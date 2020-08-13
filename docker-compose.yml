@@ -5,6 +5,6 @@ services:
     build: ./nextcloud
     
     ports: 
-      - 808080:80
+      - 8088:80
 
     restart: always
