@@ -1,0 +1,10 @@
+version: '3'
+services:
+  nextcloud:
+    hostname: nextcloud
+    build: ./nextcloud
+    
+    ports: 
+      - 808080:80
+
+    restart: always
