@@ -21,33 +21,51 @@ services:
     environment:
      - REDIS_REPLICATION_MODE=master
 
-  nextcloud:
-    hostname: nextcloud
-    build: ./nextcloud
+  # nextcloud:
+  #   hostname: nextcloud
+  #   build: ./nextcloud
 
-    environment:
-      POSTGRES_HOST: "db"
-      POSTGRES_DB: "nextcloud"
-      POSTGRES_USER: "postgres"
-      POSTGRES_PASSWORD: "password"
+  #   environment:
+  #     POSTGRES_HOST: "db"
+  #     POSTGRES_DB: "nextcloud"
+  #     POSTGRES_USER: "postgres"
+  #     POSTGRES_PASSWORD: "password"
 
-      NEXTCLOUD_ADMIN_USER: root
-      NEXTCLOUD_ADMIN_PASSWORD: "secret"
+  #     NEXTCLOUD_ADMIN_USER: root
+  #     NEXTCLOUD_ADMIN_PASSWORD: "secret"
 
-      NEXTCLOUD_TRUSTED_DOMAINS: "localhost moellenstedt.iff.kfa-juelich.de 134.94.162.235"
+  #     NEXTCLOUD_TRUSTED_DOMAINS: "localhost moellenstedt.iff.kfa-juelich.de 134.94.162.235"
+
+  #   links:
+  #     - "db"
+  #     - "redis"
+    
+  #   ports: 
+  #     - 8088:80
+
+  #   volumes:
+  #     - nextcloud:/var/www/html
+
+  #   restart: always
+
+  nextcloudweb:
+    hostname: nextcloudweb
+    build: ./nextcloudweb
 
     links:
       - "db"
       - "redis"
     
     ports: 
-      - 8088:80
+      - 8089:80
 
     volumes:
-      - nextcloud:/var/www/html
+      - nextclouddata:/var/local/nextclouddata
 
     restart: always
+
 
 volumes:
   postgres:
   nextcloud:
+  nextclouddata:
