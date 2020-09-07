@@ -86,7 +86,7 @@ running database and data volume. That means they can't be performed in the
 Dockerfile.
 
 Mitigation strategy for using the stock Docker image
-====================================================
+----------------------------------------------------
 
 * Separate data directory and corresponding volume from source code and configuration -- this is an installation option
 * Backup and snapshots of the volume that contains the configuration -- it may change or disappear at any time, and changes may have to be preserved!
@@ -124,6 +124,57 @@ Proposed set-up
   * Develop backup and recovery strategy ASAP
   * Protect against accidental deletion or modification by users or admins
 
+Hardening
+---------
+
+The current setup relies on CIFS and Samba to translate from Nextcloud users to
+Unix users. In order to support sharing, this setup has to store the Samba / Unix username
+and password to access the CIFS share as a specific Nextcloud user in the
+database in encrypted form.
+
+This should be avoided for a production setup since it represents
+the "keys to the kingdom", i.e. a complete set of user credentials together with
+the matching decryption code and keys.
+
+Concept to mitigate this
+........................
+
+* Suitable external storage back-end
+  * Existing one with single sign on capability, or custom one
+* Access a local file system or alternatively a remote service (FTP?) that accepts the same credentials
+* SUID root binary as a proxy for the storage back-end
+* Authentication based on OAuth, Kerberos or similar:
+  * Nextcloud receives or generates *long-lived* key to authenticate user through external trusted service
+    * Combine with OAuth based login to Nextcloud?
+    * Typical Kerberos set-ups generate keys that last up to 24 h, while we need keys that last months.
+  * Nextcloud stores this key instead of user credentials
+  * Nextcloud provides user ID and this key to SUID root proxy
+  * SUID root proxy validates the credentials with trusted external service
+  * SUID root binary assumes ID of matching Unix user and performs I/O for the external storage back-end
+
+--> Nextcloud never stores user login credentials (in case of OAuth based login actually never receives credentials)
+--> Key is useless outside this set-up, not a general key to other systems
+--> Key can be revoked without disrupting other systems
+--> SUID root capability limited to absolute minimum, i.e. additional step from breaching Nextcloud to becoming arbitrary Unix user
+--> SUID root binary can refuse to assume ID 0, i.e. no root access
+--> SELinux and/or configuration can limit access to specific directories
+
+In conclusion, this greatly reduces the impact of breaching the Nextcloud
+instance: from "keys to the kingdom" to local file access as arbitrary Unix
+user through the SUID root proxy (FTP server or custom binary).
+
+Avoid gaining a foothold in the Nextcloud instance
+..................................................
+
+The current Nextcloud Docker image allows Nextcloud (i.e. www-data) write access
+to its source code and configuration. Furthermore, these are persistent in a
+volume and the configuration is an executable script. That means an intruder can easily
+gain a permanent foothold in a Nextcloud instance as soon as he can execute any
+code or modify files in the context of www-data.
+
+In a production set-up, the configuration and the source code should not be
+writable for www-data, and configuration, binaries or
+source code should reset when a docker image is restarted.
 
 Backup
 ------
