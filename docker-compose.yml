@@ -1,4 +1,4 @@
-version: '3'
+version: '3.4'
 services:
   db:
     environment:
@@ -7,12 +7,19 @@ services:
     restart: always
     image: postgres:12
     volumes:
-      - postgres:/var/lib/postgresql/data
+      - type: bind
+        source: "/cachedata/data-mgmt/postgres"
+        target: "/var/lib/postgresql/data"
   
   redis:
     image: "redis:alpine"
 
-    command: redis-server
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+    volumes:
+      - type: bind
+        source: "/cachedata/data-mgmt/redis.conf"
+        target: "/usr/local/etc/redis/redis.conf"
 
     # volumes:
     #  - $PWD/redis-data:/var/lib/redis
@@ -21,51 +28,60 @@ services:
     environment:
      - REDIS_REPLICATION_MODE=master
 
-  # nextcloud:
-  #   hostname: nextcloud
-  #   build: ./nextcloud
+  nextcloud:
+    hostname: nextcloud
+    build: ./nextcloud
 
-  #   environment:
-  #     POSTGRES_HOST: "db"
-  #     POSTGRES_DB: "nextcloud"
-  #     POSTGRES_USER: "postgres"
-  #     POSTGRES_PASSWORD: "password"
+    environment:
+      POSTGRES_HOST: "db"
+      POSTGRES_DB: "nextcloud"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "password"
 
-  #     NEXTCLOUD_ADMIN_USER: root
-  #     NEXTCLOUD_ADMIN_PASSWORD: "secret"
+      REDIS_HOST: "redis"
+      REDIS_HOST_PASSWORD: "redis"
 
-  #     NEXTCLOUD_TRUSTED_DOMAINS: "localhost moellenstedt.iff.kfa-juelich.de 134.94.162.235"
+      NEXTCLOUD_ADMIN_USER: root
+      NEXTCLOUD_ADMIN_PASSWORD: "secret"
 
-  #   links:
-  #     - "db"
-  #     - "redis"
-    
-  #   ports: 
-  #     - 8088:80
+      NEXTCLOUD_DATA_DIR: "/var/local/nextclouddata"
 
-  #   volumes:
-  #     - nextcloud:/var/www/html
+      NEXTCLOUD_TRUSTED_DOMAINS: "localhost moellenstedt.iff.kfa-juelich.de 134.94.162.235"
 
-  #   restart: always
+      APACHE_DISABLE_REWRITE_IP: 1
 
-  nextcloudweb:
-    hostname: nextcloudweb
-    build: ./nextcloudweb
+      # Didn't work, unfortunately
+      # TRUSTED_PROXIES: "localhost"
 
     links:
       - "db"
       - "redis"
-    
-    ports: 
-      - 8089:80
+
+    ports:
+      - "127.0.0.1:888:80"
 
     volumes:
-      - nextclouddata:/var/local/nextclouddata
+       - type: bind
+         source: "/cachedata/data-mgmt/nextcloud-html"
+         target: "/var/www/html"
+       - type: bind
+         source: "/cachedata/data-mgmt/nextcloud-data"
+         target: "/var/local/nextclouddata"
 
     restart: always
 
+  # nextcloudweb:
+  #   hostname: nextcloudweb
+  #   build: ./nextcloudweb
 
-volumes:
-  postgres:
-  nextcloud:
-  nextclouddata:
+  #   links:
+  #     - "db"
+  #     - "redis"
+
+  #   ports:
+  #     - 8089:80
+
+  #   volumes:
+  #     - nextclouddata:/var/local/nextclouddata
+
+  #   restart: always
