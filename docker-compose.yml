@@ -85,3 +85,34 @@ services:
   #     - nextclouddata:/var/local/nextclouddata
 
   #   restart: always
+
+  backup:
+    hostname: backup
+    build: ./tsm-client
+
+    env_file:
+      # To not have password in config
+      /cachedata/data-mgmt/tsm-backup-password.env
+
+    # environment:
+      # PASSWORD: "abcd.1234"
+      # Dummy password for testing
+      # PASSWORD comes from env_file
+
+    volumes:
+      # Config
+      - type: bind
+        source: "/cachedata/data-mgmt/dsm.sys"
+        target: "/opt/tivoli/tsm/client/ba/bin/dsm.sys"
+      # Backup domains (file systems)
+      # TSM doesn't cross file system boundaries and doesn't follow symbolic links,
+      # i.e. each folder needs its own domain entry in dsm.sys and its own bind mount
+      - type: bind
+        source: "/cachedata/users/weber/backuptest"
+        target: "/mnt/data/backuptest"
+      - type: bind
+        source: "/storage/holo/clausen/testdata/"
+        target: "/mnt/data/smallstorage-testdata"
+      - type: bind
+        source: "/cachedata/data-mgmt/"
+        target: "/mnt/data/data-mgmt"
