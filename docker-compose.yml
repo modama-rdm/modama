@@ -56,6 +56,7 @@ services:
     links:
       - "db"
       - "redis"
+      - "webdav"
 
     ports:
       - "127.0.0.1:888:80"
@@ -85,6 +86,22 @@ services:
   #     - nextclouddata:/var/local/nextclouddata
 
   #   restart: always
+
+  webdav:
+    hostname: webdav
+    build: './wsgidav'
+
+    volumes:
+      # Use host's accounts
+      # Requires libpam-sss and libnss-sss in container
+      # https://jhrozek.wordpress.com/2015/03/31/authenticating-a-docker-container-against-hosts-unix-accounts/
+      - type: bind
+        source: "/var/lib/sss/pipes/"
+        target: "/var/lib/sss/pipes/"
+      # Data directory to export
+      - type: bind
+        source: "/storage/holo/clausen/testdata"
+        target: "/var/wsgidav-root"
 
   backup:
     hostname: backup

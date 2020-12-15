@@ -1,3 +1,9 @@
 [submodule "tsm-client"]
 	path = tsm-client
 	url = https://jugit.fz-juelich.de/d.weber/tsm-client
+[submodule "test/wsgidav"]
+	path = test/wsgidav
+	url = gitlab@iffgit.fz-juelich.de:clausen/wsgidav.git
+[submodule "wsgidav"]
+	path = wsgidav
+	url = gitlab@iffgit.fz-juelich.de:clausen/wsgidav.git

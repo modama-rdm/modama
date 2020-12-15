@@ -1,0 +1,88 @@
+version: '3.4'
+services:
+  db-test:
+    environment:
+      - POSTGRES_PASSWORD=password
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    restart: always
+    image: postgres:12
+    volumes:
+      - type: bind
+        source: "/cachedata/data-mgmt-test/postgres"
+        target: "/var/lib/postgresql/data"
+  
+  redis-test:
+    image: "redis:alpine"
+
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+    volumes:
+      - type: bind
+        source: "/cachedata/data-mgmt-test/redis.conf"
+        target: "/usr/local/etc/redis/redis.conf"
+
+    # volumes:
+    #  - $PWD/redis-data:/var/lib/redis
+    #   - $PWD/redis.conf:/usr/local/etc/redis/redis.conf
+
+    environment:
+     - REDIS_REPLICATION_MODE=master
+
+  nextcloud-test:
+    hostname: nextcloud-test
+    build: ./nextcloud
+
+    environment:
+      POSTGRES_HOST: "db-test"
+      POSTGRES_DB: "nextcloud"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "password"
+
+      REDIS_HOST: "redis-test"
+      REDIS_HOST_PASSWORD: "redis"
+
+      NEXTCLOUD_ADMIN_USER: root
+      NEXTCLOUD_ADMIN_PASSWORD: "secret"
+
+      NEXTCLOUD_DATA_DIR: "/var/local/nextclouddata"
+
+      NEXTCLOUD_TRUSTED_DOMAINS: "localhost moellenstedt.iff.kfa-juelich.de 134.94.162.235"
+
+      APACHE_DISABLE_REWRITE_IP: 1
+
+      # Didn't work, unfortunately
+      # TRUSTED_PROXIES: "localhost"
+
+    links:
+      - "db-test"
+      - "redis-test"
+      - "webdav-test"
+
+    ports:
+      - "127.0.0.1:887:80"
+
+    volumes:
+       - type: bind
+         source: "/cachedata/data-mgmt-test/nextcloud-html"
+         target: "/var/www/html"
+       - type: bind
+         source: "/cachedata/data-mgmt-test/nextcloud-data"
+         target: "/var/local/nextclouddata"
+
+    restart: always
+
+  webdav-test:
+    hostname: webdav-test
+    build: './wsgidav'
+
+    volumes:
+      # Use host's accounts
+      # Requires libpam-sss and libnss-sss in container
+      # https://jhrozek.wordpress.com/2015/03/31/authenticating-a-docker-container-against-hosts-unix-accounts/
+      - type: bind
+        source: "/var/lib/sss/pipes/"
+        target: "/var/lib/sss/pipes/"
+      # Data directory to export
+      - type: bind
+        source: "/storage/holo/clausen/testdata"
+        target: "/var/wsgidav-root"
