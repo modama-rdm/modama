@@ -1,0 +1,130 @@
+diff -ruN /usr/src/nextcloud/apps/files_external/lib/AppInfo/Application.php ./apps/files_external/lib/AppInfo/Application.php
+--- /usr/src/nextcloud/apps/files_external/lib/AppInfo/Application.php	2020-09-09 11:41:49.000000000 +0000
++++ ./apps/files_external/lib/AppInfo/Application.php	2020-12-15 09:16:18.807350138 +0000
+@@ -42,6 +42,7 @@
+ use OCA\Files_External\Lib\Auth\OpenStack\Rackspace;
+ use OCA\Files_External\Lib\Auth\Password\GlobalAuth;
+ use OCA\Files_External\Lib\Auth\Password\LoginCredentials;
++use OCA\Files_External\Lib\Auth\Password\LoginUsername;
+ use OCA\Files_External\Lib\Auth\Password\Password;
+ use OCA\Files_External\Lib\Auth\Password\SessionCredentials;
+ use OCA\Files_External\Lib\Auth\Password\UserGlobalAuth;
+@@ -158,6 +159,7 @@
+ 			$container->query(Password::class),
+ 			$container->query(SessionCredentials::class),
+ 			$container->query(LoginCredentials::class),
++			$container->query(LoginUsername::class),
+ 			$container->query(UserProvided::class),
+ 			$container->query(GlobalAuth::class),
+ 			$container->query(UserGlobalAuth::class),
+diff -ruN /usr/src/nextcloud/apps/files_external/lib/Lib/Auth/Password/LoginUsername.php ./apps/files_external/lib/Lib/Auth/Password/LoginUsername.php
+--- /usr/src/nextcloud/apps/files_external/lib/Lib/Auth/Password/LoginUsername.php	1970-01-01 00:00:00.000000000 +0000
++++ ./apps/files_external/lib/Lib/Auth/Password/LoginUsername.php	2020-12-15 09:16:18.807350138 +0000
+@@ -0,0 +1,95 @@
++<?php
++/**
++ * @copyright Copyright (c) 2015, ownCloud, Inc.
++ *
++ * @author Christoph Wurst <christoph@winzerhof-wurst.at>
++ * @author Lukas Reschke <lukas@statuscode.ch>
++ * @author Roeland Jago Douma <roeland@famdouma.nl>
++ * @author Dieter Weber <d.weber@fz-juelich.de>
++ *
++ * @license AGPL-3.0
++ *
++ * This code is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Affero General Public License, version 3,
++ * as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ * GNU Affero General Public License for more details.
++ *
++ * You should have received a copy of the GNU Affero General Public License, version 3,
++ * along with this program. If not, see <http://www.gnu.org/licenses/>
++ *
++ */
++
++namespace OCA\Files_External\Lib\Auth\Password;
++
++use OCA\Files_External\Lib\Auth\AuthMechanism;
++use OCA\Files_External\Lib\DefinitionParameter;
++# use OCA\Files_External\Lib\Auth\GlobalAuth;
++use OCA\Files_External\Lib\InsufficientDataForMeaningfulAnswerException;
++use OCA\Files_External\Lib\StorageConfig;
++use OCP\IL10N;
++use OCP\ISession;
++use OCP\IUser;
++use OCP\Security\ICredentialsManager;
++
++/**
++ * Username from login credentials, saved in DB
++ */
++class LoginUsername extends AuthMechanism {
++	public const CREDENTIALS_IDENTIFIER = 'password::loginname/username';
++
++	/** @var ISession */
++	protected $session;
++
++	/** @var ICredentialsManager */
++	protected $credentialsManager;
++
++	public function __construct(IL10N $l, ISession $session, ICredentialsManager $credentialsManager) {
++		$this->session = $session;
++		$this->credentialsManager = $credentialsManager;
++
++		$this
++			->setIdentifier('password::loginname')
++			->setScheme(self::SCHEME_PASSWORD)
++			->setText($l->t('Log-in username, common password'))
++			->addParameters([
++				(new DefinitionParameter('password', $l->t('Password')))
++					->setType(DefinitionParameter::VALUE_PASSWORD)
++			]);
++		;
++
++		\OCP\Util::connectHook('OC_User', 'post_login', $this, 'authenticate');
++	}
++
++	/**
++	 * Hook listener on post login
++	 *
++	 * @param array $params
++	 */
++	public function authenticate(array $params) {
++		$userId = $params['uid'];
++		$credentials = [
++			'user' => $this->session->get('loginname'),
++		];
++		$this->credentialsManager->store($userId, self::CREDENTIALS_IDENTIFIER, $credentials);
++	}
++
++	public function manipulateStorageConfig(StorageConfig &$storage, IUser $user = null) {
++		if (!isset($user)) {
++			throw new InsufficientDataForMeaningfulAnswerException('No login credentials saved');
++		}
++		$uid = $user->getUID();
++		$credentials = $this->credentialsManager->retrieve($uid, self::CREDENTIALS_IDENTIFIER);
++		# $global_credentials = $this->credentialsManager->retrieve($uid, GlobalAuth::CREDENTIALS_IDENTIFIER);
++
++		if (!isset($credentials)) {
++			throw new InsufficientDataForMeaningfulAnswerException('No login credentials saved');
++		}
++
++		$storage->setBackendOption('user', $credentials['user']);
++		# Password seems to be set "automagically" from form parameter
++	}
++}
+diff -ruN /usr/src/nextcloud/core/templates/exception.php ./core/templates/exception.php
+--- /usr/src/nextcloud/core/templates/exception.php	2020-09-09 11:41:50.000000000 +0000
++++ ./core/templates/exception.php	2021-02-03 10:12:10.358731724 +0000
+@@ -23,7 +23,7 @@
+ 		<?php endif; ?>
+ 	</ul>
+ 
+-	<?php if ($_['debugMode']): ?>
++	<?php if (isset($_['debugMode']) && $_['debugMode'] === true): ?>
+ 		<br />
+ 		<h3><?php p($l->t('Trace')) ?></h3>
+ 		<pre><?php p($_['trace']) ?></pre>
