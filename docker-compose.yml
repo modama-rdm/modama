@@ -13,6 +13,7 @@ services:
   
   redis:
     image: "redis:alpine"
+    restart: always
 
     command: redis-server /usr/local/etc/redis/redis.conf
 
@@ -87,9 +88,10 @@ services:
 
   #   restart: always
 
-  webdav:
-    hostname: webdav
+  webdav-backend:
+    hostname: webdav-backend
     build: './wsgidav'
+    restart: always
 
     volumes:
       # Use host's accounts
@@ -102,10 +104,20 @@ services:
       - type: bind
         source: "/storage/holo/clausen/testdata"
         target: "/var/wsgidav-root"
+      - "sockets:/run/gunicorn/"
+
+  webdav:
+    hostname: webdav
+    image: nginx:latest
+    restart: always
+    volumes:
+      - '/cachedata/data-mgmt/webdav-proxy.nginx.conf:/etc/nginx/conf.d/default.conf'
+      - "sockets:/run/gunicorn/"
 
   backup:
     hostname: backup
     build: ./tsm-client
+    restart: always
 
     env_file:
       # To not have password in config
@@ -133,3 +145,6 @@ services:
       - type: bind
         source: "/cachedata/data-mgmt/"
         target: "/mnt/data/data-mgmt"
+
+volumes:
+  sockets:
