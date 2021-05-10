@@ -1,6 +1,6 @@
-diff -ruN /usr/src/nextcloud/apps/files_external/lib/AppInfo/Application.php ./apps/files_external/lib/AppInfo/Application.php
---- /usr/src/nextcloud/apps/files_external/lib/AppInfo/Application.php	2020-09-09 11:41:49.000000000 +0000
-+++ ./apps/files_external/lib/AppInfo/Application.php	2020-12-15 09:16:18.807350138 +0000
+diff -ruN ./1/apps/files_external/lib/AppInfo/Application.php ./0/apps/files_external/lib/AppInfo/Application.php
+--- ./1/apps/files_external/lib/AppInfo/Application.php	2020-09-09 11:41:49.000000000 +0000
++++ ./0/apps/files_external/lib/AppInfo/Application.php	2020-12-15 09:16:18.807350138 +0000
 @@ -42,6 +42,7 @@
  use OCA\Files_External\Lib\Auth\OpenStack\Rackspace;
  use OCA\Files_External\Lib\Auth\Password\GlobalAuth;
@@ -17,9 +17,9 @@ diff -ruN /usr/src/nextcloud/apps/files_external/lib/AppInfo/Application.php ./a
  			$container->query(UserProvided::class),
  			$container->query(GlobalAuth::class),
  			$container->query(UserGlobalAuth::class),
-diff -ruN /usr/src/nextcloud/apps/files_external/lib/Lib/Auth/Password/LoginUsername.php ./apps/files_external/lib/Lib/Auth/Password/LoginUsername.php
---- /usr/src/nextcloud/apps/files_external/lib/Lib/Auth/Password/LoginUsername.php	1970-01-01 00:00:00.000000000 +0000
-+++ ./apps/files_external/lib/Lib/Auth/Password/LoginUsername.php	2020-12-15 09:16:18.807350138 +0000
+diff -ruN ./1/apps/files_external/lib/Lib/Auth/Password/LoginUsername.php ./0/apps/files_external/lib/Lib/Auth/Password/LoginUsername.php
+--- ./1/apps/files_external/lib/Lib/Auth/Password/LoginUsername.php	1970-01-01 00:00:00.000000000 +0000
++++ ./0/apps/files_external/lib/Lib/Auth/Password/LoginUsername.php	2020-12-15 09:16:18.807350138 +0000
 @@ -0,0 +1,95 @@
 +<?php
 +/**
@@ -116,15 +116,13 @@ diff -ruN /usr/src/nextcloud/apps/files_external/lib/Lib/Auth/Password/LoginUser
 +		# Password seems to be set "automagically" from form parameter
 +	}
 +}
-diff -ruN /usr/src/nextcloud/core/templates/exception.php ./core/templates/exception.php
---- /usr/src/nextcloud/core/templates/exception.php	2020-09-09 11:41:50.000000000 +0000
-+++ ./core/templates/exception.php	2021-02-03 10:12:10.358731724 +0000
-@@ -23,7 +23,7 @@
- 		<?php endif; ?>
- 	</ul>
- 
--	<?php if ($_['debugMode']): ?>
-+	<?php if (isset($_['debugMode']) && $_['debugMode'] === true): ?>
- 		<br />
- 		<h3><?php p($l->t('Trace')) ?></h3>
- 		<pre><?php p($_['trace']) ?></pre>
+diff -ruN ./1/version.php ./0/version.php
+--- ./1/version.php 2021-05-10 14:04:00.866272978 +0000
++++ ./0/version.php 2021-05-10 13:49:19.476362363 +0000
+@@ -1,5 +1,5 @@
+ <?php 
+-$OC_Version = array(21,0,1,1);
++$OC_Version = array(21,0,1,1,2);
+ $OC_VersionString = '21.0.1';
+ $OC_Edition = '';
+ $OC_Channel = 'stable';
