@@ -12,4 +12,4 @@ RUN docker-php-ext-enable smbclient
 
 COPY ./nextcloud.patch /usr/src/nextcloud.patch
 
-RUN cd /usr/src/nextcloud/ && patch -p2 --verbose < ../nextcloud.patch
+RUN cd /usr/src/nextcloud/ && patch -p2 -l --verbose < ../nextcloud.patch

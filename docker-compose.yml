@@ -47,7 +47,7 @@ services:
 
       NEXTCLOUD_DATA_DIR: "/var/local/nextclouddata"
 
-      NEXTCLOUD_TRUSTED_DOMAINS: "localhost moellenstedt.iff.kfa-juelich.de 134.94.162.235"
+      NEXTCLOUD_TRUSTED_DOMAINS: "localhost moellenstedt.iff.kfa-juelich.de 134.94.162.235 cloud-erc.fz-juelich.de 134.94.199.233"
 
       APACHE_DISABLE_REWRITE_IP: 1
 
