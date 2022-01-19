@@ -151,8 +151,21 @@ setfacl -R -m g:testshare:rX /data/sharing/sharedtechnai
 echo "Reseal dataset"
 chattr -R +i /data/privateproject/tecnai/raw/
 
+# Remove all write permission to folders to prevent adding actual data
+# to it -- allows shares to be deleted safely
+# Only do this to directories since the files are hard links and shouldn't be modified
+# Not sure if this is 100 % necessary, but probably good to ensure
+find /data/sharing/sharedtechnai -type d -print0 | xargs -0 chmod ugo-w
+
 echo "Others can read the shared files"
 sudo -u testdieter dd if=/data/sharing/sharedtechnai/raw/image1.dm4 of=/dev/null
+
+echo "Nobody can add new files to a share"
+sudo -u testdieter touch /data/sharing/sharedtechnai/rogue.file && { echo "failure";exit 1; } || echo "failed successfully"
+sudo -u testthibaud touch /data/sharing/sharedtechnai/rogue.file && { echo "failure";exit 1; } || echo "failed successfully"
+
+echo "Nobody can add top-level shares"
+sudo -u testthibaud touch /data/sharing/rogue.file && { echo "failure";exit 1; } || echo "failed successfully"
 
 # ls -lR /data/
 # getfacl -R /data/
