@@ -1,0 +1,13 @@
+version: '3.4'
+services:
+  permissions:
+    hostname: permissions
+    build: .
+
+    volumes:
+       - type: bind
+         source: "./testfolder"
+         target: "/data"
+    
+    cap_add:
+      - LINUX_IMMUTABLE
