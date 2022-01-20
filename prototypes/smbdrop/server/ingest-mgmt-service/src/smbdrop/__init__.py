@@ -2,7 +2,7 @@ from typing import Dict, TypedDict
 from flask import Flask, request
 import jsonschema
 
-from ingest_mgmt_service.share_manager import (
+from smbdrop.share_manager import (
     SambaProcessManager, SambaConfigManager, ShareManager
 )
 
