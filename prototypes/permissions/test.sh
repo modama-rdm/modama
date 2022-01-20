@@ -3,7 +3,7 @@
 set -x
 set -e
 
-trap 'chattr -iR /data/;rm -rf /data/holo /data/privateproject /data/sharing' EXIT
+trap 'chattr -iR /data/;rm -rf /data/holo /data/privateproject /data/sharing /data/adhoc' EXIT
 
 # Start watchdog to 
 /watchdog.sh &
@@ -170,10 +170,91 @@ sudo -u testthibaud touch /data/sharing/rogue.file && { echo "failure";exit 1; }
 # ls -lR /data/
 # getfacl -R /data/
 
+# Ad-hoc projects should work without Unix group
+mkdir /data/adhoc
+
+echo "Add ad-hoc project"
+mkdir /data/adhoc/kidney
+chown testthibaud:testerc /data/adhoc/kidney
+# g+s: inherit group ownership
+# +t: sticky bit, prevent deletion
+chmod u+rwx,go-w,g+s,+t /data/adhoc/kidney
+# Unfortunately the sticky bit can't be inherited or set via ACL:
+# https://unix.stackexchange.com/questions/209009/set-sticky-bit-by-default-for-new-directories-via-acl
+# Using a watchdog process watchdog.sh as proposed there
+
+# Default ACL, inherited, as well as actual ACL: write permission for ad-hc users
+setfacl -m d:u:testthibaud:rwX,u:testthibaud:rwX /data/adhoc/kidney
+setfacl -m d:u:testdieter:rwX,u:testdieter:rwX /data/adhoc/kidney
+setfacl -m d:u:testpenghan:rwX,u:testpenghan:rwX /data/adhoc/kidney
+ls -l /data
+
+echo "Create new dataset"
+mkdir -p /data/adhoc/kidney/tecnai/raw
+chown testpenghan:testerc /data/adhoc/kidney/tecnai /data/adhoc/kidney/tecnai/raw
+# Don't chmod since that messes up the inherited ACLs
+# Rely on watchdog to set sticky bit
+# SGID bit is inherited
+# echo 'don't chmod u+rwx,go-w,+t /data/adhoc/kidney/tecnai /data/adhoc/kidney/tecnai/raw'
+
+echo "Add measurement and user file"
+sudo -u testthibaud touch /data/adhoc/kidney/tecnai/raw/image1.dm4
+sudo -u testdieter touch /data/adhoc/kidney/tecnai/raw/README.rst
+
+echo "Others can't create"
+sudo -u testjanghyun touch /data/adhoc/kidney/tecnai/raw/rogue.file && { echo "failure";exit 1; } || echo "failed successfully"
+
+echo "Seal dataset"
+chattr -R +i /data/adhoc/kidney/tecnai/raw/
+
+echo "Confirm immutable"
+sudo -u testdieter rm /data/adhoc/kidney/tecnai/raw/README.rst && { echo "failure";exit 1; } || echo "failed successfully"
+rm /data/adhoc/kidney/tecnai/raw/README.rst && { echo "failure";exit 1; } || echo "failed successfully"
+dd if=/dev/zero of=/data/adhoc/kidney/tecnai/raw/README.rst bs=1 count=1 && { echo "failure";exit 1; } || echo "failed successfully"
+sudo -u testdieter dd if=/dev/zero of=/data/adhoc/kidney/tecnai/raw/README.rst bs=1 count=1 && { echo "failure";exit 1; } || echo "failed successfully"
+sudo -u testdieter touch /data/adhoc/kidney/tecnai/raw/newfile && { echo "failure";exit 1; } || echo "failed successfully"
+
+echo "Confirm readable"
+sudo -u testthibaud dd if=/data/adhoc/kidney/tecnai/raw/README.rst of=/dev/null
+echo "Confirm readable by others outside the group"
+sudo -u testjanghyun dd if=/data/adhoc/kidney/tecnai/raw/README.rst of=/dev/null
+
+echo "Add mutable files by users"
+
+sudo -u testdieter mkdir /data/adhoc/kidney/analyses
+sudo -u testdieter touch /data/adhoc/kidney/analyses/notebook1
+
+echo "Others can't create"
+sudo -u testjanghyun touch /data/adhoc/kidney/analyses/rogue.file && { echo "failure";exit 1; } || echo "failed successfully"
+
+# Other users in the group can add to folders that were created by group members
+sleep 2  # for watchdog
+sudo -u testpenghan cp /data/adhoc/kidney/analyses/notebook1 /data/holo/tecnai/analyses/notebook2
+
+# Users can modify their files
+sudo -u testdieter dd if=/dev/zero of=/data/adhoc/kidney/analyses/notebook1 bs=1 count=1
+
+# But other group members should not be allowed overwrite or delete each other's files
+# See above, sticky bit not inheritable or settable with default ACL
+# Sticky bit added by watchdog, threfore
+sudo -u testpenghan rm /data/adhoc/kidney/analyses/notebook1 && { echo "failure";exit 1; } || echo "failed successfully"
+
+# Unfortunately, the default ACL is the same for files and directories,
+# that means new files are also writable by all group members
+# https://serverfault.com/a/97786
+# Other user write permission removed by watchdog, therefore
+sudo -u testpenghan dd if=/dev/zero of=/data/adhoc/kidney/analyses/notebook1 bs=1 count=1 && { echo "failure";exit 1; } || echo "failed successfully"
+
+echo "Run Python database test suite"
+python3 /api.py
+
 echo "Cleanup"
 chattr -iR /data/holo/tecnai/raw/
 chattr -iR /data/privateproject/tecnai/raw/
+chattr -iR /data/adhoc/kidney/tecnai/raw/
+
 
 rm -rf /data/holo
+rm -rf /data/adhoc
 rm -rf /data/privateproject
 rm -rf /data/sharing
