@@ -26,7 +26,8 @@ CREATE_SHARE_REQUEST_SCHEMA = {
         },
         "gid": {
             "type": "number",
-            "description": "The numerical Unix GID of the primary group for the user that we should impersonate",
+            "description": "The numerical Unix GID of the primary group "
+                           "for the user that we should impersonate",
         },
     },
     "required": ["dest_path"],

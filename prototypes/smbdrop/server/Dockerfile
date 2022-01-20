@@ -7,13 +7,12 @@ RUN --mount=type=cache,target=/var/cache/apt apt-get update && apt-get -y instal
 COPY smb.conf /etc/samba/smb.conf
 
 COPY dev.sh /dev.sh
-COPY ./ingest-mgmt-service/ /src/ingest-mgmt-service/
+COPY ./smbdrop/ /src/smbdrop/
 
-RUN --mount=type=cache,target=/root/.cache python3 -m pip install /src/ingest-mgmt-service/
+RUN --mount=type=cache,target=/root/.cache python3 -m pip install /src/smbdrop/
 
 EXPOSE 445/tcp
 EXPOSE 5050/tcp
 
 CMD ["/bin/bash", "/dev.sh", "--port", "5050", "--host", "0.0.0.0"]
 # CMD ["/bin/bash"]
-# CMD ["smbd", "-FS", "--no-process-group"]
