@@ -263,12 +263,12 @@ class ShareManager:
         with self._share_lock:
             username = self._get_username(share_id)
             subprocess.check_call([
-                "/usr/sbin/userdel",
+                "/usr/bin/smbpasswd",
+                "-x",  # delete user
                 username,
             ])
             subprocess.check_call([
-                "/usr/bin/smbpasswd",
-                "-x",  # delete user
+                "/usr/sbin/userdel",
                 username,
             ])
             shares = self._remove_share(share_id)
@@ -280,3 +280,7 @@ class ShareManager:
             shares = self._read_shares()
             self._update_samba(shares)
             return shares
+
+    def list(self) -> Shares:
+        shares = self._read_shares()
+        return shares

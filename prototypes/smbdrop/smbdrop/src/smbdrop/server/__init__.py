@@ -40,9 +40,9 @@ class CreateShareRequest(TypedDict):
     gid: int
 
 
-# FIXME: yuck - in addition to being a side-effect on import, we need to make sure we
-# only run this in a very specific deployment (single process - can allow for
-# multiple threads though)
+# FIXME: yuck - in addition to being a side-effect on import, we need to make
+# sure we only run this in a very specific deployment (single process - can
+# allow for multiple threads though)
 pm = SambaProcessManager()
 cm = SambaConfigManager(
     config_path="/etc/samba/smb-dynamic.conf",
@@ -69,3 +69,9 @@ def create_share() -> Dict:
 def delete_share(share_id: str) -> Dict:
     sm.delete_share(share_id)
     return {"status": "ok"}
+
+
+@app.route("/share/", methods=["GET"])
+def list_shares() -> Dict:
+    shares = sm.list()
+    return shares
