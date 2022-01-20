@@ -1,8 +1,10 @@
 import os
 import sys
+import time
 import uuid
 import json
 import signal
+import secrets
 import logging
 from typing import Optional, TypedDict, Dict
 import subprocess
@@ -50,7 +52,17 @@ log = logging.getLogger(__name__)
 
 class Share(TypedDict):
     share_id: str
+    share_name: str
     dest_path: str
+    created_timestamp: int
+
+    # temporary credentials:
+    username: str
+    password: str
+
+    # mapped to this unix user:
+    uid: int
+    gid: int
 
 
 Shares = Dict[str, Share]  # id-to-Share mapping
@@ -62,9 +74,11 @@ class SambaProcessManager:
 
     def start(self) -> None:
         log.debug("Starting samba service...")
-        # -F: foreground
+        # -d debug level
+        # -F foreground
+        # -S log to stdout
         self._proc = subprocess.Popen(
-            ["strace", "-f", "-o", "/var/log/strace-smb.log", "-s", "1024", "samba", "-i", "-d", "3"],
+            ["smbd", "-FS", "--no-process-group", "-d3"],
             stdin=None,
             stdout=sys.stdout,
             stderr=sys.stderr
@@ -97,10 +111,22 @@ class SambaProcessManager:
         return self._proc.pid
 
 
+# FIXME: adjust create/directory modes?
+samba_share_cfg_tpl = """
+[%(share_name)s]
+path = %(dest_path)s
+read only = no
+force create mode = 0600
+force directory mode = 0700
+valid users = %(username)s
+"""
+
+
 def config_template(shares: Shares) -> str:
     parts = []
-    for k, v in shares.items():
-        parts.append("")
+
+    for share in shares.values():
+        parts.append(samba_share_cfg_tpl % share)
 
     return "\n\n".join(parts)
 
@@ -125,6 +151,18 @@ class ShareManager:
         shares_config: str = "/tmp/shares.json",
         lock_path: str = "/tmp/shares.lock",
     ):
+        """
+
+        Parameters
+        ----------
+        config_manager : SambaConfigManager
+            [description]
+        shares_config : str, optional
+            Path to the shares config as JSON, which will be managed by
+            this class.
+        lock_path : str, optional
+            [description], by default "/tmp/shares.lock"
+        """
         # FIXME: better default value for config/lock path!
         self._share_lock = fasteners.InterProcessLock(lock_path)
         self._shares_config_path = shares_config
@@ -148,6 +186,7 @@ class ShareManager:
 
     def _write_shares(self, shares: Shares) -> None:
         # NOTE: only call while holding the self._share_lock!
+        os.umask(0o077)  # mask out all bits for group and other
         path = os.path.join(
             os.path.dirname(self._shares_config_path),
             ".meh.json~tmp"
@@ -170,24 +209,68 @@ class ShareManager:
         # delegate to SambaConfigManager
         self._config_manager.update_shares(shares)
 
-    def create_share(self, dest_path: str) -> Share:
+    def _get_username(self, share_id: str) -> str:
+        return f"share{share_id}".replace("-", "")[:32]
+
+    def create_share(self, dest_path: str, uid: int, gid: int) -> Share:
         """
         Create a new samba share in the give configuration file
         and return its id.
         """
         share_id = str(uuid.uuid4())
+        username = self._get_username(share_id)
+        password = secrets.token_urlsafe(32)
         share: Share = {
             "share_id": share_id,
+            "share_name": f"share-{share_id}",
             "dest_path": dest_path,
-            # TODO: add timestamp
+            "uid": uid,
+            "gid": gid,
+            "created_timestamp": int(time.time()),
+            "username": username,
+            "password": password,
         }
         with self._share_lock:
+            subprocess.check_call([
+                "/usr/sbin/useradd",
+                "--no-create-home",
+                "--no-user-group",
+                username,
+                # allow multiple users with the same UID (multiple ingest for
+                # the same user at the same time):
+                "--non-unique",
+                "--uid", str(uid),
+                # "--gid", str(gid),  # FIXME: might need to create groups in the container?!?!
+                "--home-dir", dest_path,
+            ])
+            # -s read password from stdin
+            # -a add user
+            proc = subprocess.Popen(
+                ["/usr/bin/smbpasswd", "-s", "-a", username],
+                shell=False,
+                stdin=subprocess.PIPE
+            )
+            # smbpasswd wants the password twice:
+            proc.communicate(f"{password}\n{password}\n".encode("ascii"))
+            proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError("failed to set temporary credentials")
             shares = self._add_share(share)
             self._update_samba(shares)
         return share
 
     def delete_share(self, share_id: str) -> Shares:
         with self._share_lock:
+            username = self._get_username(share_id)
+            subprocess.check_call([
+                "/usr/sbin/userdel",
+                username,
+            ])
+            subprocess.check_call([
+                "/usr/bin/smbpasswd",
+                "-x",  # delete user
+                username,
+            ])
             shares = self._remove_share(share_id)
             self._update_samba(shares)
             return shares
