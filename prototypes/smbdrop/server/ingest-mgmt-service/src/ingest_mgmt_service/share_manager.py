@@ -1,9 +1,11 @@
 import os
+import sys
 import uuid
 import json
 import signal
 import logging
-from typing import TypedDict
+from typing import Optional, TypedDict, Dict
+import subprocess
 
 import fasteners
 
@@ -55,55 +57,85 @@ Shares = Dict[str, Share]  # id-to-Share mapping
 
 
 class SambaProcessManager:
-    def __init__(self):
-        self._proc = None
+    def __init__(self) -> None:
+        self._proc: Optional[subprocess.Popen[bytes]] = None
 
-    def start(self):
+    def start(self) -> None:
         log.debug("Starting samba service...")
-        proc = subprocess.Popen(...)
+        # -F: foreground
+        self._proc = subprocess.Popen(
+            ["strace", "-f", "-o", "/var/log/strace-smb.log", "-s", "1024", "samba", "-i", "-d", "3"],
+            stdin=None,
+            stdout=sys.stdout,
+            stderr=sys.stderr
+        )
 
         log.debug("Samba running in pid %d", self._proc)
 
-    def stop(self):
-        if self.self._proc is None:
-            raise RuntimeError(f"cannot stop samba service: pid is None")
-        os.kill(self._pid, signal.SIGTERM)
+    def stop(self) -> None:
+        if self._proc is None:
+            raise RuntimeError("cannot stop samba service: not running")
+        self._proc.send_signal(signal.SIGTERM)
+        self._proc.wait()  # FIXME: handle non-zero return
 
-    def reload(self):
-        if self.self._proc is None:
-            raise RuntimeError(f"cannot reload samba service: pid is None")
-        os.kill(self._pid, signal.SIGHUP)
+    def reload(self) -> None:
+        if self._proc is None:
+            raise RuntimeError("cannot reload samba service: not running")
+        self._proc.send_signal(signal.SIGHUP)
+
+    def is_running(self) -> bool:
+        if self._proc is None:
+            return False  # did not start yet
+        if self._proc.poll() is None:
+            return True  # we don't have a return value -> still running
+        return False
+
+    @property
+    def pid(self) -> int:
+        if not self.is_running() or self._proc is None:
+            raise RuntimeError("cannot get pid: not running")
+        return self._proc.pid
+
+
+def config_template(shares: Shares) -> str:
+    parts = []
+    for k, v in shares.items():
+        parts.append("")
+
+    return "\n\n".join(parts)
 
 
 class SambaConfigManager:
-    def __init__(self, template_path: str):
-        pass
+    def __init__(self, config_path: str, procman: SambaProcessManager):
+        self._procman = procman
+        self._config_path = config_path
 
     def update_shares(self, shares: Shares) -> None:
-        # update samba config
-        # 
-        # reload samba service
-        # -> kill -HUP `pid`
-        pass
+        new_config = config_template(shares)
+        with open(self._config_path, "w") as f:
+            f.write(new_config)
+        if self._procman.is_running():
+            self._procman.reload()
 
 
 class ShareManager:
     def __init__(
         self,
-        samba_config_manager: SambaConfigManager,
-        config="/tmp/shares.json",
-        lock_path="/tmp/shares.lock",
+        config_manager: SambaConfigManager,
+        shares_config: str = "/tmp/shares.json",
+        lock_path: str = "/tmp/shares.lock",
     ):
         # FIXME: better default value for config/lock path!
         self._share_lock = fasteners.InterProcessLock(lock_path)
-        self._persistent_config_path = config
-        self._config_manager = samba_config_manager
+        self._shares_config_path = shares_config
+        self._config_manager = config_manager
 
-    def _add_share(self, share: Share):
+    def _add_share(self, share: Share) -> Shares:
         # NOTE: only call this while holding the self._share_lock!
         shares = self._read_shares()
         shares[share["share_id"]] = share
         self._write_shares(shares)
+        return shares
 
     def _remove_share(self, share_id: str) -> Shares:
         # NOTE: only call while holding the self._share_lock!
@@ -116,21 +148,25 @@ class ShareManager:
 
     def _write_shares(self, shares: Shares) -> None:
         # NOTE: only call while holding the self._share_lock!
-        shares = list(shares)
         path = os.path.join(
-            os.path.dirname(self._persistent_config_path),
+            os.path.dirname(self._shares_config_path),
             ".meh.json~tmp"
         )
         with open(path, "w") as f:
             f.write(json.dumps(shares))
-        os.rename(src=path, dst=self._persistent_config_path)
+        os.rename(src=path, dst=self._shares_config_path)
 
     def _read_shares(self) -> Shares:
-        # NOTE: when doing a read/modify/update-cycle, only call while holding the self._share_lock!
-        with open(self._persistent_config_path, "r") as f:
-            return json.load(f)
+        # NOTE: when doing a read/modify/update-cycle,
+        # only call while holding the self._share_lock!
+        if not os.path.exists(self._shares_config_path):
+            # we want to create an empty, new share config if we don't already have one
+            return {}
+        with open(self._shares_config_path, "r") as f:
+            loaded_shares: Shares = json.load(f)
+            return loaded_shares
 
-    def _update_samba(self, shares: Shares):
+    def _update_samba(self, shares: Shares) -> None:
         # delegate to SambaConfigManager
         self._config_manager.update_shares(shares)
 
@@ -150,7 +186,14 @@ class ShareManager:
             self._update_samba(shares)
         return share
 
-    def delete_share(self, share_id: str) -> None:
+    def delete_share(self, share_id: str) -> Shares:
         with self._share_lock:
             shares = self._remove_share(share_id)
             self._update_samba(shares)
+            return shares
+
+    def update(self) -> Shares:
+        with self._share_lock:
+            shares = self._read_shares()
+            self._update_samba(shares)
+            return shares
