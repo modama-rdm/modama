@@ -252,6 +252,7 @@ echo "Cleanup"
 chattr -iR /data/holo/tecnai/raw/
 chattr -iR /data/privateproject/tecnai/raw/
 chattr -iR /data/adhoc/kidney/tecnai/raw/
+chattr -iR /data/adhoc/pythoncreated/helloworld/raw/
 
 
 rm -rf /data/holo
