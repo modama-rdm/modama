@@ -1,7 +1,7 @@
 FROM debian:stable-slim
 LABEL Dieter Weber <d.weber@fz-juelich.de>
 
-RUN apt-get -y update && apt-get -y upgrade && apt-get -y install sudo acl inotify-tools python3 python3-pylibacl
+RUN apt-get -y update && apt-get -y upgrade && apt-get -y install sudo acl inotify-tools python3 python3-pylibacl libpam0g libpam-runtime libpam-sss libnss-sss python3-sss
 
 RUN groupadd testerc && groupadd testholo && groupadd testprivate && groupadd testshare
 

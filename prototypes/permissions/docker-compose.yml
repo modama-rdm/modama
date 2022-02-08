@@ -8,6 +8,9 @@ services:
        - type: bind
          source: "./testfolder"
          target: "/data"
+       - type: bind
+         source: "/var/lib/sss/pipes/"
+         target: "/var/lib/sss/pipes/"
     
     cap_add:
       - LINUX_IMMUTABLE
