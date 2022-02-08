@@ -122,7 +122,7 @@ class AdhocProject:
         return os.path.join(ADHOC, self.name)
 
     @classmethod
-    def create(cls, name, owner, members):
+    def create(cls, name: str, owner: str, members: List[str]):
         check_valid_user(owner)
         check_valid_group(name)
         check_taken(name)
@@ -158,7 +158,7 @@ class AdhocProject:
         return result
 
     @classmethod
-    def is_adhoc(cls, adhoc_project):
+    def is_adhoc(cls, project_name: str) -> bool:
         path = os.path.join(ADHOC, adhoc_project)
         # Be permissive with the kind of paths that work,
         # but check that there are no shenanigans with special characters
@@ -166,11 +166,11 @@ class AdhocProject:
         return os.path.isdir(path) and os.path.realpath(path) == path
 
     @property
-    def owner(self):
+    def owner(self) -> str:
         return pwd.getpwuid(os.stat(self.path).st_uid).pw_name
 
     @property
-    def members(self):
+    def members(self) -> List[str]:
         members = []
         # Members have a default ACL for the ad-hoc project's folder
         acl = posix1e.ACL(filedef=self.path)
@@ -179,8 +179,8 @@ class AdhocProject:
                 members.append(pwd.getpwuid(a.qualifier).pw_name)
         return list(set(members))
 
-    def add_members(self, usernames):
-        def add(entries, file):
+    def add_members(self, usernames: List[str]) -> None:
+        def add(entries: List[posix1e.Entry], file: str) -> None:
             acl = posix1e.ACL(file=file)
             for entry in entries:
                 acl.append(entry)
