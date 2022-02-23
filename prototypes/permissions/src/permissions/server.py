@@ -67,7 +67,10 @@ def project_details(name) -> Dict:
     # TODO: catch exceptions?
     project_names = AdhocProject.list_all()
     projects: List[Dict] = [
-        {}  # TODO: what details are needed here?
+        {
+            "name": project_name,
+            # TODO: what details are needed here?
+        }
         for project_name in project_names
     ]
     return {
