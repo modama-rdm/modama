@@ -473,6 +473,14 @@ class AdhocProject:
         size = last_line.split('\t')[0]
         return int(size)
 
+    def serialize(self):
+        return {
+            "name": self.name,
+            "members": self.members,
+            "usage_bytes": self.diskusage,
+        }
+
+
 
 if __name__ == '__main__':
     # info = pwd.getpwnam('weber')
