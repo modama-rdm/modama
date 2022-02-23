@@ -2,7 +2,7 @@ from typing import Dict, TypedDict, List
 from flask import Flask, request
 import jsonschema
 
-from api import AdhocProject
+from permissions.api import AdhocProject
 
 app = Flask(__name__)
 
