@@ -14,3 +14,23 @@ services:
     
     cap_add:
       - LINUX_IMMUTABLE
+
+  permissions-server:
+    hostname: permissions
+    build:
+      context: .
+      dockerfile: Dockerfile-server
+
+    volumes:
+       - type: bind
+         source: "./testfolder"
+         target: "/data"
+       - type: bind
+         source: "/var/lib/sss/pipes/"
+         target: "/var/lib/sss/pipes/"
+
+    ports:
+      - "5050:5050"
+    
+    cap_add:
+      - LINUX_IMMUTABLE

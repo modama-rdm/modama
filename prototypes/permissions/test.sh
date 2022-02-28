@@ -3,13 +3,17 @@
 set -x
 set -e
 
-trap 'chattr -iR /data/;rm -rf /data/holo /data/privateproject /data/sharing /data/adhoc' EXIT
+trap 'chattr -iR /data/;rm -rf /data/holo /data/privateproject /data/rogueproject /data/roguefile /data/sharing /data/adhoc' EXIT
 
 # Start watchdog to 
-/watchdog.sh &
+/code/watchdog.sh &
 
 # Allow watchdog to start
 sleep 1
+
+sudo -u testdieter id
+
+chown root:root /data/
 
 # Users can only create new projects through the correct process,
 # not by just creating a top-level folder
@@ -77,7 +81,9 @@ sudo -u testdieter dd if=/dev/zero of=/data/holo/tecnai/analyses/notebook1 bs=1 
 # But other group members should not be allowed overwrite or delete each other's files
 # See above, sticky bit not inheritable or settable with default ACL
 # Sticky bit added by watchdog, threfore
-sudo -u testpenghan rm /data/holo/tecnai/analyses/notebook1 && { echo "failure";exit 1; } || echo "failed successfully"
+sudo -u testpenghan rm -f /data/holo/tecnai/analyses/notebook1 && { echo "failure";exit 1; } || echo "failed successfully"
+
+# `rm -f` because otherwise there might be an interactive prompt like "rm: remove write-protected regular file '[...]'?"
 
 # Unfortunately, the default ACL is the same for files and directories,
 # that means new files are also writable by all group members
@@ -237,7 +243,7 @@ sudo -u testdieter dd if=/dev/zero of=/data/adhoc/kidney/analyses/notebook1 bs=1
 # But other group members should not be allowed overwrite or delete each other's files
 # See above, sticky bit not inheritable or settable with default ACL
 # Sticky bit added by watchdog, threfore
-sudo -u testpenghan rm /data/adhoc/kidney/analyses/notebook1 && { echo "failure";exit 1; } || echo "failed successfully"
+sudo -u testpenghan rm -f /data/adhoc/kidney/analyses/notebook1 && { echo "failure";exit 1; } || echo "failed successfully"
 
 # Unfortunately, the default ACL is the same for files and directories,
 # that means new files are also writable by all group members
@@ -246,7 +252,7 @@ sudo -u testpenghan rm /data/adhoc/kidney/analyses/notebook1 && { echo "failure"
 sudo -u testpenghan dd if=/dev/zero of=/data/adhoc/kidney/analyses/notebook1 bs=1 count=1 && { echo "failure";exit 1; } || echo "failed successfully"
 
 echo "Run Python database test suite"
-python3 /api.py
+python3 /code/src/permissions/api.py
 
 echo "Cleanup"
 chattr -iR /data/holo/tecnai/raw/

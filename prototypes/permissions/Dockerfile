@@ -1,7 +1,7 @@
 FROM debian:stable-slim
 LABEL Dieter Weber <d.weber@fz-juelich.de>
 
-RUN apt-get -y update && apt-get -y upgrade && apt-get -y install sudo acl inotify-tools python3 python3-pylibacl libpam0g libpam-runtime libpam-sss libnss-sss python3-sss
+RUN apt-get -y update && apt-get -y upgrade && apt-get -y install sudo acl inotify-tools python3 python3-pylibacl libpam0g libpam-runtime libpam-sss libnss-sss python3-sss python3-pip
 
 RUN groupadd testerc && groupadd testholo && groupadd testprivate && groupadd testshare
 
@@ -11,8 +11,10 @@ RUN adduser testthibaud --gecos "" --no-create-home --disabled-login --ingroup t
 RUN adduser testpenghan --gecos "" --no-create-home --disabled-login --ingroup testerc && adduser testpenghan testholo && adduser testpenghan testprivate
 RUN adduser testjanghyun --gecos "" --no-create-home --disabled-login --ingroup testerc && adduser testjanghyun testprivate && adduser testjanghyun testshare
 
-COPY watchdog.sh /watchdog.sh
-COPY test.sh /test.sh
-COPY api.py /api.py
+COPY . /code
 
-CMD /test.sh
+RUN python3 -m pip install /code/
+
+WORKDIR /code/
+
+CMD /code/test.sh
