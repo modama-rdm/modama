@@ -1,0 +1,73 @@
+version: '3.4'
+services:
+  db:
+    volumes:
+      - type: bind
+        source: "/var/local/data-mgmt/postgres"
+        target: "/var/lib/postgresql/data"
+  nextcloud:
+    volumes:
+      - type: bind
+        source: "/var/local/data-mgmt/nextcloud-html"
+        target: "/var/www/html"
+      - type: bind
+        source: "/var/local/data-mgmt/nextcloud-data"
+        target: "/var/local/nextclouddata"
+      - type: bind
+        source: "./prodconf/nextcloud-site-config.json"
+        target: "/nextcloud-site-config.json"
+      - type: bind
+        source: "/var/local/data-mgmt/nextcloud-config-secret.json"
+        target: "/nextcloud-config-secret.json"
+      - type: bind
+        source: "/var/local/data-mgmt/externalstorage_pw"
+        target: "/externalstorage_pw"
+  webdav-backend:
+    volumes:
+      # Data directory to export
+      - "nfsdata:/var/wsgidav-root"
+  cloudproxy:
+    volumes:
+      - './prodconf/cloudproxy-servername.nginx.conf.snippet:/etc/nginx/conf.d/servername.conf.snippet'
+    ports:
+      - "127.0.0.1:1889:80"
+volumes:
+  nfsdata:
+    driver_opts:
+      type: "nfs"
+      o: "addr=localhost,soft,timeo=60,intr,noexec,nosuid,rw"
+      device: ":/er-c-data"
+
+# Backup is deactivated for now to not collide with the
+# backup of the deployed prototype
+  # backup:
+  #   hostname: backup
+  #   build: ./tsm-client
+  #   restart: always
+
+  #   env_file:
+  #     # To not have password in config
+  #     /cachedata/data-mgmt/tsm-backup-password.env
+
+  #   # environment:
+  #     # PASSWORD: "abcd.1234"
+  #     # Dummy password for testing
+  #     # PASSWORD comes from env_file
+
+  #   volumes:
+  #     # Config
+  #     - type: bind
+  #       source: "/cachedata/data-mgmt/dsm.sys"
+  #       target: "/opt/tivoli/tsm/client/ba/bin/dsm.sys"
+  #     # Backup domains (file systems)
+  #     # TSM doesn't cross file system boundaries and doesn't follow symbolic links,
+  #     # i.e. each folder needs its own domain entry in dsm.sys and its own bind mount
+  #     - type: bind
+  #       source: "/cachedata/users/weber/backuptest"
+  #       target: "/mnt/data/backuptest"
+  #     - type: bind
+  #       source: "/storage/holo/clausen/testdata/"
+  #       target: "/mnt/data/smallstorage-testdata"
+  #     - type: bind
+  #       source: "/cachedata/data-mgmt/"
+  #       target: "/mnt/data/data-mgmt"  

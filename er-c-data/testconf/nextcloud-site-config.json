@@ -1,0 +1,7 @@
+{
+    "system": {
+        "overwrite.cli.url": "http://localhost:1890/nextcloud",
+        "overwritehost": "localhost:1890",
+        "overwriteprotocol": "http"
+    }
+}

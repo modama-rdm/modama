@@ -1,0 +1,23 @@
+[
+    {
+        "mount_id": 1,
+        "mount_point": "\/ER-C-Data",
+        "storage": "\\OC\\Files\\Storage\\DAV",
+        "authentication_type": "password::loginname",
+        "configuration": {
+            "host": "http:\/\/webdav:8080\/",
+            "root": "",
+            "secure": false
+        },
+        "options": {
+            "enable_sharing": true,
+            "encoding_compatibility": false,
+            "encrypt": true,
+            "filesystem_check_changes": 1,
+            "previews": true,
+            "readonly": false
+        },
+        "applicable_users": [],
+        "applicable_groups": []
+    }
+]

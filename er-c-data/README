@@ -1,0 +1,74 @@
+# Building
+
+The script `build.sh` sets the necessary environment variables and then builds
+the docker images using `docker-compose`.
+
+# Test and production deployment
+
+Both a test and a production deployment are available. The configuration for the test deployment is defined by a combination of `docker-compose.yml` and `docker-compose.override.yml`, which is the default when using `docker-compose up`. Test-specific configuration files except secrets are placed in `testconf/`.
+
+The test deployment uses files in the `testfolder/` directory. The necessary
+subfolders with correct ownership and permissions can be created by running
+`sudo ./preparefolders.sh` in that directory. It is available under
+http://localhost:1890/ and http://localhost:1890/. `sudo ./nukefolders.sh`
+removes the folders.
+
+The configuration for production deployment is defined by a combination of `docker-compose.yml` and `docker-compose.prod.yml`. The commands to bring this up and down are contained in the `upprod.sh` and `downprod.sh` scripts. Production-specific configuration files except secrets are placed in `prodconf/`. The production configuration expects Nextcloud-specific data directories in `/var/local/data-mgmt/`. It also expects an NFS server exporting `/er-c-data` as a volume on localhost, as well as local access to the same data in `/er-c-data` for the management interface.
+
+Both test and production deployment expect files with site-specific secrets in `/var/local/data-mgmt/`.
+
+At the moment, the test and production deployment only differ in a number of volumes and ports, meaning the Docker images themselves are the same. If that should change, the build scripts should be adapted to that.
+
+# How to upgrade Nextcloud
+
+Currently, the additional auth mechanism that avoids saving user credentials in
+the database is contained in nextcloud.patch. This patch is applied as part of
+building the Docker image until this change is possibly upstreamed in the future.
+
+In the Nextcloud Docker image there is a "baked in" version of the source code
+in /usr/src/nextcloud and the "production" version of the source code in
+/var/www/html. The "production" source code is overwritten with the baked-in
+version if the upgrade script detects that the baked-in version is newer than
+the production version, minus some configuration files.
+
+For that reason, the patch is applied to the "baked in" Docker image. In order
+to force an update in case the patch changes, the version.php is updated as
+well. Here, the original version tuple is replaced with an extended one. This
+has to be adapted to match the source version of the Docker image.
+
+After the patch is applied successfully, the upgrade procedure should proceed
+normally as described in the Nextcloud documentation.
+
+# Apply configuration
+
+The applyconfig.py script can apply all settings to a fresh installation that
+are required to bring it to a working state in the ER-C data management. It can
+be run with `docker-compose exec nextcloud python3 /applyconfig.py`. It is not run automatically
+since the entrypoint script for Nextcloud is rather complex and doesn't allow to
+include custom extensions at the right point in the installation procedure.
+
+It manages the following items:
+
+* Disable `root` user
+* Enable required apps
+* Initialize and import config
+* Create mount for external storage
+* Theming
+
+Sensitive settings are kept in separate read-protected files outside the repository. Template for `nextcloud-config-secret.json`:
+
+```
+{
+    "system": {
+        "passwordsalt": "...",
+        "secret": "..."
+    },
+    "apps": {
+        "user_ldap": {
+            "s01ldap_agent_password": "..."
+        }
+    }
+}
+```
+
+The externally supplied file `externalstorage_pw` contains the preshared password for the WebDAV gateway.

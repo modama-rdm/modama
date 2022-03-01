@@ -1,0 +1,7 @@
+{
+    "system": {
+        "overwrite.cli.url": "https://er-c-data.fz-juelich.de/nextcloud",
+        "overwritehost": "er-c-data.fz-juelich.de",
+        "overwriteprotocol": "https"
+    }
+}

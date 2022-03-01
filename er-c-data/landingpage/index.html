@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ER-C Data Management</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link href="/mui-0.10.3/css/mui.min.css" rel="stylesheet" type="text/css" />
+</head>
+<body>
+<div class="mui-container">
+    <div class="mui-panel">
+        <table width="100%">
+            <tr style="vertical-align:middle;">
+                <td class="mui--appbar-height">
+                    <h1>
+                        <a href="https://fz-juelich.de"><img
+                            width="300"
+                            style="vertical-align:middle; margin-right: 20px;"
+                            src="/fzj_logo.jpg"
+                            alt="Forschungszentrim Jülich"
+                        /></a>
+                        ER-C Data Management
+                    </h1>
+                </td>
+            </tr>
+        </table>
+    </div>
+    <div class="mui-panel">
+        <h2>About</h2>
+        <p>This system stores data for the <a href="https://er-c.org/">Ernst Ruska
+        Centrum</a> at Forschungszentrum Jülich. It can handle large-scale data with
+        sufficient performance and allows access from microscopes, PCs, processing
+        workstations and mobile devices for institute members and collaborators.</p>
+
+        <h2>Access</h2>
+        <p>The system can be accessed with the IFF login credentials. See <a
+        href="https://pgi-jcns.fz-juelich.de/portal/pages/services.html">the Scientific
+        IT Systems page of PGI-JCNS-TA</a> for more information.</p>
+        <ul>
+            <li><a href="https://er-c-data.fz-juelich.de/nextcloud/">Nextcloud</a></li>
+            <li>Windows share (SMB, CIFS): \\er-c-data-smb.fz-juelich.de\er-c-data\ (Windows) or <a
+            href="smb://er-c-data-smb.fz-juelich.de/er-c-data/">smb://er-c-data-smb.fz-juelich.de/er-c-data/</a> (other operating systems). FZ
+            Jülich intranet only.</li>
+            <li><a href="https://er-c-data-mgmt.fz-juelich.de/">Project and session
+            management interface</a> (FZ Jülich intranet only).</li>
+            <li><a href="https://moellenstedt.iff.kfa-juelich.de">JupyterHub on Data
+            processing workstation <code>moellenstedt.iff.kfa-juelich.de</code></a>, mounted on <code>/storage/er-c-data/</code> (FZ
+            Jülich intranet only). See also <a href="#jupyterhub">how to make it accessible from your JupyterHub tree</a>.</li>
+            <li>SCP, rsync and direct file system access (SSH) through <code>moellenstedt.iff.kfa-juelich.de</code> in directory <code>/storage/er-c-data/</code>.</li>
+        </ul>
+
+        <h2>Directory Structure</h2>
+        <p>At the top level will be long-lived projects that are managed via Unix group
+        membership, which is administrated by PGI-JCNS-PA. This is not implemented yet, but will be
+        available soon. In the folder <code>/adhoc</code> you find user-created projects that are
+        not dependent on Unix group membership. Any user can create and manage such projects
+        through the <a href="https://er-c-data-mgmt.fz-juelich.de/">management
+        interface</a>. In the folder <code>archive</code> you will find projects that are no longer
+        active. Projects can be archived by admins on request.</p>
+
+        <p>Within a project you can create data acquisition sessions using the ingest
+        client on the microscopes or the management interface. They are subfolders of a project that
+        contain a <code>raw</code> subfolder. That raw folder and its contents will be sealed, i.e. set
+        immutable, once such a session is closed. Under the hood they are just folders,
+        which means they can be created through other means, too. Sealing can only be
+        performed through the management interface or by admins.</p>
+
+        <p>For the time being, sessions can only be created top-level within a project.
+        It is planned to allow creating sessions at any place within a project at some
+        point. Please contact the admins if creating sessions in other placesis
+        important to you so that this is prioritized accordingly!</p>
+
+        <p>Other than that, users are free to manage data in a project as they see fit.
+        It is simply a folder structure in a Unix file system.</p>
+
+        <h2>Architecture</h2>
+        <!-- Object instead of img to allow clickable links in the SVG -->
+        <object data="diagram.svg" type="image/svg+xml">
+            <span>Your browser doesn't support SVG images</span>
+        </object>
+
+        <p>At the core of the system is a Unix file system on
+        <code>iff1020.iff.kfa-juelich.de</code>. This machine doesn't allow login by users for
+        security reasons.</p>
+
+        <p>From <code>iff1020</code> the data management is exported as NFS to selected
+        machines in an internal network, such as Möllenstedt, and as SMB (CIFS) within
+        the FZ Jülich intranet to allow direct connection from PCs.
+        <code>er-c-data-smb.fz-juelich.de</code> is currently an alias of
+        <code>iff1020</code> that should be used for SMB access. The data is also made
+        available through Nextcloud using an internal WebDAV gateway and Nextcloud's
+        "external storage" feature.</p>
+
+        <p>For write access from microscope a dedicated ingest client and gateways is
+        used. This provides a convenient way to write data with the correct ownership to
+        the correct place within data management system, and seal data after closing a
+        microscopy session.</p>
+
+        <h2>Permissions</h2>
+        <p>Access is controlled by the Unix file system mechanisms: Ownership, group
+        ownership and membership, permission bits, ACLs, SGID bit and sticky bit. These
+        permissions are enforced throughout the system. Users can modify these settings
+        through the usual Unix tools on machines that mount the file system writable
+        through NFS, such as Möllenstedt.</p>
+
+        <p>The management interface allows users to perform selected operations that
+        require elevated privileges, namely creating projects and sealing sessions. It
+        also provides an interface to perform some operations more conveniently, such as
+        managing membership in adhoc projects.</p>
+
+        <p>Default file system permissions allow all project members to create files and
+        folders everywhere within a project. Once created, files can only be modified by
+        their owners. ER-C users can read all data within all projects by default.
+        Admins or users can change this behavior using the usual Unix tools to
+        manipulate file system permissions. The management interface can be extended on
+        request to include additional operations, such as creating private projects.</p>
+
+        <p>Sealing is implemented through setting the Linux-specific "immutable" flag
+        for the desired files and folders on the host file system on <code>iff1020</code>. It is not
+        available through NFS, SMB or the WebDAV gateway, meaning it can't be overridden
+        on any client system. Admins can change it manually directly on the <code>iff1020</code>
+        system.</p>
+
+        <p>Quotas for storage space per project are not enforced yet, but will be
+        implemented soon to ensure controlled and economic use of the available
+        capacity. Please contact the admins if you are planning to use more than 50 GB
+        in a project. This is very well possible, there should just be a clear
+        scientific value proposition and a way to cover the cost.</p>
+
+        <h2>Security</h2>
+        <p>Valuable data should be set immutable through sealing or on request by admins
+        to prevent deletion or modification. This is the strongest protection against
+        user error and malicious software. Data that is not set to immutable is at
+        elevated risk to be lost permanently. Please place raw data in the designated
+        folder within a session so that it is sealed when the session is closed, or
+        contact admins to set data immutable on request!</p>
+
+        <p>Data that is deleted or modified through Nextcloud might be available in the
+        Nextcloud trash bin or in previous versions. Please note that only limited space
+        is available for this and data may be purged automatically if the available
+        space or a holding period of about 30 days is exceeded.</p>
+
+        <p>Furthermore, daily snapshots are available as backup at ITS for the last 7
+        days. Please contact admins as soon as possible if you'd like to restore data
+        from backup!</p>
+
+        <p>Protection against unauthorized reading is comparatively weak: Achieving
+        administrator privileges on a client that mounts the data through NFS gives full
+        read access to all data and full write access to all data that is not immutable.
+        This is not a hypothetical scenario since users can log in to Möllenstedt and
+        may exploit unpatched local privilege escalation bugs that surface every now and
+        then. Please contact the admins if any of your projects require data privacy or
+        might be at an elevated risk.</p>
+
+        <p>Long-time archival, in particular for projects that are concluded, is in
+        planning. Policies for this are under development. Valuable data that is
+        elemental for publications should be published on Zenodo. This is often a
+        requirement from scientific journals or funding bodies.</p>
+
+        <h2>FAQ</h2>
+        <h3 id="jupyterhub">How do I make the files in the data management system available in my JupyterHub tree?</h3>
+        <p>By default, the tree shown by JupyterHub only contains a user's home
+        directory. To make data accessible that is outside a user's directory tree, one
+        can create a soft link within the home directory to the desired location.
+        Running this command on a command line terminal on Möllenstedt creates the link
+        <code>er-c-data</code> top-level in the user's home that points to the data
+        location <code>/storage/er-c-data</code>:</p>
+
+        <code>ln -s /storage/er-c-data ~/er-c-data</code>
+
+        <p>Please note that the user home directory is shared between all machines with IFF
+        login, which means the link will only work if the target folder
+        <code>/storage/er-c-data</code> is available on a given machine.</p>
+        
+        <h2>Contact</h2>
+        <p>Please contact <a href="mailto:d.weber@fz-jelich.de">Dieter Weber</a>
+        or <a href="mailto:a.clausen@fz-juelich.de">Alexander Clausen</a> for help and questions.
+        </p>
+    </div>
+    <div class="mui-panel">
+        <a href="https://er-c.org/index.php/imprint/">Imprint</a> | 
+        <a href="https://er-c.org/index.php/privacy-policy/">Privacy Policy</a>
+    </div>
+</div>
+<script src="/mui-0.10.3/js/mui.min.js"></script>
+</body>
+</html>
