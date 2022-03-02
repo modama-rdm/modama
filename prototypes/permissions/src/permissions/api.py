@@ -473,12 +473,21 @@ class AdhocProject:
         size = last_line.split('\t')[0]
         return int(size)
 
-    def serialize(self):
-        return {
+    def serialize(self, fast: bool = False):
+        """
+        Parameters
+        ----------
+        fast
+            Don't perform potentially expensive operations, like ones that
+            stat all files in the project
+        """
+        serialized = {
             "name": self.name,
             "members": self.members,
-            "usage_bytes": self.diskusage,
         }
+        if not fast:
+            serialized["usage_bytes"] = self.diskusage
+        return serialized
 
 
 

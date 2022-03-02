@@ -92,7 +92,10 @@ def list_projects() -> Dict:
     # TODO: catch exceptions? OSError?
     project_names = AdhocProject.list_all()
     return {
-        'project_names': project_names,
+        'projects': [
+            AdhocProject(project_name).serialize(fast=True)
+            for project_name in project_names
+        ]
     }
 
 
