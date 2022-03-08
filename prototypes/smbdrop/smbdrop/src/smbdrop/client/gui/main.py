@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import signal
 import time
 import sys
@@ -135,7 +135,6 @@ class LoginModel(QObject):
         return self._username
 
     def set_username(self, new_name: str) -> None:
-        print(f"set_username({new_name})")
         if new_name != self._username:
             self._username = new_name
             self.usernameChanged.emit(new_name)
@@ -260,7 +259,7 @@ class ProjectListModel(QAbstractListModel):
         return self._projects[0]
 
     def data(self, index, role):
-        print(f"data({index}, {role})")
+        print(f"PLM data({index}, {role})")
         if (role == Qt.DisplayRole
                 and index.row() >= 0
                 and index.row() < len(self._projects)
@@ -273,13 +272,23 @@ class ProjectListModel(QAbstractListModel):
 class ListOfDictModel(QAbstractListModel):
     def __init__(self, list_of_roles: List[str]) -> None:
         super().__init__()
-        self.schema = list_of_roles
-        self.items: List[Dict] = []
+        self._schema = list_of_roles
+        self._items: List[Dict] = []
+
+    def __getattribute__(self, __name: str) -> Any:
+        print(f"LoD __getattribute__ {__name}")
+        val = super().__getattribute__(__name)
+        return val
+
+    def __setattr__(self, __name: str, __value: Any) -> None:
+        print(f"LoD __setattr__ {__name}")
+        return super().__setattr__(__name, __value)
 
     def data(self, index, role):
-        key = self.schema[role]
-        value = self.items[index.row()].get(key)
-        print(f"data({index}, {key}) = {value}")
+        print("LoD data called.............")
+        key = self._schema[role]
+        value = self._items[index.row()].get(key)
+        print(f"LoD data({index}, {role} -> {key}) = {value}")
         return value
 
     def replace_data(self, new_items: List[Dict]) -> None:
@@ -292,16 +301,19 @@ class ListOfDictModel(QAbstractListModel):
             The new list items; the dicts must have the keys specified in
             `list_of_roles`
         """
-        if new_items != self.items:
-            self.items = new_items
-            print(f"replacing LoD data with {new_items}")
+        if new_items != self._items:
+            self._items = new_items
+            print("replacing LoD data")
             self.dataChanged.emit(self.index(0, 0), self.index(len(new_items) - 1, 0))
 
-    def rowCount(self, parent) -> int:
-        return len(self.items)
+    def rowCount(self, __parent) -> int:
+        print(f"LoD rowCount == {len(self._items)}")
+        return len(self._items)
 
     def roleNames(self) -> Dict[int, str]:
-        return dict(enumerate(self.schema))
+        roles = dict(enumerate(self._schema))
+        print(f"{roles=}")
+        return roles
 
 
 class SessionModel(QObject):
