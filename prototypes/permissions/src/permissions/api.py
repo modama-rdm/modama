@@ -9,7 +9,7 @@ import stat
 import shutil
 from typing import NamedTuple, List
 
-import pysss  # python3-sss
+import pamela
 import posix1e  # pylibacl, needs libacl1-dev, https://pylibacl.k1024.org/
 
 
@@ -112,6 +112,10 @@ def is_group(name):
         return False
 
 
+def authenticate(username, password):
+    return pamela.authenticate(username, password)
+
+
 def check_can_create(name):
     '''
     Check if the user is permitted to create ad-hoc projects
@@ -176,7 +180,7 @@ class Dataset(NamedTuple):
 class AdhocProject:
     def __init__(self, name):
         if not self.is_adhoc(name):
-            raise ValidationError('Not an ad-hoc project.')
+            raise ValidationError(f'"{name}" is not an ad-hoc project.')
         self._name = name
 
     @property
@@ -238,11 +242,23 @@ class AdhocProject:
                 capture_output=True, check=True
             )
             project = cls(name)
-            project.add_members(members + [owner])
+            project.add_members(members + [owner], owner)
         except Exception as e:
             os.rmdir(folder)
             raise e
         return project
+
+    def check_can_modify(self, username):
+        if self.owner != username:
+            raise ValidationError(f'User "{username}" cannot modify project {self.name}: Not an owner.')
+
+    def check_can_seal(self, dataset, username):
+        if self.owner == username:
+            return
+        # FIXME or check write permission to dataset path?
+        if username in self.members:
+            return
+        raise ValidationError(f'User "{username}" cannot seal dataset {dataset} in project {self.name}: Not an owner or member.')
 
     @staticmethod
     def list_all():
@@ -275,7 +291,7 @@ class AdhocProject:
                 members.append(pwd.getpwuid(a.qualifier).pw_name)
         return list(set(members))
 
-    def add_members(self, usernames: List[str]) -> None:
+    def add_members(self, usernames: List[str], user) -> None:
         '''
         Exceptions can come from posix1e, os.walk,
         :func:`get_immutable`and :func:`set_immutable`.
@@ -314,6 +330,7 @@ class AdhocProject:
                 raise ACLError(f"Invalid ACL encountered: {str(defcheck_res)}")
             defacl.applyto(filename, posix1e.ACL_TYPE_DEFAULT)
 
+        self.check_can_modify(user)
         source = posix1e.ACL(file=self.path)
         new_uids = set(pwd.getpwnam(username).pw_uid for username in usernames)
         new_acl_entries = []
@@ -344,7 +361,7 @@ class AdhocProject:
                         if immutable:
                             set_immutable(target, True)
 
-    def remove_members(self, usernames):
+    def remove_members(self, usernames, user):
         '''
         See :meth:`add_members()` for safety considerations!
         '''
@@ -366,6 +383,7 @@ class AdhocProject:
                 raise ACLError(f"Invalid ACL encountered: {str(defcheck_res)}")
             defacl.applyto(filename, posix1e.ACL_TYPE_DEFAULT)
 
+        self.check_can_modify(user)
         uids = set(pwd.getpwnam(username).pw_uid for username in usernames)
         remove(uids, self.path)
         # See above add_members() for safety considerations
@@ -416,7 +434,7 @@ class AdhocProject:
             capture_output=True, check=True, text=True
         )
 
-    def seal_dataset(self, name):
+    def seal_dataset(self, name, user):
         '''
         Recursively set the :code:`raw` subfolder of a dataset and its contents immutable
 
@@ -427,6 +445,7 @@ class AdhocProject:
 
         This is intended to be called after an ingest session ends.
         '''
+        self.check_can_seal(name, user)
         target_base_path = os.path.join(self.path, name)
         target_raw_path = os.path.join(target_base_path, 'raw')
         # The check for realpath is important to prevent mocking a dataset
@@ -483,12 +502,12 @@ class AdhocProject:
         """
         serialized = {
             "name": self.name,
+            "owner": self.owner,
             "members": self.members,
         }
         if not fast:
             serialized["usage_bytes"] = self.diskusage
         return serialized
-
 
 
 if __name__ == '__main__':

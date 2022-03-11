@@ -1,0 +1,6 @@
+<ul>
+{% for m in get_flashed_messages() %}
+<li>{{ m }}</li>
+</ul>
+{% endfor %}
+<p>Logged in as {{ username }} <a href="/logout">Logout</a></p>
