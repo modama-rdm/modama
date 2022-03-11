@@ -1,5 +1,3 @@
-import errno
-import re
 from subprocess import CalledProcessError
 from typing import Dict, TypedDict, List
 
