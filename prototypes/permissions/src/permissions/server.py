@@ -231,6 +231,12 @@ def create_dataset(project_name) -> Dict:
             'errno': e.returncode,
             'message': e.stderr
         }
+    except ValidationError as e:
+        return {
+            'errno': 1,
+            'message': str(e)
+        }
+
 
 
 SEAL_DATASET_REQUEST_SCHEMA = {

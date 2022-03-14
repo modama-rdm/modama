@@ -1,6 +1,6 @@
+<p>Logged in as {{ current_user.user_id }} <a href="{{ url_for("logout") }}">Logout</a></p>
 <ul>
-{% for m in get_flashed_messages() %}
-<li>{{ m }}</li>
+    {% for m in get_flashed_messages() %}
+    <li>{{ m }}</li>
+    {% endfor %}
 </ul>
-{% endfor %}
-<p>Logged in as {{ username }} <a href="/logout">Logout</a></p>

@@ -91,8 +91,8 @@ def check_valid_dataset(name: str):
     if len(name) < 1:
         raise ValidationError(f"Too short: Minimum length is 1, actual length is {len(name)}.")
     # Restrictive positive list to avoid "funny business" from user input
-    if not re.fullmatch('[-a-zA-Z0-9_.]*', name):
-        raise ValidationError("Dataset name can only contain characters a-z, A-Z, 0-9, '_', '-' and '.'.")
+    if not re.fullmatch('[-a-zA-Z0-9_. ]*', name):
+        raise ValidationError("Dataset name can only contain characters a-z, A-Z, 0-9, '_', '-', ' ' and '.'.")
 
 
 def check_project_name_taken(name):

@@ -15,15 +15,13 @@
 </tr>
 {% for p in projects %}
 <tr>
-    <td><a href="/project/details/{{ p.name }}">{{ p.name }}</a></td>
+    <td><a href="{{ url_for("project", name=p.name) }}">{{ p.name }}</a></td>
     <td>{{ p.owner }}</td>
     <td>{% for m in p.members %} {{ m }} {% endfor %}</td>
 </tr>
 {% endfor %}
 </table>
 
-<h2>Create Project</h2>
-
-{% include '_createprojectform.html.j2' %}
+<p><a href="{{ url_for("add_project") }}">Create Project...</a></p>
 
 {% endblock content %}

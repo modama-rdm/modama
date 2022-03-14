@@ -35,7 +35,7 @@ class PermissionsClient:
                 "members": list(members)
             }
         ).json()
-    
+
     def change_project_members(self, projectname: str, op, members: Iterable, user: str):
         assert op in ('add', 'remove')
         return requests.patch(
@@ -44,5 +44,23 @@ class PermissionsClient:
                 "op": op,
                 "members": list(members),
                 "user": user
+            },
+        ).json()
+
+    def create_dataset(self, projectname: str, name: str, user: str):
+        return requests.post(
+            f"{self.base_url}/project/{quote(projectname)}/dataset/",
+            json={
+                "name": name,
+                "owner": user,
+            },
+        ).json()
+
+    def seal_dataset(self, projectname: str, name: str, user: str):
+        return requests.post(
+            f"{self.base_url}/project/{quote(projectname)}/dataset/seal/",
+            json={
+                "name": name,
+                "user": user,
             },
         ).json()

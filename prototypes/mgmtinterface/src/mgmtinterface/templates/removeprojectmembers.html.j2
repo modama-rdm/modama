@@ -1,0 +1,30 @@
+{% extends "base.html.j2" %}
+
+{% from "_formhelpers.html.j2" import render_field %}
+
+{% block content %}
+
+{% include '_header.html.j2' %}
+
+<h1>Remove members from project "{{ project.name }}"</h1>
+
+<p><a href="{{ url_for("project", name=project.name) }}">Details for "{{ project.name }}"</a></p>
+<p><a href="{{ url_for("index") }}">Project overview</a></p>
+
+{{ form.errors }}
+
+<form method=post action="{{ url_for("remove_project_members", name=project.name) }}">
+  {{ form.csrf_token }}
+  <dl>
+    {{ render_field(form.members) }}
+  </dl>
+  <p><input type=submit value="Remove project members">
+</form>
+
+<h2>Current members</h2>
+
+{% for m in project.members %}
+{{ m }}<a href="{{ url_for('remove_project_members', name=project.name, member=m) }}">Remove...</a><br/>
+{% endfor %}
+
+{% endblock content %}
