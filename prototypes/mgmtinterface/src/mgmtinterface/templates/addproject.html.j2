@@ -6,18 +6,23 @@
 
 {% include '_header.html.j2' %}
 
-<p><a href="{{ url_for("index") }}">Back to project overview</a></p>
-
-{{ form.errors }}
-
-<form method=post action="{{ url_for("add_project") }}">
-  {{ form.csrf_token }}
-  <dl>
-    {{ render_field(form.name) }}
-    {{ render_field(form.members) }}
-  </dl>
-  <p><input type=submit value="Create Project">
-</form>
-
+<div class="mui-panel">
+  <p><a href="{{ url_for("index") }}">Projects overview</a></p>
+  <div class="mui-panel">
+    <h1>Create Project</h1>
+    {% include '_flash.html.j2' %}
+    <form method=post action="{{ url_for("add_project") }}" class="mui-form">
+      {{ form.csrf_token }}
+      {{ render_field(form.name) }}
+      {{ render_field(form.members) }}
+      <p>
+        <input class="mui-btn mui-btn--raised mui-btn--primary" type=submit value="Create Project">
+        <a href="{{ url_for("index") }}">
+          <button type="button" class="mui-btn mui-btn--raised">Cancel</button>
+        </a>
+      </p>
+    </form>
+  </div>
+</div>
 
 {% endblock content %}

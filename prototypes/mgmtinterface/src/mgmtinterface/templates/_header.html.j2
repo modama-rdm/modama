@@ -1,6 +1,8 @@
-<p>Logged in as {{ current_user.user_id }} <a href="{{ url_for("logout") }}">Logout</a></p>
-<ul>
-    {% for m in get_flashed_messages() %}
-    <li>{{ m }}</li>
-    {% endfor %}
-</ul>
+<div class="mui-panel">
+    <p>
+        Logged in as {{ current_user.user_id }}
+        <a href="{{ url_for("logout") }}">
+            <button class="mui-btn mui-btn--raised">Logout</button>
+        </a>
+    </p>
+</div>

@@ -8,6 +8,7 @@ import subprocess
 import stat
 import shutil
 from typing import NamedTuple, List
+import time
 
 import pamela
 import posix1e  # pylibacl, needs libacl1-dev, https://pylibacl.k1024.org/
@@ -116,6 +117,13 @@ def authenticate(username, password):
     return pamela.authenticate(username, password)
 
 
+def list_users():
+    # FIXME this only works if ADHOC_GROUP is not
+    # a user's primary group. Workaround on systems managed
+    # with IPA (LDAP, SSSD etc) TBD.
+    return grp.getgrnam(ADHOC_GROUP).gr_mem
+
+
 def check_can_create(name):
     '''
     Check if the user is permitted to create ad-hoc projects
@@ -175,6 +183,8 @@ def set_immutable(file_path, immutable):
 class Dataset(NamedTuple):
     name: str  # the relative path of the dataset in its project
     immutable: bool
+    ctime: float
+    mtime: float
 
 
 class AdhocProject:
@@ -190,6 +200,14 @@ class AdhocProject:
     @property
     def path(self):
         return os.path.join(ADHOC_PATH, self.name)
+
+    @property
+    def mtime(self):
+        return os.path.getmtime(self.path)
+
+    @property
+    def ctime(self):
+        return os.path.getctime(self.path)
 
     @classmethod
     def create(cls, name: str, owner: str, members: List[str]):
@@ -412,9 +430,17 @@ class AdhocProject:
     def datasets(self):
         result = []
         for filename in os.listdir(self.path):
-            raw = os.path.join(self.path, filename, 'raw')
+            root = os.path.join(self.path, filename)
+            raw = os.path.join(root, 'raw')
             if os.path.isdir(raw):
-                result.append(Dataset(name=filename, immutable=is_immutable(raw)))
+                result.append(
+                    Dataset(
+                        name=filename,
+                        immutable=is_immutable(raw),
+                        ctime=min(os.path.getctime(root), os.path.getctime(raw)),
+                        mtime=max(os.path.getmtime(root), os.path.getmtime(raw)),
+                    )
+                )
         return result
 
     def add_dataset(self, name, user):
@@ -504,6 +530,8 @@ class AdhocProject:
             "name": self.name,
             "owner": self.owner,
             "members": self.members,
+            "ctime": self.ctime,
+            "mtime": self.mtime,
         }
         if not fast:
             serialized["usage_bytes"] = self.diskusage

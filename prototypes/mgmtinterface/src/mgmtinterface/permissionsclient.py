@@ -21,6 +21,9 @@ class PermissionsClient:
         )
         return r.json()
 
+    def list_users(self):
+        return requests.get(f"{self.base_url}/users/list/").json()
+
     def list_projects(self):
         return requests.get(f"{self.base_url}/project/").json()
 

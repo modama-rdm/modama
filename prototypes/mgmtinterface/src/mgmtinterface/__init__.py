@@ -1,10 +1,12 @@
 from datetime import datetime
+from pydoc import cli
+import time
 
 from flask import Flask, render_template, request
 import flask
 from flask_login import LoginManager, login_required, login_user, current_user, logout_user
 from flask_wtf import FlaskForm
-from wtforms import Field, StringField, PasswordField, Label, HiddenField
+from wtforms import Field, StringField, PasswordField, SelectMultipleField
 from wtforms.widgets import TextInput
 from wtforms.validators import DataRequired
 from urllib.parse import urlparse, urljoin
@@ -48,7 +50,11 @@ class User:
 
 
 class LoginForm(FlaskForm):
-    username = StringField('username', validators=[DataRequired()])
+    username = StringField(
+        'Username',
+        validators=[DataRequired()],
+        render_kw={'autofocus': True}
+    )
     password = PasswordField('Password', validators=[DataRequired()])
 
 
@@ -65,16 +71,26 @@ class CommaListField(Field):
         if valuelist and valuelist[0]:
             self.data = [x.strip() for x in valuelist[0].split(',')]
         else:
-            self.data = []  
+            self.data = []
 
 
 class AddProjectForm(FlaskForm):
-    name = StringField('name', validators=[DataRequired()])
+    name = StringField(
+        'name', validators=[DataRequired()],
+        render_kw={'autofocus': True}
+    )
     members = CommaListField('members', validators=[])
 
 
 class ChangeProjectMembersForm(FlaskForm):
     members = CommaListField('members', validators=[DataRequired()])
+
+
+class ChangeProjectMembersForm2(FlaskForm):
+    members = SelectMultipleField(
+        'members',
+        validators=[DataRequired()]
+    )
 
 
 def default_dataset_name():
@@ -83,11 +99,20 @@ def default_dataset_name():
 
 
 class CreateDatasetForm(FlaskForm):
-    name = StringField('name', validators=[DataRequired()])
+    name = StringField(
+        'name', validators=[DataRequired()],
+        render_kw={'autofocus': True}
+    )
 
 
 class SealDatasetForm(FlaskForm):
     pass
+
+
+@app.template_filter()
+def format_unixtime(value):
+    d = datetime.fromtimestamp(value)
+    return d.strftime('%Y-%m-%d %H:%M')
 
 
 @login_manager.user_loader
@@ -105,11 +130,26 @@ def unauthorized_callback():
 @login_required
 def index():
     projects = client.list_projects()
+    plist = sorted(projects['projects'], key=lambda p: p['mtime'], reverse=True)
+    ownprojects = []
+    memberprojects = []
+    otherprojects = []
+    uid = current_user.user_id
+    for p in plist:
+        if p['owner'] == uid:
+            ownprojects.append(p)
+        elif uid in p['members']:
+            memberprojects.append(p)
+        else:
+            otherprojects.append(p)
+
     # contains: project list, actions: create new project, links to project details
     createprojectform = AddProjectForm()
     return render_template(
         'index.html.j2',
-        projects=projects['projects'],
+        ownprojects=ownprojects,
+        memberprojects=memberprojects,
+        otherprojects=otherprojects,
         createprojectform=createprojectform,
     )
 
@@ -128,9 +168,7 @@ def login():
             return flask.redirect(next_url or flask.url_for('index'))
         else:
             flask.flash(f"Error: {auth_result['message']}")
-            return render_template('login.html.j2', form=form)
-    else:
-        return render_template('login.html.j2', form=form)
+    return render_template('login.html.j2', form=form)
 
 
 @app.route("/add/", methods=["GET", "POST"])
@@ -146,21 +184,9 @@ def add_project():
 
         if result['errno'] == 0:
             flask.flash(f"Project {form.name.data} created.")
-            return flask.redirect(flask.url_for('index'))
+            return flask.redirect(flask.url_for('project', name=form.name.data))
         else:
             flask.flash(f"Error {result['message']}")
-            return flask.redirect(
-                flask.url_for(
-                    'add_project',
-                    name=form.name.data,
-                    member=form.members.data
-                )
-            )
-    args = request.args.to_dict(flat=False)
-    members = args.get('member', [])
-    name = args.get('name', [''])
-    form.name.data = name[0]
-    form.members.data = members
     return render_template(
         'addproject.html.j2',
         form=form,
@@ -184,76 +210,76 @@ def project(name: str):
         )
 
 
-@app.route("/<name>/addmembers/", methods=["GET", "POST"])
+@app.route("/<name>/members/", methods=["GET", "POST"])
 @login_required
-def add_project_members(name: str):
-    # First perform member action
-    form = ChangeProjectMembersForm()
-    if request.method == 'POST' and form.validate():
-        result = client.change_project_members(
-            projectname=name,
-            op='add',
-            members=form.members.data,
-            user=current_user.user_id,
-        )
-        if result['errno'] == 0:
-            flask.flash(f"Members {form.members.data} added.")
-            return flask.redirect(flask.url_for('project', name=name))
-        else:
-            flask.flash(f"Error {result['message']}.")
-            return flask.redirect(flask.url_for('add_project_members', name=name))
-
-    pr_info = client.projectdetails(name)
-    if pr_info['errno'] == 0:
-        return render_template(
-            'addprojectmembers.html.j2',
-            form=form,
-            project=pr_info['project']
-        )
-    else:
+def project_members(name: str):
+    def error(info):
         # FIXME a 403, 404 or other error codes
         # may be appropriate as well -- to be refined
         return render_template(
             'error.html.j2',
-            result=pr_info
+            result=info
         )
+    
+    is_error = False
 
-
-@app.route("/<name>/removemembers/", methods=["GET", "POST"])
-@login_required
-def remove_project_members(name: str):
-    args = request.args.to_dict(flat=False)
-    remove_me = args.get('member', [])
     # First perform member action
-    form = ChangeProjectMembersForm()
-    if request.method == 'POST' and form.validate():
-        result = client.change_project_members(
-            projectname=name,
-            op='remove',
-            members=form.members.data,
-            user=current_user.user_id,
-        )
-        if result['errno'] == 0:
-            flask.flash(f"Members {form.members.data} removed.")
-            return flask.redirect(flask.url_for('project', name=name))
-        else:
-            flask.flash(f"Error {result['message']}.")
-            return flask.redirect(flask.url_for('remove_project_members', name=name))
-    form.members.data = remove_me
+    form = ChangeProjectMembersForm2()
     pr_info = client.projectdetails(name)
+    
     if pr_info['errno'] == 0:
-        return render_template(
-            'removeprojectmembers.html.j2',
-            form=form,
-            project=pr_info['project']
-        )
-    else:
-        # FIXME a 403, 404 or other error codes
-        # may be appropriate as well -- to be refined
-        return render_template(
-            'error.html.j2',
-            result=pr_info
-        )
+        allusers = client.list_users()
+        if allusers['errno'] != 0:
+            return error(allusers)
+        form.members.choices = [
+            (name, name) for name in allusers['users']
+        ]
+        updated = False
+        if request.method == 'POST' and form.validate():
+            updated = True
+            form_set = set(form.members.data)
+            project_set = set(pr_info['project']['members'])
+            invalids = form_set - set(allusers['users'])
+            if invalids:
+                # Users that are not known users of the data management
+                flask.flash(f"Bad request, invalid options")
+                is_error = True
+            to_add = form_set - project_set
+            to_remove = project_set - form_set
+            if to_add and not is_error:
+                result = client.change_project_members(
+                    projectname=name,
+                    op='add',
+                    members=list(to_add),
+                    user=current_user.user_id,
+                )
+                if result['errno'] != 0:
+                    flask.flash(f"Error adding members {to_add}: {result['message']}.")
+                    is_error = True
+            if to_remove and not is_error:
+                result = client.change_project_members(
+                    projectname=name,
+                    op='remove',
+                    members=list(to_remove),
+                    user=current_user.user_id,
+                )
+                if result['errno'] != 0:
+                    flask.flash(f"Error removing members {to_remove}: {result['message']}.")
+                    is_error = True
+            if not is_error:
+                if to_add or to_remove:
+                    flask.flash("Project members updated.")
+                return flask.redirect(flask.url_for('project', name=name))
+        if updated:
+            pr_info = client.projectdetails(name)
+        if pr_info['errno'] == 0:
+            form.members.data = pr_info['project']['members']
+            return render_template(
+                'projectmembers.html.j2',
+                form=form,
+                project=pr_info['project']
+            )
+    return(error(pr_info))
 
 
 @app.route("/<name>/createdataset/", methods=["GET", "POST"])
@@ -268,18 +294,12 @@ def create_dataset(name: str):
             user=current_user.user_id,
         )
         if result['errno'] == 0:
-            flask.flash(f'Dataset "{form.name.data}" created in project "{name}".')
+            flask.flash(f'Session "{form.name.data}" created in project "{name}".')
             return flask.redirect(flask.url_for('project', name=name))
         else:
             flask.flash(f"Error: {result['message']}.")
-            return flask.redirect(
-                flask.url_for(
-                    'create_dataset',
-                    name=name,
-                    dsname=form.name.data,
-                )
-            )
-    form.name.data = request.args.get('dsname', default=default_dataset_name())
+    else:
+        form.name.data = default_dataset_name()
     pr_info = client.projectdetails(name)
     if pr_info['errno'] == 0:
         return render_template(
@@ -309,17 +329,11 @@ def seal_dataset(name: str, dataset: str):
             user=current_user.user_id,
         )
         if result['errno'] == 0:
-            flask.flash(f'Dataset "{dataset}" in project "{name}" sealed.')
+            flask.flash(f'Session "{dataset}" in project "{name}" sealed.')
             return flask.redirect(flask.url_for('project', name=name))
         else:
             flask.flash(f"Error: {result['message']}.")
-            return flask.redirect(
-                flask.url_for(
-                    'seal_dataset',
-                    name=name,
-                    dataset=dataset,
-                )
-            )
+
     pr_info = client.projectdetails(name)
     if pr_info['errno'] == 0:
         return render_template(

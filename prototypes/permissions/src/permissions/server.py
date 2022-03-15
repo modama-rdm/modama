@@ -1,11 +1,11 @@
 from subprocess import CalledProcessError
-from typing import Dict, TypedDict, List
+from typing import Dict, Iterable, TypedDict, List
 
 from flask import Flask, request, jsonify
 import jsonschema
 import pamela
 
-from permissions.api import AdhocProject, ValidationError, authenticate
+from permissions.api import AdhocProject, ValidationError, authenticate, list_users
 
 app = Flask(__name__)
 
@@ -81,6 +81,14 @@ def authenticate_user() -> bool:
         raise InvalidAPIUsage(str(e))
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
+
+
+@app.route("/users/list/", methods=["GET"])
+def get_user_list() -> Dict:
+    return {
+        'errno': 0,
+        "users": list_users(),
+    }
 
 
 CREATE_PROJECT_REQUEST_SCHEMA = {
@@ -171,7 +179,12 @@ def project_details(project_name) -> Dict:
         'errno': 0,
         "project": p.serialize(),
         "datasets": [
-            {"name": ds.name, "immutable": ds.immutable}
+            {
+                "name": ds.name,
+                "immutable": ds.immutable,
+                "ctime": ds.ctime,
+                "mtime": ds.mtime,
+            }
             for ds in p.datasets
         ]
     }

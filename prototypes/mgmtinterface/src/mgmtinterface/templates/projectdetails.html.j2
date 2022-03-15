@@ -3,42 +3,43 @@
 {% block content %}
 {% include '_header.html.j2' %}
 
-<h1>Project "{{ project.name }}"</h1>
+{% from "_projecthelpers.html.j2" import render_members, render_datasets %}
 
-  <p><a href="{{ url_for("index") }}">Project overview</a></p>
 
+<div class="mui-panel">
+  <p><a href="{{ url_for("index") }}">Projects</a></p>
+  <h1>Project "{{ project.name }}"</h1>
+  
+  {% include '_flash.html.j2' %}
   <p>Owner: {{ project.owner }}</p>
-  <p>Members:
-    {% for m in project.members %}
-    {{ m }}<a href="{{ url_for('remove_project_members', name=project.name, member=m) }}">Remove...</a><br/>
-    {% endfor %}
-  </p>
-
-  <p><a href="{{ url_for("add_project_members", name=project.name) }}">Add project members...</a></p>
-
+  <p>Created: {{ project.ctime|format_unixtime }}</p>
+  <p>Modified: {{ project.mtime|format_unixtime }}</p>
   <p>Size (Bytes): {{ project.usage_bytes }}</p>
+  <p>Members:
+    {{ render_members(project, current_user) }}
+  </p>
+  {% if current_user.user_id == project.owner %}
+    <p>
+      <a href="{{ url_for("project_members", name=project.name) }}">
+        <button type="button" class="mui-btn mui-btn--raised">
+          Manage project members...
+        </button>
+      </a>
+    </p>
+  {% endif %}
 
+  <h2>Sessions</h2>
 
-<h2>Datasets</h2>
-<table>
-<tr>
-    <th>Name</th>
-    <th>Immutable</th>
-    <th></th>
-</tr>
-  {% for d in datasets %}
-  <tr>
-      <td>{{ d.name }}</td>
-      <td>{{ d.immutable }}</td>
-      {% if d.immutable %}
-      <td></td>
-      {% else %}
-      <td><a href="{{ url_for('seal_dataset', name=project.name, dataset=d.name) }}">Seal...</a></td>
-      {% endif %}
-  </tr>
-  {% endfor %}
-</table>
+  {{ render_datasets(project, datasets, current_user)}}
 
-<p><a href="{{ url_for("create_dataset", name=project.name) }}">Create dataset...</a></p>
-
+  {% if current_user.user_id in project.members or current_user.user_id == project.owner %}
+    <p>
+      <a href="{{ url_for("create_dataset", name=project.name) }}">
+        <button type="button" class="mui-btn mui-btn--raised">
+          Create session...
+        </button>
+      </a>
+    </p>
+  {% endif %}
+</div>
 {% endblock content %}

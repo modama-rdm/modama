@@ -4,19 +4,22 @@
 
 {% block content %}
 
-{#
-{% from "_formhelpers.html" import render_field %}
-#}
+<div class="mui-panel">
+  <h1>Login</h1>
+  {% include '_flash.html.j2' %}
 
-{{ get_flashed_messages() }}
-{{ form.errors }}
-
-<form method=post action=".">
-  {{ form.csrf_token }}
-  <dl>
+  <form method=post action="." class="mui-form">
+    {{ form.csrf_token }}
     {{ render_field(form.username) }}
     {{ render_field(form.password) }}
-  </dl>
-  <p><input type=submit value="Login">
-</form>
+    <p>
+      <input
+        type=submit
+        value="Login"
+        class="mui-btn mui-btn--raised"
+        onClick="this.form.submit(); this.disabled=true; this.value='Logging in…'; "
+      />
+    </p>
+  </form>
+</div>
 {% endblock content %}

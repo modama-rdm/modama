@@ -1,32 +1,38 @@
 {% extends "base.html.j2" %}
 
 {% from "_formhelpers.html.j2" import render_field %}
+{% from "_projecthelpers.html.j2" import render_datasets, navbar, cancel %}
 
 {% block content %}
 
 {% include '_header.html.j2' %}
 
-<h1>Create dataset in project "{{ project['name'] }}"</h1>
+<div class="mui-panel">
+  {{ navbar(project) }}
+  <div class="mui-panel">
+    <h1>Create session in project "{{ project['name'] }}"</h1>
 
-<p><a href="{{ url_for("project", name=project.name) }}">Details for "{{ project.name }}"</a></p>
-<p><a href="{{ url_for("index") }}">Project overview</a></p>
+    {% include '_flash.html.j2' %}
 
-{{ form.errors }}
+    <form
+        method=post
+        action="{{ url_for("create_dataset", name=project.name) }}"
+        class="mui-form"
+    >
+      {{ form.csrf_token }}
+      <dl>
+        {{ render_field(form.name) }}
+      </dl>
+      <p>
+        <input type="submit" class="mui-btn mui-btn--raised mui-btn--primary" value="Create session">
+        {{ cancel(project) }}
+      </p>
+    </form>
+  </div>
+  <div class="mui-panel">
+    <h2>Current sessions</h2>
 
-<form method=post action="{{ url_for("create_dataset", name=project.name) }}">
-  {{ form.csrf_token }}
-  <dl>
-    {{ render_field(form.name) }}
-  </dl>
-  <p><input type=submit value="Add dataset">
-</form>
-
-<h2>Current datasets</h2>
-
-<ul>
-  {% for d in datasets %}
-    <li>{{ d.name }}</li>
-  {% endfor %}
-</ul>
-
+    {{ render_datasets(project, datasets, current_user)}}
+  </div>
+</div>
 {% endblock content %}
