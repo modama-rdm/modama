@@ -4,6 +4,8 @@ import QtQuick.Controls
 
 Item {
     id: page
+    height: 300
+    anchors.centerIn: parent
 
     visible: true
 

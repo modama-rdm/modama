@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
+import QtQuick.Layouts
 
 Item {
     id: page
@@ -28,16 +29,28 @@ Item {
             placeholderText: qsTr("Session name")
             onTextEdited: sessionModel.sessionName = text
             KeyNavigation.tab: openSessionButton
+            Keys.onReturnPressed: sessionModel.startSession()
             enabled: !sessionModel.busy
         }
 
-        Button {
-            id: openSessionButton
+        ButtonRow {
             anchors.right: parent.right
-            text: qsTr("Start session")
-            onClicked: sessionModel.startSession()
-            enabled: !sessionModel.busy
+
+            Button {
+                id: cancelButton
+                text: qsTr("Cancel")
+                onClicked: pageStateModel.cancelToOverview()
+                enabled: !sessionModel.busy
+            }
+
+            Button {
+                id: openSessionButton
+                text: qsTr("Start session")
+                onClicked: sessionModel.startSession()
+                enabled: !sessionModel.busy
+            }
         }
+
     }
 
     BusyIndicator {

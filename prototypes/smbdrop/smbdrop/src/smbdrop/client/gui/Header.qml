@@ -1,18 +1,27 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Layouts
 import QtQuick.Controls
 
 Item {
-    visible: loginModel.loggedIn
+    height: 60
+    id: header
+    clip: true
+
+    Layout.fillWidth: true
 
     Row {
+        // anchors.centerIn: parent
+        // anchors.fill: parent
         anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: 10
-        anchors.rightMargin: 10
+        anchors.leftMargin: 20
+        anchors.topMargin: 20
+        anchors.rightMargin: 20
         spacing: 10
+        height: 80
+        visible: loginModel.loggedIn
 
-        Text {
+        Label {
             text: "Logged in as " + loginModel.username
             anchors.verticalCenter: parent.verticalCenter
         }
@@ -20,6 +29,7 @@ Item {
         Button {
             text: "Logout"
             onClicked: loginModel.doLogout()
+            anchors.verticalCenter: parent.verticalCenter
         }
     }
 }

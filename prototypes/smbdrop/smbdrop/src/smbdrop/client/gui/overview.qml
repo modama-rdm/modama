@@ -1,58 +1,123 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Layouts
 import QtQuick.Controls
 
 Item {
     id: page
     visible: true
+    width: parent.width
 
-    Column {
+    Dialog {
+        id: closeSessionDialog
+        onAccepted: sessionModel.closeSession(sessionId)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        modal: true
         anchors.centerIn: parent
-        spacing: 10
+        width: 300
 
-        Text {
-            text: "Current sessions:"
+        title: "Close session?"
+
+        Label {
+            text: "Really close session " + closeSessionDialog.sessionTitle + "?"
         }
 
-        ListModel {
-            id: someModel
-            ListElement {
-                dest_path: "stuff1"
+        property string sessionId: ""
+        property string sessionTitle: ""
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.topMargin: 20
+        anchors.leftMargin: 20
+        anchors.rightMargin: 20
+        spacing: 20
+
+        Pane {
+            Layout.fillWidth: true
+            Material.elevation: 5
+
+            ColumnLayout {
+                Label {
+                    text: qsTr("Current Session:")
+                }
+
+                ButtonRow {
+                    Button {
+                        id: openSessionButton
+                        text: qsTr("New Session")
+                        onClicked: pageStateModel.startSessionDialog()
+                    }
+                }
             }
-            ListElement {
-                dest_path: "stuff2"
-            }
-            ListElement {
-                dest_path: "stuff3"
-            }
+        }
+
+        Label {
+            text: "Your other open sessions:"
+            Layout.fillWidth: true
+            visible: sharesModel.rowCount > 0
+        }
+
+        Label {
+            text: "You don't have any other sessions open"
+            Layout.fillWidth: true
+            visible: sharesModel.rowCount == 0
         }
 
         ListView {
-            width: 300
-            height: 200
-            //model: someModel
-            model: sessionModel.get_shares()
+            spacing: 20
+            flickableDirection: Flickable.VerticalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+            model: sharesModel
 
-            // FIXME: show mapped drive name, show buttons for interaction
-            // (closing session, re-map drive if it was umounted etc.)
-            delegate: Text {
-                text: "stuff: " + dest_path
+            Layout.fillHeight: true
+            Layout.fillWidth: true
+
+            header: Item {
+                height: 20
             }
-        }
 
-        ComboBox {
-            id: comboBox
-            // flat: false
-            editable: false
-            width: 300
-            model: sessionModel.get_shares()
-            textRole: "uid"
-        }
+            // FIXME: show mapped drive name
+            delegate: Pane {
+                // anchors.horizontalCenter: ListView.view.horizontalCenter
+                width: ListView.view.width - 10
 
-        Button {
-            id: openSessionButton
-            text: qsTr("New Session")
-            onClicked: pageStateModel.startSessionDialog()
+                Material.elevation: 5
+
+                ColumnLayout {
+                    Label {
+                        text: model.title
+                        font.pixelSize: 22
+                        bottomPadding: 10
+                    }
+                    Label {
+                        text: "Created: " + model.created_datetime
+                        font.pixelSize: 14
+                        bottomPadding: 10
+                    }
+                    ButtonRow {
+                        Button {
+                            id: sealButton
+                            text: qsTr("Close")
+                            onClicked: function() {
+                                closeSessionDialog.sessionId = model.share_id;
+                                closeSessionDialog.sessionTitle = model.title;
+                                closeSessionDialog.open();
+                            }
+                        }
+
+                        Button {
+                            id: mapSessionDriveButton
+                            text: qsTr("Map Drive")
+                            onClicked: sessionModel.mapSessionDrive(model.share_id)
+                            enabled: !sessionModel.busy
+                        }
+                    }
+                }
+            }
+
+            ScrollBar.vertical: ScrollBar { }
         }
     }
 }

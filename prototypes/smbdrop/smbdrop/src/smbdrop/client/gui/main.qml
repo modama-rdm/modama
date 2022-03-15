@@ -1,21 +1,26 @@
 import QtQuick
+import QtQuick.Layouts
 import QtQuick.Window
 import QtQuick.Controls
 
 ApplicationWindow {
     id: root
 
-    title: "ER-C Cloud Ingest"
+    title: "ER-C-Data Ingest"
     visible: true
     width: 640
     height: 480
 
-    header: Header { }
-
-    Loader {
-        id: pageLoader
-        source: pageStateModel.currentPage
+    ColumnLayout {
         anchors.fill: parent
+
+        Header { }
+        Loader {
+            id: pageLoader
+            source: pageStateModel.currentPage
+            Layout.fillHeight: true
+            Layout.fillWidth: true
+        }
     }
 
     // make the page state model aware of the current login state:

@@ -1,6 +1,9 @@
 from typing import Any, Dict, List, Optional
+from datetime import datetime
+from pathlib import Path
 import signal
 import time
+import copy
 import sys
 import os
 
@@ -10,7 +13,7 @@ from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtCore import (
     Qt, QObject, Signal, Slot, Property, QRunnable, QThreadPool,
-    QAbstractListModel,
+    QAbstractListModel, QTimer,
 )
 
 from smbdrop.client import ShareClient
@@ -29,8 +32,8 @@ class DoLogin(QRunnable):
     def run(self) -> None:
         self.model._set_busy(True)
         try:
-            time.sleep(1)  # simulate network...
-            print("success!")
+            time.sleep(0.1)  # simulate network...
+            print("login success!")
             self.model._set_logged_in(True)
         finally:
             self.model._set_busy(False)
@@ -117,6 +120,62 @@ class DoCreateSession(QRunnable):
         finally:
             self.model._set_busy(False)
             self.model.sessionStart.emit()
+
+
+class DoCloseSession(QRunnable):
+    def __init__(self, model: "SessionModel", login_model: "LoginModel", share_id: str) -> None:
+        super().__init__()
+        self.model = model
+        self.login_model = login_model
+        self.share_id = share_id
+
+    @Slot()
+    def run(self) -> None:
+        # FIXME: error handling!
+        try:
+            c = ShareClient(SMBDROP_API_BASE_URL)
+            c.delete(self.share_id)
+            shares = c.list()
+            self.model._set_shares(list(shares.values()))
+            self.model._set_session_share_id(None)
+        finally:
+            self.model._set_busy(False)
+
+
+class DoUpdateSharesList(QRunnable):
+    def __init__(self, model: "SessionModel", login_model: "LoginModel") -> None:
+        super().__init__()
+        self.model = model
+        self.login_model = login_model
+
+    @Slot()
+    def run(self) -> None:
+        # FIXME: error handling!
+        try:
+            c = ShareClient(SMBDROP_API_BASE_URL)
+            shares = c.list()
+            self.model._set_shares(list(shares.values()))
+        finally:
+            # as this is run in the background, we don't set/unset busy
+            # self.model._set_busy(False)
+            pass
+
+
+class DoMapDrive(QRunnable):
+    def __init__(self, model: "SessionModel", share_id: str) -> None:
+        super().__init__()
+        self.model = model
+        self.share_id = share_id
+    
+    @Slot()
+    def run(self) -> None:
+        self.model._set_busy(True)
+        try:
+            print(f"really mapping network drive {self.share_id}...")
+            share_info = self.model.get_share_by_id(self.share_id)
+            print(share_info)
+        finally:
+            self.model._set_busy(False)
 
 
 class LoginModel(QObject):
@@ -227,6 +286,10 @@ class PageStateModel(QObject):
         self._set_current_page("new-session.qml")
 
     @Slot()
+    def cancelToOverview(self) -> None:
+        self._set_current_page("overview.qml")
+
+    @Slot()
     def _session_start(self) -> None:
         self._set_current_page("overview.qml")
 
@@ -253,13 +316,12 @@ class ProjectListModel(QAbstractListModel):
         print(f"rowCount() -> {len(self._projects)}")
         return len(self._projects)
 
-    def get_default_project(self):
+    def get_default_project(self) -> Optional[str]:
         if len(self._projects) == 0:
             return None
         return self._projects[0]
 
     def data(self, index, role):
-        print(f"PLM data({index}, {role})")
         if (role == Qt.DisplayRole
                 and index.row() >= 0
                 and index.row() < len(self._projects)
@@ -275,21 +337,13 @@ class ListOfDictModel(QAbstractListModel):
         self._schema = list_of_roles
         self._items: List[Dict] = []
 
-    def __getattribute__(self, __name: str) -> Any:
-        print(f"LoD __getattribute__ {__name}")
-        val = super().__getattribute__(__name)
-        return val
-
-    def __setattr__(self, __name: str, __value: Any) -> None:
-        print(f"LoD __setattr__ {__name}")
-        return super().__setattr__(__name, __value)
-
     def data(self, index, role):
-        print("LoD data called.............")
         key = self._schema[role]
         value = self._items[index.row()].get(key)
-        print(f"LoD data({index}, {role} -> {key}) = {value}")
         return value
+
+    def get_all(self):
+        return self._items
 
     def replace_data(self, new_items: List[Dict]) -> None:
         """
@@ -302,29 +356,43 @@ class ListOfDictModel(QAbstractListModel):
             `list_of_roles`
         """
         if new_items != self._items:
-            self._items = new_items
-            print("replacing LoD data")
-            self.dataChanged.emit(self.index(0, 0), self.index(len(new_items) - 1, 0))
+            old_length = len(self._items)
+            if len(new_items) != old_length:
+                # different length, just reset the model:
+                self.beginResetModel()
+                self._items = new_items
+                self.endResetModel()
+            else:
+                # same length, just notify that things have changed:
+                self._items = new_items
+                # make sure, if we removed items, that we notify for the full range,
+                # not only the new (possibly smaller) index range:
+                self.dataChanged.emit(self.index(0, 0), self.index(len(new_items) - 1, 0))
 
     def rowCount(self, __parent) -> int:
-        print(f"LoD rowCount == {len(self._items)}")
         return len(self._items)
 
     def roleNames(self) -> Dict[int, str]:
-        roles = dict(enumerate(self._schema))
-        print(f"{roles=}")
+        # NOTE: Qt really doesn't like `str`-keyed dicts for `roleNames` for
+        # some reason...
+        roles = dict(enumerate(
+            [s.encode("utf8") for s in self._schema]
+        ))
         return roles
 
 
 class SessionModel(QObject):
-    def __init__(self, login_model: "LoginModel", projects_model: ProjectListModel, pagestate_model: PageStateModel):
+    def __init__(
+        self,
+        login_model: "LoginModel",
+        projects_model: ProjectListModel,
+        pagestate_model: PageStateModel,
+        shares_model: ListOfDictModel,
+    ):
         self._login_model = login_model
         self._projects_model = projects_model
         self._pagestate_model = pagestate_model
-        self._shares = ListOfDictModel([
-            "created_timestamp", "dest_path", "gid", "password",
-            "share_id", "share_name", "uid", "username",
-        ])
+        self._shares = shares_model
         self._session_share_id: Optional[str] = None
         self._session_name: Optional[str] = None
         self._project_name: Optional[str] = None
@@ -339,7 +407,15 @@ class SessionModel(QObject):
         self._login_model.loggedInChanged.connect(self._projects_model._fetch)
         self.sessionStart.connect(self._pagestate_model._session_start)
 
-    def _set_default_project(self):
+        # regular updates in the background:
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(500)
+        self._update_timer.timeout.connect(self._update_bg)
+        self._update_timer.start()
+
+        self._update_bg()
+
+    def _set_default_project(self) -> None:
         if self._project_name is None:
             if self._projects_model.rowCount(None) > 0:
                 self.set_project_name(self._projects_model.get_default_project())
@@ -348,16 +424,40 @@ class SessionModel(QObject):
         self._set_busy(True)
         self.threadpool.start(DoListSessions(self, self._login_model))
 
-    def _set_shares(self, shares: List[Dict]) -> None:
-        self._shares.replace_data(shares)
+    def _preprocess_share(self, share: Dict) -> Dict:
+        share = copy.copy(share)
+        created = datetime.fromtimestamp(share["created_timestamp"])
+        share["created_datetime"] = created.strftime("%c")
+        dest_path = Path(share["dest_path"])
+        trunc_path = "/".join(dest_path.parts[-2:])
+        share["title"] = f"{trunc_path}"
+        return share
 
+    def _set_shares(self, shares: List[Dict]) -> None:
+        # pre-process and set shares:
+        new_shares = [
+            self._preprocess_share(s)
+            for s in shares
+        ]
+        self._shares.replace_data(new_shares)
+
+    def _update_bg(self) -> None:
+        if not self._busy and self._login_model.loggedIn:
+            # print("updating...")
+            self.threadpool.start(DoUpdateSharesList(
+                model=self,
+                login_model=self._login_model,
+            ))
+
+    # FIXME: probably needs a result='' Qt-specific type annotation here!
+    # like this, it just doesn't work...
     @Slot()
     def get_shares(self) -> ListOfDictModel:
         return self._shares
 
     sessionShareChanged = Signal(str)
 
-    def _set_session_share_id(self, share_id: str) -> None:
+    def _set_session_share_id(self, share_id: Optional[str]) -> None:
         if share_id != self._session_share_id:
             self._session_share_id = share_id
             self.sessionShareChanged.emit(share_id)
@@ -400,6 +500,30 @@ class SessionModel(QObject):
             session_name=self.sessionName,
         ))
 
+    @Slot(str)
+    def closeSession(self, sessionId: str) -> None:
+        print(f"closing session {sessionId}")
+        self.threadpool.start(
+            DoCloseSession(self, self._login_model, sessionId)
+        )
+
+    def get_share_by_id(self, share_id: str) -> Dict:
+        # linear search, stupid but... works?
+        # TODO: might want to extend the ListOfDictModel by a
+        # "primary key" concept, by which we can then index stuff
+        # (in addition to just listing...)
+        for share in self._shares.get_all():
+            if share['share_id'] == share_id:
+                return share
+        raise RuntimeError(f"invalid share id: {share_id}")
+
+    @Slot(str)
+    def mapSessionDrive(self, sessionId: str) -> None:
+        print(f"mapping network drive for session id {sessionId}")
+        self.threadpool.start(
+            DoMapDrive(self, sessionId)
+        )
+
     busyChanged = Signal(bool)
 
     def get_busy(self) -> bool:
@@ -426,11 +550,21 @@ if __name__ == "__main__":
     login_model = LoginModel()
     pagestate_model = PageStateModel(login_model)
     projects_model = ProjectListModel(login_model)
-    session_model = SessionModel(login_model, projects_model, pagestate_model)
+    shares_model = ListOfDictModel([
+        "created_timestamp", "dest_path", "gid", "password",
+        "share_id", "share_name", "uid", "username",
+
+        # derived data:
+        "title", "created_datetime",
+    ])
+    session_model = SessionModel(
+        login_model, projects_model, pagestate_model, shares_model,
+    )
     engine.rootContext().setContextProperty("loginModel", login_model)
     engine.rootContext().setContextProperty("pageStateModel", pagestate_model)
     engine.rootContext().setContextProperty("projectListModel", projects_model)
     engine.rootContext().setContextProperty("sessionModel", session_model)
+    engine.rootContext().setContextProperty("sharesModel", shares_model)
 
     engine.load(os.path.join(os.path.dirname(__file__), "main.qml"))
 
