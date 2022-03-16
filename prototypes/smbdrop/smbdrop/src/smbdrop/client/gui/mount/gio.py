@@ -51,7 +51,7 @@ class GIOMountManager(MountManager):
 
     def umount(self, share_name: str, username: str) -> None:
         uri = self._get_uri(share_name, username)
-        subprocess.run(["gio", "mount", "-s", uri], capture_output=True, check=True)
+        subprocess.run(["gio", "mount", "-u", uri], capture_output=True, check=True)
 
     def open(self, share_name: str, username: str) -> None:
         uri = self._get_uri(share_name, username)
