@@ -58,38 +58,21 @@ class LoginForm(FlaskForm):
     password = PasswordField('Password', validators=[DataRequired()])
 
 
-class CommaListField(Field):
-    widget = TextInput()
-
-    def _value(self):
-        if self.data:
-            return u', '.join(self.data)
-        else:
-            return u''
-
-    def process_formdata(self, valuelist):
-        if valuelist and valuelist[0]:
-            self.data = [x.strip() for x in valuelist[0].split(',')]
-        else:
-            self.data = []
-
-
 class AddProjectForm(FlaskForm):
     name = StringField(
         'name', validators=[DataRequired()],
         render_kw={'autofocus': True}
     )
-    members = CommaListField('members', validators=[])
+    members = SelectMultipleField(
+        'members',
+        validators=[]
+    )
 
 
 class ChangeProjectMembersForm(FlaskForm):
-    members = CommaListField('members', validators=[DataRequired()])
-
-
-class ChangeProjectMembersForm2(FlaskForm):
     members = SelectMultipleField(
         'members',
-        validators=[DataRequired()]
+        validators=[]
     )
 
 
@@ -175,13 +158,30 @@ def login():
 @login_required
 def add_project():
     form = AddProjectForm()
+    allusers = client.list_users()
+    if allusers['errno'] != 0:
+        return render_template(
+            'error.html.j2',
+            result=allusers,
+        )
+    form.members.choices = [
+        (name, name) for name in allusers['users']
+    ]
     if request.method == 'POST' and form.validate():
+        form_set = set(form.members.data)
+        invalids = form_set - set(allusers['users'])
+        if invalids:
+            # Users that are not known users of the data management
+            flask.flash(f"Bad request, invalid options")
+            return render_template(
+                'error.html.j2',
+                result=allusers,
+            )
         result = client.create_project(
             name=form.name.data,
             owner=current_user.user_id,
             members=form.members.data
         )
-
         if result['errno'] == 0:
             flask.flash(f"Project {form.name.data} created.")
             return flask.redirect(flask.url_for('project', name=form.name.data))
@@ -220,11 +220,9 @@ def project_members(name: str):
             'error.html.j2',
             result=info
         )
-    
     is_error = False
-
     # First perform member action
-    form = ChangeProjectMembersForm2()
+    form = ChangeProjectMembersForm()
     pr_info = client.projectdetails(name)
     
     if pr_info['errno'] == 0:
