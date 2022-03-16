@@ -17,6 +17,7 @@ from PySide6.QtCore import (
 )
 
 from smbdrop.client import ShareClient
+from smbdrop.client.gui.mount import get_mm_class, MountManager
 
 
 PERMISSIONS_API_BASE_URL = "http://172.28.0.2:5050"
@@ -162,17 +163,27 @@ class DoUpdateSharesList(QRunnable):
 
 
 class DoMapDrive(QRunnable):
-    def __init__(self, model: "SessionModel", share_id: str) -> None:
+    def __init__(self, model: "SessionModel", share_id: str, mm: MountManager) -> None:
         super().__init__()
         self.model = model
         self.share_id = share_id
-    
+        self.mm = mm
+
     @Slot()
     def run(self) -> None:
         self.model._set_busy(True)
         try:
             print(f"really mapping network drive {self.share_id}...")
             share_info = self.model.get_share_by_id(self.share_id)
+            mm.mount_smb(
+                share_name=share_info["share_name"],
+                username=share_info["username"],
+                password=share_info["password"],
+            )
+            mm.open(
+                share_name=share_info["share_name"],
+                username=share_info["username"],
+            )
             print(share_info)
         finally:
             self.model._set_busy(False)
@@ -313,7 +324,6 @@ class ProjectListModel(QAbstractListModel):
         self.threadpool.start(DoListProjects(self, self._login_model))
 
     def rowCount(self, parent) -> int:
-        print(f"rowCount() -> {len(self._projects)}")
         return len(self._projects)
 
     def get_default_project(self) -> Optional[str]:
@@ -388,6 +398,7 @@ class SessionModel(QObject):
         projects_model: ProjectListModel,
         pagestate_model: PageStateModel,
         shares_model: ListOfDictModel,
+        mm: MountManager,
     ):
         self._login_model = login_model
         self._projects_model = projects_model
@@ -397,6 +408,7 @@ class SessionModel(QObject):
         self._session_name: Optional[str] = None
         self._project_name: Optional[str] = None
         self._busy: bool = False
+        self._mm = mm
 
         self.threadpool = QThreadPool()
         super().__init__()
@@ -521,7 +533,7 @@ class SessionModel(QObject):
     def mapSessionDrive(self, sessionId: str) -> None:
         print(f"mapping network drive for session id {sessionId}")
         self.threadpool.start(
-            DoMapDrive(self, sessionId)
+            DoMapDrive(self, sessionId, self._mm)
         )
 
     busyChanged = Signal(bool)
@@ -546,6 +558,9 @@ if __name__ == "__main__":
     app = QGuiApplication(sys.argv)
     engine = QQmlApplicationEngine()
 
+    MountManagerClass = get_mm_class()
+    mm = MountManagerClass(smb_host="localhost", workgroup="ER-C-INGEST")
+
     # instantiate and register global objects:
     login_model = LoginModel()
     pagestate_model = PageStateModel(login_model)
@@ -558,7 +573,7 @@ if __name__ == "__main__":
         "title", "created_datetime",
     ])
     session_model = SessionModel(
-        login_model, projects_model, pagestate_model, shares_model,
+        login_model, projects_model, pagestate_model, shares_model, mm
     )
     engine.rootContext().setContextProperty("loginModel", login_model)
     engine.rootContext().setContextProperty("pageStateModel", pagestate_model)
