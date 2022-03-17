@@ -1,0 +1,33 @@
+version: '3.4'
+services:
+  db:
+    volumes:
+      - type: bind
+        source: "./testfolder/postgres"
+        target: "/var/lib/postgresql/data"
+  nextcloud:
+    volumes:
+      - type: bind
+        source: "./testfolder/nextcloud-html"
+        target: "/var/www/html"
+      - type: bind
+        source: "./testfolder/nextcloud-data"
+        target: "/var/local/nextclouddata"
+      - type: bind
+        source: "./testconf/nextcloud-site-config.json"
+        target: "/nextcloud-site-config.json"
+      - type: bind
+        source: "/var/local/data-mgmt/nextcloud-config-secret.json"
+        target: "/nextcloud-config-secret.json"
+      - type: bind
+        source: "/var/local/data-mgmt/externalstorage_pw"
+        target: "/externalstorage_pw"
+  webdav-backend:
+    volumes:
+      # Data directory to export
+      - "./testfolder/data/:/var/wsgidav-root"
+  cloudproxy:
+    volumes:
+      - './testconf/cloudproxy-servername.nginx.conf.snippet:/etc/nginx/conf.d/servername.conf.snippet'
+    ports:
+      - "127.0.0.1:1890:80"

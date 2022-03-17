@@ -1,0 +1,96 @@
+{
+    "system": {
+        "trusted_domains": [
+            "localhost",
+            "er-c-data.fz-juelich.de"
+        ],
+        "ldapIgnoreNamingRules": false,
+        "versions_retention_obligation": "30, auto",
+        "htaccess.RewriteBase": "/nextcloud",
+        "overwritewebroot": "/nextcloud",
+        "allow_local_remote_servers": true
+    },
+    "apps": {
+        "core": {
+            "backgroundjobs_mode": "ajax",
+            "previewsCleanedUp": "1"
+        },
+        "files": {
+            "cronjob_scan_files": "1500",
+            "default_quota": "500 MB"
+        },
+        "files_trashbin": {
+            "types": "filesystem,dav"
+        },
+        "files_versions": {
+            "types": "filesystem,dav"
+        },
+        "theming": {
+            "name": "ER-C Data",
+            "url": "https:\/\/er-c.fz-juelich.de",
+            "slogan": "Ernst Ruska Centre Data Management",
+            "privacyUrl": "https:\/\/er-c.org\/index.php\/privacy-policy\/",
+            "imprintUrl": "https:\/\/er-c.org\/index.php\/imprint\/",
+            "color": "#023d6b",
+            "backgroundMime": "backgroundColor"
+        },
+        "user_ldap": {
+            "s01ldap_configuration_active": "1",
+            "s01ldap_backup_host": "",
+            "s01ldap_backup_port": "",
+            "s01ldap_override_main_server": "",
+            "s01ldap_user_filter_mode": "0",
+            "s01ldap_userfilter_objectclass": "",
+            "s01ldap_userfilter_groups": "",
+            "s01ldap_login_filter_mode": "0",
+            "s01ldap_loginfilter_email": "0",
+            "s01ldap_loginfilter_username": "1",
+            "s01ldap_loginfilter_attributes": "",
+            "s01ldap_group_filter_mode": "0",
+            "s01ldap_groupfilter_objectclass": "",
+            "s01ldap_groupfilter_groups": "",
+            "s01ldap_gid_number": "gidNumber",
+            "s01ldap_user_display_name_2": "",
+            "s01ldap_group_display_name": "cn",
+            "s01ldap_tls": "0",
+            "s01ldap_quota_def": "",
+            "s01ldap_quota_attr": "",
+            "s01ldap_cache_ttl": "600",
+            "s01home_folder_naming_rule": "",
+            "s01ldap_turn_off_cert_check": "0",
+            "s01ldap_attributes_for_group_search": "",
+            "s01ldap_expert_username_attr": "",
+            "s01ldap_expert_uuid_user_attr": "",
+            "s01ldap_expert_uuid_group_attr": "",
+            "s01has_memberof_filter_support": "0",
+            "s01use_memberof_to_detect_membership": "1",
+            "s01last_jpegPhoto_lookup": "0",
+            "s01ldap_nested_groups": "0",
+            "s01ldap_paging_size": "500",
+            "s01ldap_turn_on_pwd_change": "0",
+            "s01ldap_dynamic_group_member_url": "",
+            "s01ldap_default_ppolicy_dn": "",
+            "s01ldap_user_avatar_rule": "default",
+            "s01ldap_ext_storage_home_attribute": "",
+            "s01ldap_host": "ldaps:\/\/ldaps.iff.kfa-juelich.de",
+            "s01ldap_experienced_admin": "1",
+            "s01ldap_display_name": "cn",
+            "s01ldap_base": "cn=accounts,dc=iff,dc=kfa-juelich,dc=de",
+            "s01ldap_dn": "uid=weber,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de",
+            "s01ldap_port": "636",
+            "s01ldap_userlist_filter": "(objectclass=posixaccount)",
+            "s01ldap_email_attr": "mail",
+            "cleanUpJobOffset": "100",
+            "background_sync_prefix": "s01",
+            "background_sync_offset": "0",
+            "s01ldap_login_filter": "(&(objectclass=posixaccount)(|(uid=%uid)(mail=%uid)))",
+            "s01ldap_group_filter": "(objectclass=posixgroup)",
+            "background_sync_interval": "28761",
+            "s01ldap_group_member_assoc_attribute": "gidNumber",
+            "s01ldap_base_users": "cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de",
+            "s01ldap_base_groups": "cn=groups,cn=accounts,dc=iff,dc=kfa-juelich,dc=de",
+            "s01ldap_attributes_for_user_search": "sn\ngivenName\nuid\ncn\nmail",
+            "s01_lastChange": "1645791559"
+        }
+    }
+}

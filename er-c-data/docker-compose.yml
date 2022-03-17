@@ -1,24 +1,21 @@
 version: '3.4'
 services:
-  db-test:
+  db:
     environment:
       - POSTGRES_PASSWORD=password
       - PGDATA=/var/lib/postgresql/data/pgdata
     restart: always
     image: postgres:12
-    volumes:
-      - type: bind
-        source: "/cachedata/data-mgmt-test/postgres"
-        target: "/var/lib/postgresql/data"
   
-  redis-test:
+  redis:
     image: "redis:alpine"
+    restart: always
 
     command: redis-server /usr/local/etc/redis/redis.conf
 
     volumes:
       - type: bind
-        source: "/cachedata/data-mgmt-test/redis.conf"
+        source: "./redis.conf"
         target: "/usr/local/etc/redis/redis.conf"
 
     # volumes:
@@ -28,17 +25,17 @@ services:
     environment:
      - REDIS_REPLICATION_MODE=master
 
-  nextcloud-test:
-    hostname: nextcloud-test
+  nextcloud:
+    hostname: nextcloud
     build: ./nextcloud
 
     environment:
-      POSTGRES_HOST: "db-test"
+      POSTGRES_HOST: "db"
       POSTGRES_DB: "nextcloud"
       POSTGRES_USER: "postgres"
       POSTGRES_PASSWORD: "password"
 
-      REDIS_HOST: "redis-test"
+      REDIS_HOST: "redis"
       REDIS_HOST_PASSWORD: "redis"
 
       NEXTCLOUD_ADMIN_USER: root
@@ -46,34 +43,30 @@ services:
 
       NEXTCLOUD_DATA_DIR: "/var/local/nextclouddata"
 
-      NEXTCLOUD_TRUSTED_DOMAINS: "localhost moellenstedt.iff.kfa-juelich.de 134.94.162.235"
-
       APACHE_DISABLE_REWRITE_IP: 1
 
       # Didn't work, unfortunately
       # TRUSTED_PROXIES: "localhost"
 
     links:
-      - "db-test"
-      - "redis-test"
-      - "webdav-test"
-
-    ports:
-      - "127.0.0.1:887:80"
+      - "db"
+      - "redis"
+      - "webdav"
 
     volumes:
        - type: bind
-         source: "/cachedata/data-mgmt-test/nextcloud-html"
-         target: "/var/www/html"
+         source: "../branding/favicon.jpg"
+         target: "/favicon.jpg"
        - type: bind
-         source: "/cachedata/data-mgmt-test/nextcloud-data"
-         target: "/var/local/nextclouddata"
+         source: "../branding/Icon-Nextcloud.svg"
+         target: "/Icon-Nextcloud.svg"    
 
     restart: always
 
-  webdav-test:
-    hostname: webdav-test
+  webdav-backend:
+    hostname: webdav-backend
     build: './wsgidav'
+    restart: always
 
     volumes:
       # Use host's accounts
@@ -82,7 +75,29 @@ services:
       - type: bind
         source: "/var/lib/sss/pipes/"
         target: "/var/lib/sss/pipes/"
-      # Data directory to export
       - type: bind
-        source: "/storage/holo/clausen/testdata"
-        target: "/var/wsgidav-root"
+        source: "./wsgidav.json"
+        target: "/wsgidav.json"
+      - "sockets:/run/gunicorn/"
+
+  webdav:
+    hostname: webdav
+    image: nginx:latest
+    restart: always
+    volumes:
+      - './webdav-proxy.nginx.conf:/etc/nginx/conf.d/default.conf'
+      - "sockets:/run/gunicorn/"
+
+  cloudproxy:
+    hostname: cloudproxy
+    image: nginx:latest
+    restart: always
+    volumes:
+      - './cloudproxy.nginx.conf:/etc/nginx/conf.d/default.conf'
+      - './landingpage:/usr/share/nginx/html'
+
+    links:
+      - "nextcloud"
+
+volumes:
+  sockets:
