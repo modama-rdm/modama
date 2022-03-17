@@ -1,8 +1,26 @@
 <div class="mui-panel">
-    <p>
-        Logged in as {{ current_user.user_id }}
-        <a href="{{ url_for("logout") }}">
-            <button class="mui-btn mui-btn--raised">Logout</button>
-        </a>
-    </p>
+    <table width="100%">
+        <tr style="vertical-align:middle;">
+            <td class="mui--appbar-height">
+                <h1>
+                    <img
+                        style="vertical-align:middle; margin-right: 10px;"
+                        src="{{ url_for('static', filename='Icon-Nextcloud.svg') }}"
+                    />
+                    ER-C Data Management Self-Service
+                </h1>
+            </td>
+            <td class="mui--appbar-height" align="right">
+                {% if current_user.user_id %}
+                    <span style="margin-right: 10px;">Logged in as {{ current_user.user_id }}</span>
+                    <a href="{{ url_for("logout") }}">
+                        <button class="mui-btn mui-btn--raised">Logout</button>
+                    </a>
+                {% else %}
+                    Logged out
+                {% endif %}
+                <a style="margin-left: 10px;" href="https://er-c-data.fz-juelich.de">Help</a>
+            </td>
+        </tr>
+    </table>
 </div>

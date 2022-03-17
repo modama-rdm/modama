@@ -4,10 +4,14 @@
 
 {% block content %}
 
+{% include '_header.html.j2' %}
+
 <div class="mui-panel">
   <h1>Login</h1>
   {% include '_flash.html.j2' %}
-
+  <p>All members of the 'iff' group in the PGI-JCNS-TA user management
+  can access the data management system using their Unix login name and password as credentials.
+  </p>
   <form method=post action="." class="mui-form">
     {{ form.csrf_token }}
     {{ render_field(form.username) }}

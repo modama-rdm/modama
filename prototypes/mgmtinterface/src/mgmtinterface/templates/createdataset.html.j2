@@ -13,7 +13,22 @@
     <h1>Create session in project "{{ project['name'] }}"</h1>
 
     {% include '_flash.html.j2' %}
-
+    <p>Sessions are top-level directories within a project that contain a <code>raw</code> subfolder.
+    They offer two features that are important for managing microscopy data:
+    <ul>
+      <li>They can be mapped as network drives on microscope computers using the Ingest Tool
+      to facilitate saving data with the correct ownership and access rights for a project.</li>
+      <li>They can be sealed, which means that the <code>raw</code> subfolder and its contents are
+      write-protected. It is strongly recommended to place microscopy data and important notes in the
+      <code>raw</code> subfolder and seal sessions in a timely manner to prevent data loss through
+      user error or malicious software.</li>
+    </ul>
+    Project members are free to create files and folders within a session as they see fit.
+    The session folder itself and any content except the <code>raw</code> subfolder remain writable after sealing.
+    </p>
+    <p>
+    Administrators can seal and unseal any files and folders in the data management system on request.
+    </p>
     <form
         method=post
         action="{{ url_for("create_dataset", name=project.name) }}"

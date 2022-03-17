@@ -113,6 +113,11 @@ def unauthorized_callback():
 @login_required
 def index():
     projects = client.list_projects()
+    if projects['errno'] != 0:
+        return render_template(
+            'error.html.j2',
+            result=projects,
+        )
     plist = sorted(projects['projects'], key=lambda p: p['mtime'], reverse=True)
     ownprojects = []
     memberprojects = []

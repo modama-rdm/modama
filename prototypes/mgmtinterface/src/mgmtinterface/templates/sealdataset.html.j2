@@ -13,7 +13,8 @@
   <h1>Confirm seal session "{{ dsname }}" in project "{{ project.name }}"</h1>
   
   {% include '_flash.html.j2' %}
-
+  <p>Sealing a session sets the <code>raw</code> subfolder of a session and all it contents
+  immutable. Administrators can seal and unseal any files or folders on request.</p>
   <form
       method=post
       action="{{ url_for("seal_dataset", name=project.name, dataset=dsname) }}"

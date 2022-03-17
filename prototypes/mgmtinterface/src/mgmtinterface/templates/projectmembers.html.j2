@@ -22,6 +22,13 @@
   <h1>Manage members of project "{{ project['name'] }}"</h1>
   
   {% include '_flash.html.j2' %}
+
+  <p>Members can create files and folders within a project.
+  All members of the 'iff' group in the PGI-JCNS-TA user management
+  can be project members in the data management system. Under the hood,
+  project membership and write access for user-created projects is managed through
+  <a href="https://www.redhat.com/sysadmin/linux-access-control-lists">POSIX ACLs</a>.
+  </p>
   
   <form
       method=post
