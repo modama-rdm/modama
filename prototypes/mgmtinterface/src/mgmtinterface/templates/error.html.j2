@@ -1,0 +1,19 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+
+{% include '_header.html.j2' %}
+
+<div class="mui-panel">
+    <h1>Error</h1>
+
+    {% include '_flash.html.j2' %}
+    {{ result.errno }}: {{ result.message }}
+
+    <p>
+        <a href="{{ url_for('index') }}">
+            <button class="mui-btn mui-btn--raised">Back to main view</button>
+        </a>
+    </p>
+</div>
+{% endblock content %}

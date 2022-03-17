@@ -31,6 +31,7 @@ services:
 
     ports:
       - "5050:5050"
+      - "8899:8888"
     
     cap_add:
       - LINUX_IMMUTABLE

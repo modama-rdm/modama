@@ -1,0 +1,68 @@
+{% extends "base.html.j2" %}
+
+{% from "_formhelpers.html.j2" import render_field %}
+
+{% block styles %}
+<link href="{{ url_for('static', filename='select2-4.0.13/dist/css/select2.min.css') }}" rel="stylesheet" />
+{# Fix width of multiple select element -- broker compromise between MUI and Select2 #}
+<style type="text/css">
+.js-example-basic-multiple select {
+  width: 100%;
+}
+</style>
+{% endblock styles %}
+
+{% block content %}
+
+{% include '_header.html.j2' %}
+
+<div class="mui-panel">
+  <p><a href="{{ url_for("index") }}">Projects overview</a></p>
+  <div class="mui-panel">
+    <h1>Create Project</h1>
+    {% include '_flash.html.j2' %}
+    <p>Projects that are created by users are directories in the <code>/adhoc</code> folder.
+    The project owner can change the project membership using this self-service interface.
+    By default, all members can create files and folders everywhere within a project. 
+    Only file owners can delete or change their files.
+    Other users who are not project members can read the files. Under the hood,
+    project membership and write access for user-created projects is managed through
+    <a href="https://www.redhat.com/sysadmin/linux-access-control-lists">POSIX ACLs</a>.
+    </p>
+    <form method=post action="{{ url_for("add_project") }}" class="mui-form">
+      {{ form.csrf_token }}
+      {{ render_field(form.name) }}
+      {% with field = form.members %}
+      <div class="mui-textfield js-example-basic-multiple">
+        {{ field.label }}
+        {{ field|safe }}
+        {% if field.errors %}
+          <ul class=errors>
+          {% for error in field.errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      {% endwith %}
+      <p>
+        <input class="mui-btn mui-btn--raised mui-btn--primary" type=submit value="Create Project">
+        <a href="{{ url_for("index") }}">
+          <button type="button" class="mui-btn mui-btn--raised">Cancel</button>
+        </a>
+      </p>
+    </form>
+  </div>
+</div>
+
+{% endblock content %}
+
+{% block javascript %}
+<script src="{{ url_for('static', filename='jquery-3.6.0.slim.min.js') }}"></script>
+<script src="{{ url_for('static', filename='select2-4.0.13/dist/js/select2.min.js') }}"></script>
+<script>
+$(document).ready(function() {
+    $('.js-example-basic-multiple select').select2();
+});
+</script>
+{% endblock javascript %}

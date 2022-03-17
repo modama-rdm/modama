@@ -1,8 +1,11 @@
-from typing import Dict, TypedDict, List
+from subprocess import CalledProcessError
+from typing import Dict, Iterable, TypedDict, List
+
 from flask import Flask, request, jsonify
 import jsonschema
+import pamela
 
-from permissions.api import AdhocProject, ValidationError
+from permissions.api import AdhocProject, ValidationError, authenticate, list_users
 
 app = Flask(__name__)
 
@@ -23,12 +26,69 @@ class InvalidAPIUsage(Exception):
     def to_dict(self):
         rv = dict(self.payload or ())
         rv['message'] = self.message
+        rv['errno'] = 1
         return rv
 
 
 @app.errorhandler(InvalidAPIUsage)
 def invalid_api_usage(e):
     return jsonify(e.to_dict()), e.status_code
+
+
+AUTHENTICATE_USER_REQUEST_SCHEMA = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "http://permissions.cloud-erc.fz-juelich.de/authenticate-user-request.schema.json",
+    "title": "AuthenticateUserRequest",
+    "description": "The JSON payload for the POST request to authenticate a user",
+    "type": "object",
+    "properties": {
+        "username": {
+            "type": "string",
+            "description": "Username",
+        },
+        "password": {
+            "type": "string",
+            "description": "Password",
+        },
+    },
+    "required": ["username", "password"],
+}
+
+
+class AuthenticateUserRequest(TypedDict):
+    username: str
+    password: str
+
+
+@app.route("/users/auth/", methods=["POST"])
+def authenticate_user() -> bool:
+    request_data: AuthenticateUserRequest = request.json  # type:ignore
+    try:
+        jsonschema.validate(
+            schema=AUTHENTICATE_USER_REQUEST_SCHEMA, instance=request_data
+        )
+        try:
+            authenticate(request_data['username'], request_data['password'])
+            return {
+                'errno': 0,
+            }
+        except pamela.PAMError as e:
+            return {
+                'errno': e.errno,
+                'message': e.message
+            }
+    except ValidationError as e:
+        raise InvalidAPIUsage(str(e))
+    except jsonschema.exceptions.ValidationError as e:
+        raise InvalidAPIUsage(str(e))  # message can possibly be improved
+
+
+@app.route("/users/list/", methods=["GET"])
+def get_user_list() -> Dict:
+    return {
+        'errno': 0,
+        "users": list_users(),
+    }
 
 
 CREATE_PROJECT_REQUEST_SCHEMA = {
@@ -51,7 +111,7 @@ CREATE_PROJECT_REQUEST_SCHEMA = {
             "items": {
                 "type": "string",
             },
-            "minItems": 1,
+            "minItems": 0,
             "uniqueItems": True,
             "description": "Usernames of the members of this ad-hoc group",
         },
@@ -79,10 +139,14 @@ def create_project() -> Dict:
             members=request_data['members']
         )
         return {
+            'errno': 0,
             'project': project.serialize(),
         }
-    except ValidationError as e:
-        raise InvalidAPIUsage(str(e))
+    except (ValidationError, KeyError) as e:
+        return {
+            'errno': 1,
+            'message': str(e)
+        }
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
 
@@ -92,6 +156,7 @@ def list_projects() -> Dict:
     # TODO: catch exceptions? OSError?
     project_names = AdhocProject.list_all()
     return {
+        'errno': 0,
         'projects': [
             AdhocProject(project_name).serialize(fast=True)
             for project_name in project_names
@@ -101,32 +166,25 @@ def list_projects() -> Dict:
 
 @app.route("/project/<project_name>/", methods=["GET"])
 def project_details(project_name) -> Dict:
-    # TODO: catch exceptions? can be various:
-    # - from calling `du` (subprocess specific errors?)
-    # - from posix1e.ACL(filedef=...)
-    # - from pwd.getpwuid
-    # - ValidationError from the constructor
-    try:
-        project = AdhocProject(project_name)
-        return {
-            'project': project.serialize(),
-        }
-    except ValidationError as e:
-        raise InvalidAPIUsage(str(e))
-
-
-@app.route("/project/<project_name>/dataset/", methods=["GET"])
-def list_datasets(project_name) -> Dict:
     try:
         p = AdhocProject(project_name)
     except ValidationError as e:
-        raise InvalidAPIUsage(str(e))
+        return{
+            'errno': 1,
+            'message': str(e)
+        }
 
     # TODO: catch exceptions? `p.datasets` can raise multiple...
     return {
-        "project": project_name,
+        'errno': 0,
+        "project": p.serialize(),
         "datasets": [
-            {"name": ds.name, "immutable": ds.immutable}
+            {
+                "name": ds.name,
+                "immutable": ds.immutable,
+                "ctime": ds.ctime,
+                "mtime": ds.mtime,
+            }
             for ds in p.datasets
         ]
     }
@@ -166,15 +224,32 @@ def create_dataset(project_name) -> Dict:
         )
         p = AdhocProject(project_name)
     except ValidationError as e:
-        raise InvalidAPIUsage(str(e))
+        return{
+            'errno': 1,
+            'message': str(e)
+        }
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
     # TODO: catch exceptions? for example, `CalledProcessError` if `mkdir` fails...
-    p.add_dataset(
-        name=request_data["name"],
-        user=request_data["owner"]
-    )
-    return {}  # what should be returned here?
+    try:
+        p.add_dataset(
+            name=request_data["name"],
+            user=request_data["owner"]
+        )
+        return {
+            "errno": 0
+        }  # what should be returned here?
+    except CalledProcessError as e:
+        return {
+            'errno': e.returncode,
+            'message': e.stderr
+        }
+    except ValidationError as e:
+        return {
+            'errno': 1,
+            'message': str(e)
+        }
+
 
 
 SEAL_DATASET_REQUEST_SCHEMA = {
@@ -188,13 +263,18 @@ SEAL_DATASET_REQUEST_SCHEMA = {
             "type": "string",
             "description": "Name of the dataset",
         },
+        "user": {
+            "type": "string",
+            "description": "Username of the requesting user",
+        },
     },
-    "required": ["name"],
+    "required": ["name", "user"],
 }
 
 
 class SealDatasetRequest(TypedDict):
     name: str
+    user: str
 
 
 # NOTE: not using data set name in path, as it can contain slashes (right?) so
@@ -209,12 +289,17 @@ def seal_dataset(project_name):
         )
         # TODO: catch exceptions?
         p = AdhocProject(project_name)
-        p.seal_dataset(request_data["name"])
+        p.seal_dataset(request_data["name"], request_data["user"])
     except ValidationError as e:
-        raise InvalidAPIUsage(str(e))
+        return{
+            'errno': 1,
+            'message': str(e)
+        }
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
-    return {}  # what should be returned here?
+    return {
+        'errno': 0,
+    }  # what should be returned here?
 
 
 CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA = {
@@ -238,14 +323,19 @@ CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA = {
             "uniqueItems": True,
             "description": "Usernames of the members to add or remove from this group",
         },
+        "user": {
+            "type": "string",
+            "description": "Username of the requesting user",
+        },
     },
-    "required": ["op", "members"],
+    "required": ["op", "members", "user"],
 }
 
 
 class ChangeMembersRequest(TypedDict):
     op: str
     members: List[str]
+    user: str
 
 
 @app.route("/project/<project_name>/members/", methods=["PATCH"])
@@ -259,15 +349,19 @@ def change_project_members(project_name):
         p = AdhocProject(project_name)
         op = request_data["op"]
         if op == "add":
-            p.add_members(request_data["members"])
+            p.add_members(request_data["members"], request_data['user'])
         elif op == "remove":
-            p.remove_members(request_data["members"])
+            p.remove_members(request_data["members"], request_data['user'])
         else:
             raise InvalidAPIUsage(f"Unknown op: {op}")
-    except ValidationError as e:
-        raise InvalidAPIUsage(str(e))
+    except (ValidationError, KeyError) as e:
+        return{
+            'errno': 1,
+            'message': str(e)
+        }
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
     return {
+        'errno': 0,
         "project": p.serialize()
     }

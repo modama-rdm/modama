@@ -1,0 +1,77 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+
+{% include '_header.html.j2' %}
+
+
+
+{% macro render_row(p) %}
+    <tr>
+        <td><a href="{{ url_for("project", name=p.name) }}">{{ p.name }}</a></td>
+        <td>{{ p.mtime|format_unixtime }}</td>
+        <td>{{ p.owner }}</td>
+        <td>
+            {% for m in p.members %}
+                {{ m }}
+            {% endfor %}
+        </td>
+    </tr>
+{% endmacro %}
+
+<div class="mui-panel">
+
+    <h1>Projects</h1>
+
+    {% include '_flash.html.j2' %}
+
+    <table class="mui-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Modified</th>
+                <th>Owner</th>
+                <th>Members</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><th class="subheading" colspan="4">Own</th></tr>
+            {% if ownprojects %}
+                {% for project in ownprojects %}
+                    {{ render_row(project) }}
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="4">(None)</td></tr>
+            {% endif %}
+
+            <tr><th class="subheading" colspan="4">Member</th></tr>
+            {% if memberprojects %}
+                {% for project in memberprojects %}
+                    {{ render_row(project) }}
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="4">(None)</td></tr>
+            {% endif %}
+
+            <tr><th class="subheading" colspan="4">Other</th></tr>
+            {% if otherprojects %}
+                {% for project in otherprojects %}
+                    {{ render_row(project) }}
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="4">(None)</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <p>
+        <a href="{{ url_for("add_project") }}">
+            <button type="button" class="mui-btn mui-btn--raised">
+                Create Project...
+            </button>
+        </a>
+    </p>
+
+</div>
+
+{% endblock content %}

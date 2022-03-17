@@ -1,0 +1,50 @@
+{% macro navbar(project) %}
+    <p><a href="{{ url_for("index") }}">Projects</a> / <a href="{{ url_for("project", name=project.name) }}">{{ project.name }}</a></p>
+{% endmacro %}
+
+{% macro render_members(project, current_user) %}      
+      {% for m in project.members %}
+        {{ m }}{{ ", " if not loop.last else "" }}
+      {% endfor %}
+{% endmacro %}
+
+{% macro render_datasets(project, datasets, current_user) %}
+    {% if datasets %}
+      <table class="mui-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Modified</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in datasets %}
+            <tr>
+                <td>{{ d.name }}</td>
+                <td>{{ d.mtime|format_unixtime }}</td>
+                <td>{% if d.immutable %}sealed{% else %}writable{% endif %}</td>
+                {% if d.immutable or (current_user.user_id not in project.members and current_user.user_id != project.owner) %}
+                <td></td>
+                {% else %}
+                <td>
+                <a href="{{ url_for('seal_dataset', name=project.name, dataset=d.name) }}">
+                    <button class="mui-btn mui-btn--small mui-btn--raised">Seal...</button>
+                </a>
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      (None)
+    {% endif %}
+{% endmacro %}
+
+{% macro cancel(project) %}
+        <a href="{{ url_for("project", name=project.name) }}">
+            <button type="button" class="mui-btn mui-btn--raised">Cancel</button>
+        </a>
+{% endmacro %}

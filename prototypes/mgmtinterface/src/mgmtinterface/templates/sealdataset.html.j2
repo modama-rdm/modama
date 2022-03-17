@@ -1,0 +1,34 @@
+{% extends "base.html.j2" %}
+
+{% from "_formhelpers.html.j2" import render_field %}
+{% from "_projecthelpers.html.j2" import navbar, cancel, render_datasets %}
+
+{% block content %}
+
+{% include '_header.html.j2' %}
+
+<div class="mui-panel">
+  {{ navbar(project) }}
+
+  <h1>Confirm seal session "{{ dsname }}" in project "{{ project.name }}"</h1>
+  
+  {% include '_flash.html.j2' %}
+  <p>Sealing a session sets the <code>raw</code> subfolder of a session and all it contents
+  immutable. Administrators can seal and unseal any files or folders on request.</p>
+  <form
+      method=post
+      action="{{ url_for("seal_dataset", name=project.name, dataset=dsname) }}"
+      class="mui-form"
+  >
+    {{ form.csrf_token }}
+    <p>
+      <input
+        type="submit"
+        class="mui-btn mui-btn--raised mui-btn--danger"
+        value="Seal session '{{ dsname }}'"
+      />
+      {{ cancel(project) }}
+    </p>
+  </form>
+</div>
+{% endblock content %}
