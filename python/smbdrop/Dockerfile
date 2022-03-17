@@ -7,7 +7,7 @@ RUN --mount=type=cache,target=/var/cache/apt apt-get update && apt-get -y instal
 COPY smb.conf /etc/samba/smb.conf
 
 COPY dev.sh /dev.sh
-COPY ./smbdrop/ /src/smbdrop/
+COPY ./ /src/smbdrop/
 
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /src/smbdrop/
 
