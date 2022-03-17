@@ -1,4 +1,4 @@
-import sys
+import platform
 from typing import List, NamedTuple, Type
 
 
@@ -26,8 +26,11 @@ class MountManager:
 
 
 def get_mm_class() -> Type[MountManager]:
-    if sys.platform.startswith("nt"):
-        from smbdrop.client.gui.mount.nt import NTMountManager as MountManagerC
-    elif sys.platform.startswith("linux"):
-        from smbdrop.client.gui.mount.gio import GIOMountManager as MountManagerC
+    s = platform.system() 
+    if s == "Window":
+        from smbdrop_gui.mount.nt import NTMountManager as MountManagerC
+    elif s == "Linux":
+        from smbdrop_gui.mount.gio import GIOMountManager as MountManagerC
+    else:
+        raise RuntimeError("unknown platform")
     return MountManagerC

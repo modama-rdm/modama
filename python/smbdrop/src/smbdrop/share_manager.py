@@ -148,7 +148,7 @@ class ShareManager:
     def __init__(
         self,
         config_manager: SambaConfigManager,
-        shares_config: str = "/tmp/shares.json",
+        shares_config: str = "/etc/smbdrop-shares.json",
         lock_path: str = "/tmp/shares.lock",
     ):
         """
