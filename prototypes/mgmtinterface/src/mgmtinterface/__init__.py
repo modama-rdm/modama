@@ -11,7 +11,7 @@ from wtforms.widgets import TextInput
 from wtforms.validators import DataRequired
 from urllib.parse import urlparse, urljoin
 
-from .permissionsclient import PermissionsClient
+from permissions_client import PermissionsClient
 
 
 def is_safe_url(target):
