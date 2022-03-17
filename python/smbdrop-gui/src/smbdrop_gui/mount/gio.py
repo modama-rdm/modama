@@ -1,6 +1,6 @@
 from typing import List, Optional
 import subprocess
-from smbdrop.client.gui.mount import Mount, MountManager
+from smbdrop_gui.mount import Mount, MountManager
 
 
 """

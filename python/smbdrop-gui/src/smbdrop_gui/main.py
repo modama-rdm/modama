@@ -16,8 +16,8 @@ from PySide6.QtCore import (
     QAbstractListModel, QTimer,
 )
 
-from smbdrop.client import ShareClient
-from smbdrop.client.gui.mount import get_mm_class, MountManager
+from smbdrop_client import ShareClient
+from smbdrop_gui.mount import get_mm_class, MountManager
 
 
 PERMISSIONS_API_BASE_URL = "http://172.28.0.2:5050"
@@ -549,7 +549,7 @@ class SessionModel(QObject):
     busy = Property(bool, get_busy, _set_busy, notify=busyChanged)
 
 
-if __name__ == "__main__":
+def main():
     QQuickStyle.setStyle("Material")
 
     # "fix" CTRL+C handling:
@@ -586,3 +586,7 @@ if __name__ == "__main__":
     if not engine.rootObjects():
         sys.exit(-1)
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
