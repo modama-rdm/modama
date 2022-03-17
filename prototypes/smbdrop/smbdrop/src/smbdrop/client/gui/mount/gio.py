@@ -1,5 +1,4 @@
-from tempfile import NamedTemporaryFile
-from typing import List, NamedTuple
+from typing import List, Optional
 import subprocess
 from smbdrop.client.gui.mount import Mount, MountManager
 
@@ -15,7 +14,7 @@ class GIOMountManager(MountManager):
     def _get_uri(self, share_name: str, username: str) -> str:
         return f"smb://{username}@{self._smb_host}/{share_name}"
 
-    def mount_smb(self, share_name: str, username: str, password: str) -> str:
+    def mount_smb(self, share_name: str, username: str, password: str) -> Mount:
         """
         Call out to `gio` to mount smb share. I/O looks like this:
 
@@ -24,20 +23,6 @@ class GIOMountManager(MountManager):
             Enter password for share “share-c79ef3b6-d550-47b1-96e9-aa3b3feca861” on “localhost”:
             Domain [WORKGROUP]: ER-C-INGEST
             Password:
-
-        Parameters
-        ----------
-        share_name : str
-            _description_
-        username : str
-            _description_
-        password : str
-            _description_
-
-        Returns
-        -------
-        str
-            _description_
         """
         uri = self._get_uri(share_name, username)
         proc = subprocess.Popen(["gio", "mount", uri], stdin=subprocess.PIPE)
@@ -48,6 +33,7 @@ class GIOMountManager(MountManager):
             proc.kill()
         ret = proc.wait()
         assert ret == 0, "mount should succeed"
+        return Mount(dest=uri, share=share_name)
 
     def umount(self, share_name: str, username: str) -> None:
         uri = self._get_uri(share_name, username)
@@ -76,7 +62,7 @@ class GIOMountManager(MountManager):
         return mounts
 
 
-def mount_from_line(line):
+def mount_from_line(line: str) -> Optional[Mount]:
     if not line.startswith("Mount"):
         return None  # not an SMB mount
     id_, rest = line.split(":", 1)  # drop Mount(X) prefix

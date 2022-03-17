@@ -12,7 +12,7 @@ class MountManager:
         self._smb_host = smb_host
         self._workgroup = workgroup
 
-    def mount_smb(self, share_name: str, username: str, password: str) -> str:
+    def mount_smb(self, share_name: str, username: str, password: str) -> Mount:
         raise NotImplementedError()
 
     def list_mounts(self) -> List[Mount]:
