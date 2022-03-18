@@ -1,23 +1,24 @@
+import os
 from datetime import datetime
 from pydoc import cli
 import time
+from typing import Dict
+import pathlib
 
+import jsonschema
 from flask import Flask, render_template, request
 import flask
 from flask_login import LoginManager, login_required, login_user, current_user, logout_user
+from flask_httpauth import HTTPBasicAuth
 from flask_wtf import FlaskForm
-from wtforms import Field, StringField, PasswordField, SelectMultipleField
+from wtforms import Field, StringField, PasswordField, SelectMultipleField, HiddenField
 from wtforms.widgets import TextInput
 from wtforms.validators import DataRequired
 from urllib.parse import urlparse, urljoin
 
 from permissions_client import PermissionsClient
-
-
-def is_safe_url(target):
-    ref_url = urlparse(request.host_url)
-    test_url = urlparse(urljoin(request.host_url, target))
-    return test_url.scheme in ('http', 'https') and ref_url.netloc == test_url.netloc
+from smbdrop_client import ShareClient
+import permissions.server as proxy
 
 
 app = Flask(__name__)
@@ -26,7 +27,24 @@ login_manager.init_app(app)
 
 app.secret_key = b'caHudnec[drav2'
 
+apiauth = HTTPBasicAuth()
+
 client = PermissionsClient("http://localhost:5050")
+smbclient = ShareClient("http://localhost:5051")
+SMB_BASE = '/data'
+
+
+def is_safe_url(target):
+    ref_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    return test_url.scheme in ('http', 'https') and ref_url.netloc == test_url.netloc
+
+
+@apiauth.verify_password
+def verify_password(username, password):
+    auth_result = client.authenticate(username, password)
+    if auth_result['errno'] == 0:
+        return username
 
 
 class User:
@@ -92,6 +110,10 @@ class SealDatasetForm(FlaskForm):
     pass
 
 
+class ShareDatasetForm(FlaskForm):
+    op = HiddenField('op', validators=[DataRequired()])
+
+
 @app.template_filter()
 def format_unixtime(value):
     d = datetime.fromtimestamp(value)
@@ -107,6 +129,26 @@ def load_user(user_id):
 def unauthorized_callback():
     flask.flash("Unauthorized, login required.")
     return flask.redirect(flask.url_for('login'))
+
+
+@app.route("/login/", methods=["GET", "POST"])
+def login():
+    form = LoginForm()
+    if request.method == 'POST' and form.validate():
+        auth_result = client.authenticate(form.username.data, form.password.data)
+        if auth_result['errno'] == 0:
+            login_user(
+                User(
+                    user_id=form.username.data,
+                )
+            )
+            next_url = flask.request.args.get('next')
+            if not is_safe_url(next_url):
+                return flask.abort(400)
+            return flask.redirect(next_url or flask.url_for('index'))
+        else:
+            flask.flash(f"Error: {auth_result['message']}")
+    return render_template('login.html.j2', form=form)
 
 
 @app.route("/", methods=["GET"])
@@ -140,23 +182,6 @@ def index():
         otherprojects=otherprojects,
         createprojectform=createprojectform,
     )
-
-
-@app.route("/login/", methods=["GET", "POST"])
-def login():
-    form = LoginForm()
-    if request.method == 'POST' and form.validate():
-        auth_result = client.authenticate(form.username.data, form.password.data)
-
-        if auth_result['errno'] == 0:
-            login_user(User(user_id=form.username.data))
-            next_url = flask.request.args.get('next')
-            if not is_safe_url(next_url):
-                return flask.abort(400)
-            return flask.redirect(next_url or flask.url_for('index'))
-        else:
-            flask.flash(f"Error: {auth_result['message']}")
-    return render_template('login.html.j2', form=form)
 
 
 @app.route("/add/", methods=["GET", "POST"])
@@ -198,15 +223,45 @@ def add_project():
     )
 
 
+def smbpath(project, dsname):
+    return os.path.join(
+        SMB_BASE,
+        project['relpath'],
+        dsname
+    )
+
+
+def add_share_info(datasets, project, uid, shares):
+    for ds in datasets:
+        dest_path = smbpath(project, ds['name'])
+        for key, value in shares.items():
+            ds['shared'] = (value['dest_path'] == dest_path)
+            if ds['shared'] and value['uid'] == uid:
+                ds['shareinfo'] = value
+                ds['shareinfo']['smb_host'] = "FIXMEHOST"
+                ds['shareinfo']['workgroup'] = "FIXMEWORKGROUP"
+            else:
+                ds['shareinfo'] = None
+    return datasets
+
+
 @app.route("/<name>/details/", methods=["GET"])
 @login_required
 def project(name: str):
     pr_info = client.projectdetails(name)
     if pr_info['errno'] == 0:
+        user_info = client.id_user(current_user.user_id)
+        shares = smbclient.list()
+        datasets = add_share_info(
+            pr_info['datasets'],
+            pr_info['project'],
+            user_info['id']['uid'],
+            shares
+        )
         return render_template(
             'projectdetails.html.j2',
             project=pr_info['project'],
-            datasets=pr_info['datasets'],
+            datasets=datasets,
         )
     else:
         return render_template(
@@ -297,6 +352,18 @@ def create_dataset(name: str):
             user=current_user.user_id,
         )
         if result['errno'] == 0:
+            pr_info = client.projectdetails(name)
+            user_info = client.id_user(current_user.user_id)
+            # TODO error handling
+            smb_res = smbclient.create(
+                dest_path=os.path.join(
+                    SMB_BASE,
+                    pr_info['project']['relpath'],
+                    form.name.data
+                ),
+                uid=user_info['id']['uid'],
+                gid=pr_info['project']['gid']
+            )
             flask.flash(f'Session "{form.name.data}" created in project "{name}".')
             return flask.redirect(flask.url_for('project', name=name))
         else:
@@ -355,9 +422,213 @@ def seal_dataset(name: str, dataset: str):
         )
 
 
+@app.route("/<name>/share/<dataset>/", methods=["GET", "POST"])
+@login_required
+def share_dataset(name: str, dataset: str):
+    # First perform member action
+    form = ShareDatasetForm()
+    pr_info = client.projectdetails(name)
+    user_info = client.id_user(current_user.user_id)
+    shares = smbclient.list()
+    datasets = add_share_info(
+        pr_info['datasets'],
+        pr_info['project'],
+        user_info['id']['uid'],
+        shares
+    )
+    for ds in datasets:
+        if ds['name'] == dataset:
+            break
+    updated = False
+    if request.method == 'POST' and form.validate():
+        if (current_user.user_id in pr_info['project']['members']
+                or current_user.user_id == pr_info['project']['owner']):
+            if form.op.data == 'create':
+                updated = True
+                result = smbclient.create(
+                    dest_path=smbpath(pr_info['project'], ds['name']),
+                    uid=user_info['id']['uid'],
+                    gid=pr_info['project']['gid'],
+                )
+                if result['share_id']:
+                    flask.flash(f'Share for session "{dataset}" in project "{name}" created.')
+                    return flask.redirect(flask.url_for('share_dataset', name=name, dataset=dataset))
+                else:
+                    flask.flash(f"Error: {result}.")
+            elif form.op.data == 'delete':
+                updated = True
+                result = smbclient.delete(
+                    share_id=ds['shareinfo']['share_id']
+                )
+                # TODO error handling
+                if result:
+                    flask.flash(f'Share for session "{dataset}" in project "{name}" deactivated.')
+                    return flask.redirect(flask.url_for('share_dataset', name=name, dataset=dataset))
+                else:
+                    flask.flash(f"Error: {result}.")
+            else:
+                flask.flash(f"Error: Invalid opcode.")
+        else:
+            flask.flash(f"Error: Managing share forbidden.")
+    if updated:
+        pr_info = client.projectdetails(name)
+        user_info = client.id_user(current_user.user_id)
+        shares = smbclient.list()
+        datasets = add_share_info(
+            pr_info['datasets'],
+            pr_info['project'],
+            user_info['id']['uid'],
+            shares
+        )
+        for ds in datasets:
+            if ds['name'] == dataset:
+                break
+    form.op.data = "delete" if ds['shareinfo'] else "create"
+    if pr_info['errno'] == 0:
+        return render_template(
+            'sharedataset.html.j2',
+            project=pr_info['project'],
+            datasets=datasets,
+            form=form,
+            ds=ds,
+        )
+    else:
+        # FIXME a 403, 404 or other error codes
+        # may be appropriate as well -- to be refined
+        return render_template(
+            'error.html.j2',
+            result=pr_info
+        )
+
+
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     flask.flash('You were logged out.')
     return flask.redirect(flask.url_for('login'))
+
+
+@app.route('/api/users/auth/', methods=["POST"])
+def api_authenticate_user() -> dict:
+    request_data: proxy.AuthenticateUserRequest = request.json  # type:ignore
+    try:
+        jsonschema.validate(
+            schema=proxy.AUTHENTICATE_USER_REQUEST_SCHEMA, instance=request_data
+        )
+    except jsonschema.exceptions.ValidationError as e:
+        raise proxy.InvalidAPIUsage(str(e))
+    return client.authenticate(request_data['username'], request_data['password'])
+
+
+@app.route("/api/users/id/<name>/", methods=["GET"])
+@apiauth.login_required
+def api_id_user(name) -> Dict:
+    return client.id_user(name)
+
+
+@app.route("/api/users/list/", methods=["GET"])
+@apiauth.login_required
+def api_get_user_list() -> Dict:
+    return client.list_users()
+
+
+@app.route("/api/project/", methods=["POST"])
+@apiauth.login_required
+def api_create_project() -> Dict:
+    request_data: proxy.CreateProjectRequest = request.json  # type:ignore
+    try:
+        jsonschema.validate(
+            schema=proxy.CREATE_PROJECT_REQUEST_SCHEMA, instance=request_data
+        )
+        if request_data['owner'] != apiauth.current_user():
+            raise proxy.InvalidAPIUsage(
+                f'Project owner {request_data["owner"]} '
+                f'must equal authenticated user {apiauth.current_user()}.'
+            )
+        return client.create_project(
+            name=request_data['name'],
+            owner=request_data['owner'],
+            members=request_data['members']
+        )
+    except jsonschema.exceptions.ValidationError as e:
+        raise proxy.InvalidAPIUsage(str(e))  # message can possibly be improved
+
+
+@app.route("/api/project/", methods=["GET"])
+@apiauth.login_required
+def api_list_projects() -> Dict:
+    return client.list_projects()
+
+
+@app.route("/api/project/<project_name>/", methods=["GET"])
+@apiauth.login_required
+def api_project_details(project_name) -> Dict:
+    return client.projectdetails(project_name)
+
+
+@app.route("/api/project/<project_name>/dataset/", methods=["POST"])
+@apiauth.login_required
+def api_create_dataset(project_name) -> Dict:
+    request_data: proxy.CreateDatasetRequest = request.json  # type:ignore
+    try:
+        jsonschema.validate(
+            schema=proxy.CREATE_DATASET_REQUEST_SCHEMA, instance=request_data
+        )
+        if request_data['owner'] != apiauth.current_user():
+            raise proxy.InvalidAPIUsage(
+                f'Project owner {request_data["owner"]} '
+                f'must equal authenticated user {apiauth.current_user()}.'
+            )
+        return client.create_dataset(
+            projectname=project_name,
+            name=request_data["name"],
+            user=request_data["owner"]
+        )
+    except jsonschema.exceptions.ValidationError as e:
+        raise proxy.InvalidAPIUsage(str(e))  # message can possibly be improved
+
+
+@app.route("/api/project/<project_name>/dataset/seal/", methods=["POST"])
+@apiauth.login_required
+def api_seal_dataset(project_name):
+    request_data: proxy.CreateDatasetRequest = request.json  # type:ignore
+    try:
+        jsonschema.validate(
+            schema=proxy.SEAL_DATASET_REQUEST_SCHEMA, instance=request_data
+        )
+        if request_data['user'] != apiauth.current_user():
+            raise proxy.InvalidAPIUsage(
+                f'API user {request_data["user"]} '
+                f'must equal authenticated user {apiauth.current_user()}.'
+            )
+        return client.seal_dataset(
+            projectname=project_name,
+            name=request_data["name"],
+            user=request_data["user"]
+        )
+    except jsonschema.exceptions.ValidationError as e:
+        raise proxy.InvalidAPIUsage(str(e))  # message can possibly be improved
+
+
+@app.route("/api/project/<project_name>/members/", methods=["PATCH"])
+@apiauth.login_required
+def api_change_project_members(project_name):
+    request_data: proxy.ChangeMembersRequest = request.json  # type:ignore
+    try:
+        jsonschema.validate(
+            schema=proxy.CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA, instance=request_data
+        )
+        if request_data['user'] != apiauth.current_user():
+            raise proxy.InvalidAPIUsage(
+                f'API user {request_data["user"]} '
+                f'must equal authenticated user {apiauth.current_user()}.'
+            )
+        return client.change_project_members(
+            projectname=project_name,
+            op=request_data["op"],
+            members=request_data["members"],
+            user=request_data['user']
+        )
+    except jsonschema.exceptions.ValidationError as e:
+        raise proxy.InvalidAPIUsage(str(e))  # message can possibly be improved

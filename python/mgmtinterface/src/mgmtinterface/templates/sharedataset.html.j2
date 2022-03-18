@@ -1,0 +1,58 @@
+{% extends "base.html.j2" %}
+
+{% from "_formhelpers.html.j2" import render_field %}
+{% from "_projecthelpers.html.j2" import navbar, cancel, render_datasets %}
+
+{% block content %}
+
+{% include '_header.html.j2' %}
+
+<div class="mui-panel">
+  {{ navbar(project) }}
+
+  <h1>Manage ingest share for session "{{ ds.name }}" in project "{{ project.name }}"</h1>
+  
+  {% include '_flash.html.j2' %}
+  <p>An ingest network share is a temporary Windows network share (SMB/CIFS) with temporary credentials
+  that can be created on-demand for a session.
+  Mapping it on machines that are operated with system accounts,
+  such as microscope computers, allows importing data into a session using the identity of the operator
+  and not the system account. At the same time, it avoids issues with saving credentials
+  on machines that are used by many users.</p>
+  <p>That way, data can be saved directly in the correct location with correct ownership
+  and access permissions using all data acquisition tools and most operating systems.
+  The ingest GUI FIXME link etc? helps managing the shares and sessions on the client machine.
+  </p>
+  {% if ds.shareinfo %}
+    {% with si = ds.shareinfo %}  
+      <h2>Access using Windows Explorer</h2>
+        <code>
+          \\{{ si.smb_host }}\{{ si.share_name}}
+        </code>
+        <p>Username: {{ si.workgroup }}\{{ si.username }}</p>
+        <p>Password: {{ si.password }}</p>
+      <h2>Access on Linux or OS X using a file manager</h2>
+        <code>
+          smb://{{ si.username }}@{{ si.smb_host }}/{{ si.share_name }}
+        </code>
+        <p>Password: {{ si.password }}</p>
+    {% endwith %}
+  {%endif%}
+  <form
+      method=post
+      action="{{ url_for("share_dataset", name=project.name, dataset=ds.name) }}"
+      class="mui-form"
+  >
+    {{ form.csrf_token }}
+    {{ form.op }}
+    <p>
+      <input
+        type="submit"
+        class="mui-btn mui-btn--raised mui-btn--primary"
+        value="{% if ds.shareinfo %}Close{% else %}Create{% endif %} ingest share of session '{{ ds.name }}'"
+      />
+      {{ cancel(project) }}
+    </p>
+  </form>
+</div>
+{% endblock content %}

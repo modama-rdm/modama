@@ -1,11 +1,12 @@
 from subprocess import CalledProcessError
-from typing import Dict, Iterable, TypedDict, List
+from typing import Dict, Iterable, List
+from typing_extensions import TypedDict
 
 from flask import Flask, request, jsonify
 import jsonschema
 import pamela
 
-from permissions.api import AdhocProject, ValidationError, authenticate, list_users
+from permissions.api import AdhocProject, ValidationError, authenticate, list_users, id
 
 app = Flask(__name__)
 
@@ -61,7 +62,7 @@ class AuthenticateUserRequest(TypedDict):
 
 
 @app.route("/users/auth/", methods=["POST"])
-def authenticate_user() -> bool:
+def authenticate_user() -> dict:
     request_data: AuthenticateUserRequest = request.json  # type:ignore
     try:
         jsonschema.validate(
@@ -71,6 +72,7 @@ def authenticate_user() -> bool:
             authenticate(request_data['username'], request_data['password'])
             return {
                 'errno': 0,
+                'id': id(request_data['username']),
             }
         except pamela.PAMError as e:
             return {
@@ -81,6 +83,14 @@ def authenticate_user() -> bool:
         raise InvalidAPIUsage(str(e))
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
+
+
+@app.route("/users/id/<name>/", methods=["GET"])
+def id_user(name) -> dict:
+    return {
+        'errno': 0,
+        'id': id(name),
+    }
 
 
 @app.route("/users/list/", methods=["GET"])

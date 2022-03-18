@@ -15,7 +15,8 @@ import posix1e  # pylibacl, needs libacl1-dev, https://pylibacl.k1024.org/
 
 
 BASE_PATH = '/data/'
-ADHOC_PATH = os.path.join(BASE_PATH, 'adhoc')
+ADHOC = 'adhoc'
+ADHOC_PATH = os.path.join(BASE_PATH, ADHOC)
 SHARING_PATH = os.path.join(BASE_PATH, 'sharing')
 
 ADHOC_GROUP = 'testerc'
@@ -117,6 +118,12 @@ def authenticate(username, password):
     return pamela.authenticate(username, password)
 
 
+def id(username):
+    return {
+        'uid': pwd.getpwnam(username).pw_uid
+    }
+
+
 def list_users():
     # FIXME this only works if ADHOC_GROUP is not
     # a user's primary group. Workaround on systems managed
@@ -200,6 +207,14 @@ class AdhocProject:
     @property
     def path(self):
         return os.path.join(ADHOC_PATH, self.name)
+
+    @property
+    def relpath(self):
+        return os.path.join(ADHOC, self.name)
+
+    @property
+    def gid(self):
+        return os.stat(self.path).st_gid
 
     @property
     def mtime(self):
@@ -527,11 +542,13 @@ class AdhocProject:
             stat all files in the project
         """
         serialized = {
+            "relpath": self.relpath,
             "name": self.name,
             "owner": self.owner,
             "members": self.members,
             "ctime": self.ctime,
             "mtime": self.mtime,
+            "gid": self.gid,
         }
         if not fast:
             serialized["usage_bytes"] = self.diskusage

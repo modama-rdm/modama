@@ -1,7 +1,7 @@
-from typing import Iterable
+from typing import Iterable, Optional
 import urllib.parse
 
-import requests
+import requests, requests.auth
 
 
 def quote(s: str):
@@ -9,26 +9,59 @@ def quote(s: str):
 
 
 class PermissionsClient:
-    def __init__(self, base_url: str):
+    def __init__(
+            self, base_url: str, use_auth: bool = False,
+            username: Optional[str] = None, password: Optional[str] = None):
         self.base_url = base_url
+        self.use_auth = use_auth
+        self.username = username
+        self.password = password
+        self.uid = None
+
+    @property
+    def auth(self):
+        if self.use_auth:
+            return requests.auth.HTTPBasicAuth(self.username, self.password)
+        else:
+            return None
 
     def authenticate(self, username: str, password: str):
         r = requests.post(
             f"{self.base_url}/users/auth/", json={
                 "username": str(username),
                 "password": str(password),
-            }
+            },
         )
-        return r.json()
+        result = r.json()
+        if result['errno'] == 0:
+            self.username = username
+            self.password = password
+            self.id = result['id']
+        return result
+
+    def id_user(self, name):
+        return requests.get(
+            f"{self.base_url}/users/id/{quote(name)}/",
+            auth=self.auth
+        ).json()
 
     def list_users(self):
-        return requests.get(f"{self.base_url}/users/list/").json()
+        return requests.get(
+            f"{self.base_url}/users/list/",
+            auth=self.auth
+        ).json()
 
     def list_projects(self):
-        return requests.get(f"{self.base_url}/project/").json()
+        return requests.get(
+            f"{self.base_url}/project/",
+            auth=self.auth
+        ).json()
 
     def projectdetails(self, projectname):
-        return requests.get(f"{self.base_url}/project/{quote(projectname)}/").json()
+        return requests.get(
+            f"{self.base_url}/project/{quote(projectname)}/",
+            auth=self.auth
+        ).json()
 
     def create_project(self, name: str, owner: str, members: Iterable):
         return requests.post(
@@ -36,7 +69,8 @@ class PermissionsClient:
                 "name": name,
                 "owner": owner,
                 "members": list(members)
-            }
+            },
+            auth=self.auth
         ).json()
 
     def change_project_members(self, projectname: str, op, members: Iterable, user: str):
@@ -48,6 +82,7 @@ class PermissionsClient:
                 "members": list(members),
                 "user": user
             },
+            auth=self.auth
         ).json()
 
     def create_dataset(self, projectname: str, name: str, user: str):
@@ -57,6 +92,7 @@ class PermissionsClient:
                 "name": name,
                 "owner": user,
             },
+            auth=self.auth
         ).json()
 
     def seal_dataset(self, projectname: str, name: str, user: str):
@@ -66,4 +102,5 @@ class PermissionsClient:
                 "name": name,
                 "user": user,
             },
+            auth=self.auth
         ).json()

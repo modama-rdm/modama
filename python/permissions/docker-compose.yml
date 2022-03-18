@@ -23,7 +23,7 @@ services:
 
     volumes:
        - type: bind
-         source: "./testfolder"
+         source: "../../er-c-data/testfolder/data"
          target: "/data"
        - type: bind
          source: "/var/lib/sss/pipes/"
