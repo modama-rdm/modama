@@ -20,8 +20,8 @@ from smbdrop_client import ShareClient
 from smbdrop_gui.mount import get_mm_class, MountManager
 
 
-PERMISSIONS_API_BASE_URL = "http://172.28.0.2:5050"
-SMBDROP_API_BASE_URL = "http://127.0.0.1:5051"
+PERMISSIONS_API_BASE_URL = "http://localhost:5050"
+SMBDROP_API_BASE_URL = "http://localhost:5051"
 
 
 class DoLogin(QRunnable):
@@ -560,7 +560,7 @@ def main():
     engine = QQmlApplicationEngine()
 
     MountManagerClass = get_mm_class()
-    mm = MountManagerClass(smb_host="localhost", workgroup="ER-C-INGEST")
+    mm = MountManagerClass(smb_host="192.168.116.130", workgroup="ER-C-INGEST")
 
     # instantiate and register global objects:
     login_model = LoginModel()

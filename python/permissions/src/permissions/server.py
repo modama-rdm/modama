@@ -351,11 +351,11 @@ class ChangeMembersRequest(TypedDict):
 @app.route("/project/<project_name>/members/", methods=["PATCH"])
 def change_project_members(project_name):
     request_data: ChangeMembersRequest = request.json  # type:ignore
-    jsonschema.validate(
-        schema=CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA, instance=request_data
-    )
     # TODO: catch exceptions from `add_members` and `remove_members`
     try:
+        jsonschema.validate(
+            schema=CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA, instance=request_data
+        )
         p = AdhocProject(project_name)
         op = request_data["op"]
         if op == "add":
