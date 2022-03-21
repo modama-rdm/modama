@@ -41,7 +41,7 @@ class ShareClient:
         return resp_data
 
     def delete(self, share_id: int) -> None:
-        url = _make_url(self._base_url, f"/share/{share_id}")
+        url = _make_url(self._base_url, f"/share/{share_id}/")
         resp = requests.delete(url, auth=self.auth)
         if not resp.ok:
             raise RuntimeError(

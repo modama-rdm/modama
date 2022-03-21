@@ -37,7 +37,7 @@ def project_dataset_from_smbpath(smbpath):
     base_offset = len(SMB_BASE)
     if smbpath[:base_offset] != SMB_BASE:
         raise ValueError(f"{smbpath} does not start with base path {SMB_BASE}.")
-    if smbpath[base_offset:len(ADHOC)] != ADHOC:
+    if smbpath[base_offset:base_offset+len(ADHOC)] != ADHOC:
         raise ValueError(f"{smbpath} does not include adhoc folder path {ADHOC} in the right place.")
     adhoc_path = os.path.join(SMB_BASE, ADHOC)
     # "+1" for slash
@@ -713,7 +713,7 @@ def api_list_shares() -> Dict:
     user_info = client.id_user(apiauth.current_user())
     if user_info['errno'] != 0:
         raise RuntimeError(user_info['message'])
-    for key, share in shares:
+    for key, share in shares.items():
         if user_info['id']['uid'] == share['uid']:
             result[key] = share
     return result
