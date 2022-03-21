@@ -13,17 +13,13 @@ class PermissionsClient:
             self, base_url: str, use_auth: bool = False,
             username: Optional[str] = None, password: Optional[str] = None):
         self.base_url = base_url
-        self.use_auth = use_auth
         self.username = username
         self.password = password
         self.uid = None
 
     @property
     def auth(self):
-        if self.use_auth:
-            return requests.auth.HTTPBasicAuth(self.username, self.password)
-        else:
-            return None
+        return None
 
     def authenticate(self, username: str, password: str):
         r = requests.post(

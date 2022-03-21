@@ -1,7 +1,5 @@
 import os
 from datetime import datetime
-from pydoc import cli
-import time
 from typing import Dict
 import pathlib
 
@@ -11,14 +9,15 @@ import flask
 from flask_login import LoginManager, login_required, login_user, current_user, logout_user
 from flask_httpauth import HTTPBasicAuth
 from flask_wtf import FlaskForm
-from wtforms import Field, StringField, PasswordField, SelectMultipleField, HiddenField
-from wtforms.widgets import TextInput
+from wtforms import StringField, PasswordField, SelectMultipleField, HiddenField
 from wtforms.validators import DataRequired
 from urllib.parse import urlparse, urljoin
 
 from permissions_client import PermissionsClient
 from smbdrop_client import ShareClient
-import permissions.server as proxy
+import permissions_client.schema as proxy
+from permissions.api import ADHOC
+import smbdrop_client.schema as smbproxy
 
 
 app = Flask(__name__)
@@ -34,6 +33,23 @@ smbclient = ShareClient("http://localhost:5051")
 SMB_BASE = '/data'
 
 
+def project_dataset_from_smbpath(smbpath):
+    base_offset = len(SMB_BASE)
+    if smbpath[:base_offset] != SMB_BASE:
+        raise ValueError(f"{smbpath} does not start with base path {SMB_BASE}.")
+    if smbpath[base_offset:len(ADHOC)] != ADHOC:
+        raise ValueError(f"{smbpath} does not include adhoc folder path {ADHOC} in the right place.")
+    adhoc_path = os.path.join(SMB_BASE, ADHOC)
+    # "+1" for slash
+    adhoc_offset = len(adhoc_path) + 1
+    # FIXME also handle top-level projects in the future!
+    project_dataset = smbpath[adhoc_offset:]
+    parts = pathlib.PosixPath(project_dataset).parts
+    if len(parts) != 2:
+        raise ValueError("Could not extract project and dataset from {smbpath}.")
+    return parts
+
+
 def is_safe_url(target):
     ref_url = urlparse(request.host_url)
     test_url = urlparse(urljoin(request.host_url, target))
@@ -42,6 +58,8 @@ def is_safe_url(target):
 
 @apiauth.verify_password
 def verify_password(username, password):
+    if not username or not password:
+        return None
     auth_result = client.authenticate(username, password)
     if auth_result['errno'] == 0:
         return username
@@ -233,15 +251,14 @@ def smbpath(project, dsname):
 
 def add_share_info(datasets, project, uid, shares):
     for ds in datasets:
-        dest_path = smbpath(project, ds['name'])
+        dest_path = os.path.normpath(smbpath(project, ds['name']))
+        ds['shareinfo'] = None
         for key, value in shares.items():
-            ds['shared'] = (value['dest_path'] == dest_path)
+            ds['shared'] = (os.path.normpath(value['dest_path']) == dest_path)
             if ds['shared'] and value['uid'] == uid:
                 ds['shareinfo'] = value
                 ds['shareinfo']['smb_host'] = "FIXMEHOST"
                 ds['shareinfo']['workgroup'] = "FIXMEWORKGROUP"
-            else:
-                ds['shareinfo'] = None
     return datasets
 
 
@@ -252,6 +269,7 @@ def project(name: str):
     if pr_info['errno'] == 0:
         user_info = client.id_user(current_user.user_id)
         shares = smbclient.list()
+        print(shares)
         datasets = add_share_info(
             pr_info['datasets'],
             pr_info['project'],
@@ -632,3 +650,70 @@ def api_change_project_members(project_name):
         )
     except jsonschema.exceptions.ValidationError as e:
         raise proxy.InvalidAPIUsage(str(e))  # message can possibly be improved
+
+
+@app.route("/api/share/", methods=["POST"])
+@apiauth.login_required
+def api_create_share() -> Dict:
+    request_data: smbproxy.CreateShareRequest = request.json  # type:ignore
+    jsonschema.validate(schema=smbproxy.CREATE_SHARE_REQUEST_SCHEMA, instance=request_data)
+    project, dataset = project_dataset_from_smbpath(request_data["dest_path"])
+    pr_info = client.projectdetails(project)
+    user_info = client.id_user(apiauth.current_user())
+    if pr_info['errno'] != 0:
+        raise RuntimeError(pr_info['message'])
+    if user_info['errno'] != 0:
+        raise RuntimeError(user_info['message'])
+    if request_data['uid'] != user_info['id']['uid']:
+        raise RuntimeError(
+            f"API user {request_data['uid']} "
+            f"must equal authenticated user {user_info['id']['uid']}."
+        )
+    if current_user.user_id not in pr_info['project']['members']:
+        raise RuntimeError(
+            f"API user {current_user.user_id} "
+            f"not in project members {pr_info['project']['members']}."
+        )
+    if request_data["gid"] != pr_info['project']['gid']:
+        raise RuntimeError(
+            f"GID mismatch between request {request_data['gid']} "
+            f"and project {pr_info['project']['gid']} for {pr_info['project']['name']}."
+        )
+    share = smbclient.create_share(
+        dest_path=request_data["dest_path"],
+        uid=request_data["uid"],
+        gid=request_data["gid"],
+    )
+    return dict(share)
+
+
+@app.route("/api/share/<share_id>/", methods=["DELETE"])
+@apiauth.login_required
+def api_delete_share(share_id: str) -> Dict:
+    shares = smbclient.list()
+    share = shares.get(share_id, None)
+    if share is None:
+        raise RuntimeError(f"Share {share_id} not found.")
+    user_info = client.id_user(apiauth.current_user())
+    if user_info['errno'] != 0:
+        raise RuntimeError(user_info['message'])
+    if user_info['id']['uid'] != share['uid']:
+        raise RuntimeError(
+            f"API user {user_info['id']['uid']} "
+            f"does not match share owner {share['uid']}."
+        )
+    return smbclient.delete_share(share_id)
+
+
+@app.route("/api/share/", methods=["GET"])
+@apiauth.login_required
+def api_list_shares() -> Dict:
+    result = {}
+    shares = smbclient.list()
+    user_info = client.id_user(apiauth.current_user())
+    if user_info['errno'] != 0:
+        raise RuntimeError(user_info['message'])
+    for key, share in shares:
+        if user_info['id']['uid'] == share['uid']:
+            result[key] = share
+    return result

@@ -6,7 +6,8 @@ import json
 import signal
 import secrets
 import logging
-from typing import Optional, TypedDict, Dict
+from typing import Optional, Dict
+from typing_extensions import TypedDict
 import subprocess
 
 import fasteners

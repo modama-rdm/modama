@@ -7,58 +7,21 @@ import jsonschema
 import pamela
 
 from permissions.api import AdhocProject, ValidationError, authenticate, list_users, id
+from permissions_client.schema import (
+    InvalidAPIUsage,
+    AUTHENTICATE_USER_REQUEST_SCHEMA, AuthenticateUserRequest,
+    CREATE_PROJECT_REQUEST_SCHEMA, CreateProjectRequest,
+    CREATE_DATASET_REQUEST_SCHEMA, CreateDatasetRequest,
+    SEAL_DATASET_REQUEST_SCHEMA, SealDatasetRequest,
+    CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA, ChangeMembersRequest,
+)
 
 app = Flask(__name__)
-
-
-class InvalidAPIUsage(Exception):
-    """
-    Exception type for conveying the right status code to return
-    """
-    status_code = 400
-
-    def __init__(self, message, status_code=None, payload=None):
-        super().__init__()
-        self.message = message
-        if status_code is not None:
-            self.status_code = status_code
-        self.payload = payload
-
-    def to_dict(self):
-        rv = dict(self.payload or ())
-        rv['message'] = self.message
-        rv['errno'] = 1
-        return rv
 
 
 @app.errorhandler(InvalidAPIUsage)
 def invalid_api_usage(e):
     return jsonify(e.to_dict()), e.status_code
-
-
-AUTHENTICATE_USER_REQUEST_SCHEMA = {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "http://permissions.cloud-erc.fz-juelich.de/authenticate-user-request.schema.json",
-    "title": "AuthenticateUserRequest",
-    "description": "The JSON payload for the POST request to authenticate a user",
-    "type": "object",
-    "properties": {
-        "username": {
-            "type": "string",
-            "description": "Username",
-        },
-        "password": {
-            "type": "string",
-            "description": "Password",
-        },
-    },
-    "required": ["username", "password"],
-}
-
-
-class AuthenticateUserRequest(TypedDict):
-    username: str
-    password: str
 
 
 @app.route("/users/auth/", methods=["POST"])
@@ -99,41 +62,6 @@ def get_user_list() -> Dict:
         'errno': 0,
         "users": list_users(),
     }
-
-
-CREATE_PROJECT_REQUEST_SCHEMA = {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "http://permissions.cloud-erc.fz-juelich.de/create-project-request.schema.json",
-    "title": "CreateProjectRequest",
-    "description": "The JSON payload for the POST request to create a new project",
-    "type": "object",
-    "properties": {
-        "name": {
-            "type": "string",
-            "description": "Short name of the project",
-        },
-        "owner": {
-            "type": "string",
-            "description": "Username of the owner of the project",
-        },
-        "members": {
-            "type": "array",
-            "items": {
-                "type": "string",
-            },
-            "minItems": 0,
-            "uniqueItems": True,
-            "description": "Usernames of the members of this ad-hoc group",
-        },
-    },
-    "required": ["name", "owner", "members"],
-}
-
-
-class CreateProjectRequest(TypedDict):
-    name: str
-    owner: str
-    members: List[str]
 
 
 @app.route("/project/", methods=["POST"])
@@ -200,31 +128,6 @@ def project_details(project_name) -> Dict:
     }
 
 
-CREATE_DATASET_REQUEST_SCHEMA = {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "http://permissions.cloud-erc.fz-juelich.de/create-dataset-request.schema.json",
-    "title": "CreateDatasetRequest",
-    "description": "The JSON payload for the POST request to create a new dataset in a project",
-    "type": "object",
-    "properties": {
-        "name": {
-            "type": "string",
-            "description": "Name of the dataset, which will be used as directory name",
-        },
-        "owner": {
-            "type": "string",
-            "description": "Username of the owner of the dataset",
-        },
-    },
-    "required": ["name", "owner"],
-}
-
-
-class CreateDatasetRequest(TypedDict):
-    name: str
-    owner: str
-
-
 @app.route("/project/<project_name>/dataset/", methods=["POST"])
 def create_dataset(project_name) -> Dict:
     request_data: CreateDatasetRequest = request.json  # type:ignore
@@ -261,38 +164,12 @@ def create_dataset(project_name) -> Dict:
         }
 
 
-
-SEAL_DATASET_REQUEST_SCHEMA = {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "http://permissions.cloud-erc.fz-juelich.de/seal-dataset-request.schema.json",
-    "title": "SealDatasetRequest",
-    "description": "The JSON payload for the POST request to seal a dataset",
-    "type": "object",
-    "properties": {
-        "name": {
-            "type": "string",
-            "description": "Name of the dataset",
-        },
-        "user": {
-            "type": "string",
-            "description": "Username of the requesting user",
-        },
-    },
-    "required": ["name", "user"],
-}
-
-
-class SealDatasetRequest(TypedDict):
-    name: str
-    user: str
-
-
 # NOTE: not using data set name in path, as it can contain slashes (right?) so
 # we are using a json payload for this request, which may seem a bit like
 # overkill....
 @app.route("/project/<project_name>/dataset/seal/", methods=["POST"])
 def seal_dataset(project_name):
-    request_data: CreateDatasetRequest = request.json  # type:ignore
+    request_data: SealDatasetRequest = request.json  # type:ignore
     try:
         jsonschema.validate(
             schema=SEAL_DATASET_REQUEST_SCHEMA, instance=request_data
@@ -310,42 +187,6 @@ def seal_dataset(project_name):
     return {
         'errno': 0,
     }  # what should be returned here?
-
-
-CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA = {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "http://permissions.cloud-erc.fz-juelich.de/create-project-request.schema.json",
-    "title": "CreateProjectRequest",
-    "description": "The JSON payload for the POST request to change membership of a project",
-    "type": "object",
-    "properties": {
-        "op": {
-            "type": "string",
-            "enum": ["add", "remove"],
-            "description": "Operation: add or remove",
-        },
-        "members": {
-            "type": "array",
-            "items": {
-                "type": "string",
-            },
-            "minItems": 1,
-            "uniqueItems": True,
-            "description": "Usernames of the members to add or remove from this group",
-        },
-        "user": {
-            "type": "string",
-            "description": "Username of the requesting user",
-        },
-    },
-    "required": ["op", "members", "user"],
-}
-
-
-class ChangeMembersRequest(TypedDict):
-    op: str
-    members: List[str]
-    user: str
 
 
 @app.route("/project/<project_name>/members/", methods=["PATCH"])

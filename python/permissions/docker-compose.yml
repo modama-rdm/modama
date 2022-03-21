@@ -2,7 +2,9 @@ version: '3.4'
 services:
   permissions:
     hostname: permissions
-    build: .
+    build:
+      context: ..
+      dockerfile: permissions/Dockerfile
 
     volumes:
        - type: bind
@@ -18,8 +20,8 @@ services:
   permissions-server:
     hostname: permissions
     build:
-      context: .
-      dockerfile: Dockerfile-server
+      context: ..
+      dockerfile: permissions/Dockerfile-server
 
     volumes:
        - type: bind

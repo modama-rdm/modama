@@ -15,8 +15,9 @@ RUN adduser testjanghyun --gecos "" --no-create-home --disabled-login --ingroup 
 
 COPY . /code
 
-RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/
+RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/permissions-client/
+RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/permissions/
 
-WORKDIR /code/
+WORKDIR /code/permissions/
 
-CMD /code/test.sh
+CMD /code/permissions/test.sh
