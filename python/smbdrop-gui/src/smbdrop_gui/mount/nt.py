@@ -26,14 +26,14 @@ class NTMountManager(MountManager):
         # FIXME: selection of share drive?
         # print(f"net use z: \\\\192.168.178.27\\{share['share_name']} {share['password']} /USER:ER-C-INGEST\\{share['username']}")
         subprocess.run([
-            "net", "use", "z:", f'\\\\{self._smb_host}\\{share_name}', password, f'/USER:{self._workgroup}\\{username}'
-        ], capture_output=True, check=True)
+            "net", "use", "/persistent:no", "z:", f'\\\\{self._smb_host}\\{share_name}', password, f'/USER:{self._workgroup}\\{username}'
+        ], capture_output=False, check=True)
         return Mount(dest="z:", share=share_name)
 
     def umount(self, share_name: str, username: str) -> None:
         subprocess.run([
-            "net", "use", "z:", "/delete"
-        ], capture_output=True, check=True)
+            "net", "use", "z:", "/delete", "/yes"
+        ], capture_output=False, check=True)
 
     def open(self, share_name: str, username: str) -> None:
         subprocess.run([

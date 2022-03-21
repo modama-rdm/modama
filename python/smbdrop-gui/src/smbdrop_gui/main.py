@@ -72,7 +72,7 @@ class DoListSessions(QRunnable):
     def run(self) -> None:
         # FIXME: error handling!
         try:
-            shares = self.login_model.mgmt_client.list()
+            shares = self.login_model.mgmt_client.list_shares()
             share_list = list(shares.values())
             print(f"got list of shares: {share_list}")
             self.model.get_shares().replace_data(share_list)
@@ -104,11 +104,11 @@ class DoCreateSession(QRunnable):
             )
             if "message" in resp:
                 print(resp["message"])
-            share = self.login_model.mgmt_client.create(
+            share = self.login_model.mgmt_client.create_share(
                 project=project_name,
                 dataset=session_name,
             )
-            shares = self.login_model.mgmt_client.list()
+            shares = self.login_model.mgmt_client.list_shares()
             self.model._set_shares(list(shares.values()))
             self.model._set_session_share_id(share["share_id"])
         finally:
@@ -117,18 +117,22 @@ class DoCreateSession(QRunnable):
 
 
 class DoCloseSession(QRunnable):
-    def __init__(self, model: "SessionModel", login_model: "LoginModel", share_id: str) -> None:
+    def __init__(self, model: "SessionModel", login_model: "LoginModel", share_id: str, mm: MountManager) -> None:
         super().__init__()
         self.model = model
         self.login_model = login_model
         self.share_id = share_id
+        self.mm = mm
 
     @Slot()
     def run(self) -> None:
         # FIXME: error handling!
         try:
-            self.login_model.mgmt_client.delete(self.share_id)
-            shares = self.login_model.mgmt_client.list()
+            share_info = self.model.get_share_by_id(self.share_id)
+            share_name = share_info["share_name"]
+            self.mm.umount(share_name, self.login_model.username)
+            self.login_model.mgmt_client.delete_share(self.share_id)
+            shares = self.login_model.mgmt_client.list_shares()
             self.model._set_shares(list(shares.values()))
             self.model._set_session_share_id(None)
         finally:
@@ -145,7 +149,7 @@ class DoUpdateSharesList(QRunnable):
     def run(self) -> None:
         # FIXME: error handling!
         try:
-            shares = self.login_model.mgmt_client.list()
+            shares = self.login_model.mgmt_client.list_shares()
             self.model._set_shares(list(shares.values()))
         finally:
             # as this is run in the background, we don't set/unset busy
@@ -509,7 +513,7 @@ class SessionModel(QObject):
     def closeSession(self, sessionId: str) -> None:
         print(f"closing session {sessionId}")
         self.threadpool.start(
-            DoCloseSession(self, self._login_model, sessionId)
+            DoCloseSession(self, self._login_model, sessionId, self._mm)
         )
 
     def get_share_by_id(self, share_id: str) -> Dict:
