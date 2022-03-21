@@ -679,7 +679,7 @@ def api_create_share() -> Dict:
             f"GID mismatch between request {request_data['gid']} "
             f"and project {pr_info['project']['gid']} for {pr_info['project']['name']}."
         )
-    share = smbclient.create_share(
+    share = smbclient.create(
         dest_path=request_data["dest_path"],
         uid=request_data["uid"],
         gid=request_data["gid"],
@@ -702,7 +702,7 @@ def api_delete_share(share_id: str) -> Dict:
             f"API user {user_info['id']['uid']} "
             f"does not match share owner {share['uid']}."
         )
-    return smbclient.delete_share(share_id)
+    return smbclient.delete(share_id)
 
 
 @app.route("/api/share/", methods=["GET"])

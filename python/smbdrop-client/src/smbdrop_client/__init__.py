@@ -48,4 +48,4 @@ class ShareClient:
                 f"something went wrong when deleting the share {share_id},"
                 " please check the logs!"
             )
-        return resp
+        return resp.json()
