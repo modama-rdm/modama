@@ -8,6 +8,7 @@ from permissions_client import PermissionsClient, quote
 class MgmtClient(PermissionsClient):
     def __init__(self, base_url: str,  username: Optional[str] = None, password: Optional[str] = None):
         PermissionsClient.__init__(
+            self,
             base_url=base_url,
             username=username,
             password=password,

@@ -27,7 +27,7 @@ class MountManager:
 
 def get_mm_class() -> Type[MountManager]:
     s = platform.system() 
-    if s == "Window":
+    if s == "Windows":
         from smbdrop_gui.mount.nt import NTMountManager as MountManagerC
     elif s == "Linux":
         from smbdrop_gui.mount.gio import GIOMountManager as MountManagerC

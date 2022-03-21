@@ -15,7 +15,7 @@ class PermissionsClient:
         self.base_url = base_url
         self.username = username
         self.password = password
-        self.uid = None
+        self.id = None
 
     @property
     def auth(self):
@@ -82,14 +82,17 @@ class PermissionsClient:
         ).json()
 
     def create_dataset(self, projectname: str, name: str, user: str):
-        return requests.post(
+        result = requests.post(
             f"{self.base_url}/project/{quote(projectname)}/dataset/",
             json={
                 "name": name,
                 "owner": user,
             },
             auth=self.auth
-        ).json()
+        )
+        # TODO percolate consistently through client
+        result.raise_for_status()
+        return result.json()
 
     def seal_dataset(self, projectname: str, name: str, user: str):
         return requests.post(

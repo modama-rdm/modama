@@ -16,12 +16,11 @@ from PySide6.QtCore import (
     QAbstractListModel, QTimer,
 )
 
-from smbdrop_client import ShareClient
 from smbdrop_gui.mount import get_mm_class, MountManager
 
+from mgmtinterface_client import MgmtClient
 
-PERMISSIONS_API_BASE_URL = "http://localhost:5050"
-SMBDROP_API_BASE_URL = "http://localhost:5051"
+API_BASE_URL = "http://localhost:5000/api"
 
 
 class DoLogin(QRunnable):
@@ -34,8 +33,14 @@ class DoLogin(QRunnable):
         self.model._set_busy(True)
         try:
             time.sleep(0.1)  # simulate network...
-            print("login success!")
-            self.model._set_logged_in(True)
+            resp = self.model.mgmt_client.authenticate(
+                self.model.username,
+                self.model.password,
+            )
+            if resp["errno"] == 0:
+                self.model._set_logged_in(True)
+            else:
+                pass  # FIXME: show error dialog
         finally:
             self.model._set_busy(False)
 
@@ -48,8 +53,7 @@ class DoListProjects(QRunnable):
 
     @Slot()
     def run(self) -> None:
-        url = f"{PERMISSIONS_API_BASE_URL}/project/"
-        resp = requests.get(url).json()
+        resp = self.login_model.mgmt_client.list_projects()
         print(f"got list of projects: {resp['projects']}")
         self.model._set_projects([
             project["name"]
@@ -68,9 +72,7 @@ class DoListSessions(QRunnable):
     def run(self) -> None:
         # FIXME: error handling!
         try:
-            c = ShareClient(SMBDROP_API_BASE_URL)
-            shares = c.list()
-            # TODO: server should filter by the UID we are logged in with
+            shares = self.login_model.mgmt_client.list()
             share_list = list(shares.values())
             print(f"got list of shares: {share_list}")
             self.model.get_shares().replace_data(share_list)
@@ -95,27 +97,18 @@ class DoCreateSession(QRunnable):
             project_name = self.project_name
             session_name = self.session_name
 
-            # first, create the "dataset" via the "permissions API":
-            url = f"{PERMISSIONS_API_BASE_URL}/project/{project_name}/dataset/"
-            resp = requests.post(url, json={
-                "name": session_name,
-                "owner": self.login_model.username,
-            })
-            if "message" in resp.json():
-                print(resp.json()["message"])
-            resp.raise_for_status()
-
-            c = ShareClient(SMBDROP_API_BASE_URL)
-            share = c.create(
-                # FIXME: `dest_path` should be set by the high-level API - or more clearly,
-                # it should be retrieved from the "permissions API", via the high-level API
-                dest_path=f"/data/adhoc/{project_name}/{session_name}/",
-                # FIXME: uid/gid should be set by the high level API from the
-                # credentials we log in with
-                uid=1000,
-                gid=1000,
+            resp = self.login_model.mgmt_client.create_dataset(
+                projectname=project_name,
+                name=session_name,
+                user=self.login_model.username
             )
-            shares = c.list()
+            if "message" in resp:
+                print(resp["message"])
+            share = self.login_model.mgmt_client.create(
+                project=project_name,
+                dataset=session_name,
+            )
+            shares = self.login_model.mgmt_client.list()
             self.model._set_shares(list(shares.values()))
             self.model._set_session_share_id(share["share_id"])
         finally:
@@ -134,9 +127,8 @@ class DoCloseSession(QRunnable):
     def run(self) -> None:
         # FIXME: error handling!
         try:
-            c = ShareClient(SMBDROP_API_BASE_URL)
-            c.delete(self.share_id)
-            shares = c.list()
+            self.login_model.mgmt_client.delete(self.share_id)
+            shares = self.login_model.mgmt_client.list()
             self.model._set_shares(list(shares.values()))
             self.model._set_session_share_id(None)
         finally:
@@ -153,8 +145,7 @@ class DoUpdateSharesList(QRunnable):
     def run(self) -> None:
         # FIXME: error handling!
         try:
-            c = ShareClient(SMBDROP_API_BASE_URL)
-            shares = c.list()
+            shares = self.login_model.mgmt_client.list()
             self.model._set_shares(list(shares.values()))
         finally:
             # as this is run in the background, we don't set/unset busy
@@ -199,6 +190,7 @@ class LoginModel(QObject):
         self._logged_in: bool = False
         self._busy: bool = False
         self.threadpool = QThreadPool()
+        self.mgmt_client = MgmtClient(base_url=API_BASE_URL)
 
     usernameChanged = Signal(str)
 
