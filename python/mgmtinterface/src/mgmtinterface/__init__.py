@@ -19,6 +19,8 @@ import permissions_client.schema as proxy
 from permissions.api import ADHOC
 import smbdrop_client.schema as smbproxy
 
+from mgmtinterface_client.schema import CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
+
 
 app = Flask(__name__)
 login_manager = LoginManager()
@@ -655,34 +657,32 @@ def api_change_project_members(project_name):
 @app.route("/api/share/", methods=["POST"])
 @apiauth.login_required
 def api_create_share() -> Dict:
-    request_data: smbproxy.CreateShareRequest = request.json  # type:ignore
-    jsonschema.validate(schema=smbproxy.CREATE_SHARE_REQUEST_SCHEMA, instance=request_data)
-    project, dataset = project_dataset_from_smbpath(request_data["dest_path"])
-    pr_info = client.projectdetails(project)
+    request_data: CreateShareRequest = request.json  # type:ignore
+    jsonschema.validate(schema=CREATE_SHARE_REQUEST_SCHEMA, instance=request_data)
+
+    pr_info = client.projectdetails(request_data["project"])
     user_info = client.id_user(apiauth.current_user())
     if pr_info['errno'] != 0:
         raise RuntimeError(pr_info['message'])
     if user_info['errno'] != 0:
         raise RuntimeError(user_info['message'])
-    if request_data['uid'] != user_info['id']['uid']:
+    ds = None
+    for ds in pr_info['datasets']:
+        if ds['name'] == request_data["dataset"]:
+            break
+    if ds is None:
         raise RuntimeError(
-            f"API user {request_data['uid']} "
-            f"must equal authenticated user {user_info['id']['uid']}."
+            f"Dataset {ds.name} not found in project {pr_info['project']['name']}"
         )
     if current_user.user_id not in pr_info['project']['members']:
         raise RuntimeError(
             f"API user {current_user.user_id} "
             f"not in project members {pr_info['project']['members']}."
         )
-    if request_data["gid"] != pr_info['project']['gid']:
-        raise RuntimeError(
-            f"GID mismatch between request {request_data['gid']} "
-            f"and project {pr_info['project']['gid']} for {pr_info['project']['name']}."
-        )
     share = smbclient.create(
-        dest_path=request_data["dest_path"],
-        uid=request_data["uid"],
-        gid=request_data["gid"],
+        dest_path=smbpath(pr_info['project'], ds['name']),
+        uid=user_info['id']['uid'],
+        gid=pr_info['project']['gid'],
     )
     return dict(share)
 
