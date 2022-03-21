@@ -278,6 +278,7 @@ def project(name: str):
             user_info['id']['uid'],
             shares
         )
+        datasets = sorted(datasets, key=lambda ds:ds['mtime'], reverse=True)
         return render_template(
             'projectdetails.html.j2',
             project=pr_info['project'],
@@ -674,9 +675,9 @@ def api_create_share() -> Dict:
         raise RuntimeError(
             f"Dataset {ds.name} not found in project {pr_info['project']['name']}"
         )
-    if current_user.user_id not in pr_info['project']['members']:
+    if apiauth.current_user() not in pr_info['project']['members']:
         raise RuntimeError(
-            f"API user {current_user.user_id} "
+            f"API user {apiauth.current_user()} "
             f"not in project members {pr_info['project']['members']}."
         )
     share = smbclient.create(
