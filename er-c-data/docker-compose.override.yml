@@ -31,3 +31,21 @@ services:
       - './testconf/cloudproxy-servername.nginx.conf.snippet:/etc/nginx/conf.d/servername.conf.snippet'
     ports:
       - "127.0.0.1:1890:80"
+  permissions:
+    volumes:
+      - type: bind
+        source: "./testfolder/data"
+        target: "/data"
+  watchdog:
+    volumes:
+      - type: bind
+        source: "./testfolder/data"
+        target: "/data"
+  smbdrop:
+    volumes:
+      - type: bind
+        source: "./testfolder/data"
+        target: "/data"
+  mgmtinterface:
+    ports:
+      - "127.0.0.1:5001:5000"

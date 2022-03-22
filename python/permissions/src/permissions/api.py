@@ -13,9 +13,11 @@ import time
 import pamela
 import posix1e  # pylibacl, needs libacl1-dev, https://pylibacl.k1024.org/
 
+from permissions_client.schema import ADHOC
+
 
 BASE_PATH = '/data/'
-ADHOC = 'adhoc'
+
 ADHOC_PATH = os.path.join(BASE_PATH, ADHOC)
 SHARING_PATH = os.path.join(BASE_PATH, 'sharing')
 
@@ -124,23 +126,23 @@ def id(username):
     }
 
 
-def list_users():
-    # FIXME this only works if ADHOC_GROUP is not
+def list_users(adhoc_group):
+    # FIXME this only works if adhoc_group is not
     # a user's primary group. Workaround on systems managed
     # with IPA (LDAP, SSSD etc) TBD.
-    return grp.getgrnam(ADHOC_GROUP).gr_mem
+    return grp.getgrnam(adhoc_group).gr_mem
 
 
-def check_can_create(name):
+def check_can_create(name, adhoc_group):
     '''
     Check if the user is permitted to create ad-hoc projects
     '''
-    usersgroup = grp.getgrnam(ADHOC_GROUP)
+    usersgroup = grp.getgrnam(adhoc_group)
     try:
         info = pwd.getpwnam(name)
         groups = os.getgrouplist(name, info.pw_gid)
         if usersgroup.gr_gid not in groups:
-            raise ValidationError(f'User "{name}" is not in the group "{ADHOC_GROUP}".')
+            raise ValidationError(f'User "{name}" is not in the group "{adhoc_group}".')
     except KeyError:
         raise ValidationError(f'User "{name}" not found.')
 
@@ -195,7 +197,10 @@ class Dataset(NamedTuple):
 
 
 class AdhocProject:
-    def __init__(self, name):
+    def __init__(self, name, adhoc_group):
+        if adhoc_group is None:
+            adhoc_group = ADHOC_GROUP
+        self.adhoc_group = adhoc_group
         if not self.is_adhoc(name):
             raise ValidationError(f'"{name}" is not an ad-hoc project.')
         self._name = name
@@ -225,7 +230,7 @@ class AdhocProject:
         return os.path.getctime(self.path)
 
     @classmethod
-    def create(cls, name: str, owner: str, members: List[str]):
+    def create(cls, name: str, owner: str, members: List[str], adhoc_group):
         '''
         Create a new ad-hoc project folder
 
@@ -246,7 +251,9 @@ class AdhocProject:
         Permission issues -> OSError and the like
         Subprocess call failed -> subprocess.CalledProcessError
         '''
-        check_can_create(owner)
+        if adhoc_group is None:
+            adhoc_group = ADHOC_GROUP
+        check_can_create(owner, adhoc_group)
         check_valid_group(name)
         check_project_name_taken(name)
         if is_group(name):
@@ -258,7 +265,7 @@ class AdhocProject:
         folder = os.path.join(ADHOC_PATH, name)
         os.mkdir(folder)
         try:
-            shutil.chown(folder, owner, ADHOC_GROUP)
+            shutil.chown(folder, owner, adhoc_group)
 
             mode  = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR  # u+rwx
             mode |= stat.S_IRGRP | stat.S_IXGRP               # g+rx  -> explicitly state the should-state, don't rely on the umask
@@ -274,7 +281,7 @@ class AdhocProject:
                 ['setfacl', '-m', 'o:rX,d:o:rX', folder],
                 capture_output=True, check=True
             )
-            project = cls(name)
+            project = cls(name, adhoc_group=adhoc_group)
             project.add_members(members + [owner], owner)
         except Exception as e:
             os.rmdir(folder)
@@ -463,7 +470,7 @@ class AdhocProject:
         Permissions, ACLs etc will be set by default ACLs and the watchdog.
         '''
         check_valid_dataset(name)
-        check_can_create(user)
+        check_can_create(user, self.adhoc_group)
         target_base_path = os.path.join(self.path, name)
         target_raw_path = os.path.join(target_base_path, 'raw')
         # Run as the specified user to make sure

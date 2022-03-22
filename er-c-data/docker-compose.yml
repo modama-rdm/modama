@@ -48,7 +48,7 @@ services:
       # Didn't work, unfortunately
       # TRUSTED_PROXIES: "localhost"
 
-    links:
+    depends_on:
       - "db"
       - "redis"
       - "webdav"
@@ -96,8 +96,49 @@ services:
       - './cloudproxy.nginx.conf:/etc/nginx/conf.d/default.conf'
       - './landingpage:/usr/share/nginx/html'
 
-    links:
+    depends_on:
       - "nextcloud"
+  
+  permissions:
+    hostname: permissions
+    build:
+      context: ..
+      dockerfile: er-c-data/permissions/Dockerfile
+
+    volumes:
+       - type: bind
+         source: "/var/lib/sss/pipes/"
+         target: "/var/lib/sss/pipes/"
+    
+    cap_add:
+      - LINUX_IMMUTABLE
+
+  watchdog:
+    hostname: watchdog
+    build:
+      context: ..
+      dockerfile: er-c-data/watchdog/Dockerfile
+
+  smbdrop:
+    hostname: smbdrop
+    build:
+      context: ..
+      dockerfile: er-c-data/smbdrop/Dockerfile
+
+  mgmtinterface:
+    hostname: mgmtinterface
+    build:
+      context: ..
+      dockerfile: er-c-data/mgmtinterface/Dockerfile
+    environment:
+      - MGMTINTERFACE_SECRET=/mgmt_secret.py
+    volumes:
+      - type: bind
+        source: "/var/local/data-mgmt/mgmt_secret.py"
+        target: "/mgmt_secret.py"
+    depends_on:
+      - "permissions"
+      - "smbdrop"
 
 volumes:
   sockets:
