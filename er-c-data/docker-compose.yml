@@ -101,6 +101,7 @@ services:
   
   permissions:
     hostname: permissions
+    restart: always
     build:
       context: ..
       dockerfile: er-c-data/permissions/Dockerfile
@@ -115,18 +116,21 @@ services:
 
   watchdog:
     hostname: watchdog
+    restart: always
     build:
       context: ..
       dockerfile: er-c-data/watchdog/Dockerfile
 
   smbdrop:
     hostname: smbdrop
+    restart: always
     build:
       context: ..
       dockerfile: er-c-data/smbdrop/Dockerfile
 
   mgmtinterface:
     hostname: mgmtinterface
+    restart: always
     build:
       context: ..
       dockerfile: er-c-data/mgmtinterface/Dockerfile
