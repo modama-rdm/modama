@@ -46,6 +46,8 @@ services:
       - type: bind
         source: "/er-c-data"
         target: "/data"
+    ports:
+      - "127.0.0.1:1445:445"
   mgmtinterface:
     ports:
       - "80:5000"

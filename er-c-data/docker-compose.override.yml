@@ -46,6 +46,8 @@ services:
       - type: bind
         source: "./testfolder/data"
         target: "/data"
+    ports:
+      - "127.0.0.1:1446:445"
   mgmtinterface:
     ports:
       - "127.0.0.1:5001:5000"

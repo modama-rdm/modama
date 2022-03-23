@@ -248,8 +248,8 @@ def add_share_info(datasets, project, uid, shares):
             ds['shared'] = (os.path.normpath(value['dest_path']) == dest_path)
             if ds['shared'] and value['uid'] == uid:
                 ds['shareinfo'] = value
-                ds['shareinfo']['smb_host'] = "FIXMEHOST"
-                ds['shareinfo']['workgroup'] = "FIXMEWORKGROUP"
+                ds['shareinfo']['smb_host'] = "moellenstedt.iff.kfa-juelich.de"
+                ds['shareinfo']['workgroup'] = "ER-C-INGEST"
     return datasets
 
 
