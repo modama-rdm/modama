@@ -20,7 +20,7 @@ from smbdrop_gui.mount import get_mm_class, MountManager
 
 from mgmtinterface_client import MgmtClient
 
-API_BASE_URL = "http://localhost:5000/api"
+API_BASE_URL = "http://er-c-data-mgmt.fz-juelich.de/api"
 
 
 class DoLogin(QRunnable):
@@ -246,7 +246,7 @@ class LoginModel(QObject):
 
     @Slot()
     def doLogin(self) -> None:
-        print(f"logging in with {self.get_username()} / {self.get_password()}...")
+        print(f"logging in with {self.get_username()} ...")
         # `DoLogin` asynchronously calls back into model methods to update the state
         # based on the result of the login call:
         self.threadpool.start(DoLogin(self))
@@ -556,7 +556,7 @@ def main():
     engine = QQmlApplicationEngine()
 
     MountManagerClass = get_mm_class()
-    mm = MountManagerClass(smb_host="192.168.116.130", workgroup="ER-C-INGEST")
+    mm = MountManagerClass(smb_host="moellenstedt.iff.kfa-juelich.de", workgroup="ER-C-INGEST")
 
     # instantiate and register global objects:
     login_model = LoginModel()
