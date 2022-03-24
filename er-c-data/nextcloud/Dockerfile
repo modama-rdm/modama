@@ -1,4 +1,4 @@
-FROM nextcloud:apache
+FROM nextcloud:23.0.3-apache
 LABEL Dieter Weber <d.weber@fz-juelich.de>
 
 ARG aptopts="-y --no-install-recommends"

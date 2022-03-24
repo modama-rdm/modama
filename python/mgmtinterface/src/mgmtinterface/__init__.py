@@ -244,8 +244,9 @@ def add_share_info(datasets, project, uid, shares):
     for ds in datasets:
         dest_path = os.path.normpath(smbpath(project, ds['name']))
         ds['shareinfo'] = None
+        ds['shared'] = False
         for key, value in shares.items():
-            ds['shared'] = (os.path.normpath(value['dest_path']) == dest_path)
+            ds['shared'] = ds['shared'] or (os.path.normpath(value['dest_path']) == dest_path)
             if ds['shared'] and value['uid'] == uid:
                 ds['shareinfo'] = value
                 ds['shareinfo']['smb_host'] = "moellenstedt.iff.kfa-juelich.de"
