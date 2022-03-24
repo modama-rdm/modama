@@ -26,16 +26,24 @@
   {% if ds.shareinfo %}
     {% with si = ds.shareinfo %}  
       <h2>Access using Windows Explorer</h2>
-        <code>
-          \\{{ si.smb_host }}\{{ si.share_name}}
-        </code>
-        <p>Username: {{ si.workgroup }}\{{ si.username }}</p>
-        <p>Password: {{ si.password }}</p>
+      <div>
+        <label for="urlwin">Address</label>
+        <input id="urlwin" value="\\{{ si.smb_host }}\{{ si.share_name}}" readonly style="width: 100%"/>
+
+        <label for="username">Username</label>
+        <input id="username" value="{{ si.workgroup }}\{{ si.username }}" readonly style="width: 100%"/>
+
+        <label for="passwordwin">Password</label>
+        <input id="passwordwin" value="{{ si.password }}" readonly style="width: 100%"/>
+      </div>
       <h2>Access on Linux or OS X using a file manager</h2>
-        <code>
-          smb://{{ si.username }}@{{ si.smb_host }}/{{ si.share_name }}
-        </code>
-        <p>Password: {{ si.password }}</p>
+      <div>
+        <label for="url">Address</label>
+        <input id="url" value="smb://{{ si.username }}@{{ si.smb_host }}/{{ si.share_name }}" readonly style="width: 100%"/>
+        
+        <label for="password">Password</label>
+        <input id="password" value="{{ si.password }}" readonly style="width: 100%"/>
+      </div>
     {% endwith %}
   {%endif%}
   <form

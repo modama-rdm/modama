@@ -16,40 +16,29 @@ from urllib.parse import urlparse, urljoin
 from permissions_client import PermissionsClient
 from smbdrop_client import ShareClient
 import permissions_client.schema as proxy
-from permissions.api import ADHOC
+from permissions_client.schema import ADHOC
 import smbdrop_client.schema as smbproxy
 
 from mgmtinterface_client.schema import CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
 
 
 app = Flask(__name__)
+
+app.config.from_object('mgmtinterface.default_config')
+app.config.from_envvar('MGMTINTERFACE_CONFIG')
+app.config.from_envvar('MGMTINTERFACE_SECRET')
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 
-app.secret_key = b'caHudnec[drav2'
-
 apiauth = HTTPBasicAuth()
 
-client = PermissionsClient("http://localhost:5050")
-smbclient = ShareClient("http://localhost:5051")
-SMB_BASE = '/data'
-
-
-def project_dataset_from_smbpath(smbpath):
-    base_offset = len(SMB_BASE)
-    if smbpath[:base_offset] != SMB_BASE:
-        raise ValueError(f"{smbpath} does not start with base path {SMB_BASE}.")
-    if smbpath[base_offset:base_offset+len(ADHOC)] != ADHOC:
-        raise ValueError(f"{smbpath} does not include adhoc folder path {ADHOC} in the right place.")
-    adhoc_path = os.path.join(SMB_BASE, ADHOC)
-    # "+1" for slash
-    adhoc_offset = len(adhoc_path) + 1
-    # FIXME also handle top-level projects in the future!
-    project_dataset = smbpath[adhoc_offset:]
-    parts = pathlib.PosixPath(project_dataset).parts
-    if len(parts) != 2:
-        raise ValueError("Could not extract project and dataset from {smbpath}.")
-    return parts
+client = PermissionsClient(
+    app.config['PERMISSIONS_API']
+)
+smbclient = ShareClient(
+    app.config['SHARE_API']
+)
 
 
 def is_safe_url(target):
@@ -245,7 +234,7 @@ def add_project():
 
 def smbpath(project, dsname):
     return os.path.join(
-        SMB_BASE,
+        app.config['SMB_BASE'],
         project['relpath'],
         dsname
     )
@@ -255,12 +244,14 @@ def add_share_info(datasets, project, uid, shares):
     for ds in datasets:
         dest_path = os.path.normpath(smbpath(project, ds['name']))
         ds['shareinfo'] = None
+        ds['shared'] = False
         for key, value in shares.items():
-            ds['shared'] = (os.path.normpath(value['dest_path']) == dest_path)
-            if ds['shared'] and value['uid'] == uid:
+            path_match = os.path.normpath(value['dest_path']) == dest_path
+            ds['shared'] = ds['shared'] or path_match
+            if path_match and value['uid'] == uid:
                 ds['shareinfo'] = value
-                ds['shareinfo']['smb_host'] = "FIXMEHOST"
-                ds['shareinfo']['workgroup'] = "FIXMEWORKGROUP"
+                ds['shareinfo']['smb_host'] = "moellenstedt.iff.kfa-juelich.de"
+                ds['shareinfo']['workgroup'] = "ER-C-INGEST"
     return datasets
 
 
@@ -373,18 +364,6 @@ def create_dataset(name: str):
             user=current_user.user_id,
         )
         if result['errno'] == 0:
-            pr_info = client.projectdetails(name)
-            user_info = client.id_user(current_user.user_id)
-            # TODO error handling
-            smb_res = smbclient.create(
-                dest_path=os.path.join(
-                    SMB_BASE,
-                    pr_info['project']['relpath'],
-                    form.name.data
-                ),
-                uid=user_info['id']['uid'],
-                gid=pr_info['project']['gid']
-            )
             flask.flash(f'Session "{form.name.data}" created in project "{name}".')
             return flask.redirect(flask.url_for('project', name=name))
         else:

@@ -2,6 +2,9 @@ from typing import List
 from typing_extensions import TypedDict
 
 
+ADHOC = 'adhoc'
+
+
 class InvalidAPIUsage(Exception):
     """
     Exception type for conveying the right status code to return

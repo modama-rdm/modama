@@ -31,6 +31,27 @@ services:
       - './prodconf/cloudproxy-servername.nginx.conf.snippet:/etc/nginx/conf.d/servername.conf.snippet'
     ports:
       - "127.0.0.1:1889:80"
+  permissions:
+    volumes:
+      - type: bind
+        source: "/er-c-data"
+        target: "/data"
+  watchdog:
+    volumes:
+      - type: bind
+        source: "/er-c-data"
+        target: "/data"
+  smbdrop:
+    volumes:
+      - type: bind
+        source: "/er-c-data"
+        target: "/data"
+    ports:
+      - "127.0.0.1:1445:445"
+  mgmtinterface:
+    ports:
+      - "80:5000"
+
 volumes:
   nfsdata:
     driver_opts:

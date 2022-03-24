@@ -18,6 +18,9 @@ from permissions_client.schema import (
 
 app = Flask(__name__)
 
+app.config.from_object('permissions.default_config')
+app.config.from_envvar('PERMISSIONS_CONFIG')
+
 
 @app.errorhandler(InvalidAPIUsage)
 def invalid_api_usage(e):
@@ -60,7 +63,7 @@ def id_user(name) -> dict:
 def get_user_list() -> Dict:
     return {
         'errno': 0,
-        "users": list_users(),
+        "users": list_users(app.config['ADHOC_GROUP']),
     }
 
 
@@ -74,7 +77,8 @@ def create_project() -> Dict:
         project = AdhocProject.create(
             name=request_data['name'],
             owner=request_data['owner'],
-            members=request_data['members']
+            members=request_data['members'],
+            adhoc_group=app.config['ADHOC_GROUP']
         )
         return {
             'errno': 0,
@@ -96,7 +100,10 @@ def list_projects() -> Dict:
     return {
         'errno': 0,
         'projects': [
-            AdhocProject(project_name).serialize(fast=True)
+            AdhocProject(
+                project_name,
+                adhoc_group=app.config['ADHOC_GROUP']
+            ).serialize(fast=True)
             for project_name in project_names
         ]
     }
@@ -105,7 +112,10 @@ def list_projects() -> Dict:
 @app.route("/project/<project_name>/", methods=["GET"])
 def project_details(project_name) -> Dict:
     try:
-        p = AdhocProject(project_name)
+        p = AdhocProject(
+            project_name,
+            adhoc_group=app.config['ADHOC_GROUP']
+        )
     except ValidationError as e:
         return{
             'errno': 1,
@@ -135,16 +145,10 @@ def create_dataset(project_name) -> Dict:
         jsonschema.validate(
             schema=CREATE_DATASET_REQUEST_SCHEMA, instance=request_data
         )
-        p = AdhocProject(project_name)
-    except ValidationError as e:
-        return{
-            'errno': 1,
-            'message': str(e)
-        }
-    except jsonschema.exceptions.ValidationError as e:
-        raise InvalidAPIUsage(str(e))  # message can possibly be improved
-    # TODO: catch exceptions? for example, `CalledProcessError` if `mkdir` fails...
-    try:
+        p = AdhocProject(
+            project_name,
+            adhoc_group=app.config['ADHOC_GROUP']
+        )
         p.add_dataset(
             name=request_data["name"],
             user=request_data["owner"]
@@ -162,6 +166,8 @@ def create_dataset(project_name) -> Dict:
             'errno': 1,
             'message': str(e)
         }
+    except jsonschema.exceptions.ValidationError as e:
+        raise InvalidAPIUsage(str(e))  # message can possibly be improved
 
 
 # NOTE: not using data set name in path, as it can contain slashes (right?) so
@@ -175,7 +181,10 @@ def seal_dataset(project_name):
             schema=SEAL_DATASET_REQUEST_SCHEMA, instance=request_data
         )
         # TODO: catch exceptions?
-        p = AdhocProject(project_name)
+        p = AdhocProject(
+            project_name,
+            adhoc_group=app.config['ADHOC_GROUP']
+        )
         p.seal_dataset(request_data["name"], request_data["user"])
     except ValidationError as e:
         return{
@@ -197,7 +206,10 @@ def change_project_members(project_name):
         jsonschema.validate(
             schema=CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA, instance=request_data
         )
-        p = AdhocProject(project_name)
+        p = AdhocProject(
+            project_name,
+            adhoc_group=app.config['ADHOC_GROUP']
+        )
         op = request_data["op"]
         if op == "add":
             p.add_members(request_data["members"], request_data['user'])

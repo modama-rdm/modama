@@ -1,0 +1,1 @@
+ADHOC_GROUP = 'testerc'
