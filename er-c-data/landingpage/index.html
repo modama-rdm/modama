@@ -5,51 +5,165 @@
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link href="/mui-0.10.3/css/mui.min.css" rel="stylesheet" type="text/css" />
+    <link href="/styles.css" rel="stylesheet" type="text/css" />
 </head>
 <body>
 <div class="mui-container">
-    <div class="mui-panel">
-        <table width="100%">
-            <tr style="vertical-align:middle;">
-                <td class="mui--appbar-height">
-                    <h1>
-                        <a href="https://fz-juelich.de"><img
-                            width="300"
-                            style="vertical-align:middle; margin-right: 20px;"
-                            src="/fzj_logo.jpg"
-                            alt="Forschungszentrim Jülich"
-                        /></a>
-                        ER-C Data Management
-                    </h1>
-                </td>
-            </tr>
-        </table>
+    <div class="mui-panel header">
+        <h1>
+            <a href="https://fz-juelich.de"><img
+                width="300"
+                src="/fzj_logo.jpg"
+                alt="Forschungszentrum Jülich"
+            /></a>
+            ER-C Data Management
+        </h1>
     </div>
     <div class="mui-panel">
         <h2>About</h2>
-        <p>This system stores data for the <a href="https://er-c.org/">Ernst Ruska
-        Centrum</a> at Forschungszentrum Jülich. It can handle large-scale data with
+        <p>This system stores data for the <a href="https://er-c.org/">Ernst Ruska-Centre</a> at Forschungszentrum Jülich. It can handle large-scale data with
         sufficient performance and allows access from microscopes, PCs, processing
         workstations and mobile devices for institute members and collaborators.</p>
 
-        <h2>Access</h2>
+        <div class="cta">
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>Management</h3>
+                    <p>Manage projects, sessions, ingest and access permissions (VPN/Intranet)</p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="https://er-c-data-mgmt.fz-juelich.de/">
+                        Management interface
+                    </a>
+                </p>
+            </div>
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>Nextcloud</h3>
+                    <p>Syncronize, collaborate, ingest data via Nextcloud</p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="/nextcloud/">Use Nextcloud</a>
+                </p>
+            </div>
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>Network Filesystem</h3>
+                    <p>Directly access files from your favourite programs via network filesystems (VPN/Intranet)</p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="#use-filesystem">
+                        Details
+                    </a>
+                </p>
+            </div>
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>Jupyter Notebooks</h3>
+                    <p>Analyze and process data with Jupyter notebooks (VPN/Intranet)</p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="#use-jupyter">
+                        Use Jupyter
+                    </a>
+                </p>
+            </div>
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>File Transfer</h3>
+                    <p>Use standard tools like <code>scp</code> or
+                        <code>rsync</code> to transfer data in or out
+                    </p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="#use-file-transfer">
+                        Transfer files
+                    </a>
+                </p>
+            </div>
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>Ingest Data</h3>
+                    <p>Use our Ingest GUI to store your session's data from the microscopes</p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="#use-ingest">
+                        Details
+                    </a>
+                </p>
+            </div>
+            <!-- <div class="mui-panel cta__item cta__item--placeholder"></div> --> <!-- placeholder for layout purposes -->
+        </div>
+
+        <h2>Using the data management system</h2>
+
         <p>The system can be accessed with the IFF login credentials. See <a
         href="https://pgi-jcns.fz-juelich.de/portal/pages/services.html">the Scientific
         IT Systems page of PGI-JCNS-TA</a> for more information.</p>
+
+        <p>Please <a href="#contact">contact the admins</a> if you are planning to use more than 50 GB
+        in a project. This is very well possible, there should just be a clear
+        scientific value proposition and a way to cover the cost.</p>
+
+
+        <h3 id="use-filesystem">Access via network file systems</h3>
+
+        <p>
+        Your data is made available as a network share:
+        <code>\\er-c-data-smb.fz-juelich.de\er-c-data\</code> (Windows) or <a
+            href="smb://er-c-data-smb.fz-juelich.de/er-c-data/">smb://er-c-data-smb.fz-juelich.de/er-c-data/</a> (Linux, Mac OS X, other operating systems). FZ Jülich intranet/VPN only.
+        </p>
+
+        <p>
+        On the following Linux servers, your data is also available via NFS,
+        mounted at <code>/storage/er-c-data/</code>:
+        </p>
         <ul>
-            <li><a href="https://er-c-data.fz-juelich.de/nextcloud/">Nextcloud</a></li>
-            <li>Windows share (SMB, CIFS): \\er-c-data-smb.fz-juelich.de\er-c-data\ (Windows) or <a
-            href="smb://er-c-data-smb.fz-juelich.de/er-c-data/">smb://er-c-data-smb.fz-juelich.de/er-c-data/</a> (other operating systems). FZ
-            Jülich intranet only.</li>
-            <li><a href="https://er-c-data-mgmt.fz-juelich.de/">Project and session
-            management interface</a> (FZ Jülich intranet only).</li>
-            <li><a href="https://moellenstedt.iff.kfa-juelich.de">JupyterHub on Data
-            processing workstation <code>moellenstedt.iff.kfa-juelich.de</code></a>, mounted on <code>/storage/er-c-data/</code> (FZ
-            Jülich intranet only). See also <a href="#jupyterhub">how to make it accessible from your JupyterHub tree</a>.</li>
-            <li>SCP, rsync and direct file system access (SSH) through <code>moellenstedt.iff.kfa-juelich.de</code> in directory <code>/storage/er-c-data/</code>.</li>
+            <li>iff588 (moellenstedt)</li>
         </ul>
 
+        <p>Please <a href="#contact">contact us</a> if you would like to create a fast direct
+        connection to other data processing servers!</p>
+
+        <h3 id="use-jupyter">Jupyter notebooks</h3>
+
+        <p>
+        JupyterHub is available on the following hosts:
+        </p>
+        <ul>
+            <li><a href="https://moellenstedt.iff.kfa-juelich.de">JupyterHub on data
+                    processing workstation <code>moellenstedt.iff.kfa-juelich.de</code></a></li>
+        </ul>
+
+        <p>Your notebooks can access your data at <code>/storage/er-c-data/</code> - if you want to run notebooks stored
+        in the data management system, you need to create a link as <a href="#faq-jupyterhub">documented in our FAQ</a>.</p>
+
+        <h3 id="use-filetransfer">File Transfer</h3>
+        <p>As documented <a href="#use-filesystem">above</a>, your data is
+        available on
+        <code>moellenstedt.iff.kfa-juelich.de:/storage/er-c-data/</code> - that
+        means you can connect via standard file transfer tools (rsync, scp; GUIs like winscp or cyberduck)
+        to this host to transfer data in both directions. If possible, direct use
+        <a href="#use-filesystem">via the network share or NFS</a> should be preferred.</p>
+        <!-- TODO: a bit more documentation here? -->
+
+        <h3 id="use-ingest">Ingest GUI</h3>
+        <p>From the microscope PCs, you can use the data ingest GUI to upload
+        your experimental data. In the future, the UI will be properly documented here.
+        </p>
+
         <h2>Directory Structure</h2>
+
+        <p>In short:</p>
+
+        <ul>
+            <li>/storage/er-c-data/ — the root of the storage system</li>
+            <li>/storage/er-c-data/<em>project-name</em>/ — location for long-term projects</li>
+            <li>/storage/er-c-data/adhoc/ — location for user-created projects</li>
+            <li>/storage/er-c-data/adhoc/<em>project-name</em>/<em>session-name</em>/ — a session inside of a project</li>
+            <li>/storage/er-c-data/adhoc/<em>project-name</em>/<em>session-name</em>/raw/ — raw experimental data</li>
+        </ul>
+
         <p>At the top level will be long-lived projects that are managed via Unix group
         membership, which is administrated by PGI-JCNS-PA. This is not implemented yet, but will be
         available soon. In the folder <code>/adhoc</code> you find user-created projects that are
@@ -67,11 +181,31 @@
 
         <p>For the time being, sessions can only be created top-level within a project.
         It is planned to allow creating sessions at any place within a project at some
-        point. Please contact the admins if creating sessions in other placesis
+        point. Please <a href="#contact">contact the admins</a> if creating sessions in other places is
         important to you so that this is prioritized accordingly!</p>
 
         <p>Other than that, users are free to manage data in a project as they see fit.
         It is simply a folder structure in a Unix file system.</p>
+
+        <h2>FAQ</h2>
+        <h3 id="faq-jupyterhub">How do I make the files in the data management system available in my JupyterHub tree?</h3>
+        <p>By default, the tree shown by JupyterHub only contains a user's home
+        directory. To make data accessible that is outside a user's directory tree, one
+        can create a soft link within the home directory to the desired location.
+        Running this command on a command line terminal on Möllenstedt creates the link
+        <code>er-c-data</code> top-level in the user's home that points to the data
+        location <code>/storage/er-c-data</code>:</p>
+
+        <code>ln -s /storage/er-c-data ~/er-c-data</code>
+
+        <p>Please note that the user home directory is shared between all machines with IFF
+        login, which means the link will only work if the target folder
+        <code>/storage/er-c-data</code> is available on a given machine.</p>
+        
+        <h2 id="contact">Contact</h2>
+        <p>Please contact <a href="mailto:d.weber@fz-jelich.de">Dieter Weber</a>
+        or <a href="mailto:a.clausen@fz-juelich.de">Alexander Clausen</a> for help and questions.
+        </p>
 
         <h2>Architecture</h2>
         <!-- Object instead of img to allow clickable links in the SVG -->
@@ -123,9 +257,7 @@
 
         <p>Quotas for storage space per project are not enforced yet, but will be
         implemented soon to ensure controlled and economic use of the available
-        capacity. Please contact the admins if you are planning to use more than 50 GB
-        in a project. This is very well possible, there should just be a clear
-        scientific value proposition and a way to cover the cost.</p>
+        capacity.</p>
 
         <h2>Security</h2>
         <p>Valuable data should be set immutable through sealing or on request by admins
@@ -141,7 +273,7 @@
         space or a holding period of about 30 days is exceeded.</p>
 
         <p>Furthermore, daily snapshots are available as backup at ITS for the last 7
-        days. Please contact admins as soon as possible if you'd like to restore data
+        days. Please <a href="#contact">contact admins</a> as soon as possible if you'd like to restore data
         from backup!</p>
 
         <p>Protection against unauthorized reading is comparatively weak: Achieving
@@ -149,33 +281,13 @@
         read access to all data and full write access to all data that is not immutable.
         This is not a hypothetical scenario since users can log in to Möllenstedt and
         may exploit unpatched local privilege escalation bugs that surface every now and
-        then. Please contact the admins if any of your projects require data privacy or
+        then. Please <a href="#contact">contact the admins</a> if any of your projects require data privacy or
         might be at an elevated risk.</p>
 
         <p>Long-time archival, in particular for projects that are concluded, is in
         planning. Policies for this are under development. Valuable data that is
         elemental for publications should be published on Zenodo. This is often a
         requirement from scientific journals or funding bodies.</p>
-
-        <h2>FAQ</h2>
-        <h3 id="jupyterhub">How do I make the files in the data management system available in my JupyterHub tree?</h3>
-        <p>By default, the tree shown by JupyterHub only contains a user's home
-        directory. To make data accessible that is outside a user's directory tree, one
-        can create a soft link within the home directory to the desired location.
-        Running this command on a command line terminal on Möllenstedt creates the link
-        <code>er-c-data</code> top-level in the user's home that points to the data
-        location <code>/storage/er-c-data</code>:</p>
-
-        <code>ln -s /storage/er-c-data ~/er-c-data</code>
-
-        <p>Please note that the user home directory is shared between all machines with IFF
-        login, which means the link will only work if the target folder
-        <code>/storage/er-c-data</code> is available on a given machine.</p>
-        
-        <h2>Contact</h2>
-        <p>Please contact <a href="mailto:d.weber@fz-jelich.de">Dieter Weber</a>
-        or <a href="mailto:a.clausen@fz-juelich.de">Alexander Clausen</a> for help and questions.
-        </p>
     </div>
     <div class="mui-panel">
         <a href="https://er-c.org/index.php/imprint/">Imprint</a> | 
