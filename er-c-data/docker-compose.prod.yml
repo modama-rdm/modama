@@ -34,17 +34,17 @@ services:
   permissions:
     volumes:
       - type: bind
-        source: "/er-c-data"
+        source: "/data/er-c-data"
         target: "/data"
   watchdog:
     volumes:
       - type: bind
-        source: "/er-c-data"
+        source: "/data/er-c-data"
         target: "/data"
   smbdrop:
     volumes:
       - type: bind
-        source: "/er-c-data"
+        source: "/data/er-c-data"
         target: "/data"
     ports:
       - "127.0.0.1:1445:445"
@@ -57,7 +57,7 @@ volumes:
     driver_opts:
       type: "nfs"
       o: "addr=localhost,soft,timeo=60,intr,noexec,nosuid,rw"
-      device: ":/er-c-data"
+      device: ":/data/er-c-data"
 
 # Backup is deactivated for now to not collide with the
 # backup of the deployed prototype
