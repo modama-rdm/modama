@@ -21,9 +21,9 @@ if __name__ == '__main__':
             continue
         name = os.path.join(path, filename)
         try:
-            mode = os.stat(name).st_mode
             if 'IN_ISDIR' in type_names:
                 print("chmod +t", name)
+                mode = os.stat(name).st_mode
                 os.chmod(name, mode | stat.S_ISVTX)
             else:
                 print("remove acls", name)
@@ -35,6 +35,7 @@ if __name__ == '__main__':
                     check=True
                 )
                 print("chmod g-w", name)
+                mode = os.stat(name).st_mode
                 os.chmod(name, mode & ~stat.S_IWGRP)
         except Exception as e:
             print(e)
