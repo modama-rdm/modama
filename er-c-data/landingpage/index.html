@@ -111,8 +111,35 @@
         <p>
         Your data is made available as a network share:
         <code>\\er-c-data-smb.fz-juelich.de\er-c-data\</code> (Windows) or <a
-            href="smb://er-c-data-smb.fz-juelich.de/er-c-data/">smb://er-c-data-smb.fz-juelich.de/er-c-data/</a> (Linux, Mac OS X, other operating systems). FZ Jülich intranet/VPN only.
+        href="smb://er-c-data-smb.fz-juelich.de/er-c-data/">smb://er-c-data-smb.fz-juelich.de/er-c-data/</a>
+        (Linux, Mac OS X, other operating systems). FZ Jülich intranet/VPN only. When Windows prompts for credentials,
+        first select "More choices...", then "Use a different account", and enter <nobr><code>IFFWIN2K\&lt;your username&gt;</code></nobr>
+        and your IFF password. You can let Windows save these credentials if you
+        are logged into your own Windows session with your account. The
+        credentials should not be saved on shared accounts.
         </p>
+        <div class="mui-container-fluid">
+            <div class="mui-row">
+                <div class="mui-col-md-6"><div class="">
+                    <figure>
+                    <p><img width="100%" src="credentials-1.png" alt="Select 'More options'"/></p>
+                    <figurecaption>
+                        First, select "More choices" to enter the credentials for
+                        <code>\\er-c-data-smb.fz-juelich.de\er-c-data\</code>code></code>
+                    </figurecaption>
+                    </figure>
+                </div></div>
+                <div class="mui-col-md-6">
+                    <figure>
+                    <p><img width="100%" src="credentials-2.png" alt="Select 'Use a different account', use IFFWIN2K\&lt;your username&gt; and our IFF password"/></p>
+                    <figurecaption>
+                        Next, select "Use a different account" and enter your IFF credentials, specifying the <code>IFFW2K</code>
+                        Windows domain with your IFF user name. Optionally, you can save the credentials.
+                    </figurecaption>
+                    </figure>
+                </div>
+            </div>
+        </div>
 
         <p>
         On the following Linux servers, your data is also available via NFS,
@@ -138,7 +165,7 @@
         <p>Your notebooks can access your data at <code>/storage/er-c-data/</code> - if you want to run notebooks stored
         in the data management system, you need to create a link as <a href="#faq-jupyterhub">documented in our FAQ</a>.</p>
 
-        <h3 id="use-filetransfer">File Transfer</h3>
+        <h3 id="use-file-transfer">File Transfer</h3>
         <p>As documented <a href="#use-filesystem">above</a>, your data is
         available on
         <code>moellenstedt.iff.kfa-juelich.de:/storage/er-c-data/</code> - that
