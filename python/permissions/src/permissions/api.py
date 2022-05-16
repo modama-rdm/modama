@@ -78,8 +78,8 @@ def check_valid_group(groupname: str):
     '''
     if groupname in system_groups:
         raise ValidationError("Is a system group.")
-    if len(groupname) > 16:
-        raise ValidationError(f"Too long: Maximum length is 16, actual length is {len(groupname)}.")
+    if len(groupname) > 32:
+        raise ValidationError(f"Too long: Maximum length is 32, actual length is {len(groupname)}.")
     if len(groupname) < 3:
         raise ValidationError(f"Too short: Minimum length is 3, actual length is {len(groupname)}.")
     if not re.fullmatch('[a-z]', groupname[0]):
