@@ -115,7 +115,7 @@ class SambaProcessManager:
 # FIXME: adjust create/directory modes?
 samba_share_cfg_tpl = """
 [%(share_name)s]
-path = %(dest_path)s
+path = "%(dest_path)s"
 read only = no
 force create mode = 0600
 force directory mode = 0700
