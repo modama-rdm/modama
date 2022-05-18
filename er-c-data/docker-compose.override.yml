@@ -46,6 +46,9 @@ services:
       - type: bind
         source: "./testfolder/data"
         target: "/data"
+      - type: bind
+        source: "./testfolder/etc/smbdrop-shares.json"
+        target: "/etc/smbdrop-shares.json"
     ports:
       - "127.0.0.1:1446:445"
   mgmtinterface:
