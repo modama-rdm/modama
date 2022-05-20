@@ -358,13 +358,14 @@ def create_dataset(name: str):
     # First perform member action
     form = CreateDatasetForm()
     if request.method == 'POST' and form.validate():
+        dsname = form.name.data.strip()
         result = client.create_dataset(
             projectname=name,
-            name=form.name.data,
+            name=dsname,
             user=current_user.user_id,
         )
         if result['errno'] == 0:
-            flask.flash(f'Session "{form.name.data}" created in project "{name}".')
+            flask.flash(f'Session "{dsname}" created in project "{dsname}".')
             return flask.redirect(flask.url_for('project', name=name))
         else:
             flask.flash(f"Error: {result['message']}.")
