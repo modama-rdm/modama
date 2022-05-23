@@ -5,4 +5,4 @@ chmod o-rwx -R nextcloud-data
 chmod ugo+rwx data
 chown 33:33 -R nextcloud-html nextcloud-data
 chown root:root data data/adhoc
-echo "{}" > ./etc/smbdrop-shares.json
+echo '{ "shares": {}, "users": {}}' > ./etc/smbdrop-shares.json
