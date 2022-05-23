@@ -17,7 +17,8 @@
         },
         "files": {
             "cronjob_scan_files": "1500",
-            "default_quota": "500 MB"
+            "default_quota": "500 MB",
+            "max_chunk_size": 209715200
         },
         "files_trashbin": {
             "types": "filesystem,dav"
