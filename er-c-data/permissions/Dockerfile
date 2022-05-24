@@ -5,16 +5,16 @@ RUN --mount=type=cache,target=/var/cache/apt apt-get -y update && apt-get -y upg
 
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install gunicorn
 
-COPY ./python /code
-
+COPY ./python/permissions-client /code/permissions-client/
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/permissions-client/
+
+COPY ./python/permissions /code/permissions/
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/permissions/
 
 WORKDIR /code/permissions/
 
-COPY ./er-c-data/permissions/entrypoint.sh /entrypoint.sh
 COPY ./er-c-data/permissions/config.py /config.py
 
 ENV PERMISSIONS_CONFIG /config.py
 
-CMD ["/bin/bash", "/entrypoint.sh"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5050", "permissions.server:app"]

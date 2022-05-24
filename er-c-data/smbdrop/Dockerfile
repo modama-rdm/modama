@@ -8,15 +8,13 @@ RUN --mount=type=cache,target=/root/.cache python3 -m pip install gunicorn
 
 COPY ./python/smbdrop/smb.conf /etc/samba/smb.conf
 
-COPY ./python/ /code
-
-# RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/permissions-client
+COPY ./python/smbdrop-client /code/smbdrop-client
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/smbdrop-client
+
+COPY ./python/smbdrop /code/smbdrop
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/smbdrop
 
 EXPOSE 445/tcp
 EXPOSE 5051/tcp
 
-COPY ./er-c-data/smbdrop/entrypoint.sh /entrypoint.sh
-
-CMD ["/bin/bash", "/entrypoint.sh"]
+CMD ["gunicorn", "--worker-class", "sync", "--workers", "1", "--bind", "0.0.0.0:5051", "smbdrop.server:app"]
