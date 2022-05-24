@@ -7,18 +7,23 @@ RUN --mount=type=cache,target=/var/cache/apt apt-get -y update && \
 
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install gunicorn
 
-COPY ./python /code
-
+COPY ./python/smbdrop-client /code/smbdrop-client
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/smbdrop-client/
+
+COPY ./python/permissions-client /code/permissions-client
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/permissions-client/
+
+COPY ./python/mgmtinterface-client /code/mgmtinterface-client
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/mgmtinterface-client/
+
+# This one last to speed up iteration on the GUI
+COPY ./python/mgmtinterface /code/mgmtinterface
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install -e /code/mgmtinterface/
 
 WORKDIR /code/mgmtinterface/src/mgmtinterface
 
-COPY ./er-c-data/mgmtinterface/entrypoint.sh /entrypoint.sh
 COPY ./er-c-data/mgmtinterface/config.py /config.py
 
 ENV MGMTINTERFACE_CONFIG /config.py
 
-CMD ["/bin/bash", "/entrypoint.sh"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "mgmtinterface:app"]
