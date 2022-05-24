@@ -23,6 +23,14 @@
   and access permissions using all data acquisition tools and most operating systems.
   The ingest GUI FIXME link etc? helps managing the shares and sessions on the client machine.
   </p>
+  <p>
+  Windows only allows one set of credentials per session and remote host. The management interface creates all ingest shares for the same user
+  with the same credentials so that they can be open in parallel. Ingest shares for different users
+  cannot coexist, however. Any active shares by other users have to be closed for that reason. Active shares
+  can be listed with <code>net use</code> on the command line and closed with <code>net use &lt;drive letter or path&gt; /delete</code>.
+  Please note that shares opened with <code>\\&lt;host&gt;\&lt;share&gt;</code> in the Explorer remain active even after the Explorer window
+  is closed. They can only be unmapped via the command line or the Microsoft Management Console.
+  </p>
   {% if ds.shareinfo %}
     {% with si = ds.shareinfo %}  
       <h2>Access using Windows Explorer</h2>
@@ -36,6 +44,12 @@
         <label for="passwordwin">Password</label>
         <input id="passwordwin" value="{{ si.password }}" readonly style="width: 100%"/>
       </div>
+      <h2>Map as network drive Z: on Windows</h2>
+      <input id="netusewin" value="net use /persistent:no z: \\{{ si.smb_host }}\{{ si.share_name}} {{ si.password }} /USER:{{ si.workgroup }}\{{ si.username }}" readonly style="width: 100%"/>
+      <h2>Unmap network drive Z: on Windows</h2>
+      <input id="netusedeletewin" value="net use z: /delete" readonly style="width: 100%"/>
+      <h2>Unmap after opening in Windows Explorer</h2>
+      <input id="netusedeletewin2" value="net use \\{{ si.smb_host }}\{{ si.share_name}} /delete" readonly style="width: 100%"/>
       <h2>Access on Linux or OS X using a file manager</h2>
       <div>
         <label for="url">Address</label>
