@@ -174,6 +174,7 @@ def index():
     memberprojects = []
     otherprojects = []
     uid = current_user.user_id
+    user_info = client.id_user(uid)
     for p in plist:
         if p['owner'] == uid:
             ownprojects.append(p)
@@ -181,6 +182,18 @@ def index():
             memberprojects.append(p)
         else:
             otherprojects.append(p)
+
+    shares = smbclient.list()
+    own_shareinfo = []
+    for _, share in shares.items():
+        if share['uid'] == user_info['id']['uid']:
+            project, dsname = split_smbpath(share['dest_path'])
+            own_shareinfo.append(
+                {
+                    'project': project,
+                    'dsname': dsname,
+                }
+            )
 
     # contains: project list, actions: create new project, links to project details
     createprojectform = AddProjectForm()
@@ -190,6 +203,7 @@ def index():
         memberprojects=memberprojects,
         otherprojects=otherprojects,
         createprojectform=createprojectform,
+        shares=own_shareinfo,
     )
 
 
@@ -232,12 +246,42 @@ def add_project():
     )
 
 
+def moellenstedtpath(project, dsname=None):
+    if dsname is None:
+        return os.path.join(
+            app.config['MOELLENSTEDT_BASE'],
+            project['relpath'],
+        )
+    else:
+        return os.path.join(
+            app.config['MOELLENSTEDT_BASE'],
+            project['relpath'],
+            dsname,
+        )
+
+def main_smbpath(project, dsname=None):
+    win_path = project['relpath'].replace('/', '\\')
+    parts = [
+        app.config['MAIN_SMB_BASE'],
+        win_path
+    ]
+    if dsname is not None:
+        parts.append(dsname)
+    return '\\'.join(parts)
+
+
 def smbpath(project, dsname):
     return os.path.join(
         app.config['SMB_BASE'],
         project['relpath'],
         dsname
     )
+
+
+def split_smbpath(dest_path):
+    head, dsname = os.path.split(dest_path)
+    _, project = os.path.split(head)
+    return (project, dsname)
 
 
 def add_share_info(datasets, project, uid, shares):
@@ -262,7 +306,6 @@ def project(name: str):
     if pr_info['errno'] == 0:
         user_info = client.id_user(current_user.user_id)
         shares = smbclient.list()
-        print(shares)
         datasets = add_share_info(
             pr_info['datasets'],
             pr_info['project'],
@@ -270,6 +313,8 @@ def project(name: str):
             shares
         )
         datasets = sorted(datasets, key=lambda ds:ds['mtime'], reverse=True)
+        pr_info['project']['moellenstedtpath'] = moellenstedtpath(pr_info['project'])
+        pr_info['project']['main_smbpath'] = main_smbpath(pr_info['project'])
         return render_template(
             'projectdetails.html.j2',
             project=pr_info['project'],

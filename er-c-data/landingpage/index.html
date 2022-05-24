@@ -92,6 +92,39 @@
                     </a>
                 </p>
             </div>
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>Synchronize locally</h3>
+                    <p>Install and connect a native Nextcloud client</p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="#install-nextcloud">
+                        Install Nextcloud
+                    </a>
+                </p>
+            </div>
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>Large datasets</h3>
+                    <p>Transfer large folders or files</p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="#use-large">
+                        Details
+                    </a>
+                </p>
+            </div>
+            <div class="cta__item mui-panel">
+                <div>
+                    <h3>Report an issue</h3>
+                    <p>Contact admins or use the Issue tracker</p>
+                </div>
+                <p>
+                    <a class="mui-btn mui-btn--raised mui-btn--primary" href="#contact">
+                        Details
+                    </a>
+                </p>
+            </div>
             <!-- <div class="mui-panel cta__item cta__item--placeholder"></div> --> <!-- placeholder for layout purposes -->
         </div>
 
@@ -104,6 +137,18 @@
         <p>Please <a href="#contact">contact the admins</a> if you are planning to use more than 50 GB
         in a project. This is very well possible, there should just be a clear
         scientific value proposition and a way to cover the cost.</p>
+
+        <h3 id="install-nextcloud">Install a native Nextcloud client</h3>
+        <p>You can <a href="https://nextcloud.com/install/">download and install
+        the native Nextcloud client for your device</a>. Then choose "Log in to your
+        Nextcloud" and enter <a
+        href="https://er-c-data.fz-juelich.de/nextcloud/">https://er-c-data.fz-juelich.de/nextcloud/</a>
+        as your server address. If you already have the client installed and connected to a cloud server,
+        you can add an additional account.
+        </p>
+        <p>Please note that <a
+        href="https://docs.nextcloud.com/server/latest/user_manual/en/files/federated_cloud_sharing.html">federation</a>
+        is not supported yet and may not work reliably.</p>
 
 
         <h3 id="use-filesystem">Access via network file systems</h3>
@@ -169,10 +214,28 @@
         <p>As documented <a href="#use-filesystem">above</a>, your data is
         available on
         <code>moellenstedt.iff.kfa-juelich.de:/storage/er-c-data/</code> - that
-        means you can connect via standard file transfer tools (rsync, scp; GUIs like winscp or cyberduck)
-        to this host to transfer data in both directions. If possible, direct use
-        <a href="#use-filesystem">via the network share or NFS</a> should be preferred.</p>
+        means you can connect via standard file transfer tools (<a
+        href="https://en.wikipedia.org/wiki/Rsync">rsync</a>,
+        <a href="https://en.wikipedia.org/wiki/Secure_copy_protocol">scp</a>, <a
+        href="https://en.wikipedia.org/wiki/Secure_file_transfer_program">sftp</a>;
+        GUIs like <a href="https://en.wikipedia.org/wiki/WinSCP">WinSCP</a> or
+        <a href="https://en.wikipedia.org/wiki/Cyberduck">Cyberduck</a>) to this
+        host to transfer data in both directions. Direct use
+        <a href="#use-filesystem">via the network share or NFS</a> may give
+        better performance. Choosing a fast cipher and disabling compression can
+        speed up transfers tremendously over fast network: Try "<code>-c
+        aes128-ctr -o Compression=no</code>" as options with SSH-based tools.
+        </p>
         <!-- TODO: a bit more documentation here? -->
+
+        <h3 id="use-large">Large files or folders</h3>
+        <p>Using Nextcloud to handle large files or folders with many files can
+        be slow and may lead to timeouts or other errors. <a
+        href="#use-filesystem">Direct file system access</a>
+        is faster, in particular for many small files. Tools like <a href="#use-file-transfer">rsync</a> allow
+        to resume an aborted transfer, which is particularly advantageous for very large amounts of data or transfer over
+        unreliable network.
+        </p>
 
         <h3 id="use-ingest">Ingest GUI</h3>
         <p>From the microscope PCs, you can use the data ingest GUI to upload
@@ -230,6 +293,9 @@
         <code>/storage/er-c-data</code> is available on a given machine.</p>
         
         <h2 id="contact">Contact</h2>
+        <p>You can report, check and discuss current issues in the <a
+        href="https://iffgit.fz-juelich.de/weber/data-management-system/-/issues?sort=created_date&state=opened">Issue
+        tracker on IFFgit</a>. It is also used as a platform to develop the system further. You can access is with your IFF login.</p>
         <p>Please contact <a href="mailto:d.weber@fz-jelich.de">Dieter Weber</a>
         or <a href="mailto:a.clausen@fz-juelich.de">Alexander Clausen</a> for help and questions.
         </p>

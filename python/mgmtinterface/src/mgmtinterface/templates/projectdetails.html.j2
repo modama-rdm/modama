@@ -3,11 +3,11 @@
 {% block content %}
 {% include '_header.html.j2' %}
 
-{% from "_projecthelpers.html.j2" import render_members, render_datasets %}
+{% from "_projecthelpers.html.j2" import render_members, render_datasets, navbar_short %}
 
 
 <div class="mui-panel">
-  <p><a style="margin-right: 10px;" href="https://er-c-data.fz-juelich.de">Data management overview</a> | <a style="margin-left: 10px;"href="{{ url_for("index") }}">Projects</a></p>
+  {{ navbar_short() }}
   <h1>Project "{{ project.name }}"</h1>
   
   {% include '_flash.html.j2' %}
@@ -15,6 +15,10 @@
   <p>Created: {{ project.ctime|format_unixtime }}</p>
   <p>Modified: {{ project.mtime|format_unixtime }}</p>
   <p>Size (Bytes): {{ project.usage_bytes }}</p>
+  <p><a href="https://er-c-data.fz-juelich.de/nextcloud/apps/files/?dir=/ER-C-Data/{{ project.relpath  }}">Direct Nextcloud link</a></p>
+  <p><a href="https://en.wikipedia.org/wiki/Rsync">Rsync</a> push to Möllenstedt with optimized settings: <input id="rsync" value="rsync -av --info=progress2 -e &quot;ssh -T -c aes128-ctr -o Compression=no -x&quot; &quot;&lt;src_path&gt;&quot; &quot;{{ current_user.user_id }}@{{ project.moellenstedtpath }}/&quot;" readonly style="width: 100%"/></p>
+  <p><a href="https://en.wikipedia.org/wiki/Secure_file_transfer_program">SFTP</a> with optimized settings: <input id="sftp" value="sftp -c aes128-ctr -o Compression=no &quot;{{ current_user.user_id }}@{{ project.moellenstedtpath }}/&quot;" readonly style="width: 100%"/></p>
+  <p><a href="https://er-c-data.fz-juelich.de/#use-filesystem">SMB (Windows)</a>: <input id="smb" value="{{ project.main_smbpath }}" readonly style="width: 100%"/></p>
   <p>Members:
     {{ render_members(project, current_user) }}
   </p>

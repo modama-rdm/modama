@@ -1,6 +1,7 @@
 {% extends "base.html.j2" %}
 
 {% from "_formhelpers.html.j2" import render_field %}
+{% from "_projecthelpers.html.j2" import navbar_short %}
 
 {% block styles %}
 <link href="{{ url_for('static', filename='select2-4.0.13/dist/css/select2.min.css') }}" rel="stylesheet" />
@@ -17,7 +18,7 @@
 {% include '_header.html.j2' %}
 
 <div class="mui-panel">
-  <p><a style="margin-right: 10px;" href="https://er-c-data.fz-juelich.de">Data management overview</a> | <a style="margin-left: 10px;"href="{{ url_for("index") }}">Projects</a></p>
+  {{ navbar_short() }}
   <div class="mui-panel">
     <h1>Create Project</h1>
     {% include '_flash.html.j2' %}

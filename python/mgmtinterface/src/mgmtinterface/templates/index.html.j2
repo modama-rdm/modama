@@ -19,6 +19,17 @@
     </tr>
 {% endmacro %}
 
+{% macro render_share(s) %}
+    <tr>
+        <td><a href="{{ url_for("project", name=s.project) }}">{{ s.project }}</a></td>
+        <td>{{ s.dsname }}</td>
+        <td><a href="{{ url_for('share_dataset', name=s.project, dataset=s.dsname) }}">
+                    <button class="mui-btn mui-btn--small mui-btn--raised">Manage ingest...</button>
+                </a>
+        </td>
+    </tr>
+{% endmacro %}
+
 <div class="mui-panel">
     <p><a href="https://er-c-data.fz-juelich.de">Data management overview</a></p>
     <h1>Projects</h1>
@@ -64,6 +75,24 @@
         </tbody>
     </table>
 
+    {% if shares %}
+    <h1>Active ingest sessions</h1>
+
+    <table class="mui-table">
+        <thead>
+            <tr>
+                <th>Project</th>
+                <th>Name</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+                {% for shares in shares %}
+                    {{ render_share(shares) }}
+                {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
     <p>
         <a href="{{ url_for("add_project") }}">
             <button type="button" class="mui-btn mui-btn--raised">
