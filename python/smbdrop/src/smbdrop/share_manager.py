@@ -165,8 +165,8 @@ class ShareManager:
     def __init__(
         self,
         config_manager: SambaConfigManager,
-        shares_config: str = "/etc/smbdrop-shares.json",
-        lock_path: str = "/tmp/shares.lock",
+        shares_config: str = "/etc/smbdrop/shares.json",
+        lock_path: str = "/etc/smbdrop/shares.lock",
     ):
         """
 
@@ -204,9 +204,13 @@ class ShareManager:
     def _write_config(self, config: Config) -> None:
         # NOTE: only call while holding the self._share_lock!
         os.umask(0o077)  # mask out all bits for group and other
-        path = self._shares_config_path
+        path = os.path.join(
+            os.path.dirname(self._shares_config_path),
+            ".meh.json~tmp"
+        )
         with open(path, "w") as f:
             f.write(json.dumps(config))
+        os.rename(src=path, dst=self._shares_config_path)
 
     def _read_config(self) -> Config:
         # NOTE: when doing a read/modify/update-cycle,
@@ -289,24 +293,33 @@ class ShareManager:
         return config
     
     def _consistency_check(self, config: Config) -> bool:
-        for s in config['shares'].values():
-            if str(s['uid']) not in config['users']:
-                try:
-                    pwd.getpwnam(s['username'])
-                    raise RuntimeError(f"User for share {s} not found in share database, but exists on system.")
-                except KeyError:
-                    raise RuntimeError(f"User for share {s} not found.")
+        share_uids = set(s['uid'] for s in config['shares'].values())
+        user_uids = set(u['uid'] for u in config['users'].values())
+        if share_uids != user_uids:
+            RuntimeError(f"Mismatch between UIDs used in shares {share_uids} and UIDs assigned to users {user_uids}.")
+
         for u in config['users'].values():
             try:
-                pwd.getpwnam(u['username'])
+                pwres = pwd.getpwnam(u['username'])
+                if u['uid'] != pwres.pw_uid:
+                    raise RuntimeError(
+                        f"UID mismatch for {u['username']}: System UID {pwres.pw_uid} vs database UID {u['uid']}."
+                    )
             except KeyError:
-                raise RuntimeError(f"User {s['uid']} not found.")
-            used = False
-            for s in config['shares'].values():
-                if u['uid'] == s['uid']:
-                    used = True
-            if not used:
-                raise RuntimeError(f"No share found for user {u}.")
+                raise RuntimeError(f"User {u['username']} not found.")
+            try:
+                pwres = pwd.getpwuid(u['uid'])
+                if u['username'] != pwres.pw_name:
+                    raise RuntimeError(
+                        f"User name mismatch for {u['uid']}: System {pwres.pw_name} vs database {u['username']}."
+                    )
+            except KeyError:
+                raise RuntimeError(f"User {u['username']} not found.")
+
+        for s in config['shares'].values():
+            user_entry = config['users'][str(s['uid'])]
+            if user_entry['username'] != s['username']:
+                raise RuntimeError(f"User name mismatch for {s['uid']}: User entry {user_entry['username']} vs share {s['username']}.")
         return True
 
     def create_share(self, dest_path: str, uid: int, gid: int) -> Share:
@@ -373,6 +386,5 @@ class ShareManager:
             return config
 
     def list(self) -> Shares:
-        with self._share_lock:
-            config = self._read_config()
+        config = self._read_config()
         return config['shares']

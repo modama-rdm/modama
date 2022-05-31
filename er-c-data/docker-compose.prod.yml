@@ -47,8 +47,8 @@ services:
         source: "/data/er-c-data"
         target: "/data"
       - type: bind
-        source: "/var/local/data-mgmt/smbdrop-shares.json"
-        target: "/etc/smbdrop-shares.json"
+        source: "/var/local/data-mgmt/smbdrop"
+        target: "/etc/smbdrop/"
     ports:
       - "127.0.0.1:1445:445"
   mgmtinterface:
