@@ -1,9 +1,9 @@
-{% macro navbar(project) %}
-    <p><a href="{{ url_for("index") }}">Projects</a> / <a style="margin-right: 10px;" href="{{ url_for("project", name=project.name) }}">{{ project.name }}</a> | <a style="margin-left: 10px;" href="https://er-c-data.fz-juelich.de">Data management overview</a></p>
+{% macro navbar(project, topic) %}
+    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("index") }}">Projects</a> / <a href="{{ url_for("project", name=project.name) }}">{{ project.name }}</a> / {{ topic }}</p>
 {% endmacro %}
 
-{% macro navbar_short() %}
-    <p><a style="margin-right: 10px;" href="{{ url_for("index") }}">Projects</a> | <a style="margin-left: 10px;" href="https://er-c-data.fz-juelich.de">Data management overview</a></p>
+{% macro navbar_short(topic) %}
+    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("index") }}">Projects</a> / {{ topic }}</p>
 {% endmacro %}
 
 {% macro render_members(project, current_user) %}      

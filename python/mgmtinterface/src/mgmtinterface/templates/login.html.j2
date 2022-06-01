@@ -1,13 +1,14 @@
 {% extends "base.html.j2" %}
 
 {% from "_formhelpers.html.j2" import render_field %}
+{% from "_projecthelpers.html.j2" import navbar_short %}
 
 {% block content %}
 
 {% include '_header.html.j2' %}
 
 <div class="mui-panel">
-  <p><a href="https://er-c-data.fz-juelich.de">Data management overview</a></p>
+  {{ navbar_short("Login") }}
   <h1>Login</h1>
   {% include '_flash.html.j2' %}
   <p>All members of the 'iff' group in the PGI-JCNS-TA user management
