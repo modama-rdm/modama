@@ -7,7 +7,7 @@ import json
 import signal
 import secrets
 import logging
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 from typing_extensions import TypedDict
 import subprocess
 
@@ -178,9 +178,8 @@ class ShareManager:
             Path to the shares config as JSON, which will be managed by
             this class.
         lock_path : str, optional
-            [description], by default "/tmp/shares.lock"
+            [description], by default "/etc/smbdrop/shares.lock"
         """
-        # FIXME: better default value for config/lock path!
         self._share_lock = fasteners.InterProcessLock(lock_path)
         self._shares_config_path = shares_config
         self._config_manager = config_manager
