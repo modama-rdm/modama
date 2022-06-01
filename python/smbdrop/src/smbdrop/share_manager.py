@@ -77,7 +77,7 @@ class User(TypedDict):
 
 
 Shares = Dict[str, Share]  # id-to-Share mapping
-Users = Dict[int, User]  # Unix uid to Samba user mapping
+Users = Dict[str, User]  # Unix uid to Samba user mapping
 
 
 class Config(TypedDict):
@@ -206,7 +206,7 @@ class ShareManager:
         os.umask(0o077)  # mask out all bits for group and other
         path = os.path.join(
             os.path.dirname(self._shares_config_path),
-            ".meh.json~tmp"
+            ".shares.json~tmp"
         )
         with open(path, "w") as f:
             f.write(json.dumps(config))
@@ -229,7 +229,7 @@ class ShareManager:
         # delegate to SambaConfigManager
         self._config_manager.update_shares(shares)
 
-    def _get_create_user(self, uid: int, share_id: str) -> str:
+    def _get_create_user(self, uid: int, share_id: str) -> Tuple[str, str]:
         # NOTE: only call while holding the self._share_lock!
         config = self._read_config()
         if str(uid) in config['users']:
@@ -273,7 +273,7 @@ class ShareManager:
         if proc.returncode != 0:
             raise RuntimeError("failed to set temporary credentials")
 
-    def _remove_user(self, uid: int) -> None:
+    def _remove_user(self, uid: int) -> Config:
         # NOTE: only call while holding the self._share_lock!
         config = self._read_config()
         if str(uid) not in config['users']:
@@ -346,7 +346,7 @@ class ShareManager:
             self._update_samba(config['shares'])
         return share
 
-    def delete_share(self, share_id: str) -> Shares:
+    def delete_share(self, share_id: str) -> Config:
         with self._share_lock:
             config = self._read_config()
             if share_id not in config['shares']:
@@ -362,7 +362,7 @@ class ShareManager:
             # The share to delete is the last one of that user
             if use_count == 1:
                 self._remove_user(share['uid'])
-            elif use_count <= 1:
+            elif use_count < 1:
                 raise RuntimeError('User database inconsistency')
             config = self._read_config()
             assert self._consistency_check(config)
