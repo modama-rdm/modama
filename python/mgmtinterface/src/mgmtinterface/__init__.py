@@ -107,7 +107,7 @@ class ChangeProjectMembersForm(FlaskForm):
 
 def default_dataset_name():
     now = datetime.now()
-    return now.strftime('%Y-%m-%d ')
+    return now.strftime('%Y-%m-%d-')
 
 
 class CreateDatasetForm(FlaskForm):
