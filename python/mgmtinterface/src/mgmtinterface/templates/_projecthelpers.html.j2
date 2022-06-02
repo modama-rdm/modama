@@ -1,14 +1,14 @@
 {% macro navbar(project, topic) %}
-    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("index") }}">Projects</a> / <a href="{{ url_for("project", name=project.name) }}">{{ project.name }}</a> / {{ topic }}</p>
+    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("project") }}">Projects</a> / <a href="{{ url_for("projectdetails", name=project.name) }}">{{ project.name | escape }}</a> / {{ topic | escape }}</p>
 {% endmacro %}
 
 {% macro navbar_short(topic) %}
-    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("index") }}">Projects</a> / {{ topic }}</p>
+    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("project") }}">Projects</a> / {{ topic | escape }}</p>
 {% endmacro %}
 
 {% macro render_members(project, current_user) %}      
       {% for m in project.members %}
-        {{ m }}{{ ", " if not loop.last else "" }}
+        {{ m | escape }}{{ ", " if not loop.last else "" }}
       {% endfor %}
 {% endmacro %}
 
@@ -26,13 +26,13 @@
         <tbody>
             {% for d in datasets %}
             <tr>
-                <td>{{ d.name }}</td>
+                <td>{{ d.name | escape }}</td>
                 <td>{{ d.mtime|format_unixtime }}</td>
                 <td>
                   {% if d.immutable %}sealed{% else %}writable{% endif %}{% if d.shared %}, ingest active{% endif %}
                 </td>
-                {% if not d.immutable and (current_user.user_id in project.members or current_user.user_id == project.owner) %}
                 <td>
+                {% if not d.immutable and (current_user.user_id in project.members or current_user.user_id == project.owner) %}
                 <a href="{{ url_for('seal_dataset', name=project.name, dataset=d.name) }}">
                     <button class="mui-btn mui-btn--small mui-btn--raised">Seal...</button>
                 </a>
@@ -53,7 +53,7 @@
 {% endmacro %}
 
 {% macro cancel(project, action="Cancel") %}
-        <a href="{{ url_for("project", name=project.name) }}">
+        <a href="{{ url_for("projectdetails", name=project.name) }}">
             <button type="button" class="mui-btn mui-btn--raised">{{ action }}</button>
         </a>
 {% endmacro %}

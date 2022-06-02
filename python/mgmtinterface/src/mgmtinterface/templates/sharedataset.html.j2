@@ -10,7 +10,7 @@
 <div class="mui-panel">
   {{ navbar(project, "Ingest") }}
 
-  <h1>Manage ingest share for session "{{ ds.name }}" in project "{{ project.name }}"</h1>
+  <h1>Manage ingest share for session "{{ ds.name | escape }}" in project "{{ project.name | escape }}"</h1>
   
   {% include '_flash.html.j2' %}
   <p>An ingest network share is a temporary Windows network share (SMB/CIFS) with temporary credentials
@@ -36,27 +36,27 @@
       <h2>Access using Windows Explorer</h2>
       <div>
         <label for="urlwin">Address</label>
-        <input id="urlwin" value="\\{{ si.smb_host }}\{{ si.share_name}}" readonly style="width: 100%"/>
+        <input id="urlwin" value="\\{{ si.smb_host | escape }}\{{ si.share_name | escape}}" readonly style="width: 100%"/>
 
         <label for="username">Username</label>
-        <input id="username" value="{{ si.workgroup }}\{{ si.username }}" readonly style="width: 100%"/>
+        <input id="username" value="{{ si.workgroup | escape }}\{{ si.username | escape }}" readonly style="width: 100%"/>
 
         <label for="passwordwin">Password</label>
-        <input id="passwordwin" value="{{ si.password }}" readonly style="width: 100%"/>
+        <input id="passwordwin" value="{{ si.password | escape }}" readonly style="width: 100%"/>
       </div>
       <h2>Map as network drive Z: on Windows</h2>
-      <input id="netusewin" value="net use /persistent:no z: \\{{ si.smb_host }}\{{ si.share_name}} {{ si.password }} /USER:{{ si.workgroup }}\{{ si.username }}" readonly style="width: 100%"/>
+      <input id="netusewin" value="net use /persistent:no z: \\{{ si.smb_host | escape }}\{{ si.share_name | escape }} {{ si.password | escape }} /USER:{{ si.workgroup | escape }}\{{ si.username | escape }}" readonly style="width: 100%"/>
       <h2>Unmap network drive Z: on Windows</h2>
       <input id="netusedeletewin" value="net use z: /delete" readonly style="width: 100%"/>
       <h2>Unmap after opening in Windows Explorer</h2>
-      <input id="netusedeletewin2" value="net use \\{{ si.smb_host }}\{{ si.share_name}} /delete" readonly style="width: 100%"/>
+      <input id="netusedeletewin2" value="net use \\{{ si.smb_host | escape }}\{{ si.share_name | escape }} /delete" readonly style="width: 100%"/>
       <h2>Access on Linux or OS X using a file manager</h2>
       <div>
         <label for="url">Address</label>
-        <input id="url" value="smb://{{ si.username }}@{{ si.smb_host }}/{{ si.share_name }}" readonly style="width: 100%"/>
+        <input id="url" value="smb://{{ si.username | escape }}@{{ si.smb_host | escape }}/{{ si.share_name | escape }}" readonly style="width: 100%"/>
         
         <label for="password">Password</label>
-        <input id="password" value="{{ si.password }}" readonly style="width: 100%"/>
+        <input id="password" value="{{ si.password | escape }}" readonly style="width: 100%"/>
       </div>
     {% endwith %}
   {%endif%}

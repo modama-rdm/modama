@@ -8,12 +8,12 @@
 
 {% macro render_row(p) %}
     <tr>
-        <td><a href="{{ url_for("project", name=p.name) }}">{{ p.name }}</a></td>
+        <td><a href="{{ url_for("projectdetails", name=p.name) }}">{{ p.name | escape }}</a></td>
         <td>{{ p.mtime|format_unixtime }}</td>
-        <td>{{ p.owner }}</td>
+        <td>{{ p.owner | escape }}</td>
         <td>
             {% for m in p.members %}
-                {{ m }}
+                {{ m | escape }}
             {% endfor %}
         </td>
     </tr>
@@ -21,8 +21,8 @@
 
 {% macro render_share(s) %}
     <tr>
-        <td><a href="{{ url_for("project", name=s.project) }}">{{ s.project }}</a></td>
-        <td>{{ s.dsname }}</td>
+        <td><a href="{{ url_for("projectdetails", name=s.project) }}">{{ s.project | escape }}</a></td>
+        <td>{{ s.dsname | escape }}</td>
         <td><a href="{{ url_for('share_dataset', name=s.project, dataset=s.dsname) }}">
                     <button class="mui-btn mui-btn--small mui-btn--raised">Manage ingest...</button>
                 </a>

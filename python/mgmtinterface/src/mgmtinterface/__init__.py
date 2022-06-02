@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from typing import Dict
 import pathlib
+import shlex
 
 import jsonschema
 from flask import Flask, render_template, request
@@ -129,6 +130,11 @@ def format_unixtime(value):
     return d.strftime('%Y-%m-%d %H:%M')
 
 
+@app.template_filter()
+def shellescape(filename):
+    return shlex.quote(filename)
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return User(user_id=user_id)
@@ -160,9 +166,14 @@ def login():
     return render_template('login.html.j2', form=form)
 
 
-@app.route("/", methods=["GET"])
-@login_required
+@app.route('/')
 def index():
+    return flask.redirect(flask.url_for('project'))
+
+
+@app.route("/project/", methods=["GET"])
+@login_required
+def project():
     projects = client.list_projects()
     if projects['errno'] != 0:
         return render_template(
@@ -198,7 +209,7 @@ def index():
     # contains: project list, actions: create new project, links to project details
     createprojectform = AddProjectForm()
     return render_template(
-        'index.html.j2',
+        'project.html.j2',
         ownprojects=ownprojects,
         memberprojects=memberprojects,
         otherprojects=otherprojects,
@@ -207,7 +218,7 @@ def index():
     )
 
 
-@app.route("/add/", methods=["GET", "POST"])
+@app.route("/project/add/", methods=["GET", "POST"])
 @login_required
 def add_project():
     form = AddProjectForm()
@@ -237,7 +248,7 @@ def add_project():
         )
         if result['errno'] == 0:
             flask.flash(f"Project {form.name.data} created.")
-            return flask.redirect(flask.url_for('project', name=form.name.data))
+            return flask.redirect(flask.url_for('projectdetails', name=form.name.data))
         else:
             flask.flash(f"Error {result['message']}")
     return render_template(
@@ -299,9 +310,9 @@ def add_share_info(datasets, project, uid, shares):
     return datasets
 
 
-@app.route("/<name>/details/", methods=["GET"])
+@app.route("/project/<name>/details/", methods=["GET"])
 @login_required
-def project(name: str):
+def projectdetails(name: str):
     pr_info = client.projectdetails(name)
     if pr_info['errno'] == 0:
         user_info = client.id_user(current_user.user_id)
@@ -327,7 +338,7 @@ def project(name: str):
         )
 
 
-@app.route("/<name>/members/", methods=["GET", "POST"])
+@app.route("/project/<name>/members/", methods=["GET", "POST"])
 @login_required
 def project_members(name: str):
     def error(info):
@@ -384,7 +395,7 @@ def project_members(name: str):
             if not is_error:
                 if to_add or to_remove:
                     flask.flash("Project members updated.")
-                return flask.redirect(flask.url_for('project', name=name))
+                return flask.redirect(flask.url_for('projectdetails', name=name))
         if updated:
             pr_info = client.projectdetails(name)
         if pr_info['errno'] == 0:
@@ -397,7 +408,7 @@ def project_members(name: str):
     return(error(pr_info))
 
 
-@app.route("/<name>/createdataset/", methods=["GET", "POST"])
+@app.route("/project/<name>/createdataset/", methods=["GET", "POST"])
 @login_required
 def create_dataset(name: str):
     # First perform member action
@@ -411,7 +422,7 @@ def create_dataset(name: str):
         )
         if result['errno'] == 0:
             flask.flash(f'Session "{dsname}" created in project "{dsname}".')
-            return flask.redirect(flask.url_for('project', name=name))
+            return flask.redirect(flask.url_for('projectdetails', name=name))
         else:
             flask.flash(f"Error: {result['message']}.")
     else:
@@ -433,7 +444,7 @@ def create_dataset(name: str):
         )
 
 
-@app.route("/<name>/seal/<dataset>/", methods=["GET", "POST"])
+@app.route("/project/<name>/seal/<dataset>/", methods=["GET", "POST"])
 @login_required
 def seal_dataset(name: str, dataset: str):
     # First perform member action
@@ -446,7 +457,7 @@ def seal_dataset(name: str, dataset: str):
         )
         if result['errno'] == 0:
             flask.flash(f'Session "{dataset}" in project "{name}" sealed.')
-            return flask.redirect(flask.url_for('project', name=name))
+            return flask.redirect(flask.url_for('projectdetails', name=name))
         else:
             flask.flash(f"Error: {result['message']}.")
 
@@ -468,7 +479,7 @@ def seal_dataset(name: str, dataset: str):
         )
 
 
-@app.route("/<name>/share/<dataset>/", methods=["GET", "POST"])
+@app.route("/project/<name>/share/<dataset>/", methods=["GET", "POST"])
 @login_required
 def share_dataset(name: str, dataset: str):
     # First perform member action
