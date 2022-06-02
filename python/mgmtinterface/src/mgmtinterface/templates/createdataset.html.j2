@@ -10,7 +10,7 @@
 <div class="mui-panel">
   {{ navbar(project, "Create session") }}
   <div class="mui-panel">
-    <h1>Create session in project "{{ project['name'] | escape }}"</h1>
+    <h1>Create session in project "{{ project['name'] }}"</h1>
 
     {% include '_flash.html.j2' %}
     <p>Sessions are top-level directories within a project that contain a <code>raw</code> subfolder.

@@ -23,7 +23,7 @@ class ShareClient:
         resp = requests.post(url, json=payload, auth=self.auth)
         if not resp.ok:
             raise RuntimeError(
-                "something went wrong when creating the share for {dest_path},"
+                f"something went wrong when creating the share for {dest_path},"
                 " please check the logs!"
             )
         resp_data: Dict = resp.json()

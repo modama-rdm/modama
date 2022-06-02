@@ -28,6 +28,7 @@ app = Flask(__name__)
 app.config.from_object('mgmtinterface.default_config')
 app.config.from_envvar('MGMTINTERFACE_CONFIG')
 app.config.from_envvar('MGMTINTERFACE_SECRET')
+app.jinja_options["autoescape"] = lambda _: True
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -502,11 +503,15 @@ def share_dataset(name: str, dataset: str):
                 or current_user.user_id == pr_info['project']['owner']):
             if form.op.data == 'create':
                 updated = True
-                result = smbclient.create(
-                    dest_path=smbpath(pr_info['project'], ds['name']),
-                    uid=user_info['id']['uid'],
-                    gid=pr_info['project']['gid'],
-                )
+                try:
+                    result = smbclient.create(
+                        dest_path=smbpath(pr_info['project'], ds['name']),
+                        uid=user_info['id']['uid'],
+                        gid=pr_info['project']['gid'],
+                    )
+                except RuntimeError as e:
+                    flask.flash(f"Error: {e}.")
+                    return flask.redirect(flask.url_for('share_dataset', name=name, dataset=dataset))
                 if result['share_id']:
                     flask.flash(f'Share for session "{dataset}" in project "{name}" created.')
                     return flask.redirect(flask.url_for('share_dataset', name=name, dataset=dataset))

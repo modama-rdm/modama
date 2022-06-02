@@ -12,7 +12,7 @@
             </td>
             <td class="mui--appbar-height" align="right">
                 {% if current_user.user_id %}
-                    <span style="margin-right: 10px;">Logged in as {{ current_user.user_id | escape }}</span>
+                    <span style="margin-right: 10px;">Logged in as {{ current_user.user_id }}</span>
                     <a href="{{ url_for("logout") }}">
                         <button class="mui-btn mui-btn--raised">Logout</button>
                     </a>

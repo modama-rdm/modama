@@ -10,7 +10,7 @@
 <div class="mui-panel">
   {{ navbar(project, "Seal session") }}
 
-  <h1>Confirm seal session "{{ dsname | escape }}" in project "{{ project.name | escape }}"</h1>
+  <h1>Confirm seal session "{{ dsname }}" in project "{{ project.name }}"</h1>
   
   {% include '_flash.html.j2' %}
   <p>Sealing a session sets the <code>raw</code> subfolder of a session and all it contents
@@ -25,7 +25,7 @@
       <input
         type="submit"
         class="mui-btn mui-btn--raised mui-btn--danger"
-        value="Seal session '{{ dsname | escape }}'"
+        value="Seal session '{{ dsname }}'"
       />
       {{ cancel(project) }}
     </p>

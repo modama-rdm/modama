@@ -10,6 +10,7 @@ import logging
 from typing import Optional, Dict, Tuple
 from typing_extensions import TypedDict
 import subprocess
+import re
 
 import fasteners
 
@@ -326,6 +327,8 @@ class ShareManager:
         Create a new samba share in the give configuration file
         and return its id.
         """
+        if not re.fullmatch('[-/a-zA-Z0-9_. ]*', dest_path):
+            raise RuntimeError("Path name can only contain characters /, a-z, A-Z, 0-9, '_', '-', ' ' and '.'.")
         with self._share_lock:
             share_id = str(uuid.uuid4())
             username, password = self._get_create_user(uid, share_id)

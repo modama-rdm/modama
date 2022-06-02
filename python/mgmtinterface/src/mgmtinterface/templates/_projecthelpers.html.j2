@@ -1,14 +1,14 @@
 {% macro navbar(project, topic) %}
-    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("project") }}">Projects</a> / <a href="{{ url_for("projectdetails", name=project.name) }}">{{ project.name | escape }}</a> / {{ topic | escape }}</p>
+    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("project") }}">Projects</a> / <a href="{{ url_for("projectdetails", name=project.name) }}">{{ project.name }}</a> / {{ topic }}</p>
 {% endmacro %}
 
 {% macro navbar_short(topic) %}
-    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("project") }}">Projects</a> / {{ topic | escape }}</p>
+    <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("project") }}">Projects</a> / {{ topic }}</p>
 {% endmacro %}
 
 {% macro render_members(project, current_user) %}      
       {% for m in project.members %}
-        {{ m | escape }}{{ ", " if not loop.last else "" }}
+        {{ m }}{{ ", " if not loop.last else "" }}
       {% endfor %}
 {% endmacro %}
 
@@ -26,7 +26,7 @@
         <tbody>
             {% for d in datasets %}
             <tr>
-                <td>{{ d.name | escape }}</td>
+                <td>{{ d.name }}</td>
                 <td>{{ d.mtime|format_unixtime }}</td>
                 <td>
                   {% if d.immutable %}sealed{% else %}writable{% endif %}{% if d.shared %}, ingest active{% endif %}
