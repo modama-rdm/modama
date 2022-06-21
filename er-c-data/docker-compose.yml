@@ -86,6 +86,7 @@ services:
     restart: always
     volumes:
       - './webdav-proxy.nginx.conf:/etc/nginx/conf.d/default.conf'
+      - './webdav-proxy.etc.nginx.nginx.conf:/etc/nginx/nginx.conf'
       - "sockets:/run/gunicorn/"
 
   cloudproxy:

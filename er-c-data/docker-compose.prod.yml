@@ -26,6 +26,10 @@ services:
     volumes:
       # Data directory to export
       - "nfsdata:/var/wsgidav-root"
+  webdav:
+    volumes:
+      # Data directory to export
+      - "nfsdata:/data/"
   cloudproxy:
     volumes:
       - './prodconf/cloudproxy-servername.nginx.conf.snippet:/etc/nginx/conf.d/servername.conf.snippet'

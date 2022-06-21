@@ -4,5 +4,9 @@
     },
     "server_args": {
         "timeout": 3600
+    },
+    "sendfile": {
+        "enabled": true,
+        "prefix": "/protected"
     }
 }
