@@ -29,7 +29,9 @@ services:
   webdav:
     volumes:
       # Data directory to export
-      - "nfsdata:/data/"
+      - type: bind
+        source: "/data/er-c-data"
+        target: "/data"
   cloudproxy:
     volumes:
       - './prodconf/cloudproxy-servername.nginx.conf.snippet:/etc/nginx/conf.d/servername.conf.snippet'
