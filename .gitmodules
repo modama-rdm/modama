@@ -8,3 +8,6 @@
 	path = er-c-data/wsgidav
 	url = gitlab@iffgit.fz-juelich.de:clausen/wsgidav.git
 	branch = suid
+[submodule "er-c-data/tsm-client"]
+	path = er-c-data/tsm-client
+	url = https://jugit.fz-juelich.de/d.weber/tsm-client.git
