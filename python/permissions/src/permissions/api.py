@@ -319,7 +319,11 @@ class AdhocProject:
 
     @property
     def owner(self) -> str:
-        return pwd.getpwuid(os.stat(self.path).st_uid).pw_name
+        uid = os.stat(self.path).st_uid
+        try:
+            return pwd.getpwuid(uid).pw_name
+        except KeyError:  # example: `KeyError: 'getpwuid(): uid not found: XXX'`
+            return str(uid)
 
     @property
     def members(self) -> List[str]:
