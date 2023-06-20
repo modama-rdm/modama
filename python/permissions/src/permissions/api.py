@@ -126,6 +126,13 @@ def id(username):
     }
 
 
+def uid_to_username(uid: int) -> str:
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:  # example: `KeyError: 'getpwuid(): uid not found: XXX'`
+        return str(uid)
+
+
 def list_users(adhoc_group):
     # FIXME this only works if adhoc_group is not
     # a user's primary group. Workaround on systems managed
@@ -320,10 +327,7 @@ class AdhocProject:
     @property
     def owner(self) -> str:
         uid = os.stat(self.path).st_uid
-        try:
-            return pwd.getpwuid(uid).pw_name
-        except KeyError:  # example: `KeyError: 'getpwuid(): uid not found: XXX'`
-            return str(uid)
+        return uid_to_username(uid)
 
     @property
     def members(self) -> List[str]:
@@ -332,7 +336,9 @@ class AdhocProject:
         acl = posix1e.ACL(filedef=self.path)
         for a in acl:
             if a.tag_type is posix1e.ACL_USER:
-                members.append(pwd.getpwuid(a.qualifier).pw_name)
+                members.append(
+                    uid_to_username(a.qualifier)
+                )
         return list(set(members))
 
     def add_members(self, usernames: List[str], user) -> None:
