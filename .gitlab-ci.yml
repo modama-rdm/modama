@@ -11,10 +11,27 @@ container-image-build:
   script:
     # TODO:
     # - login, tag images, and push them to the registry
+
     - /kaniko/executor
         --context "${CI_PROJECT_DIR}"
         --dockerfile er-c-data/permissions/Dockerfile
         --no-push
+
+    - /kaniko/executor
+        --context "${CI_PROJECT_DIR}"
+        --dockerfile er-c-data/watchdog/Dockerfile
+        --no-push
+
+    - /kaniko/executor
+        --context "${CI_PROJECT_DIR}"
+        --dockerfile er-c-data/smbdrop/Dockerfile
+        --no-push
+
+    - /kaniko/executor
+        --context "${CI_PROJECT_DIR}"
+        --dockerfile er-c-data/mgmtinterface/Dockerfile
+        --no-push
+
     # - podman build -f permissions/Dockerfile ..
     # - podman build -f watchdog/Dockerfile ..
     # - podman build -f smbdrop/Dockerfile ..
