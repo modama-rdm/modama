@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM debian:stable-slim
+FROM debian:11-slim
 LABEL Dieter Weber <d.weber@fz-juelich.de>
 
 RUN --mount=type=cache,target=/var/cache/apt apt-get -y update &&\

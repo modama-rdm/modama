@@ -1,0 +1,17 @@
+stages:
+  - build
+
+
+podman-build:
+  stage: build
+  image:
+    name: quay.io/podman/stable
+
+  script:
+    # TODO:
+    # - tag images, and push them to the registry
+    - podman login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - podman build -f permissions/Dockerfile ..
+    - podman build -f watchdog/Dockerfile ..
+    - podman build -f smbdrop/Dockerfile ..
+    - podman build -f mgmtinterface/Dockerfile ..
