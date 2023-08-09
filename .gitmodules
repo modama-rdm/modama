@@ -3,10 +3,10 @@
 	url = https://jugit.fz-juelich.de/d.weber/tsm-client.git
 [submodule "wsgidav"]
 	path = cloud-erc/wsgidav
-	url = gitlab@iffgit.fz-juelich.de:clausen/wsgidav.git
+	url = https://iffgit.fz-juelich.de/clausen/wsgidav.git
 [submodule "wsgidav-updated"]
 	path = er-c-data/wsgidav
-	url = gitlab@iffgit.fz-juelich.de:clausen/wsgidav.git
+	url = https://iffgit.fz-juelich.de/clausen/wsgidav.git
 	branch = suid
 [submodule "er-c-data/tsm-client"]
 	path = er-c-data/tsm-client

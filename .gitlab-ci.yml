@@ -1,6 +1,9 @@
 stages:
   - build
 
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  GIT_SUBMODULE_FORCE_HTTPS: "true"
 
 container-image-build:
   stage: build
