@@ -12,18 +12,22 @@ container-image-build:
     entrypoint: [""]
   parallel:
     matrix:
-      - DOCKERFILE:
-        - er-c-data/permissions/Dockerfile
-        - er-c-data/watchdog/Dockerfile
-        - er-c-data/smbdrop/Dockerfile
-        - er-c-data/mgmtinterface/Dockerfile
-        - er-c-data/wsgidav/Dockerfile
+      - DOCKERFILE: er-c-data/permissions/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}"
+      - DOCKERFILE: er-c-data/watchdog/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}"
+      - DOCKERFILE: er-c-data/smbdrop/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}"
+      - DOCKERFILE: er-c-data/mgmtinterface/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}"
+      - DOCKERFILE: er-c-data/wsgidav/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}/er-c-data/wsgidav/"
 
   script:
     # TODO:
     # - login, tag images, and push them to the registry
 
     - /kaniko/executor
-        --context "${CI_PROJECT_DIR}"
+        --context $CONTEXT
         --dockerfile $DOCKERFILE
         --no-push
