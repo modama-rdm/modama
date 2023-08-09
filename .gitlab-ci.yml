@@ -14,6 +14,7 @@ container-image-build:
         - er-c-data/watchdog/Dockerfile
         - er-c-data/smbdrop/Dockerfile
         - er-c-data/mgmtinterface/Dockerfile
+        - er-c-data/wsgidav/Dockerfile
 
   script:
     # TODO:
