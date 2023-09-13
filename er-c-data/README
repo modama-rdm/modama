@@ -73,6 +73,10 @@ Sensitive settings are kept in separate read-protected files outside the reposit
 
 The externally supplied file `externalstorage_pw` contains the preshared password for the WebDAV gateway.
 
+# Create database for SampleDB
+
+The sampledb container is configured to expect the `sampledb` database. It will not be created automatically. In order to create it, run `docker-compose exec db su - postgres -c "/usr/bin/createdb sampledb"`.
+
 # Backup
 
 The configuration for FZ Jülich IBM Spectrum Protect is only present for production, meaning any
