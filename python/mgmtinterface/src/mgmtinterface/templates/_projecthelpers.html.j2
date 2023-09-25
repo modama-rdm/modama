@@ -20,6 +20,7 @@
                 <th>Name</th>
                 <th>Modified</th>
                 <th>Status</th>
+                <th>Links</th>
                 <th></th>
             </tr>
         </thead>
@@ -30,6 +31,11 @@
                 <td>{{ d.mtime|format_unixtime }}</td>
                 <td>
                   {% if d.immutable %}sealed{% else %}writable{% endif %}{% if d.shared %}, ingest active{% endif %}
+                </td>
+                <td>
+                <a target="_blank" href="{{ sampledbsearch(project, d.name) }}">
+                  /{{ project.relpath }}/{{d.name}}
+                </a>
                 </td>
                 <td>
                 {% if not d.immutable and (current_user.user_id in project.members or current_user.user_id == project.owner) %}

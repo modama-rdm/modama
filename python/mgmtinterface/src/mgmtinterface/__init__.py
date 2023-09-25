@@ -16,7 +16,7 @@ from wtforms import (
     StringField, PasswordField, SelectMultipleField, HiddenField
 )
 from wtforms.validators import DataRequired
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, quote_plus
 
 from permissions_client import PermissionsClient
 from smbdrop_client import ShareClient
@@ -32,6 +32,7 @@ app = Flask(__name__)
 app.config.from_object('mgmtinterface.default_config')
 app.config.from_envvar('MGMTINTERFACE_CONFIG')
 app.config.from_envvar('MGMTINTERFACE_SECRET')
+
 app.jinja_options["autoescape"] = lambda _: True
 
 login_manager = LoginManager()
@@ -279,6 +280,20 @@ def moellenstedtpath(project, dsname=None):
             project['relpath'],
             dsname,
         )
+
+def sampledbsearch(project, dsname=None):
+    if dsname is None:
+        search = project['relpath']
+    else:
+        search = os.path.join(
+            project['relpath'],
+            dsname,
+        )
+    base = os.path.join(app.config['SAMPLEDB_BASE'], 'objects/')
+    return f"{base}?q=&quot;{quote_plus(search)}&quot;"
+
+
+app.jinja_env.globals.update(sampledbsearch=sampledbsearch)
 
 
 def main_smbpath(project, dsname=None):

@@ -19,6 +19,8 @@ Both test and production deployment expect files with site-specific secrets in `
 
 At the moment, the test and production deployment only differ in a number of volumes and ports, meaning the Docker images themselves are the same. If that should change, the build scripts should be adapted to that.
 
+For mgmtinterface the test deployment also overrides the source code copy with a read-only bind mount. Furthermore, it starts a Flask server in development mode instead of a production server. That way a change in the source code is immediately active in the container. This setup can/should be extended to other containers.
+
 # How to upgrade Nextcloud
 
 Currently, the additional auth mechanism that avoids saving user credentials in
