@@ -21,6 +21,9 @@ container-image-build:
     entrypoint: [""]
   parallel:
     matrix:
+      - DOCKERFILE: er-c-data/nextcloud/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/nextcloud
       - DOCKERFILE: er-c-data/permissions/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/permissions
@@ -54,6 +57,7 @@ container-image-retag:
     GIT_STRATEGY: none
   parallel:
     matrix:
+      - IMAGE_NAME: nextcloud
       - IMAGE_NAME: permissions
       - IMAGE_NAME: watchdog
       - IMAGE_NAME: smbdrop
