@@ -8,7 +8,7 @@ variables:
 container-image-build:
   stage: build
   image:
-    name: gcr.io/kaniko-project/executor:v1.9.0-debug
+    name: gcr.io/kaniko-project/executor:v1.16.0-debug
     entrypoint: [""]
   parallel:
     matrix:
@@ -33,3 +33,25 @@ container-image-build:
         --context $CONTEXT
         --dockerfile $DOCKERFILE
         --destination "${IMAGE_NAME}:${CI_COMMIT_SHA}"
+
+contaimer-image-retag:
+  rules:
+    if: $CI_COMMIT_TAG
+  needs:
+    job: container-image-build
+  image:
+    name: gcr.io/go-containerregistry/crane:debug
+    entrypoint: [""]
+  variables:
+    GIT_STRATEGY: none
+  parallel:
+    matrix:
+      - IMAGE_NAME: permissions
+      - IMAGE_NAME: watchdog
+      - IMAGE_NAME: smbdrop
+      - IMAGE_NAME: mgmtinterface
+      - IMAGE_NAME: wsgidav
+  script:
+    - crane auth login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - crane tag iffregistry.fz-juelich.de/weber/data-management-system/$IMAGE_NAME:$CI_COMMIT_SHA latest
+    - crane tag iffregistry.fz-juelich.de/weber/data-management-system/$IMAGE_NAME:$CI_COMMIT_SHA ${CI_COMMIT_TAG}
