@@ -22,7 +22,7 @@ container-image-build:
   parallel:
     matrix:
       - DOCKERFILE: er-c-data/nextcloud/Dockerfile
-        CONTEXT: "${CI_PROJECT_DIR}"
+        CONTEXT: "${CI_PROJECT_DIR}/er-c-data/nextcloud"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/nextcloud
       - DOCKERFILE: er-c-data/permissions/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
