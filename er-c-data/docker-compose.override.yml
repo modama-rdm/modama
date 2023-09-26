@@ -30,6 +30,8 @@ services:
     volumes:
       # Data directory to export
       - "./testfolder/data/:/data/"
+    ports:
+      - "127.0.0.1:8081:8080"
   sampledb:
     volumes:
       - './testfolder/sampledb:/home/sampledb/files:rw'

@@ -17,6 +17,7 @@ from wtforms import (
 )
 from wtforms.validators import DataRequired
 from urllib.parse import urlparse, urljoin, quote_plus
+from webdav3.client import Client as WebDAVClient
 
 from permissions_client import PermissionsClient
 from smbdrop_client import ShareClient
@@ -806,3 +807,28 @@ def api_list_shares() -> Dict:
         if user_info['id']['uid'] == share['uid']:
             result[key] = share
     return result
+
+
+@app.route("/browse/", methods=["GET"])
+@login_required
+def browse():
+    path = request.args.get('path')
+    if path is None:
+        return flask.redirect(flask.url_for('browse', path='/'))
+    options = {
+        'webdav_hostname': app.config['WEBDAV_BASE'],
+        'webdav_login': current_user.user_id,
+        'webdav_password': '1234',
+        'webdav_timeout': 30,
+    }
+    cl = WebDAVClient(options)
+    members = cl.list(path, get_info=True)
+    components = {
+        'info': cl.info(path),
+        'path': path,
+        'members':  members
+    }
+    return render_template(
+        'browse.html.j2',
+        components=components,
+    )
