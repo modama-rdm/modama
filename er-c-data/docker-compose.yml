@@ -28,6 +28,7 @@ services:
   nextcloud:
     hostname: nextcloud
     build: ./nextcloud
+    image: iffregistry.fz-juelich.de/weber/data-management-system/nextcloud:latest
 
     environment:
       POSTGRES_HOST: "db"
@@ -66,6 +67,7 @@ services:
   webdav-backend:
     hostname: webdav-backend
     build: './wsgidav'
+    image: iffregistry.fz-juelich.de/weber/data-management-system/wsgidav:latest
     restart: always
 
     volumes:
@@ -106,6 +108,7 @@ services:
     build:
       context: ..
       dockerfile: er-c-data/permissions/Dockerfile
+    image: iffregistry.fz-juelich.de/weber/data-management-system/permissions:latest
 
     volumes:
        - type: bind
@@ -121,6 +124,7 @@ services:
     build:
       context: ..
       dockerfile: er-c-data/watchdog/Dockerfile
+    image: iffregistry.fz-juelich.de/weber/data-management-system/watchdog:latest
 
   smbdrop:
     hostname: smbdrop
@@ -128,6 +132,7 @@ services:
     build:
       context: ..
       dockerfile: er-c-data/smbdrop/Dockerfile
+    image: iffregistry.fz-juelich.de/weber/data-management-system/smbdrop:latest
 
   mgmtinterface:
     hostname: mgmtinterface
@@ -135,6 +140,7 @@ services:
     build:
       context: ..
       dockerfile: er-c-data/mgmtinterface/Dockerfile
+    image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface:latest
     environment:
       - MGMTINTERFACE_SECRET=/mgmt_secret.py
     volumes:
