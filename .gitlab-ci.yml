@@ -14,20 +14,22 @@ container-image-build:
     matrix:
       - DOCKERFILE: er-c-data/permissions/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/permissions
       - DOCKERFILE: er-c-data/watchdog/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/watchdog
       - DOCKERFILE: er-c-data/smbdrop/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/smbdrop
       - DOCKERFILE: er-c-data/mgmtinterface/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface
       - DOCKERFILE: er-c-data/wsgidav/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}/er-c-data/wsgidav/"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/wsgidav
 
   script:
-    # TODO:
-    # - login, tag images, and push them to the registry
-
     - /kaniko/executor
         --context $CONTEXT
         --dockerfile $DOCKERFILE
-        --no-push
+        --destination "${IMAGE_NAME}:${CI_COMMIT_SHA}"
