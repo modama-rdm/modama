@@ -16,6 +16,7 @@
                 {{ m }}
             {% endfor %}
         </td>
+        <td><a href="{{ url_for('browse', path=canonical_path(p)) }}">{{ canonical_path(p) }}</td>
     </tr>
 {% endmacro %}
 
@@ -43,6 +44,7 @@
                 <th>Modified</th>
                 <th>Owner</th>
                 <th>Members</th>
+                <th>Path</th>
             </tr>
         </thead>
         <tbody>

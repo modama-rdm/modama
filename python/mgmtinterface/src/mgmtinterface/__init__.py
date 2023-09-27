@@ -17,7 +17,7 @@ from wtforms import (
 )
 from wtforms.validators import DataRequired
 from urllib.parse import urlparse, urljoin, quote_plus
-from webdav3.client import Client as WebDAVClient
+from webdav3.client import Client as WebDAVClient, RemoteResourceNotFound
 
 from permissions_client import PermissionsClient
 from smbdrop_client import ShareClient
@@ -320,6 +320,18 @@ def split_smbpath(dest_path):
     head, dsname = os.path.split(dest_path)
     _, project = os.path.split(head)
     return (project, dsname)
+
+@app.context_processor
+def utility_processor():
+    def canonical_path(project, dsname=None):
+        if dsname is None:
+            return os.path.join('/', project['relpath'])
+        else:
+            return os.path.join('/', project['relpath'], dsname)
+    
+    return {
+        'canonical_path': canonical_path
+    }
 
 
 def add_share_info(datasets, project, uid, shares):
@@ -822,11 +834,66 @@ def browse():
         'webdav_timeout': 30,
     }
     cl = WebDAVClient(options)
+    resource = cl.resource(path)
+    if resource.urn.path() != path:
+        return flask.redirect(flask.url_for('browse', path=resource.urn.path()))
+
+    try:
+        info = resource.info()
+        info['isdir'] = resource.is_dir()
+        # To be set later if appropriate
+        info['project'] = None
+    except RemoteResourceNotFound:
+        result = {
+            'errno': 404,
+            'message': f'Remote resource {path} not found.',
+            'path': path,
+        }
+        return render_template(
+            'browse_error.html.j2',
+            result=result,
+        )
     members = cl.list(path, get_info=True)
+    members.sort(key=lambda m: m['isdir'], reverse=True)
+
+    path_pyramid = []
+    head = path
+
+    while True:
+        head, tail = os.path.split(head)
+        # stripped trailing slash
+        if not tail and head != '/':
+            continue
+        # no leading slash and no separator
+        if tail:
+            path_pyramid.insert(0, (os.path.join(head, tail), tail))
+        else:
+            break
+        if head == '':
+            break
+
+    one_up_member = {
+        'name': '..',
+        'path': None,
+        'isdir': True,
+        'created': None,
+        'size': None,
+        'modified': None,
+        'etag': None,
+        'content_type': None,
+    }
+    if len(path_pyramid) > 1:
+        one_up_member['path'] = path_pyramid[-2][0]
+        info['project'] = path_pyramid[1][1]
+    elif len(path_pyramid) == 1:
+        one_up_member['path'] = '/'
+    if one_up_member['path'] is not None:
+        members.insert(0, one_up_member)
     components = {
-        'info': cl.info(path),
+        'info': info,
         'path': path,
-        'members':  members
+        'members':  members,
+        'path_pyramid': path_pyramid,
     }
     return render_template(
         'browse.html.j2',
