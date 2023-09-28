@@ -6,7 +6,7 @@
 
 <div class="mui-panel">
   <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("browse") }}">Browse</a></p>
-  <h1>{% if components.info.isdir %}Folder{% else %}File{% endif %} details</h1>
+  <h1>{% if components.info.isdir %}📁 Folder{% else %}📄 File{% endif %} details</h1>
   {% include '_flash.html.j2' %}
   <p>Path:
     {% for (full, tail) in components.path_pyramid %}

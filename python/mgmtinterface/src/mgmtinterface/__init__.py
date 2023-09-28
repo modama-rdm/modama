@@ -17,7 +17,7 @@ from wtforms import (
 )
 from wtforms.validators import DataRequired
 from urllib.parse import urlparse, urljoin, quote_plus
-from webdav3.client import Client as WebDAVClient, RemoteResourceNotFound
+from webdav3.client import Client as WebDAVClient, RemoteResourceNotFound, ResponseErrorCode
 
 from permissions_client import PermissionsClient
 from smbdrop_client import ShareClient
@@ -838,24 +838,6 @@ def browse():
     if resource.urn.path() != path:
         return flask.redirect(flask.url_for('browse', path=resource.urn.path()))
 
-    try:
-        info = resource.info()
-        info['isdir'] = resource.is_dir()
-        # To be set later if appropriate
-        info['project'] = None
-    except RemoteResourceNotFound:
-        result = {
-            'errno': 404,
-            'message': f'Remote resource {path} not found.',
-            'path': path,
-        }
-        return render_template(
-            'browse_error.html.j2',
-            result=result,
-        )
-    members = cl.list(path, get_info=True)
-    members.sort(key=lambda m: m['isdir'], reverse=True)
-
     path_pyramid = []
     head = path
 
@@ -871,6 +853,42 @@ def browse():
             break
         if head == '':
             break
+
+    try:
+        info = resource.info()
+        info['isdir'] = resource.is_dir()
+        # To be set later if appropriate
+        info['project'] = None
+    except (RemoteResourceNotFound, ResponseErrorCode) as e:
+        if isinstance(e, RemoteResourceNotFound):
+            code = 404
+            message = f'Remote path {path} not found.'
+        else:
+            code = e.code
+            message = e.message
+        result = {
+            'errno': code,
+            'message': message,
+            'path': path,
+        }
+        parent = '/'
+        for parent, _ in reversed(path_pyramid):
+            try:
+                if cl.info(parent) and cl.is_dir(parent):
+                    break
+            except (RemoteResourceNotFound, ResponseErrorCode):
+                # If the path pyramid contains no valid path,
+                # this will be the final value for the next step
+                parent = '/'
+                continue
+
+        return render_template(
+            'browse_error.html.j2',
+            result=result,
+            backto=parent
+        )
+    members = cl.list(path, get_info=True)
+    members.sort(key=lambda m: m['isdir'], reverse=True)
 
     one_up_member = {
         'name': '..',
