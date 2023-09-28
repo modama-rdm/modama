@@ -4,7 +4,7 @@ diff -ruN ./1/version.php ./0/version.php
 @@ -1,5 +1,5 @@
  <?php 
 -$OC_Version = array(23,0,3,2);
-+$OC_Version = array(23,0,3,2,5);
++$OC_Version = array(23,0,3,2,6);
  $OC_VersionString = '23.0.3';
  $OC_Edition = '';
  $OC_Channel = 'stable';
@@ -327,3 +327,22 @@ diff -ruN ./1/lib/private/Http/Client/ClientService.php ./0/lib/private/Http/Cli
                 $stack->push($this->dnsPinMiddleware->addDnsPinning());
 
                 $client = new GuzzleClient(['handler' => $stack]);
+diff -ur ./1/3rdparty/sabre/dav/lib/DAV/Server.php ./0/3rdparty/sabre/dav/lib/DAV/Server.php
+--- ./1/3rdparty/sabre/dav/lib/DAV/Server.php    2022-03-21 13:02:49.000000000 +0000
++++ ./0/3rdparty/sabre/dav/lib/DAV/Server.php    2023-09-28 13:29:53.602723446 +0000
+@@ -981,7 +981,14 @@
+ 
+         foreach ($propFindRequests as $propFindRequest) {
+             list($propFind, $node) = $propFindRequest;
+-            $r = $this->getPropertiesByNode($propFind, $node);
++            try {
++                $r = $this->getPropertiesByNode($propFind, $node);
++            } catch (\OCP\Files\ForbiddenException $e) {
++                // We pretend that we got sth.
++                // As a result, Nextcloud will show the forbidden folder as a sort-of
++                // ghost file.
++                $r = 1;
++            }
+             if ($r) {
+                 $result = $propFind->getResultForMultiStatus();
+                 $result['href'] = $propFind->getPath();
