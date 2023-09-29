@@ -6,6 +6,7 @@ from smbdrop_client.schema import CREATE_SHARE_REQUEST_SCHEMA, CreateShareReques
 from smbdrop.share_manager import (
     SambaProcessManager, SambaConfigManager, ShareManager
 )
+from smbdrop.mount_manager import MountManager
 
 app = Flask(__name__)
 
@@ -18,7 +19,8 @@ cm = SambaConfigManager(
     config_path="/etc/samba/smb-dynamic.conf",
     procman=pm,
 )
-sm = ShareManager(config_manager=cm)
+mm = MountManager()
+sm = ShareManager(config_manager=cm, mount_manager=mm)
 sm.update()
 pm.start()
 

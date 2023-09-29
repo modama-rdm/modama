@@ -7,12 +7,14 @@ import json
 import signal
 import secrets
 import logging
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Set
 from typing_extensions import TypedDict
 import subprocess
 import re
 
 import fasteners
+
+from smbdrop.mount_manager import MountManager, BindMount
 
 """
 This module manages dynamic creation and deletion of Samba shares.
@@ -51,6 +53,8 @@ for the currently existing shares, which survives restarts of this service.
 
 
 log = logging.getLogger(__name__)
+
+BIND_MOUNT_PREFIX = '/run/smbdrop/'
 
 
 class Share(TypedDict):
@@ -91,12 +95,12 @@ class SambaProcessManager:
         self._proc: Optional[subprocess.Popen[bytes]] = None
 
     def start(self) -> None:
-        log.debug("Starting samba service...")
+        log.info("Starting samba service...")
         # -d debug level
         # -F foreground
         # -S log to stdout
         self._proc = subprocess.Popen(
-            ["smbd", "-FS", "--no-process-group", "-d3"],
+            ["smbd", "-F", "--debug-stdout", "--no-process-group", "-d3"],
             stdin=None,
             stdout=sys.stdout,
             stderr=sys.stderr
@@ -132,7 +136,7 @@ class SambaProcessManager:
 # FIXME: adjust create/directory modes?
 samba_share_cfg_tpl = """
 [%(share_name)s]
-path = "%(dest_path)s"
+path = "%(dest_path_bind)s"
 read only = no
 force create mode = 0600
 force directory mode = 0700
@@ -140,11 +144,18 @@ valid users = %(username)s
 """
 
 
+def share_bind_path(share: Share):
+    return os.path.join(BIND_MOUNT_PREFIX, 'shares', share['share_id'])
+
+
 def config_template(shares: Shares) -> str:
     parts = []
 
     for share in shares.values():
-        parts.append(samba_share_cfg_tpl % share)
+        context = {}
+        context.update(share)
+        context['dest_path_bind'] = share_bind_path(share)
+        parts.append(samba_share_cfg_tpl % context)
 
     return "\n\n".join(parts)
 
@@ -166,6 +177,7 @@ class ShareManager:
     def __init__(
         self,
         config_manager: SambaConfigManager,
+        mount_manager: MountManager,
         shares_config: str = "/etc/smbdrop/shares.json",
         lock_path: str = "/etc/smbdrop/shares.lock",
     ):
@@ -174,6 +186,8 @@ class ShareManager:
         Parameters
         ----------
         config_manager : SambaConfigManager
+            [description]
+        mount_manager : MountManager
             [description]
         shares_config : str, optional
             Path to the shares config as JSON, which will be managed by
@@ -184,6 +198,7 @@ class ShareManager:
         self._share_lock = fasteners.InterProcessLock(lock_path)
         self._shares_config_path = shares_config
         self._config_manager = config_manager
+        self._mount_manager = mount_manager
 
     def _add_share(self, share: Share) -> Config:
         # NOTE: only call this while holding the self._share_lock!
@@ -225,6 +240,17 @@ class ShareManager:
             loaded_config: Config = json.load(f)
             return loaded_config
 
+    def _shares_to_mounts(self, shares: Shares) -> Set[BindMount]:
+        return set([
+            BindMount(src=share['dest_path'], dest=share_bind_path(share))
+            for share in shares.values()
+        ])
+
+    def _update_mounts(self, shares: Shares) -> None:
+        mounts = self._shares_to_mounts(shares)
+        self._mount_manager.set_state(mounts)
+        log.debug("desired set of mounts: %s", mounts)
+
     def _update_samba(self, shares: Shares) -> None:
         # delegate to SambaConfigManager
         self._config_manager.update_shares(shares)
@@ -237,7 +263,7 @@ class ShareManager:
             return u['username'], u['password']
         else:
             password = secrets.token_urlsafe(32)
-            username =  f"share{share_id}".replace("-", "")[:32]
+            username = f"share{share_id}".replace("-", "")[:32]
             self._add_user(username, uid, password)
             config['users'][str(uid)] = User(
                 username=username,
@@ -246,7 +272,7 @@ class ShareManager:
             )
             self._write_config(config)
             return username, password
-    
+
     def _add_user(self, username: str, uid: int, password: str):
         subprocess.check_call([
             "/usr/sbin/useradd",
@@ -291,19 +317,23 @@ class ShareManager:
         del config['users'][str(uid)]
         self._write_config(config)
         return config
-    
+
     def _consistency_check(self, config: Config) -> bool:
         share_uids = set(s['uid'] for s in config['shares'].values())
         user_uids = set(u['uid'] for u in config['users'].values())
         if share_uids != user_uids:
-            RuntimeError(f"Mismatch between UIDs used in shares {share_uids} and UIDs assigned to users {user_uids}.")
+            RuntimeError(
+                f"Mismatch between UIDs used in shares {share_uids}"
+                f" and UIDs assigned to users {user_uids}."
+            )
 
         for u in config['users'].values():
             try:
                 pwres = pwd.getpwnam(u['username'])
                 if u['uid'] != pwres.pw_uid:
                     raise RuntimeError(
-                        f"UID mismatch for {u['username']}: System UID {pwres.pw_uid} vs database UID {u['uid']}."
+                        f"UID mismatch for {u['username']}: System UID {pwres.pw_uid}"
+                        f" vs database UID {u['uid']}."
                     )
             except KeyError:
                 raise RuntimeError(f"User {u['username']} not found.")
@@ -311,7 +341,8 @@ class ShareManager:
                 pwres = pwd.getpwuid(u['uid'])
                 if u['username'] != pwres.pw_name:
                     raise RuntimeError(
-                        f"User name mismatch for {u['uid']}: System {pwres.pw_name} vs database {u['username']}."
+                        f"User name mismatch for {u['uid']}: System {pwres.pw_name}"
+                        f" vs database {u['username']}."
                     )
             except KeyError:
                 raise RuntimeError(f"User {u['username']} not found.")
@@ -319,7 +350,10 @@ class ShareManager:
         for s in config['shares'].values():
             user_entry = config['users'][str(s['uid'])]
             if user_entry['username'] != s['username']:
-                raise RuntimeError(f"User name mismatch for {s['uid']}: User entry {user_entry['username']} vs share {s['username']}.")
+                raise RuntimeError(
+                    f"User name mismatch for {s['uid']}: User entry {user_entry['username']}"
+                    f" vs share {s['username']}."
+                )
         return True
 
     def create_share(self, dest_path: str, uid: int, gid: int) -> Share:
@@ -328,7 +362,9 @@ class ShareManager:
         and return its id.
         """
         if not re.fullmatch('[-/a-zA-Z0-9_. ]*', dest_path):
-            raise RuntimeError("Path name can only contain characters /, a-z, A-Z, 0-9, '_', '-', ' ' and '.'.")
+            raise RuntimeError(
+                "Path name can only contain characters /, a-z, A-Z, 0-9, '_', '-', ' ' and '.'."
+            )
         with self._share_lock:
             share_id = str(uuid.uuid4())
             username, password = self._get_create_user(uid, share_id)
@@ -342,9 +378,10 @@ class ShareManager:
                 "username": username,
                 "password": password,
             }
-            
+
             config = self._add_share(share)
             assert self._consistency_check(config)
+            self._update_mounts(config['shares'])
             self._update_samba(config['shares'])
         return share
 
@@ -359,7 +396,7 @@ class ShareManager:
             for other_share in config['shares'].values():
                 if other_share['username'] == share['username']:
                     use_count += 1
-            
+
             self._remove_share(share_id)
             # The share to delete is the last one of that user
             if use_count == 1:
@@ -369,6 +406,7 @@ class ShareManager:
             config = self._read_config()
             assert self._consistency_check(config)
             self._update_samba(config['shares'])
+            self._update_mounts(config['shares'])
             return config
 
     def update(self) -> Config:
@@ -385,6 +423,7 @@ class ShareManager:
                     )
             assert self._consistency_check(config)
             self._update_samba(config['shares'])
+            self._update_mounts(config['shares'])
             return config
 
     def list(self) -> Shares:

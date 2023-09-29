@@ -133,6 +133,11 @@ services:
       context: ..
       dockerfile: er-c-data/smbdrop/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/smbdrop:latest
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - seccomp:unconfined
+    privileged: true  # MEH! would rather only allow mount/umount
 
   mgmtinterface:
     hostname: mgmtinterface
