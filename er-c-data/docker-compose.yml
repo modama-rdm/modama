@@ -91,20 +91,6 @@ services:
       - './webdav-proxy.etc.nginx.nginx.conf:/etc/nginx/nginx.conf'
       - "sockets:/run/gunicorn/"
 
-  sampledb:
-    hostname: sampledb
-    image: sciapp/sampledb:0.24.1
-    depends_on:
-      - db
-    environment:
-      SAMPLEDB_CONTACT_EMAIL: d.weber@fz-juelich.de
-      SAMPLEDB_MAIL_SERVER: mail.fz-juelich.de
-      SAMPLEDB_MAIL_SENDER: d.weber@fz-juelich.de
-      # TODO put in secrets file
-      SAMPLEDB_ADMIN_PASSWORD: "abcd1234"
-      SAMPLEDB_SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://postgres:password@db:5432/sampledb
-    restart: always
-
   cloudproxy:
     hostname: cloudproxy
     image: nginx:latest
