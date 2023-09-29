@@ -1,0 +1,38 @@
+.details-list__definition {
+    margin-inline-start: 0;
+    margin-bottom: 0.6em;
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+    font-weight: 400;
+}
+
+.cta {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-around;
+    gap: 10px;
+}
+
+.cta__item {
+    width: 230px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.cta__item div:first-child {
+    flex-grow: 1;
+}
+
+.cta__item p {
+    max-width: 300px;
+}
+
+.cta__item h3 {
+    margin-top: 0;
+}
+
+.cta__item--placeholder {
+    visibility: hidden;
+}

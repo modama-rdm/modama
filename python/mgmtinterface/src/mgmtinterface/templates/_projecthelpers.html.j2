@@ -20,7 +20,7 @@
                 <th>Name</th>
                 <th>Modified</th>
                 <th>Status</th>
-                <th>Links</th>
+                <th>Browse</th>
                 <th></th>
             </tr>
         </thead>
@@ -33,9 +33,9 @@
                   {% if d.immutable %}sealed{% else %}writable{% endif %}{% if d.shared %}, ingest active{% endif %}
                 </td>
                 <td>
-                <a target="_blank" href="{{ sampledbsearch(project, d.name) }}">
-                  /{{ project.relpath }}/{{d.name}}
-                </a>
+                  <a href="{{ url_for('browse', path=project | canonical_path(d.name)) }}">
+                    {{ project | canonical_path(d.name) }}
+                  </a>
                 </td>
                 <td>
                 {% if not d.immutable and (current_user.user_id in project.members or current_user.user_id == project.owner) %}

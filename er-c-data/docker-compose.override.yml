@@ -72,6 +72,10 @@ services:
         source: "../python/mgmtinterface"
         target: "/code/mgmtinterface"
         read_only: true
+      - type: bind
+        source: "./mgmtinterface/config-override.py"
+        target: "/config.py"
+        read_only: true
     environment:
       - FLASK_APP=mgmtinterface:app
     working_dir: /

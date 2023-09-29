@@ -11,28 +11,29 @@
   <h1>Project "{{ project.name }}"</h1>
   
   {% include '_flash.html.j2' %}
-  <p>Owner: {{ project.owner }}</p>
-  <p>Created: {{ project.ctime|format_unixtime }}</p>
-  <p>Modified: {{ project.mtime|format_unixtime }}</p>
-  <p>Size (Bytes): <span hx-get="{{ url_for("project_size", name=project.name) }}" hx-trigger="load once">loading...</span></p>
-  <h2>Access</h2>
-  <p><a href="https://er-c-data.fz-juelich.de/nextcloud/apps/files/?dir=/ER-C-Data/{{ project.relpath }}">Direct Nextcloud link</a></p>
-  <p><a href="https://en.wikipedia.org/wiki/Rsync">Rsync</a> push to Möllenstedt with optimized settings: <input id="rsync" value="rsync -av --info=progress2 -e &quot;ssh -T -c aes128-ctr -o Compression=no -x&quot; &quot;&lt;src_path&gt;&quot; {{ ( current_user.user_id ~ '@' ~ project.moellenstedtpath ) | shellescape }}" readonly style="width: 100%"/></p>
-  <p><a href="https://en.wikipedia.org/wiki/Secure_file_transfer_program">SFTP</a> with optimized settings: <input id="sftp" value="sftp -c aes128-ctr -o Compression=no {{ ( current_user.user_id ~ '@' ~ project.moellenstedtpath ) | shellescape }}" readonly style="width: 100%"/></p>
-  <p><a href="https://er-c-data.fz-juelich.de/#use-filesystem">SMB (Windows)</a>: <input id="smb" value="{{ project.main_smbpath }}" readonly style="width: 100%"/></p>
-  <h2>Members</h2>
-  <p>
-    {{ render_members(project, current_user) }}
-  </p>
-  {% if current_user.user_id == project.owner %}
-    <p>
-      <a href="{{ url_for("project_members", name=project.name) }}">
-        <button type="button" class="mui-btn mui-btn--raised">
-          Manage project members...
-        </button>
-      </a>
-    </p>
-  {% endif %}
+
+  <dl class="details-list">
+    <dt class="mui--text-dark-secondary">Owner</dt><dd class="details-list__definition">{{ project.owner }}</dd>
+    <dt class="mui--text-dark-secondary">Created</dt><dd class="details-list__definition">{{ project.ctime|format_unixtime }}</dd>
+    <dt class="mui--text-dark-secondary">Modified</dt><dd class="details-list__definition">{{ project.mtime|format_unixtime }}</dd>
+    <dt class="mui--text-dark-secondary">Size (Bytes)</dt><dd class="details-list__definition"><span hx-get="{{ url_for("project_size", name=project.name) }}" hx-trigger="load once">loading...</span></dd>
+    <dt class="mui--text-dark-secondary">Members</dt>
+      <dd class="details-list__definition">{{ render_members(project, current_user) }}</dd>
+      {% if current_user.user_id == project.owner %}
+        <dd class="details-list__definition">
+          <a href="{{ url_for("project_members", name=project.name) }}">
+            <button type="button" class="mui-btn mui-btn--raised">
+              Manage project members...
+            </button>
+          </a>
+        </dd>
+      {% endif %}
+      </dd>
+    <dt class="mui--text-dark-secondary">Browse</dt>
+      <dd class="details-list__definition">
+        <a href="{{ url_for('browse', path=project | canonical_path) }}">{{ project | canonical_path }}</a>
+      </dd>
+  </dl>
 
   <h2>Sessions</h2>
 

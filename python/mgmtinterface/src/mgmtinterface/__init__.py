@@ -269,43 +269,58 @@ def add_project():
     )
 
 
-def moellenstedtpath(project, dsname=None):
-    if dsname is None:
-        return os.path.join(
-            app.config['MOELLENSTEDT_BASE'],
-            project['relpath'],
-        )
+@app.template_filter()
+def nextcloudlink(path, isdir=False):
+    if not isdir:
+        path = os.path.dirname(path)
+    return app.config['NEXTCLOUD_BASE'] + quote_plus(path)
+
+
+@app.template_filter()
+def jupyterlink(path, isdir=False):
+    if not isdir:
+        path = os.path.dirname(path)
+    return app.config['JUPYTER_BASE'] + quote_plus(path)
+
+
+@app.template_filter()
+def libertemlink(path):
+    return app.config['LIBERTEM_BASE'] + quote_plus(path)
+
+
+@app.template_filter()
+def rsync(path, isdir=False):
+    target = app.config['MOELLENSTEDT_BASE'] + path
+    if isdir:
+        target += '/'
+        src = '<src_path>/'
     else:
-        return os.path.join(
-            app.config['MOELLENSTEDT_BASE'],
-            project['relpath'],
-            dsname,
-        )
-
-def sampledbsearch(project, dsname=None):
-    if dsname is None:
-        search = project['relpath']
-    else:
-        search = os.path.join(
-            project['relpath'],
-            dsname,
-        )
-    base = os.path.join(app.config['SAMPLEDB_BASE'], 'objects/')
-    return f"{base}?q=&quot;{quote_plus(search)}&quot;"
+        src = '<src_file>'
+    return (
+        f'rsync -av --info=progress2 -e "ssh -T -c aes128-ctr -o Compression=no -x" "{src}" '
+        f'{ shellescape(current_user.user_id + "@" + target) }'
+    )
 
 
-app.jinja_env.globals.update(sampledbsearch=sampledbsearch)
+@app.template_filter()
+def sftp(path, isdir=False):
+    if not isdir:
+        path = os.path.dirname(path)
+    target = app.config['MOELLENSTEDT_BASE'] + path
+    return f'sftp -c aes128-ctr -o Compression=no { shellescape(current_user.user_id + "@" + target) }'
 
 
-def main_smbpath(project, dsname=None):
-    win_path = project['relpath'].replace('/', '\\')
-    parts = [
-        app.config['MAIN_SMB_BASE'],
-        win_path
-    ]
-    if dsname is not None:
-        parts.append(dsname)
-    return '\\'.join(parts)
+@app.template_filter()
+def sampledbsearch(path):
+    base = app.config['SAMPLEDB_BASE'] + 'objects/'
+    return f"{base}?q=&quot;{quote_plus(path)}&quot;"
+
+
+@app.template_filter()
+def main_smbpath(path):
+    win_path = path.replace('/', '\\')
+    base = app.config['MAIN_SMB_BASE']
+    return base + win_path
 
 
 def smbpath(project, dsname):
@@ -321,17 +336,13 @@ def split_smbpath(dest_path):
     _, project = os.path.split(head)
     return (project, dsname)
 
-@app.context_processor
-def utility_processor():
-    def canonical_path(project, dsname=None):
-        if dsname is None:
-            return os.path.join('/', project['relpath'])
-        else:
-            return os.path.join('/', project['relpath'], dsname)
-    
-    return {
-        'canonical_path': canonical_path
-    }
+
+@app.template_filter()
+def canonical_path(project, dsname=None):
+    if dsname is None:
+        return os.path.join('/', project['relpath'])
+    else:
+        return os.path.join('/', project['relpath'], dsname)
 
 
 def add_share_info(datasets, project, uid, shares):
@@ -362,11 +373,7 @@ def projectdetails(name: str):
             user_info['id']['uid'],
             shares
         )
-        datasets = sorted(datasets, key=lambda ds: ds['mtime'], reverse=True)
-        pr_info['project']['moellenstedtpath'] = moellenstedtpath(
-            pr_info['project']
-        )
-        pr_info['project']['main_smbpath'] = main_smbpath(pr_info['project'])
+        datasets = sorted(datasets, key=lambda ds:ds['mtime'], reverse=True)
         return render_template(
             'projectdetails.html.j2',
             project=pr_info['project'],
@@ -881,14 +888,20 @@ def browse():
                 # this will be the final value for the next step
                 parent = '/'
                 continue
-
+        flask.flash(f"Error {code}: {message}")
         return render_template(
             'browse_error.html.j2',
             result=result,
             backto=parent
         )
     members = cl.list(path, get_info=True)
+    member_count = len(members)
+    if member_count > 1024:
+        flask.flash(f"Warning: Only showing 1024 of {member_count} entries.")
+        members = members[:1024]
     members.sort(key=lambda m: m['isdir'], reverse=True)
+
+    info['member_count'] = member_count
 
     one_up_member = {
         'name': '..',

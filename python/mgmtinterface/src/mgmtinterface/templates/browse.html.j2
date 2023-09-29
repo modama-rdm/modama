@@ -5,42 +5,129 @@
 
 
 <div class="mui-panel">
-  <p><a href="https://er-c-data.fz-juelich.de">ER-C-Data</a> / <a href="{{ url_for("browse") }}">Browse</a></p>
-  <h1>{% if components.info.isdir %}📁 Folder{% else %}📄 File{% endif %} details</h1>
+  <p>
+    <a href="https://er-c-data.fz-juelich.de">ER-C-Data</a>
+    / <a href="{{ url_for("project") }}">Management</a>
+    / <a href="{{ url_for("browse") }}">Browse</a>
+    </p>
   {% include '_flash.html.j2' %}
-  <p>Path:
-    {% for (full, tail) in components.path_pyramid %}
-      / <a href="{{ url_for('browse', path=full) }}">{{ tail }}</a>
-    {% endfor %}
-  </p>
-
-  
-  <p>Name: {{ components.info.name }}</p>
-  <p>Created: {{ components.info.created }}</p>
-  <p>Modified: {{ components.info.modified }}</p>
-  <p>Size (Bytes): {{ components.info.size }}</p>
-  
-  <p>Project: 
-    {% if components.info.project %}
-      <a href="{{ url_for("projectdetails", name=components.info.project) }}">{{ components.info.project }}</a>
+  <h1>{% if components.info.isdir %}📁 Folder{% else %}📄 File{% endif %} details</h1>
+  <dl class="details-list">
+    <dt class="mui--text-dark-secondary">Project</dt>
+    <dd class="details-list__definition">
+      {% if components.info.project %}
+        <a href="{{ url_for("projectdetails", name=components.info.project) }}">{{ components.info.project }}</a>
+      {% else %}
+        None
+      {% endif %}
+    </dd>
+    <dt class="mui--text-dark-secondary">Name</dt><dd class="details-list__definition">{{ components.info.name }}</dd>
+    <dt class="mui--text-dark-secondary">Created</dt><dd class="details-list__definition">{{ components.info.created }}</dd>
+    <dt class="mui--text-dark-secondary">Modified</dt><dd class="details-list__definition">{{ components.info.modified }}</dd>
+    {% if components.info.isdir %}
+      <dt class="mui--text-dark-secondary">Entries</dt><dd class="details-list__definition">{{ components.info.member_count }}</dd>
     {% else %}
-      None
+      <dt class="mui--text-dark-secondary">Size (Bytes)</dt><dd class="details-list__definition">{{ components.info.size }}</dd>
     {% endif %}
-  </p>
-  
+  </dl>
 
+  <h2>Access this file or folder</h2>
+  <div class="cta">
+    <div class="cta__item mui-panel">
+        <div>
+            <h3>Nextcloud</h3>
+            <p>Access folder with Nextcloud</p>
+        </div>
+        <p>
+            <a class="mui-btn mui-btn--raised mui-btn--primary" href="{{ components.path | nextcloudlink(components.info.isdir) }}" target="_blank">
+                Browse in Nextcloud
+            </a>
+        </p>
+    </div>
+    <div class="cta__item mui-panel">
+        <div>
+            <h3>JupyterHub</h3>
+            <p>Access folder in JupyterHub</p>
+        </div>
+        <p>
+            <a class="mui-btn mui-btn--raised mui-btn--primary" href="{{ components.path | jupyterlink(components.info.isdir) }}" target="_blank">
+                🛡️Open JupyterHub
+            </a>
+        </p>
+    </div>
+    <div class="cta__item mui-panel">
+        <div>
+            <h3>LiberTEM</h3>
+            <p>Open file or folder with LiberTEM</p>
+        </div>
+        <p>
+            <a class="mui-btn mui-btn--raised mui-btn--primary" href="{{ components.path | libertemlink }}" target="_blank">
+                🛡️Open in LiberTEM
+            </a>
+        </p>
+    </div>
+    <div class="cta__item mui-panel">
+        <div>
+            <h3>SampleDB</h3>
+            <p>Search in SampleDB</p>
+        </div>
+        <p>
+            <a class="mui-btn mui-btn--raised mui-btn--primary" href="{{ components.path | sampledbsearch }}" target="_blank">
+                🛡️Search in SampleDB
+            </a>
+        </p>
+    </div>
+  </div>
+
+  <p><a href="https://en.wikipedia.org/wiki/Rsync">Rsync</a> push to Möllenstedt with optimized settings:
+    <input id="rsync" value="{{ components.path | rsync(components.info.isdir) }}" readonly style="width: 100%"/>
+  </p>
+  <p>
+    <a href="https://en.wikipedia.org/wiki/Secure_file_transfer_program">SFTP</a> with optimized settings:
+    <input id="sftp" value="{{ components.path | sftp(components.info.isdir) }}" readonly style="width: 100%"/>
+  </p>
+  <p>
+    <a href="https://er-c-data.fz-juelich.de/#use-filesystem">SMB (Windows)</a>:
+    <input id="smb" value="{{ components.path | main_smbpath }}" readonly style="width: 100%"/>
+  </p>
+
+  <h2>Browse</h2>
   {% if components.members %}
-      <h2>Browse</h2>
-      <table class="mui-table">
+      <p>
+        {% for (full, tail) in components.path_pyramid %}
+          / <a href="{{ url_for('browse', path=full) }}">{{ tail }}</a>
+        {% endfor %}
+      </p>
+      <table class="mui-table mui-table--bordered">
         <thead>
             <tr>
                 <th>Name</th>
+                <th>Nextcloud</th>
+                <th>JupyterHub</th>
+                <th>LiberTEM</th>
+                <th>SampleDB</th>
             </tr>
         </thead>
         <tbody>
             {% for m in components.members %}
             <tr>
                 <td><a href="{{ url_for('browse', path=m.path) }}">{% if m.isdir %}📁 {% else %}📄 {% endif %}{{ m.name }}</a></td>
+                {% if m.name != '..' %}
+                  {% if m.isdir %}
+                    <td><a class="mui-btn" target="_blank" href="{{ m.path | nextcloudlink(m.isdir) }}">🔗</a></td>
+                    <td><a class="mui-btn" target="_blank" href="{{ m.path | jupyterlink(m.isdir) }}">🔗</a></td>
+                  {% else %}
+                    <td></td>
+                    <td></td>
+                  {% endif %}
+                  <td><a class="mui-btn" target="_blank" href="{{ m.path | libertemlink }}">🔗</a></td>
+                  <td><a class="mui-btn" target="_blank" href="{{ m.path | sampledbsearch }}">🔗</a></td>
+                {% else %}
+                  <td></td>
+                  <td></td>
+                  <td></td>
+                  <td></td>
+                {% endif %}
             </tr>
             {% endfor %}
         </tbody>
