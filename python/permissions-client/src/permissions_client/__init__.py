@@ -1,7 +1,8 @@
 from typing import Iterable, Optional
 import urllib.parse
 
-import requests, requests.auth
+import requests
+import requests.auth
 
 
 def quote(s: str):
@@ -53,9 +54,10 @@ class PermissionsClient:
             auth=self.auth
         ).json()
 
-    def projectdetails(self, projectname):
+    def projectdetails(self, projectname, fast: bool = False):
+        fast_qs = "?fast=1" if fast else ""
         return requests.get(
-            f"{self.base_url}/project/{quote(projectname)}/",
+            f"{self.base_url}/project/{quote(projectname)}/{fast_qs}",
             auth=self.auth
         ).json()
 
@@ -69,7 +71,9 @@ class PermissionsClient:
             auth=self.auth
         ).json()
 
-    def change_project_members(self, projectname: str, op, members: Iterable, user: str):
+    def change_project_members(
+        self, projectname: str, op, members: Iterable, user: str
+    ):
         assert op in ('add', 'remove')
         return requests.patch(
             f"{self.base_url}/project/{quote(projectname)}/members/",

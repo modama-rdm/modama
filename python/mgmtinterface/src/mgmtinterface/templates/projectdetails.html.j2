@@ -14,7 +14,7 @@
   <p>Owner: {{ project.owner }}</p>
   <p>Created: {{ project.ctime|format_unixtime }}</p>
   <p>Modified: {{ project.mtime|format_unixtime }}</p>
-  <p>Size (Bytes): {{ project.usage_bytes }}</p>
+  <p>Size (Bytes): <span hx-get="{{ url_for("project_size", name=project.name) }}" hx-trigger="load once"></span></p>
   <h2>Access</h2>
   <p><a href="https://er-c-data.fz-juelich.de/nextcloud/apps/files/?dir=/ER-C-Data/{{ project.relpath }}">Direct Nextcloud link</a></p>
   <p><a href="https://en.wikipedia.org/wiki/Rsync">Rsync</a> push to Möllenstedt with optimized settings: <input id="rsync" value="rsync -av --info=progress2 -e &quot;ssh -T -c aes128-ctr -o Compression=no -x&quot; &quot;&lt;src_path&gt;&quot; {{ ( current_user.user_id ~ '@' ~ project.moellenstedtpath ) | shellescape }}" readonly style="width: 100%"/></p>

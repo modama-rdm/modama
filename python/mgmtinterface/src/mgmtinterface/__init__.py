@@ -1,26 +1,30 @@
 import os
 from datetime import datetime
 from typing import Dict
-import pathlib
 import shlex
 
 import jsonschema
+import humanize
 from flask import Flask, render_template, request
 import flask
-from flask_login import LoginManager, login_required, login_user, current_user, logout_user
+from flask_login import (
+    LoginManager, login_required, login_user, current_user, logout_user
+)
 from flask_httpauth import HTTPBasicAuth
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SelectMultipleField, HiddenField
+from wtforms import (
+    StringField, PasswordField, SelectMultipleField, HiddenField
+)
 from wtforms.validators import DataRequired
 from urllib.parse import urlparse, urljoin
 
 from permissions_client import PermissionsClient
 from smbdrop_client import ShareClient
 import permissions_client.schema as proxy
-from permissions_client.schema import ADHOC
-import smbdrop_client.schema as smbproxy
 
-from mgmtinterface_client.schema import CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
+from mgmtinterface_client.schema import (
+    CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
+)
 
 
 app = Flask(__name__)
@@ -123,6 +127,11 @@ class SealDatasetForm(FlaskForm):
 
 class ShareDatasetForm(FlaskForm):
     op = HiddenField('op', validators=[DataRequired()])
+
+
+@app.template_filter()
+def format_filesize(value):
+    return humanize.naturalsize(value, binary=True)
 
 
 @app.template_filter()
@@ -237,7 +246,7 @@ def add_project():
         invalids = form_set - set(allusers['users'])
         if invalids:
             # Users that are not known users of the data management
-            flask.flash(f"Bad request, invalid options")
+            flask.flash("Bad request, invalid options")
             return render_template(
                 'error.html.j2',
                 result=allusers,
@@ -270,6 +279,7 @@ def moellenstedtpath(project, dsname=None):
             project['relpath'],
             dsname,
         )
+
 
 def main_smbpath(project, dsname=None):
     win_path = project['relpath'].replace('/', '\\')
@@ -314,7 +324,7 @@ def add_share_info(datasets, project, uid, shares):
 @app.route("/project/<name>/details/", methods=["GET"])
 @login_required
 def projectdetails(name: str):
-    pr_info = client.projectdetails(name)
+    pr_info = client.projectdetails(name, fast=True)
     if pr_info['errno'] == 0:
         user_info = client.id_user(current_user.user_id)
         shares = smbclient.list()
@@ -324,13 +334,35 @@ def projectdetails(name: str):
             user_info['id']['uid'],
             shares
         )
-        datasets = sorted(datasets, key=lambda ds:ds['mtime'], reverse=True)
-        pr_info['project']['moellenstedtpath'] = moellenstedtpath(pr_info['project'])
+        datasets = sorted(datasets, key=lambda ds: ds['mtime'], reverse=True)
+        pr_info['project']['moellenstedtpath'] = moellenstedtpath(
+            pr_info['project']
+        )
         pr_info['project']['main_smbpath'] = main_smbpath(pr_info['project'])
         return render_template(
             'projectdetails.html.j2',
             project=pr_info['project'],
             datasets=datasets,
+        )
+    else:
+        return render_template(
+            'error.html.j2',
+            result=pr_info
+        )
+
+
+@app.route("/project/<name>/fragments/disk_usage/", methods=["GET"])
+@login_required
+def project_size(name: str):
+    """
+    Extracted for async access, to not block loading the whole page on this
+    potentially slow operation.
+    """
+    pr_info = client.projectdetails(name, fast=False)
+    if pr_info['errno'] == 0:
+        return render_template(
+            'projectdetails_size.html.j2',
+            project=pr_info['project'],
         )
     else:
         return render_template(
@@ -353,7 +385,7 @@ def project_members(name: str):
     # First perform member action
     form = ChangeProjectMembersForm()
     pr_info = client.projectdetails(name)
-    
+
     if pr_info['errno'] == 0:
         allusers = client.list_users()
         if allusers['errno'] != 0:
@@ -369,7 +401,7 @@ def project_members(name: str):
             invalids = form_set - set(allusers['users'])
             if invalids:
                 # Users that are not known users of the data management
-                flask.flash(f"Bad request, invalid options")
+                flask.flash("Bad request, invalid options")
                 is_error = True
             to_add = form_set - project_set
             to_remove = project_set - form_set

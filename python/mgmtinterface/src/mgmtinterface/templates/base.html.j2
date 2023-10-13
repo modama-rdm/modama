@@ -16,6 +16,7 @@
             {% block content %}
             {% endblock content %}
         </div>
+        <script src="{{ url_for("static", filename='htmx.min.js') }}"></script>
         <script src="{{ url_for("static", filename='mui-0.10.3/js/mui.min.js') }}"></script>
         {% block javascript %}
         {% endblock javascript %}

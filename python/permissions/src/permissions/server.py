@@ -1,12 +1,13 @@
 from subprocess import CalledProcessError
-from typing import Dict, Iterable, List
-from typing_extensions import TypedDict
+from typing import Dict
 
 from flask import Flask, request, jsonify
 import jsonschema
 import pamela
 
-from permissions.api import AdhocProject, ValidationError, authenticate, list_users, id
+from permissions.api import (
+    AdhocProject, ValidationError, authenticate, list_users, id
+)
 from permissions_client.schema import (
     InvalidAPIUsage,
     AUTHENTICATE_USER_REQUEST_SCHEMA, AuthenticateUserRequest,
@@ -111,13 +112,14 @@ def list_projects() -> Dict:
 
 @app.route("/project/<project_name>/", methods=["GET"])
 def project_details(project_name) -> Dict:
+    fast = request.args.get('fast', default=False, type=bool)
     try:
         p = AdhocProject(
             project_name,
             adhoc_group=app.config['ADHOC_GROUP']
         )
     except ValidationError as e:
-        return{
+        return {
             'errno': 1,
             'message': str(e)
         }
@@ -125,7 +127,7 @@ def project_details(project_name) -> Dict:
     # TODO: catch exceptions? `p.datasets` can raise multiple...
     return {
         'errno': 0,
-        "project": p.serialize(),
+        "project": p.serialize(fast=fast),
         "datasets": [
             {
                 "name": ds.name,
@@ -187,7 +189,7 @@ def seal_dataset(project_name):
         )
         p.seal_dataset(request_data["name"], request_data["user"])
     except ValidationError as e:
-        return{
+        return {
             'errno': 1,
             'message': str(e)
         }
@@ -218,7 +220,7 @@ def change_project_members(project_name):
         else:
             raise InvalidAPIUsage(f"Unknown op: {op}")
     except (ValidationError, KeyError) as e:
-        return{
+        return {
             'errno': 1,
             'message': str(e)
         }
