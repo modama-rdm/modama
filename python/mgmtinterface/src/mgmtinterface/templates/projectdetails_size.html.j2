@@ -1,4 +1,4 @@
 {# 
 html snippet with only the size for async loading
 #}
-{{ project.usage_bytes|format_filesize }}
+<span title="{{ project.usage_bytes }} bytes">{{ project.usage_bytes|format_filesize }}</span>
