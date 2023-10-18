@@ -8,6 +8,9 @@ RUN --mount=type=cache,target=/root/.cache python3 -m pip install gunicorn
 COPY ./python/permissions-client /code/permissions-client/
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install -e /code/permissions-client/
 
+COPY ./python/modama-common /code/modama-common/
+RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/modama-common/
+
 COPY ./python/permissions /code/permissions/
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install -e /code/permissions/
 

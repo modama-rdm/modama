@@ -1,8 +1,6 @@
 import os
 import pwd
 import grp
-import fcntl
-import array
 import re
 import subprocess
 import stat
@@ -13,6 +11,7 @@ import time
 import pamela
 import posix1e  # pylibacl, needs libacl1-dev, https://pylibacl.k1024.org/
 
+from modama_common.fs import is_immutable, set_immutable
 from permissions_client.schema import ADHOC
 
 
@@ -22,11 +21,6 @@ ADHOC_PATH = os.path.join(BASE_PATH, ADHOC)
 SHARING_PATH = os.path.join(BASE_PATH, 'sharing')
 
 ADHOC_GROUP = 'testerc'
-
-# From https://www.geeklab.info/2021/04/chattr-and-lsattr-in-python/
-FS_IOC_GETFLAGS = 0x80086601
-FS_IOC_SETFLAGS = 0x40086602
-FS_IMMUTABLE_FL = 0x010
 
 with open('/etc/group', 'r') as groupfile:
     system_groups = set(line.split(':')[0] for line in groupfile)
@@ -152,48 +146,6 @@ def check_can_create(name, adhoc_group):
             raise ValidationError(f'User "{name}" is not in the group "{adhoc_group}".')
     except KeyError:
         raise ValidationError(f'User "{name}" not found.')
-
-
-# Based on https://www.geeklab.info/2021/04/chattr-and-lsattr-in-python/
-def is_immutable(file_path):
-    '''
-    Raises :class:`OSError` or subclasses thereof
-    if :func:`os.open` or :func:`fcntl.ioctl` fail, for whatever reason.
-
-    See also ioctl_iflags(2)
-    '''
-    fd = None
-    try:
-        fd = os.open(file_path, os.O_RDONLY)
-        flags = array.array('L', [0])
-        fcntl.ioctl(fd, FS_IOC_GETFLAGS, flags, True)
-        return bool(flags[0] & FS_IMMUTABLE_FL)
-    finally:
-        if fd is not None:
-            os.close(fd)
-
-
-# Based on https://www.geeklab.info/2021/04/chattr-and-lsattr-in-python/
-def set_immutable(file_path, immutable):
-    '''
-    Raises :class:`OSError` or subclasses thereof
-    if :func:`os.open` or :func:`fcntl.ioctl` fail, for whatever reason.
-
-    See also ioctl_iflags(2)
-    '''
-    fd = None
-    try:
-        fd = os.open(file_path, os.O_RDONLY)
-        flags = array.array('L', [0])
-        fcntl.ioctl(fd, FS_IOC_GETFLAGS, flags, True)
-        if immutable:
-            flags[0] = flags[0] | FS_IMMUTABLE_FL
-        else:
-            flags[0] = flags[0] & ~FS_IMMUTABLE_FL
-        fcntl.ioctl(fd, FS_IOC_SETFLAGS, flags, True)
-    finally:
-        if fd is not None:
-            os.close(fd)
 
 
 class Dataset(NamedTuple):
