@@ -561,9 +561,13 @@ def share_dataset(name: str, dataset: str):
         user_info['id']['uid'],
         shares
     )
-    for ds in datasets:
-        if ds['name'] == dataset:
-            break
+    ds_by_name = {
+        ds['name']: ds
+        for ds in datasets
+    }
+    ds = ds_by_name.get(dataset)
+    if ds is None:
+        flask.abort(404)
     updated = False
     if request.method == 'POST' and form.validate():
         if (current_user.user_id in pr_info['project']['members']
