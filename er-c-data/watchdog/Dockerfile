@@ -11,4 +11,6 @@ RUN --mount=type=cache,target=/root/.cache python3 -m pip install inotify
 
 COPY ./python/permissions/watchdog.py /watchdog.py
 
+STOPSIGNAL SIGINT
+
 CMD ["python3", "/watchdog.py"]
