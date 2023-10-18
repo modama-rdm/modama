@@ -489,7 +489,7 @@ def create_dataset(name: str):
             user=current_user.user_id,
         )
         if result['errno'] == 0:
-            flask.flash(f'Session "{dsname}" created in project "{dsname}".')
+            flask.flash(f'Session "{dsname}" created in project "{name}".')
             return flask.redirect(flask.url_for('projectdetails', name=name))
         else:
             flask.flash(f"Error: {result['message']}.")
