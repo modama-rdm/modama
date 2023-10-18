@@ -364,7 +364,7 @@ class AdhocProject:
             acl.calc_mask()
             check_res = acl.check()
             if check_res is not False:
-                raise ACLError(f"Invalid ACL encountered: {str(check_res)}")
+                raise ACLError(f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}")
             acl.applyto(filename)
 
             defacl = posix1e.ACL(filedef=filename)
@@ -377,7 +377,7 @@ class AdhocProject:
             defacl.calc_mask()
             defcheck_res = defacl.check()
             if defcheck_res is not False:
-                raise ACLError(f"Invalid ACL encountered: {str(defcheck_res)}")
+                raise ACLError(f"Invalid ACL encountered: ACL {defacl} error {str(defcheck_res)} for {filename}")
             defacl.applyto(filename, posix1e.ACL_TYPE_DEFAULT)
 
         self.check_can_modify(user)
@@ -402,6 +402,8 @@ class AdhocProject:
             for root, dirs, files in os.walk(self.path, followlinks=False):
                 for directory in dirs:
                     target = os.path.join(root, directory)
+                    if os.path.islink(target):
+                        continue
                     immutable = is_immutable(target)
                     try:
                         if immutable:
@@ -422,7 +424,7 @@ class AdhocProject:
                     acl.delete_entry(entry)
             check_res = acl.check()
             if check_res is not False:
-                raise ACLError(f"Invalid ACL encountered: {str(check_res)}")
+                raise ACLError(f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}")
             acl.applyto(filename)
             defacl = posix1e.ACL(filedef=filename)
             for entry in defacl:
@@ -430,7 +432,7 @@ class AdhocProject:
                     defacl.delete_entry(entry)
             defcheck_res = defacl.check()
             if defcheck_res is not False:
-                raise ACLError(f"Invalid ACL encountered: {str(defcheck_res)}")
+                raise ACLError(f"Invalid ACL encountered: ACL {defacl} error {str(defcheck_res)} for {filename}")
             defacl.applyto(filename, posix1e.ACL_TYPE_DEFAULT)
 
         self.check_can_modify(user)
@@ -449,6 +451,8 @@ class AdhocProject:
                 # and it saves us a lot of file system operations.
                 for directory in dirs:
                     target = os.path.join(root, directory)
+                    if os.path.islink(target):
+                        continue
                     immutable = is_immutable(target)
                     try:
                         if immutable:
