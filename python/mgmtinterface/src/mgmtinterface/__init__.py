@@ -313,7 +313,7 @@ def sftp(path, isdir=False):
 @app.template_filter()
 def sampledbsearch(path):
     base = app.config['SAMPLEDB_BASE'] + 'objects/'
-    return f"{base}?q=&quot;{quote_plus(path)}&quot;"
+    return f'{base}?q="{quote_plus(path)}"'
 
 
 @app.template_filter()
@@ -899,7 +899,7 @@ def browse():
     if member_count > 1024:
         flask.flash(f"Warning: Only showing 1024 of {member_count} entries.")
         members = members[:1024]
-    members.sort(key=lambda m: m['isdir'], reverse=True)
+    members.sort(key=lambda m: (not m['isdir'], m['name']), reverse=False)
 
     info['member_count'] = member_count
 

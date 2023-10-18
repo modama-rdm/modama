@@ -13,24 +13,29 @@
   {% include '_flash.html.j2' %}
 
   <dl class="details-list">
-    <dt class="mui--text-dark-secondary">Owner</dt><dd class="details-list__definition">{{ project.owner }}</dd>
-    <dt class="mui--text-dark-secondary">Created</dt><dd class="details-list__definition">{{ project.ctime|format_unixtime }}</dd>
-    <dt class="mui--text-dark-secondary">Modified</dt><dd class="details-list__definition">{{ project.mtime|format_unixtime }}</dd>
-    <dt class="mui--text-dark-secondary">Size</dt><dd class="details-list__definition"><span hx-get="{{ url_for("project_size", name=project.name) }}" hx-trigger="load once">loading...</span></dd>
+    <dt class="mui--text-dark-secondary">Owner</dt>
+    <dd class="details-list__definition">{{ project.owner }}</dd>
+
+    <dt class="mui--text-dark-secondary">Created</dt>
+    <dd class="details-list__definition">{{ project.ctime|format_unixtime }}</dd>
+
+    <dt class="mui--text-dark-secondary">Modified</dt>
+    <dd class="details-list__definition">{{ project.mtime|format_unixtime }}</dd>
+
+    <dt class="mui--text-dark-secondary">Size</dt>
+    <dd class="details-list__definition"><span hx-get="{{ url_for("project_size", name=project.name) }}" hx-trigger="load once">loading...</span></dd>
+
     <dt class="mui--text-dark-secondary">Members</dt>
-      <dd class="details-list__definition">{{ render_members(project, current_user) }}</dd>
-      {% if current_user.user_id == project.owner %}
-        <dd class="details-list__definition">
-          <a href="{{ url_for("project_members", name=project.name) }}" class="mui-btn mui-btn--raised">
-              Manage project members...
-          </a>
-        </dd>
-      {% endif %}
-      </dd>
+    <dd class="details-list__definition">{{ render_members(project, current_user) }}</dd>
+    {% if current_user.user_id == project.owner %}
+        <a href="{{ url_for("project_members", name=project.name) }}" class="mui-btn mui-btn--raised">
+            Manage project members...
+        </a>
+    {% endif %}
     <dt class="mui--text-dark-secondary">Browse</dt>
-      <dd class="details-list__definition">
-        <a href="{{ url_for('browse', path=project | canonical_path) }}">{{ project | canonical_path }}</a>
-      </dd>
+    <dd class="details-list__definition">
+      <a href="{{ url_for('browse', path=project | canonical_path) }}">{{ project | canonical_path }}</a>
+    </dd>
   </dl>
 
   <h2>Sessions</h2>

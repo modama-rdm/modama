@@ -91,11 +91,11 @@
     <input id="smb" value="{{ components.path | main_smbpath }}" readonly style="width: 100%"/>
   </p>
 
-  <h2>Browse</h2>
+  <h2 id='browse'>Browse</h2>
   {% if components.members %}
       <p>
         {% for (full, tail) in components.path_pyramid %}
-          / <a href="{{ url_for('browse', path=full) }}">{{ tail }}</a>
+          / <a href="{{ url_for('browse', path=full) }}#browse">{{ tail }}</a>
         {% endfor %}
       </p>
       <table class="mui-table mui-table--bordered">
@@ -111,7 +111,7 @@
         <tbody>
             {% for m in components.members %}
             <tr>
-                <td><a href="{{ url_for('browse', path=m.path) }}">{% if m.isdir %}📁 {% else %}📄 {% endif %}{{ m.name }}</a></td>
+                <td><a href="{{ url_for('browse', path=m.path) }}#browse">{% if m.isdir %}📁 {% else %}📄 {% endif %}{{ m.name }}</a></td>
                 {% if m.name != '..' %}
                   {% if m.isdir %}
                     <td><a class="mui-btn" target="_blank" href="{{ m.path | nextcloudlink(m.isdir) }}">🔗</a></td>
