@@ -6,7 +6,7 @@ import jsonschema
 import pamela
 
 from permissions.api import (
-    AdhocProject, ValidationError, authenticate, list_users, id
+    AdhocProject, ValidationError, authenticate, list_users, uid
 )
 from permissions_client.schema import (
     InvalidAPIUsage,
@@ -39,7 +39,7 @@ def authenticate_user() -> dict:
             authenticate(request_data['username'], request_data['password'])
             return {
                 'errno': 0,
-                'id': id(request_data['username']),
+                'id': uid(request_data['username']),
             }
         except pamela.PAMError as e:
             return {
@@ -56,7 +56,7 @@ def authenticate_user() -> dict:
 def id_user(name) -> dict:
     return {
         'errno': 0,
-        'id': id(name),
+        'id': uid(name),
     }
 
 

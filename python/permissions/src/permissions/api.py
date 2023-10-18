@@ -114,7 +114,7 @@ def authenticate(username, password):
     return pamela.authenticate(username, password)
 
 
-def id(username):
+def uid(username):
     return {
         'uid': pwd.getpwnam(username).pw_uid
     }
