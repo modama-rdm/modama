@@ -9,7 +9,7 @@
     <a href="https://er-c-data.fz-juelich.de">ER-C-Data</a>
     / <a href="{{ url_for("project") }}">Management</a>
     / <a href="{{ url_for("browse") }}">Browse</a>
-    </p>
+  </p>
   {% include '_flash.html.j2' %}
   <h1>{% if components.info.isdir %}📁 Folder{% else %}📄 File{% endif %} details</h1>
   <dl class="details-list">
@@ -79,7 +79,7 @@
     </div>
   </div>
 
-  <p><a href="https://en.wikipedia.org/wiki/Rsync">Rsync</a> push to Möllenstedt with optimized settings:
+  <p><a href="https://en.wikipedia.org/wiki/Rsync">Rsync</a> push to er-c-data with optimized settings:
     <input id="rsync" value="{{ components.path | rsync(components.info.isdir) }}" readonly style="width: 100%"/>
   </p>
   <p>

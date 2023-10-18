@@ -39,13 +39,13 @@
                 </td>
                 <td>
                 {% if not d.immutable and (current_user.user_id in project.members or current_user.user_id == project.owner) %}
-                <a href="{{ url_for('seal_dataset', name=project.name, dataset=d.name) }}">
-                    <button class="mui-btn mui-btn--small mui-btn--raised">Seal...</button>
+                <a href="{{ url_for('seal_dataset', name=project.name, dataset=d.name) }}" class="mui-btn mui-btn--small mui-btn--raised">
+                    Seal...
                 </a>
                 {% endif %}
                 {% if (not d.immutable or d.shared) and (current_user.user_id in project.members or current_user.user_id == project.owner) %}
-                <a href="{{ url_for('share_dataset', name=project.name, dataset=d.name) }}">
-                    <button class="mui-btn mui-btn--small mui-btn--raised">Manage ingest...</button>
+                <a href="{{ url_for('share_dataset', name=project.name, dataset=d.name) }}" class="mui-btn mui-btn--small mui-btn--raised">
+                    Manage ingest...
                 </a>
                 {% endif %}
                 </td>
@@ -59,7 +59,7 @@
 {% endmacro %}
 
 {% macro cancel(project, action="Cancel") %}
-        <a href="{{ url_for("projectdetails", name=project.name) }}">
-            <button type="button" class="mui-btn mui-btn--raised">{{ action }}</button>
+        <a href="{{ url_for("projectdetails", name=project.name) }}" class="mui-btn mui-btn--raised">
+          {{ action }}
         </a>
 {% endmacro %}

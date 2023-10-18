@@ -16,15 +16,13 @@
     <dt class="mui--text-dark-secondary">Owner</dt><dd class="details-list__definition">{{ project.owner }}</dd>
     <dt class="mui--text-dark-secondary">Created</dt><dd class="details-list__definition">{{ project.ctime|format_unixtime }}</dd>
     <dt class="mui--text-dark-secondary">Modified</dt><dd class="details-list__definition">{{ project.mtime|format_unixtime }}</dd>
-    <dt class="mui--text-dark-secondary">Size (Bytes)</dt><dd class="details-list__definition"><span hx-get="{{ url_for("project_size", name=project.name) }}" hx-trigger="load once">loading...</span></dd>
+    <dt class="mui--text-dark-secondary">Size</dt><dd class="details-list__definition"><span hx-get="{{ url_for("project_size", name=project.name) }}" hx-trigger="load once">loading...</span></dd>
     <dt class="mui--text-dark-secondary">Members</dt>
       <dd class="details-list__definition">{{ render_members(project, current_user) }}</dd>
       {% if current_user.user_id == project.owner %}
         <dd class="details-list__definition">
-          <a href="{{ url_for("project_members", name=project.name) }}">
-            <button type="button" class="mui-btn mui-btn--raised">
+          <a href="{{ url_for("project_members", name=project.name) }}" class="mui-btn mui-btn--raised">
               Manage project members...
-            </button>
           </a>
         </dd>
       {% endif %}
@@ -41,10 +39,8 @@
 
   {% if current_user.user_id in project.members or current_user.user_id == project.owner %}
     <p>
-      <a href="{{ url_for("create_dataset", name=project.name) }}">
-        <button type="button" class="mui-btn mui-btn--raised">
-          Create session...
-        </button>
+      <a href="{{ url_for("create_dataset", name=project.name) }}" class="mui-btn mui-btn--raised">
+        Create session...
       </a>
     </p>
   {% endif %}

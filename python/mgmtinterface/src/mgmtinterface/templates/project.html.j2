@@ -24,8 +24,8 @@
     <tr>
         <td><a href="{{ url_for("projectdetails", name=s.project) }}">{{ s.project }}</a></td>
         <td>{{ s.dsname }}</td>
-        <td><a href="{{ url_for('share_dataset', name=s.project, dataset=s.dsname) }}">
-                    <button class="mui-btn mui-btn--small mui-btn--raised">Manage ingest...</button>
+        <td><a href="{{ url_for('share_dataset', name=s.project, dataset=s.dsname) }}" class="mui-btn mui-btn--small mui-btn--raised">
+                    Manage ingest...
                 </a>
         </td>
     </tr>
@@ -96,10 +96,8 @@
     </table>
     {% endif %}
     <p>
-        <a href="{{ url_for("add_project") }}">
-            <button type="button" class="mui-btn mui-btn--raised">
-                Create Project...
-            </button>
+        <a href="{{ url_for("add_project") }}" class="mui-btn mui-btn--raised">
+            Create Project...
         </a>
     </p>
 
