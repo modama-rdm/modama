@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# NOTE: this file is for development only, please see
+# `er-c-data/smbdrop/Dockerfile` for the production deployment!
 
 FROM debian:12-slim
 
@@ -10,6 +12,7 @@ COPY ./ /code
 
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/smbdrop-client
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/smbdrop
+RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/modama-common
 
 EXPOSE 445/tcp
 EXPOSE 5050/tcp

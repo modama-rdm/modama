@@ -1,4 +1,6 @@
+import logging
 from typing import Dict
+
 from flask import Flask, request
 import jsonschema
 
@@ -10,6 +12,7 @@ from smbdrop.mount_manager import MountManager
 
 app = Flask(__name__)
 
+logging.basicConfig(level=logging.INFO)
 
 # FIXME: yuck - in addition to being a side-effect on import, we need to make
 # sure we only run this in a very specific deployment (single process - can

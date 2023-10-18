@@ -14,7 +14,9 @@ import re
 
 import fasteners
 
-from smbdrop.mount_manager import MountManager, BindMount
+from smbdrop.mount_manager import (
+    MountManager, BindMount, MountStateError,
+)
 
 """
 This module manages dynamic creation and deletion of Samba shares.
@@ -248,8 +250,8 @@ class ShareManager:
 
     def _update_mounts(self, shares: Shares) -> None:
         mounts = self._shares_to_mounts(shares)
-        self._mount_manager.set_state(mounts)
         log.debug("desired set of mounts: %s", mounts)
+        self._mount_manager.set_state(mounts)
 
     def _update_samba(self, shares: Shares) -> None:
         # delegate to SambaConfigManager
@@ -318,6 +320,29 @@ class ShareManager:
         self._write_config(config)
         return config
 
+    def _filter_config(self, config: Config) -> Config:
+        """
+        Remove any suspicious entries from the config (for example, sessions for
+        non-existing directories or pointing at symlinks etc.)
+
+        That means the configuration is "eventually valid" and should have
+        a tendency to fix itself.
+        """
+        shares = {}
+        for key, share in config['shares'].items():
+            dest_path = os.path.normpath(share['dest_path'])
+            # filter out "invalid" paths:
+            if not os.path.isdir(dest_path) or os.path.islink(dest_path):
+                log.warn("path %s will be filtered out of smbdrop config", dest_path)
+                continue
+            shares[key] = share
+        users = config['users']
+
+        return {
+            'shares': shares,
+            'users': users,
+        }
+
     def _consistency_check(self, config: Config) -> bool:
         share_uids = set(s['uid'] for s in config['shares'].values())
         user_uids = set(u['uid'] for u in config['users'].values())
@@ -380,6 +405,7 @@ class ShareManager:
             }
 
             config = self._add_share(share)
+            config = self._clean_shares(config)
             assert self._consistency_check(config)
             self._update_mounts(config['shares'])
             self._update_samba(config['shares'])
@@ -388,6 +414,7 @@ class ShareManager:
     def delete_share(self, share_id: str) -> Config:
         with self._share_lock:
             config = self._read_config()
+            config = self._clean_shares(config)
             if share_id not in config['shares']:
                 raise ValueError(f"share id {share_id} not found!")
             share: Share = config['shares'][share_id]
@@ -409,9 +436,18 @@ class ShareManager:
             self._update_mounts(config['shares'])
             return config
 
+    def _clean_shares(self, config: Config) -> Config:
+        # NOTE: only call while holding the self._share_lock!
+        # forget any shares that have become invalid:
+        new_config = self._filter_config(config)
+        if config != new_config:
+            self._write_config(new_config)
+        return new_config
+
     def update(self) -> Config:
         with self._share_lock:
             config = self._read_config()
+            config = self._clean_shares(config)
             for user in config['users'].values():
                 try:
                     pwd.getpwnam(user['username'])
@@ -423,7 +459,12 @@ class ShareManager:
                     )
             assert self._consistency_check(config)
             self._update_samba(config['shares'])
-            self._update_mounts(config['shares'])
+            try:
+                self._update_mounts(config['shares'])
+            except MountStateError:
+                # let the service start, even if there is a
+                # failing mount:
+                log.exception("updating mounts failed")
             return config
 
     def list(self) -> Shares:

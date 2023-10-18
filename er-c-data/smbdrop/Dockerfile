@@ -13,10 +13,16 @@ COPY ./python/smbdrop/smb.conf /etc/samba/smb.conf
 COPY ./python/smbdrop-client /code/smbdrop-client
 RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install /code/smbdrop-client
 
+COPY ./python/modama-common /code/modama-common/
+RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install /code/modama-common/
+
 COPY ./python/smbdrop /code/smbdrop
 RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install /code/smbdrop
 
 EXPOSE 445/tcp
 EXPOSE 5051/tcp
 
+# NOTE: this has to be limited to a single sync worker currently to
+# make the samba subprocess work, and to make sure things are properly
+# synchronized
 CMD ["/venv/bin/gunicorn", "--worker-class", "sync", "--workers", "1", "--bind", "0.0.0.0:5051", "smbdrop.server:app"]
