@@ -59,6 +59,14 @@ services:
       - type: bind
         source: "./testfolder/data"
         target: "/data"
+      - type: bind
+        source: "../python/permissions"
+        target: "/code/permissions"
+        read_only: true
+    environment:
+      - FLASK_APP=permissions.server:app
+    working_dir: /
+    command: flask run --debug --port 5050 --host 0.0.0.0
   watchdog:
     volumes:
       - type: bind

@@ -6,10 +6,10 @@ RUN --mount=type=cache,target=/var/cache/apt apt-get -y update && apt-get -y upg
 RUN --mount=type=cache,target=/root/.cache python3 -m pip install gunicorn
 
 COPY ./python/permissions-client /code/permissions-client/
-RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/permissions-client/
+RUN --mount=type=cache,target=/root/.cache python3 -m pip install -e /code/permissions-client/
 
 COPY ./python/permissions /code/permissions/
-RUN --mount=type=cache,target=/root/.cache python3 -m pip install /code/permissions/
+RUN --mount=type=cache,target=/root/.cache python3 -m pip install -e /code/permissions/
 
 WORKDIR /code/permissions/
 
