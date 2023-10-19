@@ -828,6 +828,37 @@ def api_list_shares() -> Dict:
     return result
 
 
+def get_path_pyramid(path):
+    path_pyramid = []
+    # this strips trailing slashes, among other things
+    head = os.path.normpath(path)
+    tail = True
+
+    # This will always terminate since either the head will get shorter
+    # or the tail is empty. Empty head or empty tail terminate the loop.
+    while head and tail:
+        head, tail = os.path.split(head)
+        if tail:
+            path_pyramid.insert(0, (os.path.join(head, tail), tail))
+
+    path_pyramid.insert(0, ('/', 'er-c-data'))
+    return path_pyramid
+
+
+def get_first_existing(cl: WebDAVClient, path_pyramid):
+    parent = '/'
+    for parent, _ in reversed(path_pyramid):
+        try:
+            if cl.info(parent) and cl.is_dir(parent):
+                break
+        except (RemoteResourceNotFound, ResponseErrorCode):
+            # If the path pyramid contains no valid path,
+            # this will be the final value for the next step
+            parent = '/'
+            continue
+    return parent
+
+
 @app.route("/browse/", methods=["GET"])
 @login_required
 def browse():
@@ -840,26 +871,18 @@ def browse():
         'webdav_password': '1234',
         'webdav_timeout': 30,
     }
+    # We make sure that the path is normalized
+    # so that we point with the same path to the same object
+    normpath = os.path.normpath(path)
     cl = WebDAVClient(options)
-    resource = cl.resource(path)
+    # This adds a leading slash if it is missing
+    resource = cl.resource(normpath)
+    # normpath or WebDAV modified the path
     if resource.urn.path() != path:
         return flask.redirect(flask.url_for('browse', path=resource.urn.path()))
 
-    path_pyramid = []
-    head = path
-
-    while True:
-        head, tail = os.path.split(head)
-        # stripped trailing slash
-        if not tail and head != '/':
-            continue
-        # no leading slash and no separator
-        if tail:
-            path_pyramid.insert(0, (os.path.join(head, tail), tail))
-        else:
-            break
-        if head == '':
-            break
+    # From here on the path is normalized
+    path_pyramid = get_path_pyramid(path)
 
     try:
         info = resource.info()
@@ -878,16 +901,7 @@ def browse():
             'message': message,
             'path': path,
         }
-        parent = '/'
-        for parent, _ in reversed(path_pyramid):
-            try:
-                if cl.info(parent) and cl.is_dir(parent):
-                    break
-            except (RemoteResourceNotFound, ResponseErrorCode):
-                # If the path pyramid contains no valid path,
-                # this will be the final value for the next step
-                parent = '/'
-                continue
+        parent = get_first_existing(cl, path_pyramid)
         flask.flash(f"Error {code}: {message}")
         return render_template(
             'browse_error.html.j2',
@@ -900,7 +914,10 @@ def browse():
         flask.flash(f"Warning: Only showing 1024 of {member_count} entries.")
         members = members[:1024]
     members.sort(key=lambda m: (not m['isdir'], m['name']), reverse=False)
-
+    # We make sure that the path is normalized
+    # so that we point with the same path to the same object
+    for m in members:
+        m['path'] = os.path.normpath(m['path'])
     info['member_count'] = member_count
 
     one_up_member = {
@@ -913,10 +930,10 @@ def browse():
         'etag': None,
         'content_type': None,
     }
-    if len(path_pyramid) > 1:
+    if len(path_pyramid) > 2:
         one_up_member['path'] = path_pyramid[-2][0]
-        info['project'] = path_pyramid[1][1]
-    elif len(path_pyramid) == 1:
+        info['project'] = path_pyramid[2][1]
+    elif len(path_pyramid) == 2:
         one_up_member['path'] = '/'
     if one_up_member['path'] is not None:
         members.insert(0, one_up_member)

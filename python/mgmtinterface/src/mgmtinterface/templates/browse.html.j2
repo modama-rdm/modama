@@ -114,14 +114,14 @@
                 <td><a href="{{ url_for('browse', path=m.path) }}#browse">{% if m.isdir %}📁 {% else %}📄 {% endif %}{{ m.name }}</a></td>
                 {% if m.name != '..' %}
                   {% if m.isdir %}
-                    <td><a class="mui-btn" target="_blank" href="{{ m.path | nextcloudlink(m.isdir) }}">🔗</a></td>
-                    <td><a class="mui-btn" target="_blank" href="{{ m.path | jupyterlink(m.isdir) }}">🔗</a></td>
+                    <td><a target="_blank" href="{{ m.path | nextcloudlink(m.isdir) }}">🔗➡️</a></td>
+                    <td><a target="_blank" href="{{ m.path | jupyterlink(m.isdir) }}">🔗➡️</a></td>
                   {% else %}
                     <td></td>
                     <td></td>
                   {% endif %}
-                  <td><a class="mui-btn" target="_blank" href="{{ m.path | libertemlink }}">🔗</a></td>
-                  <td><a class="mui-btn" target="_blank" href="{{ m.path | sampledbsearch }}">🔗</a></td>
+                  <td><a target="_blank" href="{{ m.path | libertemlink }}">🔗➡️</a></td>
+                  <td><a target="_blank" href="{{ m.path | sampledbsearch }}">🔗➡️</a></td>
                 {% else %}
                   <td></td>
                   <td></td>
