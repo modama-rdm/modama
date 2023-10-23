@@ -24,6 +24,7 @@ if __name__ == '__main__':
     )
     print("Watch created, waiting for events")
     sys.stdout.flush()
+    sharing_dir = os.path.join(root, 'sharing')
     for event in i.event_gen(yield_nones=False, ignore_missing_new_folders=True):
         (header, type_names, path, filename) = event
         if not ((header.mask & inotify.constants.IN_CREATE) or
@@ -33,7 +34,7 @@ if __name__ == '__main__':
         if not name.startswith(root):
             print(f'WARNING received event for path {name} outside {root}, ignoring')
             continue
-        if name.startswith('/data/sharing'):
+        if name.startswith(sharing_dir):
             continue
         try:
             if 'IN_ISDIR' in type_names:
