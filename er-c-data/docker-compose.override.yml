@@ -34,7 +34,7 @@ services:
       - "127.0.0.1:8081:8080"
   sampledb:
     hostname: sampledb
-    image: sciapp/sampledb:0.24.1
+    image: sciapp/sampledb:develop
     depends_on:
       - db
     environment:

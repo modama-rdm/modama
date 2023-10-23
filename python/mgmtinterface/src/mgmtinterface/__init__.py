@@ -313,7 +313,7 @@ def sftp(path, isdir=False):
 @app.template_filter()
 def sampledbsearch(path):
     base = app.config['SAMPLEDB_BASE'] + 'objects/'
-    return f'{base}?q="{quote_plus(path)}"'
+    return f'{base}?q="{quote_plus(path)}"+in+file_name&advanced=on'
 
 
 @app.template_filter()
