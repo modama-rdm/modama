@@ -396,7 +396,7 @@ class AdhocProject:
         # FIXME repeat until ACLs remain constant
         # How to test ACL equivalency?
         for repeat in range(2):
-            for root, dirs, files in os.walk(self.path):
+            for root, dirs, files in os.walk(self.path, followlinks=False):
                 # Don't manipulate files, only directories. Files should have
                 # their ACLs dropped by watchdog after creation anyway,
                 # they would be susceptible to shenanigans with hard links,

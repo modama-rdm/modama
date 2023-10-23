@@ -11,3 +11,6 @@
 [submodule "er-c-data/tsm-client"]
 	path = er-c-data/tsm-client
 	url = https://jugit.fz-juelich.de/d.weber/tsm-client.git
+[submodule "python/PyInotify"]
+	path = python/PyInotify
+	url = https://github.com/uellue/PyInotify

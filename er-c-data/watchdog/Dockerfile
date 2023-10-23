@@ -7,7 +7,9 @@ RUN --mount=type=cache,target=/var/cache/apt apt-get -y update &&\
     apt-get -y upgrade &&\
     apt-get -y install acl python3 python3-pip
 
-RUN --mount=type=cache,target=/root/.cache python3 -m pip install inotify
+COPY ./python/PyInotify /PyInotify
+
+RUN --mount=type=cache,target=/root/.cache python3 -m pip install -e /PyInotify
 
 COPY ./python/permissions/watchdog.py /watchdog.py
 
