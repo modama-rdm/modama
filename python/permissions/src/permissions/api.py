@@ -336,6 +336,8 @@ class AdhocProject:
         source = posix1e.ACL(file=self.path)
         new_uids = set(pwd.getpwnam(username).pw_uid for username in usernames)
         new_acl_entries = []
+        # List of (path, exception) tuples
+        errors = []
         for uid in new_uids:
             new = source.append()
             new.tag_type = posix1e.ACL_USER
@@ -344,7 +346,10 @@ class AdhocProject:
             new.permset.write = True
             new.permset.execute = True
             new_acl_entries.append(new)
-        add(new_acl_entries, new_uids, self.path)
+        try:
+            add(new_acl_entries, new_uids, self.path)
+        except (ACLError, PermissionError, FileNotFoundError) as e:
+            errors.append((self.path, e))
 
         # Go twice to make race condition between
         # creation with default acl and walking less likely
@@ -361,9 +366,13 @@ class AdhocProject:
                         if immutable:
                             set_immutable(target, False)
                         add(new_acl_entries, new_uids, target)
+                    except (ACLError, PermissionError, FileNotFoundError) as e:
+                        errors.append((target, e))
                     finally:
                         if immutable:
                             set_immutable(target, True)
+        if errors:
+            raise RuntimeError("Encountered errors when walking path", errors)
 
     def remove_members(self, usernames, user):
         '''
@@ -389,7 +398,12 @@ class AdhocProject:
 
         self.check_can_modify(user)
         uids = set(pwd.getpwnam(username).pw_uid for username in usernames)
-        remove(uids, self.path)
+        # List of (path, exception) tuples
+        errors = []
+        try:
+            remove(uids, self.path)
+        except (ACLError, PermissionError, FileNotFoundError) as e:
+            errors.append((target, e))
         # See above add_members() for safety considerations
         # Go twice to make race condition between
         # creation with default acl and walking less likely
@@ -410,9 +424,13 @@ class AdhocProject:
                         if immutable:
                             set_immutable(target, False)
                         remove(uids, target)
+                    except (ACLError, PermissionError, FileNotFoundError) as e:
+                        errors.append((target, e))
                     finally:
                         if immutable:
                             set_immutable(target, True)
+        if errors:
+            raise RuntimeError("Encountered errors when walking path", errors)
 
     @property
     def datasets(self):
