@@ -113,6 +113,7 @@
         <thead>
             <tr>
                 <th>Name</th>
+                <th>Copy URL</th>
                 <th>Nextcloud</th>
                 <th>JupyterHub</th>
                 <th>LiberTEM</th>
@@ -124,8 +125,8 @@
             <tr>
                 <td>
                   <a href="{{ url_for('browse', path=m.path) }}#browse">{% if m.isdir %}📁 {% else %}📄 {% endif %}{{ m.name }}</a>
-                  {% if m.name != '..' %}{{ copypath(m.path) }}{% endif %}
                 </td>
+                <td>{% if m.name != '..' %}{{ copypath(m.path) }}{% endif %}</td>
                 {% if m.name != '..' %}
                   {% if m.isdir %}
                     <td><a target="_blank" href="{{ m.path | nextcloudlink(m.isdir) }}">🔗➡️</a></td>

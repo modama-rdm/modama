@@ -65,9 +65,16 @@
 {% endmacro %}
 
 {% macro copybutton(text) %}
-<a data-to-copy="{{ text }}" class="copybutton" href="#" title="Copy to clipboard"><i class="fa-regular fa-copy"/></i></a>
+<a style="cursor: pointer" data-to-copy="{{ text }}" class="copybutton" title="Copy to clipboard: {{ text }}">
+  <i class="fa-regular fa-copy"/></i>
+</a>
 {% endmacro %}
 
 {% macro copypath(path) %}
-{{ copybutton(url_for('browse', path=path, _external=True)) }}
+{% set url = url_for('browse', path=path, _external=True) %}
+<a href="{{ url }}"
+      data-to-copy="{{ url }}"
+      class="copybutton" title="Copy to clipboard: {{ url }}">
+  <i class="fa-regular fa-copy"/></i>
+</a>
 {% endmacro %}
