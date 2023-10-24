@@ -6,6 +6,7 @@ import subprocess
 import stat
 import shutil
 from typing import NamedTuple, List
+from collections.abc import Collection
 import time
 
 import pamela
@@ -40,6 +41,23 @@ class ACLError(IOError):
     Checking an ACL failed for some reason
 
     See https://pylibacl.k1024.org/module.html#posix1e.ACL.check
+    '''
+    pass
+
+
+FS_ERRORS = (ACLError, PermissionError, FileNotFoundError, OSError)
+
+
+class AccumulatedMemberError(RuntimeError):
+    '''
+    Accumulated errors belonging to classes in FS_ERRORS from
+    traversing a project's directory tree when adding or removing members.
+
+    The code will not bail out, but just collect all errors. Since we run as root,
+    errors SHOULD not happen, but for defense in depth and keeping a consistent state
+    we try to change members as much as possible instead of bailing out early.
+
+    With this exception we can raise a collection with all errors that occurred.
     '''
     pass
 
@@ -296,7 +314,8 @@ class AdhocProject:
     def add_members(self, usernames: List[str], user) -> None:
         '''
         Exceptions can come from posix1e, os.walk,
-        :func:`get_immutable`and :func:`set_immutable`.
+        :func:`get_immutable`and :func:`set_immutable`. Most will be added
+        to a collection and raised as :class:`AccumulatedMemberError` in the end.
 
         os.walk doesn't follow symlinks by default. The option set for clarity.
         Also, the function only modifies permissions for directories,
@@ -304,8 +323,10 @@ class AdhocProject:
         If any of the limitations were lifted, a user could
         add a link to another file and have its permissions
         manipulated!
+
+        TOCTOU vulnerabilities are probably still present.
         '''
-        def add(entries: List[posix1e.Entry], new_uids: List[int], filename: str) -> None:
+        def add(entries: List[posix1e.Entry], new_uids: Collection[int], filename: str) -> None:
             acl = posix1e.ACL(file=filename)
             # Delete any existing entries for the new user
             for entry in acl:
@@ -346,10 +367,9 @@ class AdhocProject:
             new.permset.write = True
             new.permset.execute = True
             new_acl_entries.append(new)
-        try:
-            add(new_acl_entries, new_uids, self.path)
-        except (ACLError, PermissionError, FileNotFoundError) as e:
-            errors.append((self.path, e))
+
+        # Bail if this throws an exception
+        add(new_acl_entries, new_uids, self.path)
 
         # Go twice to make race condition between
         # creation with default acl and walking less likely
@@ -366,19 +386,19 @@ class AdhocProject:
                         if immutable:
                             set_immutable(target, False)
                         add(new_acl_entries, new_uids, target)
-                    except (ACLError, PermissionError, FileNotFoundError) as e:
+                    except FS_ERRORS as e:
                         errors.append((target, e))
                     finally:
                         if immutable:
                             set_immutable(target, True)
         if errors:
-            raise RuntimeError("Encountered errors when walking path", errors)
+            raise AccumulatedMemberError("Encountered errors when walking path", errors)
 
     def remove_members(self, usernames, user):
         '''
         See :meth:`add_members()` for safety considerations!
         '''
-        def remove(uids, filename):
+        def remove(uids: Collection[int], filename):
             acl = posix1e.ACL(file=filename)
             for entry in acl:
                 if entry.tag_type == posix1e.ACL_USER and entry.qualifier in uids:
@@ -402,8 +422,8 @@ class AdhocProject:
         errors = []
         try:
             remove(uids, self.path)
-        except (ACLError, PermissionError, FileNotFoundError) as e:
-            errors.append((target, e))
+        except FS_ERRORS as e:
+            errors.append((self.path, e))
         # See above add_members() for safety considerations
         # Go twice to make race condition between
         # creation with default acl and walking less likely
@@ -417,6 +437,7 @@ class AdhocProject:
                 # and it saves us a lot of file system operations.
                 for directory in dirs:
                     target = os.path.join(root, directory)
+                    # Will return False if it can't access target, won't throw Exception
                     if os.path.islink(target):
                         continue
                     immutable = is_immutable(target)
@@ -424,13 +445,13 @@ class AdhocProject:
                         if immutable:
                             set_immutable(target, False)
                         remove(uids, target)
-                    except (ACLError, PermissionError, FileNotFoundError) as e:
+                    except FS_ERRORS as e:
                         errors.append((target, e))
                     finally:
                         if immutable:
                             set_immutable(target, True)
         if errors:
-            raise RuntimeError("Encountered errors when walking path", errors)
+            raise AccumulatedMemberError("Encountered errors when walking path", errors)
 
     @property
     def datasets(self):

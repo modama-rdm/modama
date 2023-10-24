@@ -373,7 +373,7 @@ def projectdetails(name: str):
             user_info['id']['uid'],
             shares
         )
-        datasets = sorted(datasets, key=lambda ds:ds['mtime'], reverse=True)
+        datasets = sorted(datasets, key=lambda ds: ds['mtime'], reverse=True)
         return render_template(
             'projectdetails.html.j2',
             project=pr_info['project'],
@@ -473,7 +473,7 @@ def project_members(name: str):
                 form=form,
                 project=pr_info['project']
             )
-    return(error(pr_info))
+    return error(pr_info)
 
 
 @app.route("/project/<name>/createdataset/", methods=["GET", "POST"])
@@ -600,9 +600,9 @@ def share_dataset(name: str, dataset: str):
                 else:
                     flask.flash(f"Error: {result}.")
             else:
-                flask.flash(f"Error: Invalid opcode.")
+                flask.flash("Error: Invalid opcode.")
         else:
-            flask.flash(f"Error: Managing share forbidden.")
+            flask.flash("Error: Managing share forbidden.")
     if updated:
         pr_info = client.projectdetails(name)
         user_info = client.id_user(current_user.user_id)
@@ -785,7 +785,7 @@ def api_create_share() -> Dict:
             break
     if ds is None:
         raise RuntimeError(
-            f"Dataset {ds.name} not found in project {pr_info['project']['name']}"
+            f"Dataset not found in project {pr_info['project']['name']}"
         )
     if apiauth.current_user() not in pr_info['project']['members']:
         raise RuntimeError(
