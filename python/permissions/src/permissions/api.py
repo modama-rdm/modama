@@ -379,18 +379,19 @@ class AdhocProject:
             for root, dirs, files in os.walk(self.path, followlinks=False):
                 for directory in dirs:
                     target = os.path.join(root, directory)
-                    if os.path.islink(target):
-                        continue
-                    immutable = is_immutable(target)
                     try:
-                        if immutable:
-                            set_immutable(target, False)
-                        add(new_acl_entries, new_uids, target)
+                        if os.path.islink(target):
+                            continue
+                        immutable = is_immutable(target)
+                        try:
+                            if immutable:
+                                set_immutable(target, False)
+                            add(new_acl_entries, new_uids, target)
+                        finally:
+                            if immutable:
+                                set_immutable(target, True)
                     except FS_ERRORS as e:
                         errors.append((target, e))
-                    finally:
-                        if immutable:
-                            set_immutable(target, True)
         if errors:
             raise AccumulatedMemberError("Encountered errors when walking path", errors)
 
@@ -437,19 +438,20 @@ class AdhocProject:
                 # and it saves us a lot of file system operations.
                 for directory in dirs:
                     target = os.path.join(root, directory)
-                    # Will return False if it can't access target, won't throw Exception
-                    if os.path.islink(target):
-                        continue
-                    immutable = is_immutable(target)
                     try:
-                        if immutable:
-                            set_immutable(target, False)
-                        remove(uids, target)
+                        # Will return False if it can't access target, won't throw Exception
+                        if os.path.islink(target):
+                            continue
+                        immutable = is_immutable(target)
+                        try:
+                            if immutable:
+                                set_immutable(target, False)
+                            remove(uids, target)
+                        finally:
+                            if immutable:
+                                set_immutable(target, True)
                     except FS_ERRORS as e:
                         errors.append((target, e))
-                    finally:
-                        if immutable:
-                            set_immutable(target, True)
         if errors:
             raise AccumulatedMemberError("Encountered errors when walking path", errors)
 
