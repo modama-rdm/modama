@@ -4,7 +4,7 @@
 
 {% include '_header.html.j2' %}
 
-
+{% from "_projecthelpers.html.j2" import copypath %}
 
 {% macro render_row(p) %}
     <tr>
@@ -16,7 +16,7 @@
                 {{ m }}
             {% endfor %}
         </td>
-        <td><a href="{{ url_for('browse', path=p | canonical_path) }}">{{ p | canonical_path }}</td>
+        <td><a href="{{ url_for('browse', path=p | canonical_path) }}">{{ p | canonical_path }} {{ copypath(p | canonical_path) }}</td>
     </tr>
 {% endmacro %}
 

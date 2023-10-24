@@ -63,3 +63,11 @@
           {{ action }}
         </a>
 {% endmacro %}
+
+{% macro copybutton(text) %}
+<a data-to-copy="{{ text }}" class="copybutton" href="#" title="Copy to clipboard"><i class="fa-regular fa-copy"/></i></a>
+{% endmacro %}
+
+{% macro copypath(path) %}
+{{ copybutton(url_for('browse', path=path, _external=True)) }}
+{% endmacro %}

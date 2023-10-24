@@ -3,7 +3,7 @@
 {% block content %}
 {% include '_header.html.j2' %}
 
-{% from "_projecthelpers.html.j2" import render_members, render_datasets, navbar_short %}
+{% from "_projecthelpers.html.j2" import render_members, render_datasets, navbar_short, copypath %}
 
 
 <div class="mui-panel">
@@ -34,7 +34,7 @@
     {% endif %}
     <dt class="mui--text-dark-secondary">Browse</dt>
     <dd class="details-list__definition">
-      <a href="{{ url_for('browse', path=project | canonical_path) }}">{{ project | canonical_path }}</a>
+      <a href="{{ url_for('browse', path=project | canonical_path) }}">{{ project | canonical_path }} {{ copypath(project | canonical_path) }}</a>
     </dd>
   </dl>
 

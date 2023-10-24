@@ -6,6 +6,9 @@
         <meta http-equiv="X-UA-Compatible" content="IE=edge">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
+        <!-- load Font Awesome -->
+        <link href="{{ url_for("static", filename='fontawesome-free-6.4.2-web/css/fontawesome.css') }}" rel="stylesheet">
+        <link href="{{ url_for("static", filename='fontawesome-free-6.4.2-web/css/regular.css') }}" rel="stylesheet">
         <!-- load MUI -->
         <link href="{{ url_for("static", filename='mui-0.10.3/css/mui.min.css') }}" rel="stylesheet" type="text/css" />
         <link href="{{ url_for("static", filename='overrides.css') }}" rel="stylesheet" type="text/css" />
@@ -19,6 +22,15 @@
         </div>
         <script src="{{ url_for("static", filename='htmx.min.js') }}"></script>
         <script src="{{ url_for("static", filename='mui-0.10.3/js/mui.min.js') }}"></script>
+        <script>
+        // Copy button functionality, goes with macro in _projecthelpers.html
+        Array.from(document.querySelectorAll(".copybutton")).forEach((cb) => {
+            cb.addEventListener('click', (e) => {
+                navigator.clipboard.writeText(cb.dataset.toCopy);
+                e.preventDefault();
+            });
+        });
+        </script>
         {% block javascript %}
         {% endblock javascript %}
     </body>

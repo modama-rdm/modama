@@ -2,6 +2,7 @@
 
 {% block content %}
 {% include '_header.html.j2' %}
+{% from "_projecthelpers.html.j2" import copybutton, copypath %}
 
 
 <div class="mui-panel">
@@ -11,7 +12,7 @@
     / <a href="{{ url_for("browse") }}">Browse</a>
   </p>
   {% include '_flash.html.j2' %}
-  <h1>{% if components.info.isdir %}📁 Folder{% else %}📄 File{% endif %} details</h1>
+  <h1>{% if components.info.isdir %}📁 {% else %}📄 {% endif %} {{ components.info.name }} {{ copypath(components.path) }}</h1>
   <dl class="details-list">
     <dt class="mui--text-dark-secondary">Project</dt>
     <dd class="details-list__definition">
@@ -21,7 +22,6 @@
         None
       {% endif %}
     </dd>
-    <dt class="mui--text-dark-secondary">Name</dt><dd class="details-list__definition">{{ components.info.name }}</dd>
     <dt class="mui--text-dark-secondary">Created</dt><dd class="details-list__definition">{{ components.info.created }}</dd>
     <dt class="mui--text-dark-secondary">Modified</dt><dd class="details-list__definition">{{ components.info.modified }}</dd>
     {% if components.info.isdir %}
@@ -79,16 +79,26 @@
     </div>
   </div>
 
-  <p><a href="https://en.wikipedia.org/wiki/Rsync">Rsync</a> push to er-c-data with optimized settings:
-    <input id="rsync" value="{{ components.path | rsync(components.info.isdir) }}" readonly style="width: 100%"/>
+  <p>
+    <a href="https://en.wikipedia.org/wiki/Rsync">Rsync</a> push to er-c-data with optimized settings:
+    <div style="display: flex; gap: 0.5em">
+      <input id="rsync" value="{{ components.path | rsync(components.info.isdir) }}" readonly style="flex-grow: 1"/>
+      {{ copybutton(components.path | rsync(components.info.isdir)) }}
+    </div>
   </p>
   <p>
     <a href="https://en.wikipedia.org/wiki/Secure_file_transfer_program">SFTP</a> with optimized settings:
-    <input id="sftp" value="{{ components.path | sftp(components.info.isdir) }}" readonly style="width: 100%"/>
+    <div style="display: flex; gap: 0.5em">
+      <input id="sftp" value="{{ components.path | sftp(components.info.isdir) }}" readonly style="flex-grow: 1"/>
+      {{ copybutton(components.path | sftp(components.info.isdir)) }}
+    </div>
   </p>
   <p>
     <a href="https://er-c-data.fz-juelich.de/#use-filesystem">SMB (Windows)</a>:
-    <input id="smb" value="{{ components.path | main_smbpath }}" readonly style="width: 100%"/>
+    <div style="display: flex; gap: 0.5em">
+      <input id="smb" value="{{ components.path | main_smbpath }}" readonly style="flex-grow: 1"/>
+      {{ copybutton(components.path | main_smbpath) }}
+    </div>
   </p>
 
   <h2 id='browse'>Browse</h2>
@@ -97,6 +107,7 @@
         {% for (full, tail) in components.path_pyramid %}
           / <a href="{{ url_for('browse', path=full) }}#browse">{{ tail }}</a>
         {% endfor %}
+        {{ copypath(components.path) }}
       </p>
       <table class="mui-table mui-table--bordered">
         <thead>
@@ -111,7 +122,10 @@
         <tbody>
             {% for m in components.members %}
             <tr>
-                <td><a href="{{ url_for('browse', path=m.path) }}#browse">{% if m.isdir %}📁 {% else %}📄 {% endif %}{{ m.name }}</a></td>
+                <td>
+                  <a href="{{ url_for('browse', path=m.path) }}#browse">{% if m.isdir %}📁 {% else %}📄 {% endif %}{{ m.name }}</a>
+                  {% if m.name != '..' %}{{ copypath(m.path) }}{% endif %}
+                </td>
                 {% if m.name != '..' %}
                   {% if m.isdir %}
                     <td><a target="_blank" href="{{ m.path | nextcloudlink(m.isdir) }}">🔗➡️</a></td>
