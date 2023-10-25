@@ -52,6 +52,7 @@ services:
   cloudproxy:
     volumes:
       - './testconf/cloudproxy-servername.nginx.conf.snippet:/etc/nginx/conf.d/servername.conf.snippet'
+      - './testconf/cloudproxy-sampledb.nginx.conf.snippet:/etc/nginx/conf.d/sampledb.conf.snippet'
     ports:
       - "127.0.0.1:1890:80"
   permissions:
