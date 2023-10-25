@@ -16,7 +16,7 @@ from wtforms import (
     StringField, PasswordField, SelectMultipleField, HiddenField
 )
 from wtforms.validators import DataRequired
-from urllib.parse import urlparse, urljoin, quote_plus
+from urllib.parse import urlparse, urljoin, quote_plus, quote
 from webdav3.client import Client as WebDAVClient, RemoteResourceNotFound, ResponseErrorCode
 
 from permissions_client import PermissionsClient
@@ -280,7 +280,7 @@ def nextcloudlink(path, isdir=False):
 def jupyterlink(path, isdir=False):
     if not isdir:
         path = os.path.dirname(path)
-    return app.config['JUPYTER_BASE'] + quote_plus(path)
+    return app.config['JUPYTER_BASE'] + quote(path)
 
 
 @app.template_filter()
