@@ -16,7 +16,8 @@
                 {{ m }}
             {% endfor %}
         </td>
-        <td><a href="{{ url_for('browse', path=p | canonical_path) }}">{{ p | canonical_path }} {{ copypath(p | canonical_path) }}</td>
+        <td><a href="{{ url_for('browse', path=p | canonical_path) }}">{{ p | canonical_path }}</td>
+        <td>{{ copypath(p | canonical_path) }}</td>
     </tr>
 {% endmacro %}
 
@@ -45,6 +46,7 @@
                 <th>Owner</th>
                 <th>Members</th>
                 <th>Browse</th>
+                <th>Copy URL</th>
             </tr>
         </thead>
         <tbody>
