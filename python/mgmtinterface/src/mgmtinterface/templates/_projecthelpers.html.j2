@@ -65,16 +65,20 @@
 {% endmacro %}
 
 {% macro copybutton(text) %}
-<a style="cursor: pointer" data-to-copy="{{ text }}" class="copybutton" title="Copy to clipboard: {{ text }}">
-  <i class="fa-regular fa-copy"/></i>
-</a>
+{% if False %}
+  <a style="cursor: pointer" data-to-copy="{{ text }}" class="copybutton" title="Copy to clipboard: {{ text }}">
+    <i class="fa-regular fa-copy"/></i>
+  </a>
+{% endif %}
 {% endmacro %}
 
 {% macro copypath(path) %}
-{% set url = url_for('browse', path=path, _external=True) %}
-<a href="{{ url }}"
-      data-to-copy="{{ url }}"
-      class="copybutton" title="Copy to clipboard: {{ url }}">
-  <i class="fa-regular fa-copy"/></i>
-</a>
+{% if False %}
+  {% set url = url_for('browse', path=path, _external=True) %}
+  <a href="{{ url }}"
+        data-to-copy="{{ url }}"
+        class="copybutton" title="Copy to clipboard: {{ url }}">
+    <i class="fa-regular fa-copy"/></i>
+  </a>
+{% endif %}
 {% endmacro %}
