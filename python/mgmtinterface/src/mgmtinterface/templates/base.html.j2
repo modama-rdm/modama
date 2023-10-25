@@ -26,8 +26,8 @@
         // Copy button functionality, goes with macro in _projecthelpers.html
         Array.from(document.querySelectorAll(".copybutton")).forEach((cb) => {
             cb.addEventListener('click', (e) => {
-                navigator.clipboard.writeText(cb.dataset.toCopy);
                 e.preventDefault();
+                navigator.clipboard.writeText(cb.dataset.toCopy);
             });
         });
         </script>
