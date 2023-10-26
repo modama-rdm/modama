@@ -90,6 +90,7 @@ services:
       - type: bind
         source: "/var/local/data-mgmt"
         target: "/mnt/data/data-mgmt"
+    image: iffregistry.fz-juelich.de/weber/data-management-system/tsm-client:latest
 
 volumes:
   nfsdata:

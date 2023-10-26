@@ -39,6 +39,9 @@ container-image-build:
       - DOCKERFILE: er-c-data/wsgidav/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}/er-c-data/wsgidav/"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/wsgidav
+      - DOCKERFILE: er-c-data/tsm-client/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}/er-c-data/tsm-client/"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/tsm-client
 
   script:
     - /kaniko/executor
@@ -63,6 +66,7 @@ container-image-retag:
       - IMAGE_NAME: smbdrop
       - IMAGE_NAME: mgmtinterface
       - IMAGE_NAME: wsgidav
+      - IMAGE_NAME: tsm-client
   script:
     - crane auth login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - crane tag iffregistry.fz-juelich.de/weber/data-management-system/$IMAGE_NAME:$CI_COMMIT_SHA latest
