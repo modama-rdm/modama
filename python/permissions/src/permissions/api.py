@@ -311,6 +311,28 @@ class AdhocProject:
                 )
         return list(set(members))
 
+    @staticmethod
+    def get_initial_acl(filename, default=False):
+        if default:
+            acl = posix1e.ACL(filedef=filename)
+        else:
+            acl = posix1e.ACL(file=filename)
+        initial_res = acl.check()
+        # If invalid because empty, initialize with a blank ACL
+        # corresponding to the file permissions
+        if initial_res is not False:
+            # Empty ACL and no other error
+            if initial_res[0] == posix1e.ACL_MISS_ERROR and initial_res[1] == 0:
+                st = os.stat(filename)
+                acl = posix1e.ACL(mode=st.st_mode)
+                if acl.check() is not False:
+                    raise ACLError(f'Attempt to generate initial ACL {str(acl)} failed for {filename}.')
+            else:
+                raise ACLError(
+                    f"Invalid pre-existing ACL encountered: ACL {acl} error {str(initial_res)} for {filename}"
+                )
+        return acl
+
     def add_members(self, usernames: List[str], user) -> None:
         '''
         Exceptions can come from posix1e, os.walk,
@@ -327,7 +349,7 @@ class AdhocProject:
         TOCTOU vulnerabilities are probably still present.
         '''
         def add(entries: List[posix1e.Entry], new_uids: Collection[int], filename: str) -> None:
-            acl = posix1e.ACL(file=filename)
+            acl = self.get_initial_acl(filename, default=False)
             # Delete any existing entries for the new user
             for entry in acl:
                 if entry.tag_type == posix1e.ACL_USER and entry.qualifier in new_uids:
@@ -340,7 +362,7 @@ class AdhocProject:
                 raise ACLError(f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}")
             acl.applyto(filename)
 
-            defacl = posix1e.ACL(filedef=filename)
+            defacl = self.get_initial_acl(filename, default=True)
             # Delete any existing entries for the new user
             for entry in defacl:
                 if entry.tag_type == posix1e.ACL_USER and entry.qualifier in new_uids:
@@ -400,7 +422,7 @@ class AdhocProject:
         See :meth:`add_members()` for safety considerations!
         '''
         def remove(uids: Collection[int], filename):
-            acl = posix1e.ACL(file=filename)
+            acl = self.get_initial_acl(filename, default=False)
             for entry in acl:
                 if entry.tag_type == posix1e.ACL_USER and entry.qualifier in uids:
                     acl.delete_entry(entry)
@@ -408,7 +430,7 @@ class AdhocProject:
             if check_res is not False:
                 raise ACLError(f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}")
             acl.applyto(filename)
-            defacl = posix1e.ACL(filedef=filename)
+            defacl = self.get_initial_acl(filename, default=True)
             for entry in defacl:
                 if entry.tag_type == posix1e.ACL_USER and entry.qualifier in uids:
                     defacl.delete_entry(entry)
