@@ -67,6 +67,7 @@ services:
     environment:
       - FLASK_APP=permissions.server:app
     working_dir: /
+    # command: gunicorn --bind 0.0.0.0:5050 permissions.server:app --log-level=debug
     command: flask run --debug --port 5050 --host 0.0.0.0
   watchdog:
     volumes:
@@ -100,4 +101,5 @@ services:
     environment:
       - FLASK_APP=mgmtinterface:app
     working_dir: /
+    # command: gunicorn --bind 0.0.0.0:5000 mgmtinterface:app --log-level=debug
     command: flask run --debug --port 5000 --host 0.0.0.0

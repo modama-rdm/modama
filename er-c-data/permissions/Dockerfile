@@ -20,4 +20,4 @@ COPY ./er-c-data/permissions/config.py /config.py
 
 ENV PERMISSIONS_CONFIG /config.py
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5050", "permissions.server:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5050", "permissions.server:app", "--log-level=debug"]

@@ -25,4 +25,4 @@ EXPOSE 5051/tcp
 # NOTE: this has to be limited to a single sync worker currently to
 # make the samba subprocess work, and to make sure things are properly
 # synchronized
-CMD ["/venv/bin/gunicorn", "--worker-class", "sync", "--workers", "1", "--bind", "0.0.0.0:5051", "smbdrop.server:app"]
+CMD ["/venv/bin/gunicorn", "--worker-class", "sync", "--workers", "1", "--bind", "0.0.0.0:5051", "smbdrop.server:app", "--log-level=debug"]

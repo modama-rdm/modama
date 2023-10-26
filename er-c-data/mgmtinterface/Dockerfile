@@ -26,4 +26,4 @@ COPY ./er-c-data/mgmtinterface/config.py /config.py
 
 ENV MGMTINTERFACE_CONFIG /config.py
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "mgmtinterface:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "mgmtinterface:app", "--log-level=debug"]
