@@ -21,6 +21,8 @@ At the moment, the test and production deployment only differ in a number of vol
 
 For mgmtinterface the test deployment also overrides the source code copy with a read-only bind mount. Furthermore, it starts a Flask server in development mode instead of a production server. That way a change in the source code is immediately active in the container. This setup can/should be extended to other containers.
 
+A production system should increase the number of permitted inotify watches to match the expected number of folders. See https://www.suse.com/support/kb/doc/?id=000020048 for details.
+
 # How to upgrade Nextcloud
 
 Currently, the additional auth mechanism that avoids saving user credentials in
