@@ -27,7 +27,7 @@
     {% if components.info.isdir %}
       <dt class="mui--text-dark-secondary">Entries</dt><dd class="details-list__definition">{{ components.info.member_count }}</dd>
     {% else %}
-      <dt class="mui--text-dark-secondary">Size (Bytes)</dt><dd class="details-list__definition">{{ components.info.size }}</dd>
+      <dt class="mui--text-dark-secondary">Size</dt><dd class="details-list__definition" title="{{ components.info.size }} bytes">{{ components.info.size|format_filesize }}</dd>
     {% endif %}
   </dl>
 
