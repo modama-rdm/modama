@@ -1,0 +1,4 @@
+[[cert]]
+domain = "er-c-data-mgmt.fz-juelich.de"
+subj = "C=DE/ST=Nordrhein-Westfalen/L=Juelich/O=Forschungszentrum Juelich GmbH"
+key_size = 2048
