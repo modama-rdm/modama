@@ -58,9 +58,18 @@ services:
         target: "/etc/smbdrop"
     ports:
       - "127.0.0.1:1445:445"
-  mgmtinterface:
+
+  mgmtinterface-proxy:  # another nginx to terminate TLS for the internal mgmt interface
+    volumes:
+      - type: bind
+        source: "/var/local/data-mgmt/mgmtinterface-proxy/ssl/"
+        target: "/etc/nginx/ssl/"
+      - type: bind
+        source: "./prodconf/mgmtinterface-proxy.nginx.conf"
+        target: "/etc/nginx/conf.d/default.conf"
     ports:
-      - "80:5000"
+      - "127.0.0.1:443:443"
+      - "127.0.0.1:80:80"
 
   backup:
     hostname: backup

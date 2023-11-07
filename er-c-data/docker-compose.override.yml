@@ -87,8 +87,6 @@ services:
       # - "127.0.0.1:445:445"
       - "127.0.0.1:5051:5051"
   mgmtinterface:
-    ports:
-      - "127.0.0.1:5001:5000"
     volumes:
       - type: bind
         source: "../python/mgmtinterface"
@@ -103,3 +101,10 @@ services:
     working_dir: /
     # command: gunicorn --bind 0.0.0.0:5000 mgmtinterface:app --log-level=debug
     command: flask run --debug --port 5000 --host 0.0.0.0
+  mgmtinterface-proxy:
+    volumes:
+      - type: bind
+        source: "./testconf/mgmtinterface-proxy.nginx.conf"
+        target: "/etc/nginx/conf.d/default.conf"
+    ports:
+      - "127.0.0.1:5001:80"

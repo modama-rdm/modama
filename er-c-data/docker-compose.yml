@@ -101,6 +101,14 @@ services:
 
     depends_on:
       - "nextcloud"
+
+  mgmtinterface-proxy:  # another nginx, in prod this terminates TLS
+    # see prod/override files for config volumes and ports
+    hostname: mgmtinterface-proxy
+    image: nginx:latest
+    restart: always
+    depends_on:
+      - "mgmtinterface"
   
   permissions:
     hostname: permissions
