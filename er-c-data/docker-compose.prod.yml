@@ -68,6 +68,7 @@ services:
         source: "./prodconf/mgmtinterface-proxy.nginx.conf"
         target: "/etc/nginx/conf.d/default.conf"
     ports:
+      # Match external port in in prodconf/mgmtinterface-proxy.nginx.conf
       - "443:443"
       - "80:80"
 

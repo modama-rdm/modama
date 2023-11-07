@@ -6,6 +6,7 @@ import shlex
 import jsonschema
 import humanize
 from flask import Flask, render_template, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 import flask
 from flask_login import (
     LoginManager, login_required, login_user, current_user, logout_user
@@ -29,6 +30,7 @@ from mgmtinterface_client.schema import (
 
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_port=1)
 
 app.config.from_object('mgmtinterface.default_config')
 app.config.from_envvar('MGMTINTERFACE_CONFIG')

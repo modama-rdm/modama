@@ -107,4 +107,6 @@ services:
         source: "./testconf/mgmtinterface-proxy.nginx.conf"
         target: "/etc/nginx/conf.d/default.conf"
     ports:
+      # Match X-Forwarded-Port in testconf/mgmtinterface-proxy.nginx.conf
+      # so that Flask knows its external port for absoute links
       - "127.0.0.1:5001:80"
