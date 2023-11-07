@@ -911,7 +911,7 @@ def browse():
             'browse_error.html.j2',
             result=result,
             backto=parent
-        )
+        ), code
     members = cl.list(path, get_info=True)
     member_count = len(members)
     if member_count > 1024:
