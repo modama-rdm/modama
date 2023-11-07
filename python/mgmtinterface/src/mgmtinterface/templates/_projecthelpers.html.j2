@@ -18,9 +18,9 @@
         <thead>
             <tr>
                 <th>Name</th>
+                <th>Browse</th>
                 <th>Modified</th>
                 <th>Status</th>
-                <th>Browse</th>
                 <th></th>
             </tr>
         </thead>
@@ -28,14 +28,14 @@
             {% for d in datasets %}
             <tr>
                 <td>{{ d.name }}</td>
+                <td>
+                  <a href="{{ url_for('browse', path=project | canonical_path(d.name)) }}">
+                    🔗➡️
+                  </a>
+                </td>
                 <td>{{ d.mtime|format_unixtime }}</td>
                 <td>
                   {% if d.immutable %}sealed{% else %}writable{% endif %}{% if d.shared %}, ingest active{% endif %}
-                </td>
-                <td>
-                  <a href="{{ url_for('browse', path=project | canonical_path(d.name)) }}">
-                    {{ project | canonical_path(d.name) }}
-                  </a>
                 </td>
                 <td>
                 {% if not d.immutable and (current_user.user_id in project.members or current_user.user_id == project.owner) %}
