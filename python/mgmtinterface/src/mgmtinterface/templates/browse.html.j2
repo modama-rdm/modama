@@ -152,7 +152,11 @@
                     <td></td>
                   {% endif %}
                   <td><a target="_blank" href="{{ m.path | libertemlink }}">🔗➡️</a></td>
-                  <td><a target="_blank" href="{{ m.path | imageviewerlink }}">🔗➡️</a></td>
+                  {% if m.isdir %}
+                    <td></td>
+                  {% else %}
+                    <td><a target="_blank" href="{{ m.path | imageviewerlink }}">🔗➡️</a></td>
+                  {% endif %}
                   <td><a target="_blank" href="{{ m.path | sampledbsearch }}">🔗➡️</a></td>
                 {% else %}
                   <td></td>
