@@ -289,6 +289,9 @@ def jupyterlink(path, isdir=False):
 def libertemlink(path):
     return app.config['LIBERTEM_BASE'] + quote_plus(path)
 
+@app.template_filter()
+def imageviewerlink(path):
+    return app.config['IMAGE_VIEWER_BASE'] + quote_plus(path)
 
 @app.template_filter()
 def rsync(path, isdir=False):

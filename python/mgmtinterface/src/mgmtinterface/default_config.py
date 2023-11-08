@@ -6,6 +6,7 @@ SMB_BASE = 'data'
 MOELLENSTEDT_BASE = 'moellenstedt.iff.kfa-juelich.de:/storage/er-c-data'
 NEXTCLOUD_BASE = 'https://er-c-data.fz-juelich.de/nextcloud/apps/files/?dir=/ER-C-Data'
 LIBERTEM_BASE = 'https://moellenstedt.iff.kfa-juelich.de/user-redirect/libertem/#action=open&path=/storage/er-c-data'
+IMAGE_VIEWER_BASE = 'https://moellenstedt.iff.kfa-juelich.de/user-redirect/image-viewer/?path=/storage/er-c-data'
 JUPYTER_BASE = 'https://moellenstedt.iff.kfa-juelich.de/user-redirect/tree/er-c-data'
 MAIN_SMB_BASE = '\\\\er-c-data-smb.fz-juelich.de\\er-c-data'
 SAMPLEDB_BASE = "https://erc-samples.fz-juelich.de/"

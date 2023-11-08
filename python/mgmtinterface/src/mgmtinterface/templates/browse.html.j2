@@ -66,6 +66,21 @@
             </a>
         </p>
     </div>
+
+{% if not components.info.isdir %}
+    <div class="cta__item mui-panel">
+        <div>
+            <h3>Image viewer</h3>
+            <p>Open file in an image viewer</p>
+        </div>
+        <p>
+            <a class="mui-btn mui-btn--raised mui-btn--primary" href="{{ components.path | imageviewerlink }}" target="_blank">
+                🛡️Open in image viewer
+            </a>
+        </p>
+    </div>
+{% endif %}
+
     <div class="cta__item mui-panel">
         <div>
             <h3>SampleDB</h3>
@@ -117,6 +132,7 @@
                 <th>Nextcloud</th>
                 <th>JupyterHub</th>
                 <th>LiberTEM</th>
+                <th>View</th>
                 <th>SampleDB</th>
             </tr>
         </thead>
@@ -136,6 +152,7 @@
                     <td></td>
                   {% endif %}
                   <td><a target="_blank" href="{{ m.path | libertemlink }}">🔗➡️</a></td>
+                  <td><a target="_blank" href="{{ m.path | imageviewerlink }}">🔗➡️</a></td>
                   <td><a target="_blank" href="{{ m.path | sampledbsearch }}">🔗➡️</a></td>
                 {% else %}
                   <td></td>
