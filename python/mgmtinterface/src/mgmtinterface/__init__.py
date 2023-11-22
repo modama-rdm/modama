@@ -17,7 +17,7 @@ from wtforms import (
     StringField, PasswordField, SelectMultipleField, HiddenField
 )
 from wtforms.validators import DataRequired
-from urllib.parse import urlparse, urljoin, quote_plus, quote
+from urllib.parse import urlparse, urljoin, quote_plus, quote, urlencode
 from webdav3.client import Client as WebDAVClient, RemoteResourceNotFound, ResponseErrorCode
 
 from permissions_client import PermissionsClient
@@ -157,12 +157,15 @@ def load_user(user_id):
 @login_manager.unauthorized_handler
 def unauthorized_callback():
     flask.flash("Unauthorized, login required.")
-    return flask.redirect(flask.url_for('login'))
+    next_url = urlencode({"next": flask.request.url})
+    login_url = flask.url_for('login') + f"?{next_url}"
+    return flask.redirect(login_url)
 
 
 @app.route("/login/", methods=["GET", "POST"])
 def login():
     form = LoginForm()
+    next_url = flask.request.args.get('next')
     if request.method == 'POST' and form.validate():
         auth_result = client.authenticate(form.username.data, form.password.data)
         if auth_result['errno'] == 0:
@@ -171,13 +174,12 @@ def login():
                     user_id=form.username.data,
                 )
             )
-            next_url = flask.request.args.get('next')
             if not is_safe_url(next_url):
                 return flask.abort(400)
             return flask.redirect(next_url or flask.url_for('index'))
         else:
             flask.flash(f"Error: {auth_result['message']}")
-    return render_template('login.html.j2', form=form)
+    return render_template('login.html.j2', form=form, next_url=next_url)
 
 
 @app.route('/')
