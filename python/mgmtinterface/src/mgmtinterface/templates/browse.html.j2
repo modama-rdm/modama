@@ -115,6 +115,13 @@
       {{ copybutton(components.path | main_smbpath) }}
     </div>
   </p>
+  <p>
+    <a href="{{ components.path | smblink }}">SMB (Mac, Linux)</a>:
+    <div style="display: flex; gap: 0.5em">
+      <input id="smb" value="{{ components.path | smblink }}" readonly style="flex-grow: 1"/>
+      {{ copybutton(components.path | smblink) }}
+    </div>
+  </p>
 
   <h2 id='browse'>Browse</h2>
   {% if components.members %}

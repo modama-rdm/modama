@@ -330,6 +330,11 @@ def main_smbpath(path):
     return base + win_path
 
 
+@app.template_filter()
+def smblink(path):
+    return app.config['SMB_URL_BASE'] + quote(path)
+
+
 def smbpath(project, dsname):
     return os.path.join(
         app.config['SMB_BASE'],
