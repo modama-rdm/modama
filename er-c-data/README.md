@@ -65,7 +65,7 @@ The externally supplied file `externalstorage_pw` contains the preshared passwor
 
 ## NextCloud development setup
 
-For setting up the NextCloud container for development, you need to configure its authentication. Currently, we authenticate against the production LDAP server. The following steps are necessary:
+For setting up the NextCloud container for development for the first time, you need to configure its authentication. Currently, we authenticate against the production LDAP server. The following steps are necessary:
 
 * Make sure `/var/local/data-mgmt/nextcloud-config-secret.json` exists (can be an empty json file, i.e. `{"system": {}}`)
 * Set the correct LDAP settings
@@ -73,6 +73,7 @@ For setting up the NextCloud container for development, you need to configure it
     * Disable any existing LDAP authentication; run `sudo -u www-data php -d memory_limit=-1 /var/www/html/occ ldap:delete s01`
     * Go to http://localhost:1890/nextcloud/ and log in with username `root`, password `secret`
     * Go to the LDAP configuration and enter the correct settings for your environment
+        * You can use the default production values in `nextcloud/nextcloud-config.json` as starting values and adapt as needed.
         * Should be accessible at http://localhost:1890/nextcloud/settings/admin/ldap
         * Hostname, port (auto-detection doesn't seem to work), credentials, filters etc.
         * Make sure the wizard is happy with your settings!
@@ -104,7 +105,7 @@ a separate LDAP server for development.
 Make sure the `nextcloud-config-secret.json` file has proper permissions, i.e.
 owned by root and not world-readable.
 
-After changing this file, restart the `nextcloud` contianer, as editing the file
+After changing this file, restart the `nextcloud` container, as editing the file
 may actually create a new file that needs to be re-bind-mounted into the
 container. When this is done, re-generate the configuration using
 `docker-compose exec nextcloud python3 /applyconfig.py`. This will also disable
