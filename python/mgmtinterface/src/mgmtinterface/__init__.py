@@ -317,12 +317,35 @@ def sftp(path, isdir=False):
     return f'sftp -c aes128-ctr -o Compression=no { shellescape(current_user.user_id + "@" + target) }'
 
 
+def quote_path(path):
+    """
+    Consistently quote the path such that it can appear in the
+    query part of a URL, as close to the standard as possible
+    (https://url.spec.whatwg.org/)
+    """
+    return quote_plus(path, safe="!$'()*,/:;?@")
+
+
 @app.template_filter()
 def sampledbsearch(path):
     base = app.config['SAMPLEDB_BASE'] + 'objects/'
-    urlpart = quote_plus(path, safe="/'")
+    urlpart = quote_path(path)
     search = f'"{urlpart}" in file_name'
     return f'{base}?q={quote_plus(search)}&advanced=on'
+
+
+@app.template_filter()
+def add_path_to_query(url, path):
+    """
+    Add a query string part to the `url` containing the `path`.
+    Assumes that the URL doesn't contain a query path yet
+    and will add the whole thing, including the leading '?'.
+    Assumes the URL has no fragment part.
+
+    Use this template filter to generate a consistenyly encoded
+    URL for external referencing.
+    """
+    return f'{url}?path={quote_path(path)}'
 
 
 @app.template_filter()
