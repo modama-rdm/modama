@@ -69,7 +69,12 @@ def test_urlencode_path(in_path, expected):
             "/weird/!$'()*,/:;?@/",  # all these are "passed through" the inner encoding layer
             'https://erc-samples.fz-juelich.de/objects/?q=%22%2Fweird%2F%21%24%27%28%29%2A%2C%2F%3A%3B%3F%40%2F%22+in+file_name&advanced=on',
             '"/weird/!$\'()*,/:;?@/" in file_name',
-        )
+        ),
+        (
+            "/weird/\\/",  # backslash is a potential trouble maker
+            'https://erc-samples.fz-juelich.de/objects/?q=%22%2Fweird%2F%255C%2F%22+in+file_name&advanced=on',
+            '"/weird/%5C/" in file_name',
+        ),
     ),
 )
 def test_sampledb_search_url(in_path, expected, decoded):
