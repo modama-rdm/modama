@@ -71,8 +71,8 @@
 {% endmacro %}
 
 {% macro copypath(path) %}
-  {% set url = url_for('browse', _external=True) %}
-  <a href="{{ url|add_path_to_query(path) }}"
+  {% set url = url_for('browse', _external=True)|add_path_to_query(path) %}
+  <a href="{{ url }}"
         data-to-copy="{{ url }}"
         class="copybutton" title="Copy to clipboard: {{ url }}">
     <i class="fa-regular fa-copy"/></i>

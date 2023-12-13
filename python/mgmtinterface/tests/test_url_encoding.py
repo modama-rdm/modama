@@ -78,5 +78,6 @@ def test_sampledb_search_url(in_path, expected, decoded):
     assert parse_qs(parsed.query)['q'][0] == decoded
 
 
-def test_add_path_to_query(path, expected):
-    pass
+def test_add_path_to_query():
+    assert add_path_to_query("http://localhost/browse/", "/data/prime'ä") ==\
+        "http://localhost/browse/?path=/data/prime'%C3%A4"
