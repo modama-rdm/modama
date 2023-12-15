@@ -45,7 +45,8 @@ HDF5 file, The notebook asks the data management about the current foreground
 session, and directly stores the data there (possibly in a subdirectory as named
 by the user).
 
-The user goes home and enjoys their evening.
+The user puts up a sign "automated experiment in progress", goes home and enjoys
+their evening.
 
 The next morning, they come back, and find that all their DLD data acquired over
 night has been safely stored in the data management. While the experiment is
@@ -56,6 +57,25 @@ the data management (like an Oscilloscope maybe?).
 
 Using the ingest client, the DLD user then stops the ingest share and optionally
 seals the session.
+
+# Workflow notes
+
+* When creating a `Share` for a `Resource`, the user can either directly create
+  a new `Session`, or they can attach the ingest `Share` to an existing `Session`.
+  It's not possible to attach an existing `Share` to a `Resource`, though. If the
+  user already has a `Share` for said `Session`, they need to re-create it
+  from one of the `Producer`s that belong to the `Resource`.
+* To prevent mixups, the UI used to create `Share`s that belong to a `Resource`
+  should clearly state if there is an existing `Share`, and what the status
+  of said `Share` is. It needs to be explicit and clear that if you create
+  a new `Share`, it will become the foreground `Share`.
+* Any users of the foreground `Share` API should keep in mind that at the session
+  end, the foreground `Share` will either no longer exist (`Share` closed),
+  or the `Share` will still be mounted but no longer be the foreground `Share`.
+  So if you copy files, you'll usually only ask once before copying for the
+  current foreground `Share`, and keep re-using that value. That way, your
+  copy process can overlap the beginning of the next session's time slot.
+  Scripts should not repeatedly ask for the current foregroud `Share`.
 
 # Design and Model
 
@@ -83,6 +103,12 @@ seals the session.
       work to reconcile reality with this state, for example mount Shares for
       active ingest sessions, or unmount those that have been removed from
       the smbdrop service
+* Actions that influence a `Resource` must only be triggered from `Producer`s that
+  belong to said `Resource`. For the `Agent`, this is facilitated by authentication.
+    * One way to solve this for user interaction is by (re-)exporting an API
+      locally from the `Agent`, on the loopback interface, such that the authentication
+      of the `Agent` plus the user authentication allows, for example, creation
+      of `Share`s.
 
 # Notes on auth{z,n}
 

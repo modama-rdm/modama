@@ -6,14 +6,17 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Json, Router};
 use axum_macros::debug_handler;
 use futures_util::{future::join_all, StreamExt};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use messages::{CurrentForegroundShare, EventChannelMessage, ShareMsg};
 use nix::mount::MsFlags;
+use procfs::process::Process;
 use scopeguard::defer;
-use tokio::sync::Mutex;
+use thiserror::Error;
+use tokio::sync::{Mutex, OnceCell};
 use tokio_tungstenite::connect_async;
 use tungstenite::Message;
 use url::Url;
@@ -95,8 +98,8 @@ struct AgentConfig {
     /// The hostname of the ingest Samba server
     pub smb_hostname: String,
 
-    /// The resolved IP address of the Samba server
-    pub smb_ip: String,
+    /// The resolved IP address of the Samba server (lazily looked up on first mount)
+    pub smb_ip: OnceCell<String>,
 
     /// The Samba domain to use for mounting
     pub smb_domain: String,
@@ -110,6 +113,32 @@ struct AgentConfig {
     // FIXME: find a better way?
     pub linux_config: Option<AgentLinuxConfig>,
     // TODO: add mTLS certs/keys etc. for resource identification and auth
+}
+
+#[derive(Error, Debug)]
+pub enum DNSLookupFailure {
+    #[error("No address found for `{hostname}`")]
+    NoAddressFound { hostname: String },
+}
+
+impl AgentConfig {
+    pub async fn get_smb_ip(&self) -> Result<&str> {
+        self.smb_ip
+            .get_or_try_init(|| async {
+                let mut addrs = async_dns::lookup(&self.smb_hostname).await?;
+                let first = addrs.next().ok_or(DNSLookupFailure::NoAddressFound {
+                    hostname: self.smb_hostname.to_owned(),
+                })?;
+                Ok(first.ip_address.to_string())
+            })
+            .await
+            .map(String::as_str)
+    }
+
+    pub fn get_linux_config(&self) -> AgentLinuxConfig {
+        let c = &self.linux_config;
+        c.clone().unwrap_or_default()
+    }
 }
 
 #[derive(Debug)]
@@ -138,9 +167,50 @@ impl AgentState {
     }
 }
 
+/// Return whether the two paths are considered equal.
+///
+/// If the one of the paths doesn't canonicalize, either the path doesn't exist
+/// or is straight up invalid (both cases of TOCTOU?) -> log error and fall back
+/// to strict equality.
+fn mount_points_equal(m1: &Path, m2: &Path) -> bool {
+    (|| {
+        let p1 = m1.canonicalize()?;
+        let p2 = m2.canonicalize()?;
+        Ok::<_, std::io::Error>(p1 == p2)
+    })()
+    .unwrap_or_else(|e| {
+        info!(
+            "Could not canonicalize either {} or {}; falling back to strict equality: {e}",
+            m1.display(),
+            m2.display()
+        );
+        m1 == m2
+    })
+}
+
+fn is_mounted(share: &Share, config: &AgentConfig) -> Result<bool> {
+    let mounts = Process::myself()?.mountinfo()?;
+    let target = target_for_share(share, config);
+
+    Ok(mounts.into_iter().any(|m| {
+        debug!(
+            "source: {:?} mount point: {:?}",
+            m.mount_source, m.mount_point
+        );
+        mount_points_equal(&m.mount_point, &target)
+    }))
+}
+
+#[cfg(target_os = "linux")]
+fn target_for_share(share: &Share, config: &AgentConfig) -> PathBuf {
+    config
+        .get_linux_config()
+        .mount_point_prefix
+        .join(&share.share_name)
+}
+
 /// Ensure that `share` is mounted, and return a `MountedShare` if the mount succeeded.
-/// If the mount fails, logs the error and returns None. We use this pattern here, because
-async fn ensure_mounted(share: &Share, config: &AgentConfig) -> Option<MountedShare> {
+async fn ensure_mounted(share: &Share, config: &AgentConfig) -> Result<MountedShare> {
     #[cfg(target_os = "windows")]
     {}
 
@@ -149,7 +219,10 @@ async fn ensure_mounted(share: &Share, config: &AgentConfig) -> Option<MountedSh
         // On Linux, we have to:
         //
         // - take care of creating mount points
+        // - check if the mount already exists (here we assume that an existing
+        //   mount with the given share name )
         // - specific config for UID/GID handling
+        // - perform IP address lookup, as this is done in userspace, not by the kernel
 
         let linux_config = match &config.linux_config {
             None => AgentLinuxConfig::default(),
@@ -157,6 +230,15 @@ async fn ensure_mounted(share: &Share, config: &AgentConfig) -> Option<MountedSh
         };
 
         let source = format!("//{}/{}", &config.smb_hostname, share.share_name);
+        let target = target_for_share(share, config);
+
+        if is_mounted(share, config)? {
+            return Ok(MountedShare {
+                share: share.clone(),
+                mount_path: target,
+            });
+        }
+
         let options = format!(
             "domain={},username={},password={},uid={},gid={},forceuid,forcegid,vers=3.1.1,ip={}",
             &config.smb_domain,
@@ -164,30 +246,32 @@ async fn ensure_mounted(share: &Share, config: &AgentConfig) -> Option<MountedSh
             &share.password,
             &linux_config.uid,
             linux_config.gid,
-            &config.smb_ip,
+            &config.get_smb_ip().await?,
         );
-        let target = linux_config.mount_point_prefix.join(&share.share_name);
 
         if !target.exists() {
             std::fs::create_dir_all(&target).unwrap();
         }
 
-        match nix::mount::mount::<str, Path, str, str>(
+        nix::mount::mount::<str, Path, str, str>(
             Some(source.as_ref()),
             &target,
             Some("cifs"),
             MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME,
             Some(options.as_ref()),
-        ) {
-            Ok(_) => Some(MountedShare {
-                share: share.clone(),
-                mount_path: target,
-            }),
-            Err(e) => {
-                error!("Could not mount {}: {e}", &source);
-                None
-            }
-        }
+        )
+        .map(|_| MountedShare {
+            share: share.clone(),
+            mount_path: target,
+        })
+        .with_context(|| format!("Could not mount {}", &source))
+    }
+}
+
+async fn ensure_umounted(share: &MountedShare, _config: &AgentConfig) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(nix::mount::umount(&share.mount_path)?)
     }
 }
 
@@ -212,7 +296,15 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) {
             if old_fg_share != new_fg_share.as_ref() {
                 if let Some(share) = new_fg_share {
                     state_guard.foreground_share =
-                        ensure_mounted(&share, &state_guard.config).await;
+                        match ensure_mounted(&share, &state_guard.config).await {
+                            Ok(s) => Some(s),
+                            Err(e) => {
+                                error!("Mount failed: {e}");
+                                None
+                            }
+                        }
+                } else {
+                    state_guard.foreground_share = None;
                 }
             }
             state_guard.shares = join_all(
@@ -317,24 +409,26 @@ async fn serve_local_web_api(state: Arc<Mutex<AgentState>>) {
 #[tokio::main]
 async fn main() {
     let env = env_logger::Env::default()
-        .filter_or("MODAMA_AGENT_LOG_LEVEL", "error")
+        .filter_or("MODAMA_AGENT_LOG_LEVEL", "info")
         .write_style("always");
     env_logger::init_from_env(env);
 
     let smb_hostname = "moellenstedt.iff.kfa-juelich.de".to_string();
-    let ip = async_dns::lookup(&smb_hostname).await.unwrap().find(|addr| {
-        addr.ip_address.is_ipv4()
-    }).unwrap();
 
     let config = &AgentConfig {
         api_url: Url::parse("ws://localhost:1234").expect("invalid websocket URL"),
         smb_hostname,
         smb_domain: "ER-C-INGEST".to_string(),
-        smb_ip: format!("{}", &ip.ip_address),
+        smb_ip: OnceCell::new(),
         agent_name: "test".to_string(),
         resource_name: "test".to_string(),
         linux_config: Some(AgentLinuxConfig::default()),
     };
+
+    info!(
+        "This is modama-agent `{}` running for resource `{}`",
+        &config.agent_name, config.resource_name
+    );
 
     let state: Arc<Mutex<AgentState>> = Arc::new(Mutex::new(AgentState::new(config)));
 
@@ -350,9 +444,13 @@ async fn main() {
         username: "sharef76b764d16a043ea805918305ce".to_owned(),
         password: "kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U".to_owned(),
     };
-    println!(
-        "{:?}", ensure_mounted(&test_share, config).await
-    );
-    // tokio::spawn(serve_local_web_api(Arc::clone(&state)));
-    // message_loop(Arc::clone(&state)).await;
+    println!("{:?}", is_mounted(&test_share, config).unwrap());
+    let mounted_test_share = ensure_mounted(&test_share, config).await.unwrap();
+    println!("{:?}", mounted_test_share);
+    println!("{:?}", is_mounted(&test_share, config).unwrap());
+    println!("{:?}", ensure_umounted(&mounted_test_share, config).await);
+    println!("{:?}", is_mounted(&test_share, config).unwrap());
+
+    tokio::spawn(serve_local_web_api(Arc::clone(&state)));
+    message_loop(Arc::clone(&state)).await;
 }
