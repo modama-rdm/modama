@@ -62,3 +62,9 @@ pub enum EventChannelMessage {
         foreground_share: Option<ShareMsg>,
     },
 }
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum EventChannelRequests {
+    ShareListUpdate,
+}
