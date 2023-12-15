@@ -1,24 +1,19 @@
-mod messages;
-
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Json, Router};
-use axum_macros::debug_handler;
 use futures_util::{future::join_all, StreamExt};
 use log::{debug, error, info, warn};
-use messages::{CurrentForegroundShare, EventChannelMessage, ShareMsg};
+use modama_agent::messages::{CurrentForegroundShare, EventChannelMessage, ShareMsg};
 use nix::mount::MsFlags;
 use procfs::process::Process;
-use scopeguard::defer;
 use thiserror::Error;
 use tokio::sync::{Mutex, OnceCell};
 use tokio_tungstenite::connect_async;
-use tungstenite::Message;
 use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

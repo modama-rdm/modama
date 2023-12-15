@@ -3,6 +3,14 @@ name = "modama-agent"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "modama-agent"
+path = "src/bin/modama-agent.rs"
+
+[lib]
+name = "modama_agent"
+path = "src/lib/lib.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

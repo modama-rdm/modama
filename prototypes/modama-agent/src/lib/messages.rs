@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct ShareMsg {
+pub struct ShareMsg {
     /// A UUID for this share
     pub share_id: String,
 
@@ -26,7 +26,7 @@ pub(crate) struct ShareMsg {
 /// and the path where the share is mounted.
 #[derive(Serialize)]
 #[serde(tag = "type")]
-pub(crate) enum CurrentForegroundShare {
+pub enum CurrentForegroundShare {
     None,
     Share {
         /// The path in the data management that is exported with this Share
@@ -39,7 +39,7 @@ pub(crate) enum CurrentForegroundShare {
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub(crate) enum EventChannelMessage {
+pub enum EventChannelMessage {
     UpdateShareList {
         shares: Vec<ShareMsg>,
         foreground_share: Option<ShareMsg>,
