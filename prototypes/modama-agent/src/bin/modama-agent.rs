@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -9,8 +10,9 @@ use axum::{extract::State, routing::get, Json, Router};
 use futures_util::{future::join_all, StreamExt};
 use log::{debug, error, info, warn};
 use modama_agent::{
-    messages::{CurrentForegroundShare, EventChannelMessage},
-    share::{MountedShare, Share}, common::init_logging,
+    common::init_logging,
+    messages::{CurrentForegroundShare, EventChannelMessage, ShareMsg},
+    share::{MountedShare, Share},
 };
 use nix::mount::MsFlags;
 use procfs::process::Process;
@@ -39,7 +41,7 @@ struct AgentLinuxConfig {
 impl Default for AgentLinuxConfig {
     fn default() -> Self {
         Self {
-            mount_point_prefix: PathBuf::from("/mnt/"),
+            mount_point_prefix: PathBuf::from("/run/modama/ingest/"),
             uid: 1000,
             gid: 1000,
         }
@@ -121,6 +123,25 @@ impl AgentState {
             config,
         }
     }
+
+    fn set_foreground_share(&mut self, share: Option<MountedShare>) {
+        self.foreground_share = share;
+        self.ensure_consistent();
+    }
+
+    fn ensure_consistent(&mut self) {
+        // ensure the foreground share is part of the list of all shares:
+        if let Some(share) = &self.foreground_share {
+            if !self.shares.contains(share) {
+                self.shares.push(share.clone());
+            }
+        }
+    }
+
+    fn set_shares(&mut self, shares: Vec<MountedShare>) {
+        self.shares = shares;
+        self.ensure_consistent();
+    }
 }
 
 /// Return whether the two paths are considered equal.
@@ -136,7 +157,7 @@ fn mount_points_equal(m1: &Path, m2: &Path) -> bool {
     })()
     .unwrap_or_else(|e| {
         info!(
-            "Could not canonicalize either {} or {}; falling back to strict equality: {e}",
+            "Could not canonicalize either `{}` or `{}`; falling back to strict equality: {e}",
             m1.display(),
             m2.display()
         );
@@ -144,6 +165,7 @@ fn mount_points_equal(m1: &Path, m2: &Path) -> bool {
     })
 }
 
+#[cfg(target_os = "linux")]
 fn is_mounted(share: &Share, config: &AgentConfig) -> Result<bool> {
     let mounts = Process::myself()?.mountinfo()?;
     let target = target_for_share(share, config);
@@ -168,7 +190,9 @@ fn target_for_share(share: &Share, config: &AgentConfig) -> PathBuf {
 /// Ensure that `share` is mounted, and return a `MountedShare` if the mount succeeded.
 async fn ensure_mounted(share: &Share, config: &AgentConfig) -> Result<MountedShare> {
     #[cfg(target_os = "windows")]
-    {}
+    {
+        todo!();
+    }
 
     #[cfg(target_os = "linux")]
     {
@@ -226,61 +250,120 @@ async fn ensure_mounted(share: &Share, config: &AgentConfig) -> Result<MountedSh
     }
 }
 
-async fn ensure_umounted(share: &MountedShare, _config: &AgentConfig) -> Result<()> {
-    #[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
+async fn ensure_umounted(mount_point: &Path, _config: &AgentConfig) -> Result<()> {
     {
-        Ok(nix::mount::umount(&share.mount_path)?)
+        info!("Umounting {}", &mount_point.to_string_lossy());
+        nix::mount::umount(mount_point)
+            .with_context(|| format!("Umounting {}", &mount_point.to_string_lossy()))?;
+        std::fs::remove_dir(mount_point)
+            .with_context(|| format!("Unlinking mountpoint {}", &mount_point.to_string_lossy()))?;
+        Ok(())
     }
 }
 
-async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) {
-    let event_msg: EventChannelMessage = match serde_json::from_str(msg) {
-        Ok(m) => {
-            match m {
-                EventChannelMessage::UpdateShareList { .. } => {
-                    info!("Received EventChannelMessage::UpdateShareList");
+async fn update_share_list(
+    state: &mut AgentState,
+    shares: Vec<ShareMsg>,
+    foreground_share: Option<ShareMsg>,
+) -> Result<()> {
+    let new_fg_share: Option<Share> = foreground_share.map(Into::into);
+    let old_fg_share: Option<&Share> = state.foreground_share.as_ref().map(|ms| &ms.share);
+    if old_fg_share != new_fg_share.as_ref() {
+        if let Some(share) = new_fg_share {
+            state.set_foreground_share(match ensure_mounted(&share, &state.config).await {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    error!("Mount failed: {e}");
+                    None
                 }
+            });
+        } else {
+            state.set_foreground_share(None);
+        }
+    }
+    state.set_shares(
+        join_all(
+            shares
+                .into_iter()
+                .map(|s| async { ensure_mounted(&s.into(), &state.config).await }),
+        )
+        .await
+        .into_iter()
+        .flat_map(|res| {
+            if let Err(err) = &res {
+                warn!("Mounting failed: {err}");
             }
-            m
+            res
+        })
+        .collect(),
+    );
+
+    // now collect any shares that are mounted under the prefix which are _not_
+    // in the list of shares:
+    let mounts = Process::myself()?.mountinfo()?;
+    let should_be_mounted: HashSet<PathBuf> =
+        state.shares.iter().map(|s| s.mount_path.clone()).collect();
+    let config = &state.config;
+    let mounts_in_prefix: HashSet<_> = mounts
+        .into_iter()
+        .flat_map(|m| m.mount_point.canonicalize().ok())
+        .filter(|m| m.starts_with(state.config.get_linux_config().mount_point_prefix))
+        .collect();
+    join_all(
+        mounts_in_prefix
+            .clone()
+            .into_iter()
+            .filter(|m| !should_be_mounted.contains(m))
+            .map(|m| async move { ensure_umounted(&m, config).await }),
+    )
+    .await
+    .into_iter()
+    .for_each(|result| {
+        if let Err(err) = result {
+            warn!("Umounting failed: {err}");
         }
-        Err(e) => {
-            error!("Invalid message encountered, ignoring: {e}");
-            return;
+    });
+
+    // clean up ingest mount prefix directory,
+    // remove all directories that are not currently active mount points:
+    std::fs::read_dir(state.config.get_linux_config().mount_point_prefix)?
+        .flatten()
+        .filter(|dir_entry| {
+            if let Ok(metadata) = std::fs::metadata(dir_entry.path()) {
+                metadata.is_dir()
+            } else {
+                false
+            }
+        })
+        .map(|dir_entry| dir_entry.path())
+        .flat_map(|path| path.canonicalize().ok())
+        .filter(|path| ! mounts_in_prefix.contains(path))
+        .for_each(|path| if let Err(err) = std::fs::remove_dir(&path) {
+            warn!("Cannot clean up {}: {err}", &path.to_string_lossy());
+        } else {
+            info!("Cleaned up unused mount point {}", &path.to_string_lossy());
+        });
+
+    Ok(())
+}
+
+async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()> {
+    let event_msg: EventChannelMessage =
+        serde_json::from_str(msg).context("Invalid message encountered")?;
+    match event_msg {
+        EventChannelMessage::UpdateShareList { .. } => {
+            info!("Received EventChannelMessage::UpdateShareList");
         }
-    };
+    }
 
     match event_msg {
         EventChannelMessage::UpdateShareList {
             shares,
             foreground_share,
         } => {
-            let mut state_guard = state.lock().await;
-            let new_fg_share: Option<Share> = foreground_share.map(Into::into);
-            let old_fg_share: Option<&Share> =
-                state_guard.foreground_share.as_ref().map(|ms| &ms.share);
-            if old_fg_share != new_fg_share.as_ref() {
-                if let Some(share) = new_fg_share {
-                    state_guard.foreground_share =
-                        match ensure_mounted(&share, &state_guard.config).await {
-                            Ok(s) => Some(s),
-                            Err(e) => {
-                                error!("Mount failed: {e}");
-                                None
-                            }
-                        }
-                } else {
-                    state_guard.foreground_share = None;
-                }
-            }
-            state_guard.shares = join_all(
-                shares
-                    .into_iter()
-                    .map(|s| async { ensure_mounted(&s.into(), &state_guard.config).await }),
-            )
-            .await
-            .into_iter()
-            .flatten() // get rid of the `None`s
-            .collect();
+            update_share_list(&mut *state.lock().await, shares, foreground_share).await?;
+            Ok(())
         }
     }
 }
@@ -307,7 +390,9 @@ async fn message_loop(state: Arc<Mutex<AgentState>>) {
             match ws_read.next().await {
                 Some(Ok(msg)) => {
                     if let Ok(msg) = msg.into_text() {
-                        handle_message(&state, &msg).await;
+                        if let Err(e) = handle_message(&state, &msg).await {
+                            error!("Error while handing message: {e}");
+                        }
                     } else {
                         warn!("Message is not text, ignoring...");
                     }
@@ -393,25 +478,6 @@ async fn main() {
     );
 
     let state: Arc<Mutex<AgentState>> = Arc::new(Mutex::new(AgentState::new(config)));
-
-    // username: sharef76b764d16a043ea805918305ce
-    // password: kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U
-    // share: share-c3b89492-a384-45c3-bbb0-1405cd3c63d1
-    // hostname: moellenstedt.iff.kfa-juelich.de
-    // let test_share = Share {
-    //     share_id: "c3b89492-a384-45c3-bbb0-1405cd3c63d1".to_owned(),
-    //     share_name: "share-c3b89492-a384-45c3-bbb0-1405cd3c63d1".to_owned(),
-    //     dest_path: "/adhoc/datamanagement/2023-11-06-ingest-stuff/".to_owned(),
-    //     created_timestamp: SystemTime::now(),
-    //     username: "sharef76b764d16a043ea805918305ce".to_owned(),
-    //     password: "kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U".to_owned(),
-    // };
-    // println!("{:?}", is_mounted(&test_share, config).unwrap());
-    // let mounted_test_share = ensure_mounted(&test_share, config).await.unwrap();
-    // println!("{:?}", mounted_test_share);
-    // println!("{:?}", is_mounted(&test_share, config).unwrap());
-    // println!("{:?}", ensure_umounted(&mounted_test_share, config).await);
-    // println!("{:?}", is_mounted(&test_share, config).unwrap());
 
     tokio::spawn(serve_local_web_api(Arc::clone(&state)));
     message_loop(Arc::clone(&state)).await;

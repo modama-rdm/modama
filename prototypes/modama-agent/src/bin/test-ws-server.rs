@@ -1,13 +1,13 @@
-use std::{net::SocketAddr, time::SystemTime};
+use std::{fs::File, io::Read, net::SocketAddr};
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
 use modama_agent::{
     common::init_logging,
-    messages::{EventChannelMessage, EventChannelRequests},
-    share::Share,
+    messages::{EventChannelMessage, EventChannelRequests, ShareMsg},
 };
+use serde::Deserialize;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
@@ -30,29 +30,32 @@ async fn handle_message(msg: &str, ws_stream: &mut WebSocketStream<TcpStream>) -
             let msg = get_share_list().await;
             let json_msg = serde_json::to_string(&msg)?;
 
-            ws_stream
-                .send(tungstenite::Message::Text(json_msg))
-                .await?;
+            ws_stream.send(tungstenite::Message::Text(json_msg)).await?;
         }
     }
 
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct TestData {
+    share: ShareMsg,
+}
+
 async fn get_share_list() -> EventChannelMessage {
-    let foreground_share = Share {
-        share_id: "c3b89492-a384-45c3-bbb0-1405cd3c63d1".to_owned(),
-        share_name: "share-c3b89492-a384-45c3-bbb0-1405cd3c63d1".to_owned(),
-        dest_path: "/adhoc/datamanagement/2023-11-06-ingest-stuff/".to_owned(),
-        created_timestamp: SystemTime::now(),
-        username: "sharef76b764d16a043ea805918305ce".to_owned(),
-        password: "kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U".to_owned(),
-    };
-    let shares = vec![foreground_share.clone().into()];
+    let mut test_data = Vec::new();
+    File::open("test-data.toml")
+        .expect("Need test data")
+        .read_to_end(&mut test_data)
+        .unwrap();
+    let test_data = String::from_utf8(test_data).unwrap();
+    let test_data: TestData = toml::from_str(&test_data).unwrap();
+    let foreground_share = test_data.share;
+    let shares = vec![foreground_share.clone()];
 
     EventChannelMessage::UpdateShareList {
         shares,
-        foreground_share: Some(foreground_share.into()),
+        foreground_share: Some(foreground_share),
     }
 }
 
