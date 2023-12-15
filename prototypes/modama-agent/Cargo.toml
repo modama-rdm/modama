@@ -7,6 +7,10 @@ edition = "2021"
 name = "modama-agent"
 path = "src/bin/modama-agent.rs"
 
+[[bin]]
+name = "test-ws-server"
+path = "src/bin/test-ws-server.rs"
+
 [lib]
 name = "modama_agent"
 path = "src/lib/lib.rs"

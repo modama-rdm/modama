@@ -1,62 +1,23 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Json, Router};
 use futures_util::{future::join_all, StreamExt};
 use log::{debug, error, info, warn};
-use modama_agent::messages::{CurrentForegroundShare, EventChannelMessage, ShareMsg};
+use modama_agent::{
+    messages::{CurrentForegroundShare, EventChannelMessage},
+    share::{MountedShare, Share}, common::init_logging,
+};
 use nix::mount::MsFlags;
 use procfs::process::Process;
 use thiserror::Error;
 use tokio::sync::{Mutex, OnceCell};
 use tokio_tungstenite::connect_async;
 use url::Url;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Share {
-    /// A UUID for this share
-    share_id: String,
-
-    /// The full share name; the first path element of the SMB URL
-    share_name: String,
-
-    /// The path in the data management that is exported with this Share
-    dest_path: String,
-
-    /// When was this share created?
-    created_timestamp: SystemTime,
-
-    /// Username for connecting (temporary)
-    username: String,
-
-    /// Password for connecting (temporary)
-    password: String,
-}
-
-impl From<ShareMsg> for Share {
-    fn from(value: ShareMsg) -> Self {
-        Self {
-            share_id: value.share_id,
-            share_name: value.share_name,
-            dest_path: value.dest_path,
-            created_timestamp: UNIX_EPOCH + Duration::from_secs(value.created_timestamp),
-            username: value.username,
-            password: value.password,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct MountedShare {
-    share: Share,
-
-    /// The mount path; a drive letter on Windows, or a path on Linux
-    mount_path: PathBuf,
-}
 
 #[derive(Debug, Default)]
 enum ConnectionState {
@@ -248,6 +209,8 @@ async fn ensure_mounted(share: &Share, config: &AgentConfig) -> Result<MountedSh
             std::fs::create_dir_all(&target).unwrap();
         }
 
+        info!("Mounting {} at {}", &source, &target.to_string_lossy());
+
         nix::mount::mount::<str, Path, str, str>(
             Some(source.as_ref()),
             &target,
@@ -272,7 +235,14 @@ async fn ensure_umounted(share: &MountedShare, _config: &AgentConfig) -> Result<
 
 async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) {
     let event_msg: EventChannelMessage = match serde_json::from_str(msg) {
-        Ok(m) => m,
+        Ok(m) => {
+            match m {
+                EventChannelMessage::UpdateShareList { .. } => {
+                    info!("Received EventChannelMessage::UpdateShareList");
+                }
+            }
+            m
+        }
         Err(e) => {
             error!("Invalid message encountered, ignoring: {e}");
             return;
@@ -403,10 +373,7 @@ async fn serve_local_web_api(state: Arc<Mutex<AgentState>>) {
 
 #[tokio::main]
 async fn main() {
-    let env = env_logger::Env::default()
-        .filter_or("MODAMA_AGENT_LOG_LEVEL", "info")
-        .write_style("always");
-    env_logger::init_from_env(env);
+    init_logging();
 
     let smb_hostname = "moellenstedt.iff.kfa-juelich.de".to_string();
 
@@ -431,20 +398,20 @@ async fn main() {
     // password: kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U
     // share: share-c3b89492-a384-45c3-bbb0-1405cd3c63d1
     // hostname: moellenstedt.iff.kfa-juelich.de
-    let test_share = Share {
-        share_id: "c3b89492-a384-45c3-bbb0-1405cd3c63d1".to_owned(),
-        share_name: "share-c3b89492-a384-45c3-bbb0-1405cd3c63d1".to_owned(),
-        dest_path: "/adhoc/datamanagement/2023-11-06-ingest-stuff/".to_owned(),
-        created_timestamp: SystemTime::now(),
-        username: "sharef76b764d16a043ea805918305ce".to_owned(),
-        password: "kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U".to_owned(),
-    };
-    println!("{:?}", is_mounted(&test_share, config).unwrap());
-    let mounted_test_share = ensure_mounted(&test_share, config).await.unwrap();
-    println!("{:?}", mounted_test_share);
-    println!("{:?}", is_mounted(&test_share, config).unwrap());
-    println!("{:?}", ensure_umounted(&mounted_test_share, config).await);
-    println!("{:?}", is_mounted(&test_share, config).unwrap());
+    // let test_share = Share {
+    //     share_id: "c3b89492-a384-45c3-bbb0-1405cd3c63d1".to_owned(),
+    //     share_name: "share-c3b89492-a384-45c3-bbb0-1405cd3c63d1".to_owned(),
+    //     dest_path: "/adhoc/datamanagement/2023-11-06-ingest-stuff/".to_owned(),
+    //     created_timestamp: SystemTime::now(),
+    //     username: "sharef76b764d16a043ea805918305ce".to_owned(),
+    //     password: "kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U".to_owned(),
+    // };
+    // println!("{:?}", is_mounted(&test_share, config).unwrap());
+    // let mounted_test_share = ensure_mounted(&test_share, config).await.unwrap();
+    // println!("{:?}", mounted_test_share);
+    // println!("{:?}", is_mounted(&test_share, config).unwrap());
+    // println!("{:?}", ensure_umounted(&mounted_test_share, config).await);
+    // println!("{:?}", is_mounted(&test_share, config).unwrap());
 
     tokio::spawn(serve_local_web_api(Arc::clone(&state)));
     message_loop(Arc::clone(&state)).await;
