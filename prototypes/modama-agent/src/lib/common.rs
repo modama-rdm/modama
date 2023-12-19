@@ -1,4 +1,3 @@
-
 pub fn init_logging() {
     let env = env_logger::Env::default()
         .filter_or("MODAMA_AGENT_LOG_LEVEL", "info")

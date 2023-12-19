@@ -31,7 +31,11 @@ impl From<Share> for ShareMsg {
             share_id: value.share_id,
             share_name: value.share_name,
             dest_path: value.dest_path,
-            created_timestamp: value.created_timestamp.duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            created_timestamp: value
+                .created_timestamp
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             username: value.username,
             password: value.password,
         }

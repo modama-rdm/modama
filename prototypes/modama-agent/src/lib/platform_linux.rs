@@ -1,0 +1,218 @@
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
+
+use futures_util::future::join_all;
+use log::{debug, info, warn};
+use nix::{errno::Errno, mount::MsFlags};
+use procfs::{process::Process, ProcError};
+use thiserror::Error;
+
+use crate::{
+    config::{AgentConfig, AgentLinuxConfig, DNSLookupFailure},
+    share::{MountedShare, Share},
+};
+
+#[derive(Error, Debug)]
+pub enum MountListError {
+    #[error("procfs error")]
+    ProcError(#[from] ProcError),
+}
+
+#[derive(Error, Debug)]
+pub enum EnsureMountedError {
+    #[error("checking list of mounts failed")]
+    MountListFailed(#[from] MountListError),
+
+    #[error("DNS failure")]
+    LookupFailure(#[from] DNSLookupFailure),
+
+    #[error("failed to execute mount")]
+    MountFailed(#[from] Errno),
+
+    #[error("io error")]
+    IOError(#[from] std::io::Error),
+}
+
+/// Ensure that `share` is mounted, and return a `MountedShare` if the mount succeeded.
+pub async fn ensure_mounted(
+    share: &Share,
+    config: &AgentConfig,
+) -> Result<MountedShare, EnsureMountedError> {
+    // On Linux, we have to:
+    //
+    // - take care of creating mount points
+    // - check if the mount already exists (here we assume that an existing
+    //   mount with the given share name )
+    // - specific config for UID/GID handling
+    // - perform IP address lookup, as this is done in userspace, not by the kernel
+
+    let linux_config = match &config.linux_config {
+        None => AgentLinuxConfig::default(),
+        Some(c) => c.clone(),
+    };
+
+    let source = format!("//{}/{}", &config.smb_hostname, share.share_name);
+    let target = target_for_share(share, config);
+
+    if is_mounted(share, config)? {
+        return Ok(MountedShare {
+            share: share.clone(),
+            mount_path: target,
+        });
+    }
+
+    let options = format!(
+        "domain={},username={},password={},uid={},gid={},forceuid,forcegid,vers=3.1.1,ip={}",
+        &config.smb_domain,
+        &share.username,
+        &share.password,
+        &linux_config.uid,
+        linux_config.gid,
+        &config.get_smb_ip().await?,
+    );
+
+    if !target.exists() {
+        std::fs::create_dir_all(&target).unwrap();
+    }
+
+    info!("Mounting {} at {}", &source, &target.to_string_lossy());
+
+    Ok(nix::mount::mount::<str, Path, str, str>(
+        Some(source.as_ref()),
+        &target,
+        Some("cifs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME,
+        Some(options.as_ref()),
+    )
+    .map(|_| MountedShare {
+        share: share.clone(),
+        mount_path: target,
+    })?)
+}
+
+pub fn is_mounted(share: &Share, config: &AgentConfig) -> Result<bool, MountListError> {
+    let mounts = Process::myself()?.mountinfo()?;
+    let target = target_for_share(share, config);
+
+    Ok(mounts.into_iter().any(|m| {
+        debug!(
+            "source: {:?} mount point: {:?}",
+            m.mount_source, m.mount_point
+        );
+        mount_points_equal(&m.mount_point, &target)
+    }))
+}
+
+pub fn target_for_share(share: &Share, config: &AgentConfig) -> PathBuf {
+    config
+        .get_linux_config()
+        .mount_point_prefix
+        .join(&share.share_name)
+}
+
+pub async fn ensure_umounted(
+    mount_point: &Path,
+    _config: &AgentConfig,
+) -> Result<(), EnsureMountedError> {
+    {
+        info!("Umounting {}", &mount_point.to_string_lossy());
+        nix::mount::umount(mount_point)?;
+        std::fs::remove_dir(mount_point)?;
+        Ok(())
+    }
+}
+
+pub fn mount_points_equal(m1: &Path, m2: &Path) -> bool {
+    (|| {
+        let p1 = m1.canonicalize()?;
+        let p2 = m2.canonicalize()?;
+        Ok::<_, std::io::Error>(p1 == p2)
+    })()
+    .unwrap_or_else(|e| {
+        info!(
+            "Could not canonicalize either `{}` or `{}`; falling back to strict equality: {e}",
+            m1.display(),
+            m2.display()
+        );
+        m1 == m2
+    })
+}
+
+fn get_mounts_in_prefix(config: &AgentConfig) -> Result<HashSet<PathBuf>, MountListError> {
+    let mounts = Process::myself()?.mountinfo()?;
+    Ok(mounts
+        .into_iter()
+        .flat_map(|m| m.mount_point.canonicalize().ok())
+        .filter(|m| m.starts_with(config.get_linux_config().mount_point_prefix))
+        .collect())
+}
+
+/// Clean up ingest mount prefix directory,
+/// remove all directories that are not currently active mount points.
+/// Best-effort; ignores and logs errors and continues to hopefully converge
+/// in a clean situation eventually.
+pub fn cleanup_mount_points(config: &AgentConfig) {
+    let mounts_in_prefix = match get_mounts_in_prefix(config) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!("in cleanup: could not list mounts: {e}");
+            return;
+        }
+    };
+    let dir_contents = match std::fs::read_dir(config.get_linux_config().mount_point_prefix) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("in cleanup: could not read mount point prefix dircetory: {e}");
+            return;
+        }
+    };
+
+    dir_contents
+        .flatten()
+        .filter(|dir_entry| {
+            if let Ok(metadata) = std::fs::metadata(dir_entry.path()) {
+                metadata.is_dir()
+            } else {
+                false
+            }
+        })
+        .map(|dir_entry| dir_entry.path())
+        .flat_map(|path| path.canonicalize().ok())
+        .filter(|path| !mounts_in_prefix.contains(path))
+        .for_each(|path| {
+            if let Err(err) = std::fs::remove_dir(&path) {
+                warn!("Cannot clean up {}: {err}", &path.to_string_lossy());
+            } else {
+                info!("Cleaned up unused mount point {}", &path.to_string_lossy());
+            }
+        });
+}
+
+/// Umount all shares that are no longer supposed to be mounted
+pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
+    let mounts_in_prefix = match get_mounts_in_prefix(config) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!("in cleanup: could not list mounts: {e}");
+            return;
+        }
+    };
+
+    let should_be_mounted: HashSet<PathBuf> = shares.iter().map(|s| s.mount_path.clone()).collect();
+    join_all(
+        mounts_in_prefix
+            .clone()
+            .into_iter()
+            .filter(|m| !should_be_mounted.contains(m))
+            .map(|m| async move { ensure_umounted(&m, config).await }),
+    )
+    .await
+    .into_iter()
+    .for_each(|result| {
+        if let Err(err) = result {
+            warn!("Umounting failed: {err}");
+        }
+    });
+}

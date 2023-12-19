@@ -1,7 +1,9 @@
-use std::{time::{SystemTime, UNIX_EPOCH, Duration}, path::PathBuf};
+use std::{
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use crate::messages::ShareMsg;
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Share {
@@ -44,4 +46,3 @@ pub struct MountedShare {
     /// The mount path; a drive letter on Windows, or a path on Linux
     pub mount_path: PathBuf,
 }
-
