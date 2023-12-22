@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use modama_agent::{
     common::init_logging,
     config::{AgentConfig, AgentLinuxConfig},
-    messages::{CurrentForegroundShare, EventChannelMessage, ShareMsg},
+    messages::{CurrentForegroundShare, EventChannelMessage},
     platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
     share::{MountedShare, Share},
 };
@@ -22,32 +22,23 @@ enum ConnectionState {
     Connected,
 }
 
-#[derive(Debug)]
-struct AgentState {
-    connection: ConnectionState,
-
+#[derive(Debug, Clone)]
+struct ShareState<T>
+where
+    T: PartialEq + Clone,
+{
     /// The current foreground share, if any.
-    foreground_share: Option<MountedShare>,
+    foreground_share: Option<T>,
 
     /// All shares, including the foreground share
-    shares: Vec<MountedShare>,
-
-    /// Runtime configuration
-    config: AgentConfig,
+    shares: Vec<T>,
 }
 
-impl AgentState {
-    fn new(config: &AgentConfig) -> Self {
-        let config = config.clone();
-        Self {
-            connection: Default::default(),
-            foreground_share: None,
-            shares: Vec::new(),
-            config,
-        }
-    }
-
-    fn set_foreground_share(&mut self, share: Option<MountedShare>) {
+impl<T> ShareState<T>
+where
+    T: PartialEq + Clone,
+{
+    fn set_foreground_share(&mut self, share: Option<T>) {
         self.foreground_share = share;
         self.ensure_consistent();
     }
@@ -61,42 +52,81 @@ impl AgentState {
         }
     }
 
-    fn set_shares(&mut self, shares: Vec<MountedShare>) {
+    fn set_shares(&mut self, shares: Vec<T>) {
         self.shares = shares;
         self.ensure_consistent();
     }
 }
 
-/// Return whether the two paths are considered equal.
-///
-/// If the one of the paths doesn't canonicalize, either the path doesn't exist
-/// or is straight up invalid (both cases of TOCTOU?) -> log error and fall back
-/// to strict equality.
-async fn update_share_list(
-    state: &mut AgentState,
-    shares: Vec<ShareMsg>,
-    foreground_share: Option<ShareMsg>,
-) -> Result<()> {
-    let new_fg_share: Option<Share> = foreground_share.map(Into::into);
-    let old_fg_share: Option<&Share> = state.foreground_share.as_ref().map(|ms| &ms.share);
-    if old_fg_share != new_fg_share.as_ref() {
-        if let Some(share) = new_fg_share {
-            state.set_foreground_share(match ensure_mounted(&share, &state.config).await {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    error!("Mount failed: {e}");
-                    None
-                }
-            });
-        } else {
-            state.set_foreground_share(None);
+impl<T> Default for ShareState<T>
+where
+    T: PartialEq + Clone,
+{
+    fn default() -> Self {
+        Self {
+            foreground_share: None,
+            shares: Vec::new(),
         }
     }
-    state.set_shares(
+}
+
+#[derive(Debug)]
+struct AgentState {
+    connection: ConnectionState,
+
+    current_shares: ShareState<MountedShare>,
+    desired_shares: ShareState<Share>,
+
+    /// Runtime configuration
+    config: AgentConfig,
+}
+
+impl AgentState {
+    fn new(config: &AgentConfig) -> Self {
+        let config = config.clone();
+        Self {
+            connection: Default::default(),
+            current_shares: Default::default(),
+            desired_shares: Default::default(),
+            config,
+        }
+    }
+}
+
+async fn update_share_list(
+    state: &mut AgentState,
+    desired_shares: ShareState<Share>,
+) -> Result<()> {
+    let new_fg_share: Option<Share> = desired_shares.foreground_share;
+    let old_fg_share: Option<&Share> = state
+        .current_shares
+        .foreground_share
+        .as_ref()
+        .map(|ms| &ms.share);
+    if old_fg_share != new_fg_share.as_ref() {
+        if let Some(share) = new_fg_share {
+            state.current_shares.set_foreground_share(
+                match ensure_mounted(&share, &state.config).await {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        error!("Mount failed: {e}");
+                        None
+                    }
+                },
+            );
+        } else {
+            state.current_shares.set_foreground_share(None);
+        }
+    }
+    state.current_shares.set_shares(
         join_all(
-            shares
+            desired_shares
+                .shares
                 .into_iter()
-                .map(|s| async { ensure_mounted(&s.into(), &state.config).await }),
+                .map(|s| async { 
+                    let s2 = s;
+                    ensure_mounted(&s2, &state.config).await
+                }),
         )
         .await
         .into_iter()
@@ -109,7 +139,7 @@ async fn update_share_list(
         .collect(),
     );
 
-    umount_old_shares(&state.config, &state.shares).await;
+    umount_old_shares(&state.config, &state.current_shares.shares).await;
     cleanup_mount_points(&state.config);
 
     Ok(())
@@ -129,7 +159,12 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()>
             shares,
             foreground_share,
         } => {
-            update_share_list(&mut *state.lock().await, shares, foreground_share).await?;
+            let desired_shares: ShareState<Share> = ShareState {
+                foreground_share: foreground_share.map(Into::into),
+                shares: shares.into_iter().map(Into::into).collect(),
+            };
+            state.lock().await.desired_shares = desired_shares.clone();
+            update_share_list(&mut *state.lock().await, desired_shares).await?;
             Ok(())
         }
     }
@@ -197,20 +232,22 @@ impl ApiState {
 async fn handler_shares_foreground(
     State(api_state): State<ApiState>,
 ) -> Json<CurrentForegroundShare> {
-    Json(match &api_state.state.lock().await.foreground_share {
-        None => CurrentForegroundShare::None,
-        Some(s) => match s.mount_path.to_str() {
-            None => {
-                let p = s.mount_path.to_string_lossy();
-                warn!("Mount path {p} contains invalid unicode, cannot get foreground share!");
-                CurrentForegroundShare::None
-            }
-            Some(mount_path) => CurrentForegroundShare::Share {
-                dest_path: s.share.dest_path.to_owned(),
-                mount_path: mount_path.to_owned(),
+    Json(
+        match &api_state.state.lock().await.current_shares.foreground_share {
+            None => CurrentForegroundShare::None,
+            Some(s) => match s.mount_path.to_str() {
+                None => {
+                    let p = s.mount_path.to_string_lossy();
+                    warn!("Mount path {p} contains invalid unicode, cannot get foreground share!");
+                    CurrentForegroundShare::None
+                }
+                Some(mount_path) => CurrentForegroundShare::Share {
+                    dest_path: s.share.dest_path.to_owned(),
+                    mount_path: mount_path.to_owned(),
+                },
             },
         },
-    })
+    )
 }
 
 async fn serve_local_web_api(state: Arc<Mutex<AgentState>>) {

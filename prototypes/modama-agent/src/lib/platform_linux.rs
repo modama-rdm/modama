@@ -124,6 +124,11 @@ pub async fn ensure_umounted(
     }
 }
 
+/// Return whether the two paths are considered equal.
+///
+/// If the one of the paths doesn't canonicalize, either the path doesn't exist
+/// or is straight up invalid (both cases of TOCTOU?) -> log error and fall back
+/// to strict equality.
 pub fn mount_points_equal(m1: &Path, m2: &Path) -> bool {
     (|| {
         let p1 = m1.canonicalize()?;
