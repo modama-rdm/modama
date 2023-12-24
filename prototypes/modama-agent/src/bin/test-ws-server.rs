@@ -1,4 +1,9 @@
-use std::{fs::File, io::Read, net::SocketAddr};
+use std::{
+    fs::File,
+    io::{BufReader, Read},
+    net::SocketAddr,
+    sync::Arc, str::FromStr,
+};
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
@@ -7,12 +12,47 @@ use modama_agent::{
     common::init_logging,
     messages::{EventChannelMessage, EventChannelRequests, ShareMsg},
 };
+use rustls_pemfile::{certs, private_key};
 use serde::Deserialize;
 use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::{
+    rustls::{
+        pki_types::{CertificateDer, PrivateKeyDer},
+        server::WebPkiClientVerifier,
+        RootCertStore, ServerConfig,
+    },
+    TlsAcceptor, TlsStream,
+};
 use tokio_tungstenite::{accept_async, WebSocketStream};
+use url::Url;
+use x509_parser::{certificate::X509Certificate, oid_registry::asn1_rs::FromDer};
 
-async fn accept_agent_connection(peer: SocketAddr, stream: TcpStream) {
-    if let Err(e) = handle_connection(peer, stream).await {
+async fn accept_agent_connection(peer: SocketAddr, stream: TcpStream, acceptor: TlsAcceptor) {
+    let stream = acceptor.accept(stream).await.unwrap();
+    let (_, server_connection) = stream.get_ref();
+
+    let peer_certs = server_connection.peer_certificates().unwrap();
+    let (_, client_cert) = X509Certificate::from_der(peer_certs.get(0).unwrap()).unwrap();
+
+    let san = client_cert.subject_alternative_name().unwrap().unwrap();
+    let name = &san.value.general_names.first().unwrap();
+    info!("client SAN: {name}");
+
+    let (resource, agent) = match name {
+        x509_parser::extensions::GeneralName::URI(u) => {
+            let uri = Url::from_str(u).unwrap();
+            assert!(uri.scheme() == "x-modama-agent");
+            (uri.host_str().unwrap().to_string(), uri.fragment().unwrap().to_string())
+        },
+        _ => {
+            error!("invalid SAN in client certificate: {name}");
+            return;
+        }
+    };
+
+    info!("resource: {resource}, agent: {agent}");
+
+    if let Err(e) = handle_connection(peer, stream.into()).await {
         match e {
             tungstenite::Error::ConnectionClosed
             | tungstenite::Error::Protocol(_)
@@ -22,7 +62,10 @@ async fn accept_agent_connection(peer: SocketAddr, stream: TcpStream) {
     }
 }
 
-async fn handle_message(msg: &str, ws_stream: &mut WebSocketStream<TcpStream>) -> Result<()> {
+async fn handle_message(
+    msg: &str,
+    ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
+) -> Result<()> {
     let msg: EventChannelRequests = serde_json::from_str(msg)?;
 
     match msg {
@@ -59,7 +102,10 @@ async fn get_share_list() -> EventChannelMessage {
     }
 }
 
-async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<(), tungstenite::Error> {
+async fn handle_connection(
+    peer: SocketAddr,
+    stream: TlsStream<TcpStream>,
+) -> Result<(), tungstenite::Error> {
     let mut ws_stream = accept_async(stream).await?;
 
     info!("New connection: {}", peer);
@@ -83,14 +129,50 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<(), tu
     Ok(())
 }
 
+fn get_root_cert_store() -> Result<RootCertStore> {
+    let mut root_cert_store = RootCertStore::empty();
+
+    let ca_certs = File::open("./certs/ca/ca.cert.pem")?;
+    for cert in certs(&mut BufReader::new(ca_certs)) {
+        root_cert_store.add(cert?)?;
+    }
+
+    Ok(root_cert_store)
+}
+
+fn get_server_chain() -> Result<Vec<CertificateDer<'static>>> {
+    let cert_file = File::open("./certs/servers/localhost.chain.pem")?;
+
+    // FIXME: fail instead of flattening
+    Ok(certs(&mut BufReader::new(cert_file)).flatten().collect())
+}
+
+fn get_server_key() -> Result<PrivateKeyDer<'static>> {
+    let key_file = File::open("./certs/servers/localhost.priv.pem")?;
+    let pk = private_key(&mut BufReader::new(key_file))?.expect("private key file contains a key");
+    Ok(pk)
+}
+
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     init_logging();
+
+    let roots = get_root_cert_store()?;
+    let client_cert_verifier = WebPkiClientVerifier::builder(roots.into()).build()?;
+
+    let config = ServerConfig::builder()
+        .with_client_cert_verifier(client_cert_verifier)
+        .with_single_cert(get_server_chain()?, get_server_key()?)?;
+
+    let acceptor = TlsAcceptor::from(Arc::new(config));
 
     let addr = "localhost:1234";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     while let Ok((stream, _)) = listener.accept().await {
         let peer = stream.peer_addr().expect("should have a peer address");
-        tokio::spawn(accept_agent_connection(peer, stream));
+        let acc = acceptor.clone();
+        tokio::spawn(accept_agent_connection(peer, stream, acc));
     }
+
+    Ok(())
 }

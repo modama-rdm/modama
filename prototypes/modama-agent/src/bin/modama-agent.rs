@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{fs::File, io::BufReader, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Json, Router};
@@ -11,8 +11,13 @@ use modama_agent::{
     platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
     share::{MountedShare, Share},
 };
+use rustls_pemfile::{certs, private_key};
 use tokio::sync::{Mutex, OnceCell};
-use tokio_tungstenite::connect_async;
+use tokio_rustls::rustls::{
+    pki_types::{CertificateDer, PrivateKeyDer},
+    ClientConfig, RootCertStore,
+};
+use tokio_tungstenite::{connect_async, connect_async_tls_with_config};
 use url::Url;
 
 #[derive(Debug, Default)]
@@ -119,15 +124,10 @@ async fn update_share_list(
         }
     }
     state.current_shares.set_shares(
-        join_all(
-            desired_shares
-                .shares
-                .into_iter()
-                .map(|s| async { 
-                    let s2 = s;
-                    ensure_mounted(&s2, &state.config).await
-                }),
-        )
+        join_all(desired_shares.shares.into_iter().map(|s| async {
+            let s2 = s;
+            ensure_mounted(&s2, &state.config).await
+        }))
         .await
         .into_iter()
         .flat_map(|res| {
@@ -170,16 +170,56 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()>
     }
 }
 
+fn get_root_cert_store() -> Result<RootCertStore> {
+    let mut root_cert_store = RootCertStore::empty();
+
+    let ca_certs = File::open("./certs/ca/ca.cert.pem")?;
+    for cert in certs(&mut BufReader::new(ca_certs)) {
+        root_cert_store.add(cert?)?;
+    }
+
+    Ok(root_cert_store)
+}
+
+fn get_client_chain() -> Result<Vec<CertificateDer<'static>>> {
+    let cert_file = File::open("./certs/clients/holo/dld.chain.pem")?;
+
+    // FIXME: fail instead of flattening
+    Ok(certs(&mut BufReader::new(cert_file)).flatten().collect())
+}
+
+fn get_client_key() -> Result<PrivateKeyDer<'static>> {
+    let key_file = File::open("./certs/clients/holo/dld.priv.pem")?;
+    let pk = private_key(&mut BufReader::new(key_file))?.expect("private key file contains a key");
+    Ok(pk)
+}
+
 async fn message_loop(state: Arc<Mutex<AgentState>>) {
     let config = state.lock().await.config.clone();
 
+    let root_store = get_root_cert_store().unwrap();
+    let tls_config = Arc::new(
+        ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_client_auth_cert(get_client_chain().unwrap(), get_client_key().unwrap())
+            .unwrap(),
+    );
+
     loop {
         state.lock().await.connection = ConnectionState::Connecting;
-        let (conn, _response) = match connect_async(&config.api_url).await {
+        let (conn, _response) = match connect_async_tls_with_config(
+            &config.api_url,
+            None,
+            false,
+            Some(tokio_tungstenite::Connector::Rustls(Arc::clone(&tls_config))),
+        )
+        .await
+        {
             Ok(s) => s,
             Err(e) => {
                 let url = &config.api_url;
                 error!("Could not connect to {url} ({e}) reconnecting...");
+                error!("{}", e.to_string());
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 continue;
             }
@@ -267,7 +307,7 @@ async fn main() {
     let smb_hostname = "moellenstedt.iff.kfa-juelich.de".to_string();
 
     let config = &AgentConfig {
-        api_url: Url::parse("ws://localhost:1234").expect("invalid websocket URL"),
+        api_url: Url::parse("wss://localhost:1234").expect("invalid websocket URL"),
         smb_hostname,
         smb_domain: "ER-C-INGEST".to_string(),
         smb_ip: OnceCell::new(),

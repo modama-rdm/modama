@@ -104,6 +104,43 @@ impl Ca {
         Self::get_ca_path(prefix).join("ca.cert.pem")
     }
 
+    /// Serialize certificate and keypair to filesystem as PEM.
+    ///
+    /// Will write files into `dir`, with a prefix of `name_prefix`
+    /// and suffixes `.cert.pem`, `.pub.pem`, `.chain.pem`, and `.priv.pem`.
+    fn write_signed_cert_files(
+        &self,
+        dir: &Path,
+        name_prefix: &str,
+        cert: &Certificate,
+    ) -> Result<()> {
+        let cert_signed_pem = cert.serialize_pem_with_signer(&self.cert)?;
+        let mut opts = File::options();
+        opts.write(true).create_new(true).mode(0o600);
+        create_dir_all(dir)?;
+
+        let cert_path = dir.join(format!("{name_prefix}.cert.pem"));
+        opts.mode(0o644)
+            .open(cert_path)?
+            .write_all(cert_signed_pem.as_bytes())?;
+
+        let pubkey_path = dir.join(format!("{name_prefix}.pub.pem"));
+        opts.mode(0o644)
+            .open(pubkey_path)?
+            .write_all(cert.get_key_pair().public_key_pem().as_bytes())?;
+
+        let privkey_path = dir.join(format!("{name_prefix}.priv.pem"));
+        opts.open(privkey_path)?
+            .write_all(cert.get_key_pair().serialize_pem().as_bytes())?;
+
+        let chain_path = dir.join(format!("{name_prefix}.chain.pem"));
+        let mut chain = opts.open(chain_path)?;
+        chain.write_all(cert_signed_pem.as_bytes())?;
+        chain.write_all(self.cert.serialize_pem()?.as_bytes())?;
+
+        Ok(())
+    }
+
     pub fn client_cert(&self, agent_name: &str, resource_name: &str) -> Result<Certificate> {
         let mut params = CertificateParams::new(vec![]);
         assert!(!agent_name.contains('@'));
@@ -119,9 +156,13 @@ impl Ca {
         params
             .distinguished_name
             .push(DnType::CommonName, full_name);
+        params.is_ca = IsCa::NoCa;
         params.alg = &PKCS_ED25519;
         // FIXME: constrain key usage?
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::Any];
+        params.extended_key_usages = Vec::new();
+        params
+            .extended_key_usages
+            .push(ExtendedKeyUsagePurpose::ClientAuth);
         params.subject_alt_names.push(rcgen::SanType::URI(format!(
             "x-modama-agent://{resource_name}#{agent_name}"
         )));
@@ -137,30 +178,6 @@ impl Ca {
         Ok(client_cert)
     }
 
-    /// Serialize certificate and keypair to filesystem as PEM.
-    /// 
-    /// Will write files into `dir`, with a prefix of `name_prefix`
-    /// and suffixes `.cert.pem`, `.pub.pem` and `.priv.pem`.
-    fn write_signed_cert_files(&self, dir: &Path, name_prefix: &str, cert: &Certificate) -> Result<()> {
-        let cert_signed_pem = cert.serialize_pem_with_signer(&self.cert)?;
-        let mut opts = File::options();
-        opts.write(true).create_new(true).mode(0o600);
-        create_dir_all(dir)?;
-
-        let cert_path = dir.join(format!("{name_prefix}.cert.pem"));
-        opts.mode(0o644).open(cert_path)?
-            .write_all(cert_signed_pem.as_bytes())?;
-
-        let pubkey_path = dir.join(format!("{name_prefix}.pub.pem"));
-        opts.mode(0o644).open(pubkey_path)?
-            .write_all(cert.get_key_pair().public_key_pem().as_bytes())?;
-
-        let privkey_path = dir.join(format!("{name_prefix}.priv.pem"));
-        opts.open(privkey_path)?
-            .write_all(cert.get_key_pair().serialize_pem().as_bytes())?;
-        Ok(())
-    }
-
     pub fn server_cert(&self, server_names: &[String]) -> Result<Certificate> {
         let mut params = CertificateParams::new(server_names);
 
@@ -174,9 +191,12 @@ impl Ca {
         params
             .distinguished_name
             .push(DnType::CommonName, first_name);
+        params.is_ca = IsCa::NoCa;
         params.alg = &PKCS_ED25519;
-        // FIXME: constrain key usage?
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::Any];
+        params.extended_key_usages = Vec::new();
+        params
+            .extended_key_usages
+            .push(ExtendedKeyUsagePurpose::ServerAuth);
         let server_cert: Certificate = Certificate::from_params(params)?;
         let server_certs_path = Self::get_server_certs_path(&self.path_prefix);
         self.write_signed_cert_files(&server_certs_path, first_name, &server_cert)?;
@@ -257,7 +277,7 @@ fn main() {
     let args = Cli::parse();
 
     match &args.command {
-        Commands::InitializeCa { } => initialize_ca(&args),
+        Commands::InitializeCa {} => initialize_ca(&args),
         Commands::EnrollServer { server_names } => enroll_server(&args, server_names),
         Commands::EnrollAgent {
             resource_name,
