@@ -11,6 +11,10 @@ path = "src/bin/modama-agent.rs"
 name = "test-ws-server"
 path = "src/bin/test-ws-server.rs"
 
+[[bin]]
+name = "ca"
+path = "src/bin/ca.rs"
+
 [lib]
 name = "modama_agent"
 path = "src/lib/lib.rs"
@@ -21,14 +25,18 @@ path = "src/lib/lib.rs"
 anyhow = "1.0.75"
 axum = { version = "0.7.2", features = ["json"] }
 axum-macros = "0.4.0"
+clap = { version = "4.4.11", features = ["derive"] }
 env_logger = "0.10.1"
 futures-util = "0.3.29"
 log = "0.4.20"
+rcgen = { version = "0.12.0", features = ["x509-parser"] }
+rustls-pemfile = "2.0.0"
 scopeguard = "1.2.0"
 serde = { version = "1.0.193", features=["derive"] }
 serde_json = "1.0.108"
 thiserror = "1.0.50"
 tokio = { version = "1.35.0", features = ["rt-multi-thread", "macros", "time"] }
+tokio-rustls = "0.25.0"
 tokio-tungstenite = "0.21.0"
 toml = "0.8.8"
 tungstenite = "0.21.0"
