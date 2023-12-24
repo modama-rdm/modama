@@ -2,7 +2,7 @@ use std::{
     fs::File,
     io::{BufReader, Read},
     net::SocketAddr,
-    sync::Arc, str::FromStr,
+    sync::Arc,
 };
 
 use anyhow::Result;
@@ -10,7 +10,7 @@ use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
 use modama_agent::{
     common::init_logging,
-    messages::{EventChannelMessage, EventChannelRequests, ShareMsg},
+    messages::{EventChannelMessage, EventChannelRequests, ShareMsg}, cert_helpers::AgentId,
 };
 use rustls_pemfile::{certs, private_key};
 use serde::Deserialize;
@@ -24,33 +24,17 @@ use tokio_rustls::{
     TlsAcceptor, TlsStream,
 };
 use tokio_tungstenite::{accept_async, WebSocketStream};
-use url::Url;
-use x509_parser::{certificate::X509Certificate, oid_registry::asn1_rs::FromDer};
 
 async fn accept_agent_connection(peer: SocketAddr, stream: TcpStream, acceptor: TlsAcceptor) {
     let stream = acceptor.accept(stream).await.unwrap();
     let (_, server_connection) = stream.get_ref();
 
     let peer_certs = server_connection.peer_certificates().unwrap();
-    let (_, client_cert) = X509Certificate::from_der(peer_certs.get(0).unwrap()).unwrap();
+    let peer_cert = peer_certs.get(0).unwrap();
 
-    let san = client_cert.subject_alternative_name().unwrap().unwrap();
-    let name = &san.value.general_names.first().unwrap();
-    info!("client SAN: {name}");
+    let agent_id = AgentId::from_cert(peer_cert).unwrap();
 
-    let (resource, agent) = match name {
-        x509_parser::extensions::GeneralName::URI(u) => {
-            let uri = Url::from_str(u).unwrap();
-            assert!(uri.scheme() == "x-modama-agent");
-            (uri.host_str().unwrap().to_string(), uri.fragment().unwrap().to_string())
-        },
-        _ => {
-            error!("invalid SAN in client certificate: {name}");
-            return;
-        }
-    };
-
-    info!("resource: {resource}, agent: {agent}");
+    info!("agent id: {agent_id:?}");
 
     if let Err(e) = handle_connection(peer, stream.into()).await {
         match e {

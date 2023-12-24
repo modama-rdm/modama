@@ -9,7 +9,7 @@ use modama_agent::{
     config::{AgentConfig, AgentLinuxConfig},
     messages::{CurrentForegroundShare, EventChannelMessage},
     platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
-    share::{MountedShare, Share},
+    share::{MountedShare, Share}, cert_helpers::AgentId,
 };
 use rustls_pemfile::{certs, private_key};
 use tokio::sync::{Mutex, OnceCell};
@@ -17,7 +17,7 @@ use tokio_rustls::rustls::{
     pki_types::{CertificateDer, PrivateKeyDer},
     ClientConfig, RootCertStore,
 };
-use tokio_tungstenite::{connect_async, connect_async_tls_with_config};
+use tokio_tungstenite::connect_async_tls_with_config;
 use url::Url;
 
 #[derive(Debug, Default)]
@@ -194,16 +194,8 @@ fn get_client_key() -> Result<PrivateKeyDer<'static>> {
     Ok(pk)
 }
 
-async fn message_loop(state: Arc<Mutex<AgentState>>) {
+async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientConfig>) {
     let config = state.lock().await.config.clone();
-
-    let root_store = get_root_cert_store().unwrap();
-    let tls_config = Arc::new(
-        ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_client_auth_cert(get_client_chain().unwrap(), get_client_key().unwrap())
-            .unwrap(),
-    );
 
     loop {
         state.lock().await.connection = ConnectionState::Connecting;
@@ -306,13 +298,23 @@ async fn main() {
 
     let smb_hostname = "moellenstedt.iff.kfa-juelich.de".to_string();
 
+    let root_store = get_root_cert_store().unwrap();
+    let client_chain = get_client_chain().unwrap();
+    let agent_id = AgentId::from_cert(client_chain.get(0).unwrap()).unwrap();
+    let tls_config = Arc::new(
+        ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_client_auth_cert(get_client_chain().unwrap(), get_client_key().unwrap())
+            .unwrap(),
+    );
+
     let config = &AgentConfig {
         api_url: Url::parse("wss://localhost:1234").expect("invalid websocket URL"),
         smb_hostname,
         smb_domain: "ER-C-INGEST".to_string(),
         smb_ip: OnceCell::new(),
-        agent_name: "test".to_string(),
-        resource_name: "test".to_string(),
+        agent_name: agent_id.agent.to_owned(),
+        resource_name: agent_id.resource.to_owned(),
         linux_config: Some(AgentLinuxConfig::default()),
     };
 
@@ -324,5 +326,6 @@ async fn main() {
     let state: Arc<Mutex<AgentState>> = Arc::new(Mutex::new(AgentState::new(config)));
 
     tokio::spawn(serve_local_web_api(Arc::clone(&state)));
-    message_loop(Arc::clone(&state)).await;
+
+    message_loop(Arc::clone(&state), Arc::clone(&tls_config)).await;
 }

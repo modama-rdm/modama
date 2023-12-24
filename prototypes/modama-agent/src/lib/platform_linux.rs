@@ -136,7 +136,7 @@ pub fn mount_points_equal(m1: &Path, m2: &Path) -> bool {
         Ok::<_, std::io::Error>(p1 == p2)
     })()
     .unwrap_or_else(|e| {
-        info!(
+        debug!(
             "Could not canonicalize either `{}` or `{}`; falling back to strict equality: {e}",
             m1.display(),
             m2.display()
