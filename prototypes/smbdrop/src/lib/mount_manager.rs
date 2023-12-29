@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use nix::mount::MsFlags;
-use procfs::process::Process;
+use procfs::{process::Process, ProcError};
 
 use crate::helpers::{
     have_trailing_slash, keep_immutable, strip_trailing_slash, IOCFlagsError, ImmutableError,
@@ -36,6 +36,15 @@ pub enum MountError {
     Error(String),
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum SetStateError {
+    #[error("error getting current mounts")]
+    ProcError(#[from] ProcError),
+
+    #[error("setting state failed")]
+    MountError(#[from] CompoundMountError),
+}
+
 impl From<IOCFlagsError> for MountError {
     fn from(value: IOCFlagsError) -> Self {
         MountError::Preflight(value.to_string())
@@ -49,11 +58,19 @@ impl From<ImmutableError> for MountError {
 }
 
 impl MountManager {
-    pub fn new(path_prefix: PathBuf) -> Self {
-        Self { path_prefix }
+    pub fn new(path_prefix: &Path) -> Self {
+        Self {
+            path_prefix: path_prefix.to_owned(),
+        }
     }
 
-    pub fn set_state(&self, desired_mounts: HashSet<BindMount>) -> Result<()> {
+    pub fn get_prefix(&self) -> &Path {
+        &self.path_prefix
+    }
+
+    /// Reconcile state such that the given `desired_mounts` are mounted, and other
+    /// mounts in the prefix are umounted.
+    pub fn set_state(&self, desired_mounts: HashSet<BindMount>) -> Result<(), SetStateError> {
         let current_mounts = Process::myself()?.mountinfo()?;
 
         let active_mounts: HashSet<BindMount> = current_mounts

@@ -372,6 +372,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "etc-passwd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0abca7c001eeb16c83a0682ceff98d8722379492678acfd23abc3f49ab86ca69"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "flate2"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1104,9 +1113,12 @@ dependencies = [
  "axum",
  "clap",
  "env_logger",
+ "etc-passwd",
  "log",
  "nix",
  "procfs",
+ "rand",
+ "regex",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -1116,6 +1128,7 @@ dependencies = [
  "toml",
  "tungstenite",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1435,6 +1448,15 @@ name = "utf8parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
+
+[[package]]
+name = "uuid"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e395fcf16a7a3d8127ec99782007af141946b4795001f876d54fb0d55978560"
+dependencies = [
+ "getrandom",
+]
 
 [[package]]
 name = "version_check"
