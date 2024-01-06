@@ -27,17 +27,24 @@ use crate::{
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Share {
+    pub resource: Option<String>,
     pub share_id: String,
     pub share_name: String,
     pub dest_path: PathBuf,
-    pub created_timestamp: u64, // unix timestamp
 
-    // temporary credentials:
+    /// unix timestamp
+    pub created_timestamp: u64,
+
+    /// temporary username
     pub username: String,
+
+    /// temporary password
     pub password: String,
 
-    // mapped to this unix user:
+    /// the underlying unix user for which the share is created
     pub uid: u32,
+
+    /// the underlying unix group for which the share is created
     pub gid: u32,
 }
 
@@ -381,6 +388,7 @@ impl ShareManager {
         dest_path: &Path,
         uid: u32,
         gid: u32,
+        resource: Option<String>,
     ) -> Result<String, ShareError> {
         let pat = get_path_re().await;
 
@@ -402,6 +410,7 @@ impl ShareManager {
             .await?;
 
         let share = Share {
+            resource,
             share_id: share_id.clone(),
             share_name: format!("share-{share_id}"),
             dest_path: PathBuf::from(dest_path),
