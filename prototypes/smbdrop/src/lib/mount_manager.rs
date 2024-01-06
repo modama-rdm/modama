@@ -95,8 +95,13 @@ impl MountManager {
         let to_umount = active_mounts.difference(&desired_mounts);
         let to_mount = desired_mounts.difference(&active_mounts);
 
-        self.mount(to_mount)?;
-        self.umount(to_umount)?;
+        // try both mounts and umounts, but prioritize errors from mounting, as we must not
+        // create shares for destinations where the bind mount failed, but we may remove a share
+        // while a mount still exists.
+        let mount_res = self.mount(to_mount);
+        let umount_res = self.umount(to_umount);
+        mount_res?;
+        umount_res?;
 
         Ok(())
     }

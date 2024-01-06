@@ -12,13 +12,17 @@ use std::{
 use tokio::{
     fs::{rename, File},
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::{mpsc::{Sender, error::SendError}, Mutex, OnceCell},
+    sync::{
+        mpsc::{error::SendError, Sender},
+        Mutex, OnceCell,
+    },
     task::{spawn_blocking, JoinError},
 };
 
 use crate::{
-    mount_manager::{BindMount, MountManager, SetStateError},
-    process_manager::{PmCommand, SambaProcessManager}, samba_config::{SambaConfigManager, UpdateSharesError},
+    mount_manager::{BindMount, CompoundMountError, MountManager, SetStateError},
+    process_manager::{PmCommand, SambaProcessManager},
+    samba_config::{SambaConfigManager, UpdateSharesError},
 };
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -80,12 +84,16 @@ impl std::fmt::Debug for User {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Config {
+pub struct SmbDropState {
     shares: HashMap<String, Share>,
     users: HashMap<String, User>,
 }
 
-impl Config {
+impl SmbDropState {
+    // FIXME: right now, we check for these consistency errors before writing
+    // the state to JSON and abort - we might want to instead try to "heal" the
+    // configuration and try to continue, such that an error in one share cannot
+    // influence other shares being created.
     pub fn check_consistent(&self) -> Result<(), ShareError> {
         let share_uids: HashSet<u32> = self.shares.values().map(|s| s.uid).collect();
         let user_uids: HashSet<u32> = self.users.values().map(|u| u.uid).collect();
@@ -238,7 +246,7 @@ impl ShareConfigFile {
         Self { path }
     }
 
-    async fn read_config(&self) -> Result<Config, ShareError> {
+    async fn read_config(&self) -> Result<SmbDropState, ShareError> {
         let mut f = File::open(&self.path).await?;
         let mut contents = Vec::new();
         f.read_to_end(&mut contents).await?;
@@ -251,7 +259,7 @@ impl ShareConfigFile {
         Ok(config)
     }
 
-    async fn write_config(&self, config: Config) -> Result<(), ShareError> {
+    async fn write_config(&self, config: SmbDropState) -> Result<(), ShareError> {
         config.check_consistent()?;
         let serialized =
             spawn_blocking(move || -> Result<_, serde_json::Error> { serde_json::to_vec(&config) })
@@ -347,7 +355,10 @@ impl ShareManager {
             config_file: Mutex::new(ShareConfigFile::new(shares_config)),
             pm_tx,
             mm: MountManager::new(&bind_mount_prefix),
-            sm: SambaConfigManager::new(&PathBuf::from("/etc/samba/smb-dynamic.conf"), &bind_mount_prefix),
+            sm: SambaConfigManager::new(
+                &PathBuf::from("/etc/samba/smb-dynamic.conf"),
+                &bind_mount_prefix,
+            ),
         }
     }
 
@@ -407,8 +418,16 @@ impl ShareManager {
         config_file.add_share(share).await?;
         config_file.clean_shares().await?;
         let config = config_file.read_config().await?;
-        self.update_mounts(&config).await?;
-        self.update_samba(&config).await?;
+        let failed_mounts: HashSet<BindMount> = match self.update_mounts(&config).await {
+            Ok(_) => HashSet::default(),
+            Err(SetStateError::MountError(CompoundMountError::Error(mounts))) => {
+                mounts.iter().cloned().collect()
+            }
+            Err(e @ SetStateError::ProcError(_)) => {
+                return Err(ShareError::StateError(e));
+            }
+        };
+        self.update_samba(&config, failed_mounts).await?;
         self.pm_tx.send(PmCommand::Reload).await?;
 
         Ok(share_id)
@@ -418,14 +437,14 @@ impl ShareManager {
         let config_file = self.config_file.lock().await;
         config_file.remove_share(share_id).await?;
         let config = config_file.read_config().await?;
-        self.update_mounts(&config).await?;
-        self.update_samba(&config).await?;
+        self.update_samba(&config, HashSet::default()).await?;
         self.pm_tx.send(PmCommand::Reload).await?;
+        self.update_mounts(&config).await?;
 
         Ok(())
     }
 
-    async fn update_mounts(&self, config: &Config) -> Result<(), ShareError> {
+    async fn update_mounts(&self, config: &SmbDropState) -> Result<(), SetStateError> {
         let desired_mounts: HashSet<BindMount> = config
             .shares
             .values()
@@ -436,8 +455,18 @@ impl ShareManager {
         Ok(())
     }
 
-    async fn update_samba(&self, config: &Config) -> Result<(), ShareError> {
-        self.sm.update_shares(config.shares.values()).await?;
+    async fn update_samba(
+        &self,
+        config: &SmbDropState,
+        failed_mounts: HashSet<BindMount>,
+    ) -> Result<(), ShareError> {
+        let failed_dest_paths: HashSet<PathBuf> =
+            failed_mounts.into_iter().map(|m| m.mount_source).collect();
+        let shares = config
+            .shares
+            .values()
+            .filter(|s| !failed_dest_paths.contains(&s.dest_path));
+        self.sm.update_shares(shares).await?;
         Ok(())
     }
 }
