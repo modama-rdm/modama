@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "smbdrop",
+    "modama-agent",
+]
+package.edition = "2021"
+resolver = "2"
