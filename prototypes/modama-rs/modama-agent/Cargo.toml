@@ -42,6 +42,7 @@ toml = "0.8.8"
 tungstenite = "0.21.0"
 url = "2.5.0"
 x509-parser = "0.15.1"
+modama-common = { path = "../modama-common" }
 
 [target.'cfg(windows)'.dependencies]
 

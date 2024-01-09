@@ -1,3 +1,5 @@
+use log::{debug, warn, error, info};
+use modama_common::messages::Share;
 use rand::{distributions::Alphanumeric, Rng};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -6,12 +8,15 @@ use std::{
     ffi::CString,
     io,
     path::{Path, PathBuf},
+    process::Stdio,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use tokio::{
     fs::{rename, File},
     io::{AsyncReadExt, AsyncWriteExt},
+    process::Command,
     sync::{
         mpsc::{error::SendError, Sender},
         Mutex, OnceCell,
@@ -20,58 +25,10 @@ use tokio::{
 };
 
 use crate::{
-    mount_manager::{BindMount, CompoundMountError, MountManager, SetStateError},
+    mount_manager::{BindMount, CompoundMountError, MountManager, SetStateError, MountError},
     process_manager::{PmCommand, SambaProcessManager},
     samba_config::{SambaConfigManager, UpdateSharesError},
 };
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct Share {
-    pub resource: Option<String>,
-    pub share_id: String,
-    pub share_name: String,
-    pub dest_path: PathBuf,
-
-    /// unix timestamp
-    pub created_timestamp: u64,
-
-    /// temporary username
-    pub username: String,
-
-    /// temporary password
-    pub password: String,
-
-    /// the underlying unix user for which the share is created
-    pub uid: u32,
-
-    /// the underlying unix group for which the share is created
-    pub gid: u32,
-}
-
-impl std::fmt::Debug for Share {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Share")
-            .field("share_id", &self.share_id)
-            .field("share_name", &self.share_name)
-            .field("dest_path", &self.dest_path)
-            .field("created_timestamp", &self.created_timestamp)
-            .field("username", &self.username)
-            .field("password", &"[REDACTED]")
-            .field("uid", &self.uid)
-            .field("gid", &self.gid)
-            .finish()
-    }
-}
-
-impl Share {
-    pub fn to_mount(&self, bind_mount_prefix: &Path) -> BindMount {
-        let mount_point = bind_mount_prefix.join("shares").join(&self.share_id);
-        BindMount {
-            mount_source: self.dest_path.to_owned(),
-            mount_point,
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct User {
@@ -92,15 +49,15 @@ impl std::fmt::Debug for User {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SmbDropState {
-    shares: HashMap<String, Share>,
-    users: HashMap<String, User>,
+    pub shares: HashMap<String, Share>,
+    pub users: HashMap<String, User>,
 }
 
 impl SmbDropState {
     // FIXME: right now, we check for these consistency errors before writing
     // the state to JSON and abort - we might want to instead try to "heal" the
     // configuration and try to continue, such that an error in one share cannot
-    // influence other shares being created.
+    // influence other shares being created or removed.
     pub fn check_consistent(&self) -> Result<(), ShareError> {
         let share_uids: HashSet<u32> = self.shares.values().map(|s| s.uid).collect();
         let user_uids: HashSet<u32> = self.users.values().map(|u| u.uid).collect();
@@ -170,6 +127,59 @@ impl SmbDropState {
 
         Ok(())
     }
+
+    /// Get the User for the given uid, or create a new one with a random password.
+    /// Note that this will not create a system user, which is done separately.
+    async fn get_or_create_user(&mut self, uid: u32, share_id: String) -> Result<User, ShareError> {
+        let key = uid.to_string();
+        if let Some(user) = self.users.get(&key) {
+            debug!("get_or_create_user: returning existing user for {key}");
+            Ok((*user).clone())
+        } else {
+            let mut username = format!("share{share_id}").replace('-', "");
+            let _rest = username.split_off(31);
+            debug!("get_or_create_user: adding user {username}");
+            let password = make_password();
+            let user = User {
+                uid,
+                username,
+                password,
+            };
+            self.users.insert(key, user.clone());
+            Ok(user)
+        }
+    }
+
+    async fn add_share(&mut self, share: Share) -> Result<(), ShareError> {
+        let key = share.share_id.clone();
+        self.shares.insert(key, share);
+        Ok(())
+    }
+
+    async fn remove_share(&mut self, share_id: &str) -> Result<Share, ShareError> {
+        info!("removing share {share_id}");
+        if let Some(share) = self.shares.remove(share_id) {
+            Ok(share)
+        } else {
+            Err(ShareError::ShareNotFound(share_id.to_owned()))
+        }
+    }
+
+    /// Remove shares that are broken in some way, for example those that
+    /// point to symlinks or non-directories (normal files, special files etc.).
+    /// The idea is that over time, invalid shares are removed from the system.
+    fn clean_shares(&mut self) {
+        self.shares.retain(|_share_id, share| {
+            let dest_path = share.get_dest_path();
+            dest_path.is_dir() && !dest_path.is_symlink()
+        });
+    }
+
+    /// Remove users that match the given UID
+    fn remove_user(&mut self, uid_to_remove: u32) {
+        self.users
+            .retain(|_user_id, user| uid_to_remove != user.uid);
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -192,14 +202,24 @@ pub enum ShareError {
     #[error("inconcsistent configuration: {0}")]
     Inconsistent(String),
 
-    #[error("could not sync mount state")]
+    #[error("could not sync mount state: {0}")]
     StateError(#[from] SetStateError),
 
-    #[error("could not update shares")]
+    #[error("mount error: {0}")]
+    MountError(#[from] MountError),
+
+    // FIXME: get rid of this one; always keep detailed error around
+    #[error("other mount error")]
+    OtherMountError,
+
+    #[error("could not update shares: {0}")]
     UpdateShares(#[from] UpdateSharesError),
 
-    #[error("could not reload samba")]
+    #[error("could not reload samba: {0}")]
     SambaError(#[from] SendError<PmCommand>),
+
+    #[error("could not add or remove system user {username}: {stderr}")]
+    UsermgmtError { username: String, stderr: String },
 }
 
 /// Return a path to a randomized temporariy filename in the same directory as
@@ -244,6 +264,7 @@ fn make_password() -> String {
 
 /// Utility to manipulate on-disk configuration for smbdrop. Read-modify-write
 /// cycles should be guarded by an external mutex.
+#[derive(Clone, Debug)]
 struct ShareConfigFile {
     path: PathBuf,
 }
@@ -266,74 +287,29 @@ impl ShareConfigFile {
         Ok(config)
     }
 
-    async fn write_config(&self, config: SmbDropState) -> Result<(), ShareError> {
+    async fn write_config(&self, config: &SmbDropState) -> Result<(), ShareError> {
         config.check_consistent()?;
+        debug!("write_config");
+        let config = config.clone();
+
         let serialized =
             spawn_blocking(move || -> Result<_, serde_json::Error> { serde_json::to_vec(&config) })
                 .await??;
 
         let rand_name = make_temporary_fname(&self.path);
+        debug!("write_config: writing to {rand_name:?}");
         let mut opts = File::options();
         opts.mode(0o600).create_new(true).write(true);
         let mut f = opts.open(&rand_name).await?;
 
         f.write_all(&serialized).await?;
+        debug!("write_config: wrote all...");
         f.sync_all().await?;
+        debug!("write_config: synced");
 
         rename(&rand_name, &self.path).await?;
 
-        Ok(())
-    }
-
-    /// Get the User for the given uid, or create a new one with a random password.
-    /// Note that this will not create a system user, which is done separately.
-    async fn get_or_create_user(&self, uid: u32, share_id: String) -> Result<User, ShareError> {
-        let mut config = self.read_config().await?;
-
-        let key = uid.to_string();
-        if let Some(user) = config.users.get(&key) {
-            Ok((*user).clone())
-        } else {
-            let username = format!("share{share_id}").replace('-', "");
-            let password = make_password();
-            let user = User {
-                uid,
-                username,
-                password,
-            };
-            config.users.insert(key, user.clone());
-            self.write_config(config).await?;
-            Ok(user)
-        }
-    }
-
-    async fn add_share(&self, share: Share) -> Result<(), ShareError> {
-        let mut config = self.read_config().await?;
-        let key = share.share_id.clone();
-        config.shares.insert(key, share);
-        self.write_config(config).await?;
-        Ok(())
-    }
-
-    async fn remove_share(&self, share_id: &str) -> Result<(), ShareError> {
-        let mut config = self.read_config().await?;
-        if config.shares.remove(share_id).is_none() {
-            return Err(ShareError::ShareNotFound(share_id.to_owned()));
-        }
-        self.write_config(config).await?;
-        Ok(())
-    }
-
-    async fn clean_shares(&self) -> Result<(), ShareError> {
-        let config = self.read_config().await?;
-        let mut new_config = config.clone();
-        new_config
-            .shares
-            .retain(|_share_id, share| share.dest_path.is_dir() && !share.dest_path.is_symlink());
-
-        if new_config != config {
-            self.write_config(new_config).await?;
-        }
+        debug!("write_config: renamed");
 
         Ok(())
     }
@@ -347,40 +323,98 @@ async fn get_path_re() -> &'static Regex {
         .await
 }
 
+#[derive(Clone, Debug)]
 pub struct ShareManager {
-    config_file: Mutex<ShareConfigFile>,
+    config_file: Arc<Mutex<ShareConfigFile>>,
     sm: SambaConfigManager,
     mm: MountManager,
-    pm_tx: Sender<PmCommand>,
+    pm_tx: Option<Sender<PmCommand>>,
 }
 
 impl ShareManager {
-    pub async fn new(bind_mount_prefix: PathBuf, shares_config: PathBuf) -> Self {
-        let pm_tx = SambaProcessManager::start_in_background().await;
+    pub async fn new(
+        bind_mount_prefix: PathBuf,
+        shares_config: PathBuf,
+        samba_config_path: PathBuf,
+    ) -> Self {
+        let config_file = Arc::new(Mutex::new(ShareConfigFile::new(shares_config)));
+        let sm = SambaConfigManager::new(&samba_config_path, &bind_mount_prefix);
+        let mm = MountManager::new(&bind_mount_prefix);
 
         Self {
-            config_file: Mutex::new(ShareConfigFile::new(shares_config)),
-            pm_tx,
-            mm: MountManager::new(&bind_mount_prefix),
-            sm: SambaConfigManager::new(
-                &PathBuf::from("/etc/samba/smb-dynamic.conf"),
-                &bind_mount_prefix,
-            ),
+            config_file,
+            pm_tx: None,
+            mm,
+            sm,
         }
     }
 
+    pub async fn start(&mut self) -> Result<(), ShareError> {
+        // ensure mounts and samba config are up-to-date before starting samba:
+        let config_file = self.config_file.lock().await;
+        let state = config_file.read_config().await?;
+
+        let failed_mounts: HashSet<BindMount> = match self.update_mounts(&state).await {
+            Ok(_) => HashSet::default(),
+            Err(SetStateError::MountError(CompoundMountError::Error(mounts))) => {
+                mounts.iter().cloned().collect()
+            }
+            Err(e @ SetStateError::ProcError(_)) => {
+                return Err(ShareError::StateError(e));
+            }
+        };
+
+        self.update_samba(&state, &failed_mounts).await?;
+        self.ensure_users(&state).await?;
+
+        let pm_tx = SambaProcessManager::start_in_background().await;
+        self.pm_tx = Some(pm_tx);
+
+        Ok(())
+    }
+
+    pub async fn ensure_users(&self, config: &SmbDropState) -> Result<(), ShareError> {
+        for user in config.users.values() {
+            let pwd = etc_passwd::Passwd::from_uid(user.uid)?;
+            if pwd.is_none() {
+                self.add_system_user(user).await?;
+            }
+        };
+
+        Ok(())
+    }
+
     pub async fn reload(&self) {
-        self.pm_tx
-            .send(PmCommand::Reload)
-            .await
-            .expect("process manager no longer running");
+        if let Some(ref pm_tx) = self.pm_tx {
+            pm_tx
+                .send(PmCommand::Reload)
+                .await
+                .expect("process manager no longer running");
+        } else {
+            error!("process manager is not running! call `start` first");
+        }
     }
 
     pub async fn stop(&self) {
-        self.pm_tx
-            .send(PmCommand::Stop)
-            .await
-            .expect("process manager no longer running");
+        if let Some(ref pm_tx) = self.pm_tx {
+            pm_tx
+                .send(PmCommand::Stop)
+                .await
+                .expect("process manager no longer running");
+        } else {
+            error!("process manager is not running! call `start` first");
+        }
+    }
+
+    /// Returns a map of share IDs to shares
+    pub async fn list_shares(&self) -> Result<HashMap<String, Share>, ShareError> {
+        let config_file = self.config_file.lock().await;
+        Ok(config_file.read_config().await?.shares)
+    }
+
+    pub async fn get_state(&self) -> Result<SmbDropState, ShareError> {
+        let config_file = self.config_file.lock().await;
+        config_file.read_config().await
     }
 
     pub async fn create_share(
@@ -389,7 +423,7 @@ impl ShareManager {
         uid: u32,
         gid: u32,
         resource: Option<String>,
-    ) -> Result<String, ShareError> {
+    ) -> Result<Share, ShareError> {
         let pat = get_path_re().await;
 
         let dest_path = if let Some(path) = dest_path.to_str() {
@@ -405,17 +439,22 @@ impl ShareManager {
         let share_id = share_id.hyphenated().to_string();
 
         let config_file = self.config_file.lock().await;
-        let user = config_file
-            .get_or_create_user(uid, share_id.clone())
-            .await?;
+
+        let mut state = config_file.read_config().await?;
+
+        debug!("create_share: config read");
+
+        let user = state.get_or_create_user(uid, share_id.clone()).await?;
+
+        debug!("create_share: user {user:?} created in config, if it didn't exist");
 
         let share = Share {
             resource,
             share_id: share_id.clone(),
             share_name: format!("share-{share_id}"),
-            dest_path: PathBuf::from(dest_path),
-            username: user.username,
-            password: user.password,
+            dest_path: dest_path.to_owned(),
+            username: user.username.clone(),
+            password: user.password.clone(),
             uid,
             gid,
             created_timestamp: SystemTime::now()
@@ -424,10 +463,21 @@ impl ShareManager {
                 .as_secs(),
         };
 
-        config_file.add_share(share).await?;
-        config_file.clean_shares().await?;
-        let config = config_file.read_config().await?;
-        let failed_mounts: HashSet<BindMount> = match self.update_mounts(&config).await {
+        // before writing the config, run the pre-flight checks (without immutability)
+        // so we can be confident the mount will succeed later
+        self.share_preflight_checks(&share).await?;
+
+        self.add_system_user(&user).await?;
+
+        state.add_share(share.clone()).await?;
+        debug!("create_share: share {share_id} added");
+
+        config_file.write_config(&state).await?;
+
+        debug!("create_share: config written");
+
+        debug!("create_share: updating mounts...");
+        let failed_mounts: HashSet<BindMount> = match self.update_mounts(&state).await {
             Ok(_) => HashSet::default(),
             Err(SetStateError::MountError(CompoundMountError::Error(mounts))) => {
                 mounts.iter().cloned().collect()
@@ -436,19 +486,140 @@ impl ShareManager {
                 return Err(ShareError::StateError(e));
             }
         };
-        self.update_samba(&config, failed_mounts).await?;
-        self.pm_tx.send(PmCommand::Reload).await?;
+        debug!("create_share: updating samba...");
+        self.update_samba(&state, &failed_mounts).await?;
+        self.reload().await;
 
-        Ok(share_id)
+        let this_mount = BindMount::from_share(&share, self.mm.get_prefix());
+        if failed_mounts.contains(&this_mount) {
+            return Err(ShareError::OtherMountError);
+        }
+
+        debug!("create_share: done!");
+        Ok(share)
     }
 
     pub async fn delete_share(&self, share_id: &str) -> Result<(), ShareError> {
         let config_file = self.config_file.lock().await;
-        config_file.remove_share(share_id).await?;
-        let config = config_file.read_config().await?;
-        self.update_samba(&config, HashSet::default()).await?;
-        self.pm_tx.send(PmCommand::Reload).await?;
-        self.update_mounts(&config).await?;
+        let mut state = config_file.read_config().await?;
+        let removed_share = state.remove_share(share_id).await?;
+
+        self.update_samba(&state, &HashSet::default()).await?;
+        self.reload().await;
+        self.update_mounts(&state).await?;
+
+        // if the number of shares with a matching `uid` is now zero, we can remove the user:
+        let share_count = state
+            .shares
+            .values()
+            .filter(|s| s.uid == removed_share.uid)
+            .count();
+        if share_count == 0 {
+            state.remove_user(removed_share.uid);
+            self.remove_system_user(&removed_share.username).await?;
+        }
+
+        // FIXME: is it ok to delay writing the updated config until here?
+        // if we don't delay, we may write an "inconsistent" intermediate version,
+        // where unused users aren't removed yet
+        config_file.write_config(&state).await?;
+
+        Ok(())
+    }
+
+    async fn add_system_user(&self, user: &User) -> Result<(), ShareError> {
+        let useradd_res = Command::new("useradd")
+            .args([
+                "--no-create-home",
+                "--no-user-group",
+                &user.username,
+                "--badname",  // ignore system settings, for example length limit
+                "--uid",
+                &user.uid.to_string(),
+                "--home-dir",
+                "/tmp",
+            ])
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await?;
+        if !useradd_res.status.success() {
+            let stderr = String::from_utf8_lossy(&useradd_res.stderr);
+            warn!("useradd failed; stderr:\n {}", &stderr);
+            let stdout = String::from_utf8_lossy(&useradd_res.stdout);
+            debug!("stdout from useradd:\n {}", &stdout);
+            return Err(ShareError::UsermgmtError {
+                username: user.username.clone(),
+                stderr: stderr.to_string(),
+            });
+        }
+
+        let mut smbpasswd = Command::new("smbpasswd")
+            .args(["-s", "-a", &user.username])
+            .stdin(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+        let mut stdin = smbpasswd
+            .stdin
+            .take()
+            .expect("child did not have a handle to stdin");
+        let smbpasswd_in: String = format!("{}\n{}\n", &user.password, &user.password);
+        stdin.write_all(smbpasswd_in.as_bytes()).await?;
+        let res = smbpasswd.wait_with_output().await?;
+        if !res.status.success() {
+            let stderr = String::from_utf8_lossy(&res.stderr);
+            warn!("smbpasswd failed; stderr:\n {}", &stderr);
+            let stdout = String::from_utf8_lossy(&res.stdout);
+            debug!("stdout from smbpasswd:\n {}", &stdout);
+            return Err(ShareError::UsermgmtError {
+                username: user.username.clone(),
+                stderr: stderr.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn remove_system_user(&self, username: &str) -> Result<(), ShareError> {
+        let smbpasswd_res = Command::new("smbpasswd")
+            .args(["-x", &username])
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await?;
+        if !smbpasswd_res.status.success() {
+            let stderr = String::from_utf8_lossy(&smbpasswd_res.stderr);
+            warn!("smbpasswd failed; stderr:\n {}", &stderr);
+            let stdout = String::from_utf8_lossy(&smbpasswd_res.stdout);
+            debug!("stdout from smbpasswd:\n {}", &stdout);
+            return Err(ShareError::UsermgmtError {
+                username: username.to_string(),
+                stderr: stderr.to_string(),
+            });
+        }
+
+        let userdel_res = Command::new("userdel")
+            .args([&username])
+            .stdin(Stdio::null())
+            .output()
+            .await?;
+        if !userdel_res.status.success() {
+            let stderr = String::from_utf8_lossy(&userdel_res.stderr);
+            warn!("userdel failed; stderr:\n {}", &stderr);
+            let stdout = String::from_utf8_lossy(&userdel_res.stdout);
+            debug!("stdout from userdel:\n {}", &stdout);
+            return Err(ShareError::UsermgmtError {
+                username: username.to_string(),
+                stderr: stderr.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn share_preflight_checks(&self, share: &Share) -> Result<(), ShareError> {
+        let mount = BindMount::from_share(share, self.mm.get_prefix());
+        self.mm.preflight(&mount)?;
 
         Ok(())
     }
@@ -457,7 +628,7 @@ impl ShareManager {
         let desired_mounts: HashSet<BindMount> = config
             .shares
             .values()
-            .map(|share| share.to_mount(self.mm.get_prefix()))
+            .map(|share| BindMount::from_share(share, self.mm.get_prefix()))
             .collect();
         self.mm.set_state(desired_mounts)?;
 
@@ -467,14 +638,14 @@ impl ShareManager {
     async fn update_samba(
         &self,
         config: &SmbDropState,
-        failed_mounts: HashSet<BindMount>,
+        failed_mounts: &HashSet<BindMount>,
     ) -> Result<(), ShareError> {
         let failed_dest_paths: HashSet<PathBuf> =
-            failed_mounts.into_iter().map(|m| m.mount_source).collect();
+            failed_mounts.iter().cloned().map(|m| m.mount_source).collect();
         let shares = config
             .shares
             .values()
-            .filter(|s| !failed_dest_paths.contains(&s.dest_path));
+            .filter(|s| !failed_dest_paths.contains(&s.get_dest_path()));
         self.sm.update_shares(shares).await?;
         Ok(())
     }

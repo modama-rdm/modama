@@ -1124,6 +1124,7 @@ dependencies = [
  "env_logger",
  "futures-util",
  "log",
+ "modama-common",
  "nix",
  "procfs",
  "rcgen",
@@ -1137,6 +1138,20 @@ dependencies = [
  "tokio-tungstenite",
  "toml",
  "tungstenite",
+ "url",
+ "x509-parser",
+]
+
+[[package]]
+name = "modama-common"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio-rustls",
  "url",
  "x509-parser",
 ]
@@ -1665,7 +1680,9 @@ dependencies = [
  "clap",
  "env_logger",
  "etc-passwd",
+ "futures-util",
  "log",
+ "modama-common",
  "nix",
  "procfs",
  "rand",

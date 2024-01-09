@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
+use modama_common::messages::Share;
 use tokio::{
     fs::{rename, File},
     io::AsyncWriteExt,
 };
 
-use crate::share_manager::{make_temporary_fname, Share};
+use crate::{share_manager::make_temporary_fname, mount_manager::BindMount};
 
 #[derive(thiserror::Error, Debug)]
 pub enum UpdateSharesError {
@@ -28,6 +29,7 @@ valid users = {username}
 "
     )
 }
+#[derive(Clone, Debug)]
 pub struct SambaConfigManager {
     config_path: PathBuf,
     bind_mount_prefix: PathBuf,
@@ -58,7 +60,8 @@ impl SambaConfigManager {
     pub async fn update_shares<'a, I>(&self, shares: I) -> Result<(), UpdateSharesError>
     where I: Iterator<Item = &'a Share> {
         let snippets: Vec<String> = shares.map(|s| {
-            get_config_snippet(&s.to_mount(&self.bind_mount_prefix).mount_point, s)
+            let mount = BindMount::from_share(s, &self.bind_mount_prefix);
+            get_config_snippet(&mount.mount_point, s)
         }).collect();
         let new_config = snippets.join("\n\n");
         self.write_config(&new_config).await?;

@@ -2,15 +2,17 @@ use std::{fs::File, io::BufReader, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Json, Router};
+use clap::Parser;
 use futures_util::{future::join_all, StreamExt};
 use log::{error, info, warn};
 use modama_agent::{
-    common::init_logging,
+    cert_helpers::AgentId,
     config::{AgentConfig, AgentLinuxConfig},
-    messages::{CurrentForegroundShare, EventChannelMessage},
     platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
-    share::{MountedShare, Share}, cert_helpers::AgentId,
+    share::MountedShare,
 };
+use modama_common::messages::{CurrentForegroundShare, EventChannelMessage, Share};
+use modama_common::logging::init_logging;
 use rustls_pemfile::{certs, private_key};
 use tokio::sync::{Mutex, OnceCell};
 use tokio_rustls::rustls::{
@@ -160,7 +162,7 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()>
             foreground_share,
         } => {
             let desired_shares: ShareState<Share> = ShareState {
-                foreground_share: foreground_share.map(Into::into),
+                foreground_share,
                 shares: shares.into_iter().map(Into::into).collect(),
             };
             state.lock().await.desired_shares = desired_shares.clone();
@@ -203,7 +205,9 @@ async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientConfi
             &config.api_url,
             None,
             false,
-            Some(tokio_tungstenite::Connector::Rustls(Arc::clone(&tls_config))),
+            Some(tokio_tungstenite::Connector::Rustls(Arc::clone(
+                &tls_config,
+            ))),
         )
         .await
         {
@@ -292,11 +296,23 @@ async fn serve_local_web_api(state: Arc<Mutex<AgentState>>) {
     axum::serve(listener, app).await.unwrap();
 }
 
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(long, default_value="wss://localhost:5052")]
+    event_url: String,
+
+    #[arg(long, default_value="moellenstedt.iff.kfa-juelich.de")]
+    smb_hostname: String,
+    
+    #[arg(long, default_value="ER-C-INGEST")]
+    smb_domain: String,
+}
+
 #[tokio::main]
 async fn main() {
     init_logging();
 
-    let smb_hostname = "moellenstedt.iff.kfa-juelich.de".to_string();
+    let args = Args::parse();
 
     let root_store = get_root_cert_store().unwrap();
     let client_chain = get_client_chain().unwrap();
@@ -309,9 +325,9 @@ async fn main() {
     );
 
     let config = &AgentConfig {
-        api_url: Url::parse("wss://localhost:1234").expect("invalid websocket URL"),
-        smb_hostname,
-        smb_domain: "ER-C-INGEST".to_string(),
+        api_url: Url::parse(&args.event_url).expect("invalid websocket URL"),
+        smb_hostname: args.smb_hostname,
+        smb_domain: args.smb_domain,
         smb_ip: OnceCell::new(),
         agent_name: agent_id.agent.to_owned(),
         resource_name: agent_id.resource.to_owned(),

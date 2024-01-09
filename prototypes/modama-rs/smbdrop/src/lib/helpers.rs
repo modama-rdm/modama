@@ -13,9 +13,9 @@ const FS_IMMUTABLE_FL: u64 = 0x010;
 
 #[derive(thiserror::Error, Debug)]
 pub enum IOCFlagsError {
-    #[error("OS error")]
+    #[error("OS error: {0}")]
     OsError(#[from] Errno),
-    #[error("I/O error")]
+    #[error("I/O error: {0}")]
     IoError(#[from] io::Error),
 }
 
@@ -23,7 +23,7 @@ pub enum IOCFlagsError {
 pub enum ImmutableError {
     #[error("already immutable")]
     AlreadyImmutable,
-    #[error("I/O error")]
+    #[error("I/O error: {0}")]
     OsError(#[from] IOCFlagsError),
 }
 

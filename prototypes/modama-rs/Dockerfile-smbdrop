@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+
+FROM rust:slim-bookworm AS builder
+
+WORKDIR /usr/src/modama-rs/
+
+COPY . .
+
+RUN --mount=type=cache,target=/usr/src/modama-rs/target/release/build/ --mount=type=cache,target=/usr/local/cargo/registry/ cargo build --release --bin smbdrop
+
+FROM debian:bookworm-slim
+
+RUN --mount=type=cache,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind strace
+
+# the main samba config
+COPY ./smbdrop/smb.conf /etc/samba/smb.conf
+
+COPY --from=builder /usr/src/modama-rs/target/release/smbdrop /usr/bin/smbdrop
+
+RUN mkdir -p /data/adhoc/proj1/session1
+RUN chown 1000:1000 -R /data/adhoc/proj1/
+
+EXPOSE 445/tcp
+EXPOSE 5051/tcp
+EXPOSE 5052/tcp
+
+CMD ["/usr/bin/smbdrop", "--api-listen=0.0.0.0:5051", "--ws-listen=0.0.0.0:5052"]
+

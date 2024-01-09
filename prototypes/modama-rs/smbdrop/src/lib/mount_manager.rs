@@ -1,15 +1,16 @@
 use std::{
     collections::HashSet,
-    fs::create_dir,
+    fs::create_dir_all,
     path::{Path, PathBuf},
 };
 
 use anyhow::Result;
+use modama_common::messages::Share;
 use nix::mount::MsFlags;
 use procfs::{process::Process, ProcError};
 
 use crate::helpers::{
-    have_trailing_slash, keep_immutable, strip_trailing_slash, IOCFlagsError, ImmutableError,
+    have_trailing_slash, keep_immutable, strip_trailing_slash, ImmutableError,
 };
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
@@ -18,6 +19,17 @@ pub struct BindMount {
     pub mount_point: PathBuf,
 }
 
+impl BindMount {
+    pub fn from_share(share: &Share, bind_mount_prefix: &Path) -> Self {
+        let mount_point = bind_mount_prefix.join("shares").join(&share.share_id);
+        BindMount {
+            mount_source: share.get_dest_path(),
+            mount_point,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct MountManager {
     path_prefix: PathBuf,
 }
@@ -30,30 +42,24 @@ pub enum CompoundMountError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum MountError {
-    #[error("pre-mount checks failed")]
+    #[error("pre-mount checks failed: {0}")]
     Preflight(String),
-    #[error("mounting failed")]
+    #[error("mounting failed: {0}")]
     Error(String),
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum SetStateError {
-    #[error("error getting current mounts")]
+    #[error("error getting current mounts: {0}")]
     ProcError(#[from] ProcError),
 
-    #[error("setting state failed")]
+    #[error("setting state failed: {0}")]
     MountError(#[from] CompoundMountError),
-}
-
-impl From<IOCFlagsError> for MountError {
-    fn from(value: IOCFlagsError) -> Self {
-        MountError::Preflight(value.to_string())
-    }
 }
 
 impl From<ImmutableError> for MountError {
     fn from(value: ImmutableError) -> Self {
-        MountError::Preflight(value.to_string())
+        MountError::Preflight(format!("immutable error: {}", value))
     }
 }
 
@@ -129,19 +135,40 @@ impl MountManager {
         }
     }
 
-    fn mount_single(&self, mount: &BindMount) -> Result<(), MountError> {
-        // 0) Pre-flight checks: make sure the source is a directory, and it
-        //    stays this way. We do this here by setting the immutable flag, and
-        //    keeping it until after the mount finished successfully:
+    /// Pre-flight check that doesn't set the immutable flag. Some code is
+    /// duplicated in `mount_single`, where we make sure the given source path
+    /// is not modified concurrently.
+    pub fn preflight(&self, mount: &BindMount) -> Result<(), MountError> {
         let src_path = strip_trailing_slash(&mount.mount_source);
-        // if we do `chattr +i /some/symlink/` (with a trailing slash),  we
-        // actually _follow_ the symlink, and set the link target immutable.
-        // Can't have that...
+        // if we do `chattr +i /some/symlink/` at some point (with a trailing
+        // slash),  we actually _follow_ the symlink, and set the link target
+        // immutable.  Can't have that... (paranoid, as we remove the trailing
+        // slash above)
         if have_trailing_slash(&src_path) {
             Err(MountError::Preflight(format!(
                 "source path `{src_path:?}` has trailing slash"
             )))?;
         }
+        // make sure the source path is a directory
+        if src_path.is_symlink() || !src_path.is_dir() {
+            Err(MountError::Preflight(format!(
+                "source path `{src_path:?}` is not a directory"
+            )))?;
+        }
+
+        Ok(())
+    }
+
+    fn mount_single(&self, mount: &BindMount) -> Result<(), MountError> {
+        self.preflight(mount)?;
+        // 0) Pre-flight checks: make sure the source is a directory, and it
+        //    stays this way. We do this here by setting the immutable flag, and
+        //    keeping it until after the mount finished successfully:
+        // if we do `chattr +i /some/symlink/` (with a trailing slash),  we
+        // actually _follow_ the symlink, and set the link target immutable.
+        // Can't have that...
+        let src_path = strip_trailing_slash(&mount.mount_source);
+
         let _guard = keep_immutable(&src_path)?;
         if src_path.is_symlink() || !src_path.is_dir() {
             Err(MountError::Preflight(format!(
@@ -149,7 +176,7 @@ impl MountManager {
             )))?;
         }
         if !mount.mount_point.exists() {
-            if let Err(e) = create_dir(&mount.mount_point) {
+            if let Err(e) = create_dir_all(&mount.mount_point) {
                 Err(MountError::Preflight(format!(
                     "could not create mount point `{:?}`: {e}",
                     &mount.mount_point
@@ -160,8 +187,8 @@ impl MountManager {
             Some(&src_path),
             &mount.mount_point,
             None,
-            MsFlags::empty(),
-            Some("bind"),
+            MsFlags::MS_BIND,
+            None,
         ) {
             Err(MountError::Error(e.to_string()))
         } else {

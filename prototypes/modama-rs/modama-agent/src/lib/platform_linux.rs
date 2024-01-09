@@ -5,13 +5,14 @@ use std::{
 
 use futures_util::future::join_all;
 use log::{debug, info, warn};
+use modama_common::messages::Share;
 use nix::{errno::Errno, mount::MsFlags};
 use procfs::{process::Process, ProcError};
 use thiserror::Error;
 
 use crate::{
     config::{AgentConfig, AgentLinuxConfig, DNSLookupFailure},
-    share::{MountedShare, Share},
+    share::MountedShare,
 };
 
 #[derive(Error, Debug)]

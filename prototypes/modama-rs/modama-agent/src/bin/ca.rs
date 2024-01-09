@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use modama_agent::common::init_logging;
+use modama_common::logging::init_logging;
 use rcgen::{
     Certificate, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair, PKCS_ED25519,

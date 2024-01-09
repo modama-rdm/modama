@@ -4,8 +4,3 @@ pub fn init_logging() {
         .write_style("always");
     env_logger::init_from_env(env);
 }
-
-
-fn main() {
-    println!("Hello, world!");
-}
