@@ -5,10 +5,11 @@ use clap::Parser;
 use modama_common::logging::init_logging;
 use smbdrop::{
     events::start_event_server,
-    server::{serve_smbdrop_api, ApiState, serve_smbdrop_privileged_api},
+    server::{serve_smbdrop_api, ApiState},
     share_manager::ShareManager,
+    token_server::start_token_server,
 };
-use tokio::{signal::unix::SignalKind, select};
+use tokio::{select, signal::unix::SignalKind};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -37,14 +38,19 @@ struct Args {
     ws_listen: String,
 
     #[arg(long, default_value = "localhost:5053")]
-    api_priv_listen: String,
+    token_api_listen: String,
 }
 
 #[tokio::main]
 async fn main() {
     init_logging();
     let args = Args::parse();
-    let mut sm = ShareManager::new(args.bind_mount_prefix, args.shares_config, args.samba_config_file).await;
+    let mut sm = ShareManager::new(
+        args.bind_mount_prefix,
+        args.shares_config,
+        args.samba_config_file,
+    )
+    .await;
     sm.start().await.expect("could not start share manager");
     let state = sm.get_state().await.context("get initial state").unwrap();
 
@@ -60,16 +66,15 @@ async fn main() {
     .unwrap();
 
     let api_state: ApiState = ApiState::new(sm, state_updates_tx);
-    let priv_state = api_state.clone();
 
     let api_listen = args.api_listen.clone();
     let _join_handle = tokio::spawn(async move {
         serve_smbdrop_api(api_state, &api_listen).await;
     });
 
-    let api_priv_listen = args.api_priv_listen.clone();
+    let token_api_listen = args.token_api_listen.clone();
     let _join_handle = tokio::spawn(async move {
-        serve_smbdrop_privileged_api(priv_state, &api_priv_listen).await;
+        start_token_server(&token_api_listen, &args.ca_cert, &args.chain, &args.privkey).await.unwrap();
     });
 
     let mut term_stream = tokio::signal::unix::signal(SignalKind::terminate()).unwrap();
@@ -82,5 +87,4 @@ async fn main() {
             eprintln!("SIGTERM received, exiting");
         }
     }
-
 }

@@ -49,7 +49,7 @@ async fn create_share(
     let dest_path = PathBuf::from(&request.dest_path);
     let share = state
         .share_manager
-        .create_share(&dest_path, request.uid, request.gid, None)
+        .create_share(&dest_path, request.uid, request.gid, request.resource)
         .await
         .unwrap();
     state.send_state_update().await;
@@ -82,8 +82,4 @@ pub async fn serve_smbdrop_api(api_state: ApiState, listen_addr: &str) {
         .with_state(api_state);
     let listener = tokio::net::TcpListener::bind(listen_addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
-}
-
-pub async fn serve_smbdrop_privileged_api(api_state: ApiState, listen_addr: &str) {
-    todo!("TLS setup; serve");
 }

@@ -1,19 +1,17 @@
 use std::{
-    fs::File,
-    io::{self, BufReader},
+    io,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use crate::share_manager::SmbDropState;
+use crate::{share_manager::SmbDropState, cert_helpers::load_tls_config};
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
     agent::AgentId,
     messages::{EventChannelMessage, EventChannelRequests, Share},
 };
-use rustls_pemfile::{certs, private_key};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -23,11 +21,9 @@ use tokio::{
     },
 };
 use tokio_rustls::{
-    rustls::{
-        pki_types::{CertificateDer, PrivateKeyDer},
-        server::{VerifierBuilderError, WebPkiClientVerifier},
-        RootCertStore, ServerConfig,
-    },
+    rustls::
+        server::VerifierBuilderError
+    ,
     server::TlsStream,
     TlsAcceptor,
 };
@@ -61,54 +57,6 @@ impl From<VerifierBuilderError> for ServerStartError {
     fn from(value: VerifierBuilderError) -> Self {
         ServerStartError::CertError(Box::new(value))
     }
-}
-
-fn get_root_cert_store(ca_cert: &Path) -> Result<RootCertStore, ServerStartError> {
-    let mut root_cert_store = RootCertStore::empty();
-
-    let ca_certs = File::open(ca_cert).map_err(|e| ServerStartError::IoError {
-        source: e,
-        path: ca_cert.to_owned(),
-    })?;
-    for cert in certs(&mut BufReader::new(ca_certs)) {
-        root_cert_store.add(cert?)?;
-    }
-
-    Ok(root_cert_store)
-}
-
-fn get_server_chain(chain: &Path) -> Result<Vec<CertificateDer<'static>>, ServerStartError> {
-    let cert_file = File::open(chain).map_err(|e| ServerStartError::IoError {
-        source: e,
-        path: chain.to_owned(),
-    })?;
-
-    // FIXME: fail instead of flattening
-    Ok(certs(&mut BufReader::new(cert_file)).flatten().collect())
-}
-
-fn get_server_key(privkey: &Path) -> Result<PrivateKeyDer<'static>, ServerStartError> {
-    let key_file = File::open(privkey).map_err(|e| ServerStartError::IoError {
-        source: e,
-        path: privkey.to_owned(),
-    })?;
-    let pk = private_key(&mut BufReader::new(key_file))?.expect("private key file should contain a key");
-    Ok(pk)
-}
-
-fn load_tls_config(
-    ca_cert: &Path,
-    chain: &Path,
-    privkey: &Path,
-) -> Result<ServerConfig, ServerStartError> {
-    let roots = get_root_cert_store(ca_cert)?;
-    let client_cert_verifier = WebPkiClientVerifier::builder(roots.into()).build()?;
-
-    let config = ServerConfig::builder()
-        .with_client_cert_verifier(client_cert_verifier)
-        .with_single_cert(get_server_chain(chain)?, get_server_key(privkey)?)?;
-
-    Ok(config)
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -262,7 +210,7 @@ pub async fn start_event_server(
     privkey: &Path,
     state: &SmbDropState,
 ) -> Result<broadcast::Sender<SmbDropState>, ServerStartError> {
-    let config = load_tls_config(ca_cert, chain, privkey)?;
+    let config = load_tls_config(ca_cert, chain, privkey, true)?;
     let (tx, mut rx) = broadcast::channel(16);
 
     // the state we have seen last, which will be sent to newly connecting agents:
