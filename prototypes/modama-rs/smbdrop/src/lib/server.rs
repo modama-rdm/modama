@@ -3,8 +3,9 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use axum::{
     extract::{self, State},
     routing::{delete, get, post},
-    Json, Router,
+    Json, Router, response::IntoResponse,
 };
+use hyper::StatusCode;
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
@@ -56,22 +57,39 @@ async fn create_share(
     Json(share)
 }
 
-// FIXME: move to modama-common if we decide to keep it
+// FIXME: move to modama-common?
 #[derive(Serialize, Deserialize, Debug)]
-struct DeleteResponse {
+pub struct DeleteResponse {
     status: String,
 }
 
 async fn delete_share(
     State(state): State<ApiState>,
     extract::Path(share_id): extract::Path<String>,
-) -> Json<DeleteResponse> {
-    state.share_manager.delete_share(&share_id).await.unwrap();
-    state.send_state_update().await;
-    // FIXME: return type: can we get rid of that? it's a bit silly...
-    Json(DeleteResponse {
-        status: "ok".to_owned(),
-    })
+) -> impl IntoResponse {
+    match state.share_manager.delete_share(&share_id).await {
+        Err(crate::share_manager::ShareError::ShareNotFound(_)) => (
+            StatusCode::NOT_FOUND,
+            Json(DeleteResponse {
+                status: "error".to_owned(),
+            }),
+        ),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(DeleteResponse {
+                status: "error".to_owned(),
+            }),
+        ),
+        Ok(_) => {
+            state.send_state_update().await;
+            (
+                StatusCode::OK,
+                Json(DeleteResponse {
+                    status: "ok".to_owned(),
+                })
+            )
+        }
+    }
 }
 
 pub async fn serve_smbdrop_api(api_state: ApiState, listen_addr: &str) {

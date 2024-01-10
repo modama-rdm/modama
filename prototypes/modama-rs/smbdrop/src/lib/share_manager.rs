@@ -434,6 +434,7 @@ impl ShareManager {
         resource: Option<String>,
     ) -> Result<Share, ShareError> {
         let pat = get_path_re().await;
+        info!("creating share to {}", &dest_path.to_string_lossy());
 
         let dest_path = if let Some(path) = dest_path.to_str() {
             path
@@ -505,6 +506,7 @@ impl ShareManager {
         }
 
         debug!("create_share: done!");
+        info!("created share {} to {}", &share.share_id, &share.dest_path);
         Ok(share)
     }
 
@@ -532,6 +534,8 @@ impl ShareManager {
         // if we don't delay, we may write an "inconsistent" intermediate version,
         // where unused users aren't removed yet
         config_file.write_config(&state).await?;
+
+        info!("removed share {}", &share_id);
 
         Ok(())
     }
@@ -613,7 +617,10 @@ impl ShareManager {
         }
 
         let userdel_res = Command::new("userdel")
-            .args([&username])
+            .args([
+                "-f", // force, even if there's a process from the user still running
+                &username
+            ])
             .stdin(Stdio::null())
             .output()
             .await?;

@@ -1,5 +1,5 @@
 #!/bin/bash
-docker run -eMODAMA_LOG_LEVEL=debug -eRUST_BACKTRACE=1 \
+docker run -eMODAMA_LOG_LEVEL=info -eRUST_BACKTRACE=1 \
     -p5051:5051 -p5052:5052 -p5053:5053 -p445:445 \
     -it --rm --privileged \
     -v $(pwd)/certs:/certs/ \
