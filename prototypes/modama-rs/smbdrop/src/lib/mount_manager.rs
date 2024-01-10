@@ -9,9 +9,7 @@ use modama_common::messages::Share;
 use nix::mount::MsFlags;
 use procfs::{process::Process, ProcError};
 
-use crate::helpers::{
-    have_trailing_slash, keep_immutable, strip_trailing_slash, ImmutableError,
-};
+use crate::helpers::{have_trailing_slash, keep_immutable, strip_trailing_slash, ImmutableError};
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub struct BindMount {

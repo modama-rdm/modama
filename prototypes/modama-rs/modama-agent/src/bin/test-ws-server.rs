@@ -9,6 +9,10 @@ use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
 use modama_agent::cert_helpers::AgentId;
+use modama_common::{
+    logging::init_logging,
+    messages::{EventChannelMessage, EventChannelRequests, Share},
+};
 use rustls_pemfile::{certs, private_key};
 use serde::Deserialize;
 use tokio::net::{TcpListener, TcpStream};
@@ -21,7 +25,6 @@ use tokio_rustls::{
     TlsAcceptor, TlsStream,
 };
 use tokio_tungstenite::{accept_async, WebSocketStream};
-use modama_common::{logging::init_logging, messages::{EventChannelRequests, Share, EventChannelMessage}};
 
 async fn accept_agent_connection(peer: SocketAddr, stream: TcpStream, acceptor: TlsAcceptor) {
     let stream = acceptor.accept(stream).await.unwrap();

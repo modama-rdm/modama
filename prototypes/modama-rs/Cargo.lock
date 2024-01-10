@@ -1267,6 +1267,8 @@ dependencies = [
  "env_logger",
  "log",
  "reqwest",
+ "rustls 0.22.2",
+ "rustls-pemfile 2.0.0",
  "serde",
  "serde_json",
  "thiserror",

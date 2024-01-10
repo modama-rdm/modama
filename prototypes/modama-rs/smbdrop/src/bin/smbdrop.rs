@@ -74,7 +74,9 @@ async fn main() {
 
     let token_api_listen = args.token_api_listen.clone();
     let _join_handle = tokio::spawn(async move {
-        start_token_server(&token_api_listen, &args.ca_cert, &args.chain, &args.privkey).await.unwrap();
+        start_token_server(&token_api_listen, &args.ca_cert, &args.chain, &args.privkey)
+            .await
+            .unwrap();
     });
 
     let mut term_stream = tokio::signal::unix::signal(SignalKind::terminate()).unwrap();

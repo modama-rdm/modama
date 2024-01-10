@@ -13,14 +13,14 @@ use hyper::{body::Incoming, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use log::{error, warn};
-use modama_common::{agent::AgentId, tokens::TokenVerifyResponse};
+use modama_common::{agent::AgentId, cert_helpers::get_private_key, tokens::TokenVerifyResponse};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
 use crate::{
-    cert_helpers::{agent_id_from_stream, get_private_key, load_tls_config},
+    cert_helpers::{agent_id_from_stream, load_tls_config},
     events::ServerStartError,
 };
 
@@ -70,7 +70,7 @@ async fn verify_jwt(
     request: String,
 ) -> Result<Json<TokenVerifyResponse>, StatusCode> {
     let mut validation = Validation::default();
-    validation.validate_exp = true;  // in case the default _ever_ changes...
+    validation.validate_exp = true; // in case the default _ever_ changes...
 
     Ok(Json(
         match decode::<Claims>(
@@ -84,7 +84,7 @@ async fn verify_jwt(
             Err(e) => {
                 warn!("error while validating jwt: {e} stuff");
                 TokenVerifyResponse::Invalid
-            },
+            }
         },
     ))
 }

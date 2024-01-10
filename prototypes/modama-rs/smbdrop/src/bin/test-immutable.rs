@@ -9,7 +9,6 @@ struct Cli {
     filename: PathBuf,
 }
 
-
 fn main() -> Result<()> {
     let args = Cli::parse();
     let imm = is_immutable(&args.filename)?;

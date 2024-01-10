@@ -4,7 +4,9 @@ use log::debug;
 use thiserror::Error;
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use url::Url;
-use x509_parser::{certificate::X509Certificate, error::X509Error, oid_registry::asn1_rs::FromDer, nom::Err};
+use x509_parser::{
+    certificate::X509Certificate, error::X509Error, nom::Err, oid_registry::asn1_rs::FromDer,
+};
 
 #[derive(Error, Debug)]
 pub enum ClientCertError {

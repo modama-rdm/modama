@@ -25,7 +25,6 @@ pub enum PmCommand {
 pub enum PmError {
     #[error("child is not running")]
     NotRunning,
-
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -62,11 +61,11 @@ async fn handle_pm_command(
 impl SambaProcessManager {
     /// Start the samba process in the background and keep restarting.
     /// Reload or stop the process by sending commands to the channel that is returned.
-    pub async fn start_in_background() -> mpsc::Sender<PmCommand> {
+    pub async fn start_in_background(debug: bool) -> mpsc::Sender<PmCommand> {
         let (tx, mut rx) = mpsc::channel::<PmCommand>(16);
         tokio::spawn(async move {
             'outer: loop {
-                let mut pm = match Self::start().await {
+                let mut pm = match Self::start(debug).await {
                     Ok(pm) => pm,
                     Err(e) => {
                         error!("failed to start subprocess ({e}), retrying...");
@@ -101,9 +100,13 @@ impl SambaProcessManager {
         tx
     }
 
-    pub async fn start() -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub async fn start(debug: bool) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let mut args = vec!["-F", "--debug-stdout", "--no-process-group"];
+        if debug {
+            args.push("-d3");
+        }
         let child = Command::new("smbd")
-            .args(["-F", "--debug-stdout", "--no-process-group", "-d3"])
+            .args(&args)
             .stdin(Stdio::null())
             .spawn()?;
 

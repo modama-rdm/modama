@@ -5,11 +5,12 @@ use std::{
     sync::Arc,
 };
 
-use crate::{share_manager::SmbDropState, cert_helpers::load_tls_config};
+use crate::{cert_helpers::load_tls_config, share_manager::SmbDropState};
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
     agent::AgentId,
+    cert_helpers::CertHelperError,
     messages::{EventChannelMessage, EventChannelRequests, Share},
 };
 use tokio::{
@@ -20,13 +21,7 @@ use tokio::{
         Mutex,
     },
 };
-use tokio_rustls::{
-    rustls::
-        server::VerifierBuilderError
-    ,
-    server::TlsStream,
-    TlsAcceptor,
-};
+use tokio_rustls::{rustls::server::VerifierBuilderError, server::TlsStream, TlsAcceptor};
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
 #[derive(thiserror::Error, Debug)]
@@ -43,6 +38,12 @@ pub enum ServerStartError {
 
 impl From<std::io::Error> for ServerStartError {
     fn from(value: std::io::Error) -> Self {
+        ServerStartError::CertError(Box::new(value))
+    }
+}
+
+impl From<CertHelperError> for ServerStartError {
+    fn from(value: CertHelperError) -> Self {
         ServerStartError::CertError(Box::new(value))
     }
 }

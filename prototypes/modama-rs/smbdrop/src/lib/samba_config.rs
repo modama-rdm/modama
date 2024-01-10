@@ -6,7 +6,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::{share_manager::make_temporary_fname, mount_manager::BindMount};
+use crate::{mount_manager::BindMount, share_manager::make_temporary_fname};
 
 #[derive(thiserror::Error, Debug)]
 pub enum UpdateSharesError {
@@ -58,11 +58,15 @@ impl SambaConfigManager {
     }
 
     pub async fn update_shares<'a, I>(&self, shares: I) -> Result<(), UpdateSharesError>
-    where I: Iterator<Item = &'a Share> {
-        let snippets: Vec<String> = shares.map(|s| {
-            let mount = BindMount::from_share(s, &self.bind_mount_prefix);
-            get_config_snippet(&mount.mount_point, s)
-        }).collect();
+    where
+        I: Iterator<Item = &'a Share>,
+    {
+        let snippets: Vec<String> = shares
+            .map(|s| {
+                let mount = BindMount::from_share(s, &self.bind_mount_prefix);
+                get_config_snippet(&mount.mount_point, s)
+            })
+            .collect();
         let new_config = snippets.join("\n\n");
         self.write_config(&new_config).await?;
 

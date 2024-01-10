@@ -1,10 +1,12 @@
-use std::{time::{SystemTime, UNIX_EPOCH, Duration}, path::PathBuf};
+use std::{
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct Share {    
+pub struct Share {
     /// the name of the Resource this share belongs to; None if it wasn't
     /// created for a Resource
     pub resource: Option<String>,

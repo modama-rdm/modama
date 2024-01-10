@@ -58,9 +58,7 @@ impl AgentId {
         debug!("client SAN: {name}");
         match name {
             x509_parser::extensions::GeneralName::URI(u) => Self::from_uri(u),
-            _ => {
-                Err(ClientCertError::InvalidSan(Some(name.to_string())))
-            }
+            _ => Err(ClientCertError::InvalidSan(Some(name.to_string()))),
         }
     }
 }

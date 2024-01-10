@@ -1,4 +1,4 @@
-use log::{debug, warn, error, info};
+use log::{debug, error, info, warn};
 use modama_common::messages::Share;
 use rand::{distributions::Alphanumeric, Rng};
 use regex::Regex;
@@ -25,7 +25,7 @@ use tokio::{
 };
 
 use crate::{
-    mount_manager::{BindMount, CompoundMountError, MountManager, SetStateError, MountError},
+    mount_manager::{BindMount, CompoundMountError, MountError, MountManager, SetStateError},
     process_manager::{PmCommand, SambaProcessManager},
     samba_config::{SambaConfigManager, UpdateSharesError},
 };
@@ -220,6 +220,9 @@ pub enum ShareError {
 
     #[error("could not add or remove system user {username}: {stderr}")]
     UsermgmtError { username: String, stderr: String },
+
+    #[error("process manager in bad shape: {0}")]
+    ProcessManagerError(String),
 }
 
 /// Return a path to a randomized temporariy filename in the same directory as
@@ -367,7 +370,7 @@ impl ShareManager {
         self.update_samba(&state, &failed_mounts).await?;
         self.ensure_users(&state).await?;
 
-        let pm_tx = SambaProcessManager::start_in_background().await;
+        let pm_tx = SambaProcessManager::start_in_background(false).await;
         self.pm_tx = Some(pm_tx);
 
         Ok(())
@@ -379,30 +382,36 @@ impl ShareManager {
             if pwd.is_none() {
                 self.add_system_user(user).await?;
             }
-        };
+        }
 
         Ok(())
     }
 
-    pub async fn reload(&self) {
+    pub async fn reload(&self) -> Result<(), ShareError> {
         if let Some(ref pm_tx) = self.pm_tx {
             pm_tx
                 .send(PmCommand::Reload)
                 .await
-                .expect("process manager no longer running");
+                .map_err(|e| ShareError::ProcessManagerError(e.to_string()))?;
+            Ok(())
         } else {
-            error!("process manager is not running! call `start` first");
+            Err(ShareError::ProcessManagerError(
+                "process manager not running".to_string(),
+            ))
         }
     }
 
-    pub async fn stop(&self) {
+    pub async fn stop(&self) -> Result<(), ShareError> {
         if let Some(ref pm_tx) = self.pm_tx {
             pm_tx
                 .send(PmCommand::Stop)
                 .await
-                .expect("process manager no longer running");
+                .map_err(|e| ShareError::ProcessManagerError(e.to_string()))?;
+            Ok(())
         } else {
-            error!("process manager is not running! call `start` first");
+            Err(ShareError::ProcessManagerError(
+                "process manager not running".to_string(),
+            ))
         }
     }
 
@@ -488,7 +497,7 @@ impl ShareManager {
         };
         debug!("create_share: updating samba...");
         self.update_samba(&state, &failed_mounts).await?;
-        self.reload().await;
+        self.reload().await?;
 
         let this_mount = BindMount::from_share(&share, self.mm.get_prefix());
         if failed_mounts.contains(&this_mount) {
@@ -505,7 +514,7 @@ impl ShareManager {
         let removed_share = state.remove_share(share_id).await?;
 
         self.update_samba(&state, &HashSet::default()).await?;
-        self.reload().await;
+        self.reload().await?;
         self.update_mounts(&state).await?;
 
         // if the number of shares with a matching `uid` is now zero, we can remove the user:
@@ -538,7 +547,7 @@ impl ShareManager {
                 "--no-create-home",
                 "--no-user-group",
                 &user.username,
-                "--badname",  // ignore system settings, for example length limit
+                "--badname", // ignore system settings, for example length limit
                 "--uid",
                 &user.uid.to_string(),
                 "--home-dir",
@@ -645,8 +654,11 @@ impl ShareManager {
         config: &SmbDropState,
         failed_mounts: &HashSet<BindMount>,
     ) -> Result<(), ShareError> {
-        let failed_dest_paths: HashSet<PathBuf> =
-            failed_mounts.iter().cloned().map(|m| m.mount_source).collect();
+        let failed_dest_paths: HashSet<PathBuf> = failed_mounts
+            .iter()
+            .cloned()
+            .map(|m| m.mount_source)
+            .collect();
         let shares = config
             .shares
             .values()

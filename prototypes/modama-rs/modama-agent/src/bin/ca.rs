@@ -215,7 +215,11 @@ impl Ca {
             .push(DnType::CommonName, "modama CA root certificate");
         params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Constrained(1));
         // FIXME: constrain key usage?
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::Any, ExtendedKeyUsagePurpose::ServerAuth, ExtendedKeyUsagePurpose::ClientAuth];
+        params.extended_key_usages = vec![
+            ExtendedKeyUsagePurpose::Any,
+            ExtendedKeyUsagePurpose::ServerAuth,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        ];
         let ca_cert = Certificate::from_params(params).context("generate CA certificate")?;
         Ok(ca_cert)
     }

@@ -1,10 +1,4 @@
-use std::{
-    fs::File,
-    io::BufReader,
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Json, Router};
@@ -17,14 +11,13 @@ use modama_agent::{
     platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
     share::MountedShare,
 };
-use modama_common::logging::init_logging;
 use modama_common::messages::{CurrentForegroundShare, EventChannelMessage, Share};
-use rustls_pemfile::{certs, private_key};
-use tokio::sync::{Mutex, OnceCell};
-use tokio_rustls::rustls::{
-    pki_types::{CertificateDer, PrivateKeyDer},
-    ClientConfig, RootCertStore,
+use modama_common::{
+    cert_helpers::{get_cert_chain, get_private_key, get_root_cert_store},
+    logging::init_logging,
 };
+use tokio::sync::{Mutex, OnceCell};
+use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
 use url::Url;
 
@@ -154,8 +147,8 @@ async fn update_share_list(
 }
 
 async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()> {
-    let event_msg: EventChannelMessage =
-        serde_json::from_str(msg).with_context(|| format!("Invalid message encountered: {}", msg))?;
+    let event_msg: EventChannelMessage = serde_json::from_str(msg)
+        .with_context(|| format!("Invalid message encountered: {}", msg))?;
     match event_msg {
         ref event @ EventChannelMessage::UpdateShareList { .. } => {
             info!("Received EventChannelMessage::UpdateShareList: {event:?}");
@@ -176,30 +169,6 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()>
             Ok(())
         }
     }
-}
-
-fn get_root_cert_store(path: &Path) -> Result<RootCertStore> {
-    let mut root_cert_store = RootCertStore::empty();
-
-    let ca_certs = File::open(path)?;
-    for cert in certs(&mut BufReader::new(ca_certs)) {
-        root_cert_store.add(cert?)?;
-    }
-
-    Ok(root_cert_store)
-}
-
-fn get_client_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
-    let cert_file = File::open(path)?;
-
-    // FIXME: fail instead of flattening
-    Ok(certs(&mut BufReader::new(cert_file)).flatten().collect())
-}
-
-fn get_client_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
-    let key_file = File::open(path)?;
-    let pk = private_key(&mut BufReader::new(key_file))?.expect("private key file contains a key");
-    Ok(pk)
 }
 
 async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientConfig>) {
@@ -327,24 +296,37 @@ struct Args {
     key: PathBuf,
 }
 
+fn get_tls_config(args: &Args) -> Result<(Arc<ClientConfig>, AgentId)> {
+    let root_store = get_root_cert_store(&args.ca_cert)?;
+    let client_chain = get_cert_chain(&args.chain)?;
+    let agent_id = AgentId::from_cert(
+        client_chain
+            .get(0)
+            .context("need at least one cert in chain")
+            .unwrap(),
+    )
+    .context("loading agent id from client cert failed")
+    .unwrap();
+    Ok((
+        Arc::new(
+            ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_client_auth_cert(client_chain, get_private_key(&args.key)?)?,
+        ),
+        agent_id,
+    ))
+}
+
 #[tokio::main]
 async fn main() {
     init_logging();
 
     let args = Args::parse();
-
-    let root_store = get_root_cert_store(&args.ca_cert).unwrap();
-    let client_chain = get_client_chain(&args.chain).unwrap();
-    let agent_id = AgentId::from_cert(client_chain.get(0).unwrap()).unwrap();
-    let tls_config = Arc::new(
-        ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_client_auth_cert(client_chain, get_client_key(&args.key).unwrap())
-            .unwrap(),
-    );
+    let (tls_config, agent_id) = get_tls_config(&args).unwrap();
 
     let config = &AgentConfig {
-        api_url: Url::parse(&args.event_url).expect("invalid websocket URL"),
+        api_url: Url::parse(&args.event_url)
+            .unwrap_or_else(|e| panic!("invalid websocket URL `{}`: {e}", &args.event_url)),
         smb_hostname: args.smb_hostname,
         smb_domain: args.smb_domain,
         smb_ip: OnceCell::new(),

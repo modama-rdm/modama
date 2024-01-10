@@ -1,9 +1,6 @@
-use std::
-    path::PathBuf
-;
+use std::path::PathBuf;
 
 use modama_common::messages::Share;
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountedShare {
