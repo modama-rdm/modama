@@ -23,16 +23,16 @@ pub enum MountListError {
 
 #[derive(Error, Debug)]
 pub enum EnsureMountedError {
-    #[error("checking list of mounts failed")]
+    #[error("checking list of mounts failed: {0}")]
     MountListFailed(#[from] MountListError),
 
-    #[error("DNS failure")]
+    #[error("DNS failure: {0}")]
     LookupFailure(#[from] DNSLookupFailure),
 
-    #[error("failed to execute mount")]
+    #[error("failed to execute mount: {0}")]
     MountFailed(#[from] Errno),
 
-    #[error("io error")]
+    #[error("io error: {0}")]
     IOError(#[from] std::io::Error),
 }
 

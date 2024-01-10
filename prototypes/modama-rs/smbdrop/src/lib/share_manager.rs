@@ -184,13 +184,13 @@ impl SmbDropState {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ShareError {
-    #[error("I/O error")]
+    #[error("I/O error: {0}")]
     IoError(#[from] io::Error),
 
-    #[error("serialization error")]
+    #[error("serialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
 
-    #[error("background task failed")]
+    #[error("background task failed: {0}")]
     JoinError(#[from] JoinError),
 
     #[error("Path name can only contain characters /, a-z, A-Z, 0-9, '_', '-', ' ' and '.'.")]
@@ -528,6 +528,11 @@ impl ShareManager {
     }
 
     async fn add_system_user(&self, user: &User) -> Result<(), ShareError> {
+        let pwd = etc_passwd::Passwd::from_uid(user.uid)?;
+        if pwd.is_some() {
+            info!("system user {} already exists", &user.username);
+            return Ok(());
+        }
         let useradd_res = Command::new("useradd")
             .args([
                 "--no-create-home",

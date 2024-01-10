@@ -37,7 +37,7 @@ pub fn get_server_chain(chain: &Path) -> Result<Vec<CertificateDer<'static>>, Se
     Ok(certs(&mut BufReader::new(cert_file)).flatten().collect())
 }
 
-pub fn get_server_key(privkey: &Path) -> Result<PrivateKeyDer<'static>, ServerStartError> {
+pub fn get_private_key(privkey: &Path) -> Result<PrivateKeyDer<'static>, ServerStartError> {
     let key_file = File::open(privkey).map_err(|e| ServerStartError::IoError {
         source: e,
         path: privkey.to_owned(),
@@ -62,7 +62,7 @@ pub fn load_tls_config(
 
     let config = ServerConfig::builder()
         .with_client_cert_verifier(client_cert_verifier)
-        .with_single_cert(get_server_chain(chain)?, get_server_key(privkey)?)?;
+        .with_single_cert(get_server_chain(chain)?, get_private_key(privkey)?)?;
 
     Ok(config)
 }

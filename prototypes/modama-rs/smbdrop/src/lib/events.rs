@@ -80,12 +80,8 @@ async fn handle_message(
         // explicit request of the current share list
         EventChannelRequests::ShareListUpdate => {
             let state = { last_state.lock().await.clone() };
-            let msg = EventChannelMessage::UpdateShareList {
-                shares: share_list_from_state(&state, agent_id),
-                foreground_share: None,
-            };
+            let msg = update_msg_from_state(&state, agent_id).await;
             let json_msg = serde_json::to_string(&msg)?;
-
             ws_stream.send(tungstenite::Message::Text(json_msg)).await?;
         }
     }
@@ -93,15 +89,26 @@ async fn handle_message(
     Ok(())
 }
 
+async fn update_msg_from_state(state: &SmbDropState, agent_id: &AgentId) -> EventChannelMessage {
+    let mut shares = share_list_from_state(state, agent_id);
+    shares.sort_by_key(|share| share.get_created_systime());
+
+    // FIXME: right now, the foreground share is always the latest share
+    // for the resource, by creation timestamp. This might need to be
+    // re-evaluated.
+    let msg = EventChannelMessage::UpdateShareList {
+        shares: shares.clone(),
+        foreground_share: shares.iter().last().cloned(),
+    };
+    msg
+}
+
 async fn handle_state_update(
     state: &SmbDropState,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     agent_id: &AgentId,
 ) -> Result<(), HandlerError> {
-    let msg = EventChannelMessage::UpdateShareList {
-        shares: share_list_from_state(state, agent_id),
-        foreground_share: None,
-    };
+    let msg = update_msg_from_state(state, agent_id).await;
     let json_msg = serde_json::to_string(&msg)?;
     ws_stream.send(tungstenite::Message::Text(json_msg)).await?;
 
@@ -133,10 +140,7 @@ async fn handle_connection(
     info!("New connection: {}", peer);
 
     let state = { last_state.lock().await.clone() };
-    let init_msg = EventChannelMessage::UpdateShareList {
-        shares: share_list_from_state(&state, &agent_id),
-        foreground_share: None,
-    };
+    let init_msg = update_msg_from_state(&state, &agent_id).await;
     let init_msg = serde_json::to_string(&init_msg).unwrap();
 
     ws_stream

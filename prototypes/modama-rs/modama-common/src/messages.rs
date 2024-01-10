@@ -76,7 +76,7 @@ pub enum CurrentForegroundShare {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum EventChannelMessage {
     UpdateShareList {

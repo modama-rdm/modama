@@ -1,35 +1,45 @@
-use std::{path::Path, sync::Arc, collections::BTreeMap};
+use std::{
+    path::Path,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use axum::{
     extract::{Request, State},
-    routing::{get, put},
+    routing::put,
     Json, Router,
 };
-use hmac::{Hmac, Mac};
 use hyper::{body::Incoming, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use jwt::{SignWithKey, VerifyWithKey};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use log::{error, warn};
-use modama_common::agent::AgentId;
+use modama_common::{agent::AgentId, tokens::TokenVerifyResponse};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
 use crate::{
-    cert_helpers::{agent_id_from_stream, get_server_key, load_tls_config},
+    cert_helpers::{agent_id_from_stream, get_private_key, load_tls_config},
     events::ServerStartError,
 };
 
 #[derive(Clone)]
 struct TokenServerState {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct ConnState {
     pub agent_id: Option<AgentId>,
-    pub key: Hmac<Sha256>,
+    pub secret: Vec<u8>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    exp: u64,
+}
+
+const EXPIRY_DURATION: u64 = 3600;
 
 async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> {
     let agent_id = if let Some(agent_id) = &state.agent_id {
@@ -39,29 +49,44 @@ async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> 
     };
     eprintln!("agent id {:?}", &agent_id);
 
-    let mut claims = BTreeMap::new();
-    claims.insert("sub", agent_id.san_encoded.as_str());
-    // FIXME: expiration claim!
-    let token_str = claims.sign_with_key(&state.key).unwrap();
-    Ok(token_str)
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-enum VerifyResponse {
-    Invalid,
-    VerifiedAgent {
-        agent_id: String,
-    }
+    let sub = agent_id.san_encoded.as_str();
+    let claims = Claims {
+        sub: sub.to_owned(),
+        exp: (SystemTime::now() + Duration::from_secs(EXPIRY_DURATION))
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    };
+    Ok(encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(&state.secret),
+    )
+    .unwrap())
 }
 
 async fn verify_jwt(
     State(state): State<ConnState>,
     request: String,
-) -> Result<Json<VerifyResponse>, StatusCode> {
-    let claims: BTreeMap<String, String> = request.verify_with_key(&state.key).unwrap();
-    // FIXME: check expiration claim!
+) -> Result<Json<TokenVerifyResponse>, StatusCode> {
+    let mut validation = Validation::default();
+    validation.validate_exp = true;  // in case the default _ever_ changes...
 
-    Ok(Json(VerifyResponse::VerifiedAgent { agent_id: claims["sub"].clone() }))
+    Ok(Json(
+        match decode::<Claims>(
+            &request,
+            &DecodingKey::from_secret(&state.secret),
+            &validation,
+        ) {
+            Ok(decode_result) => TokenVerifyResponse::VerifiedAgent {
+                agent_id: decode_result.claims.sub.clone(),
+            },
+            Err(e) => {
+                warn!("error while validating jwt: {e} stuff");
+                TokenVerifyResponse::Invalid
+            },
+        },
+    ))
 }
 
 /// Start a HTTP server on the given `listen_addr` with optional client
@@ -77,7 +102,8 @@ pub async fn start_token_server(
     privkey: &Path,
 ) -> Result<(), ServerStartError> {
     let config = load_tls_config(ca_cert, chain, privkey, false)?;
-    let sign_key: Hmac<Sha256> = Hmac::new_from_slice(get_server_key(privkey)?.secret_der()).unwrap();
+    let pk = get_private_key(privkey)?;
+    let secret = Vec::from(pk.secret_der());
 
     let listener = TcpListener::bind(&listen_addr).await?;
     let acceptor = TlsAcceptor::from(Arc::new(config));
@@ -88,7 +114,7 @@ pub async fn start_token_server(
     loop {
         let tower_service = app.clone();
         let tls_acceptor = acceptor.clone();
-        let sign_key = sign_key.clone();
+        let secret = secret.clone();
 
         let (conn, addr) = listener.accept().await.unwrap();
 
@@ -107,7 +133,7 @@ pub async fn start_token_server(
                     .clone()
                     .with_state(ConnState {
                         agent_id: agent_id.clone(),
-                        key: sign_key.clone(),
+                        secret: secret.clone(),
                     })
                     .call(request)
             });

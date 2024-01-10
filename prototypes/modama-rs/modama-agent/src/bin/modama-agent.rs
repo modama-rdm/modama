@@ -1,4 +1,10 @@
-use std::{fs::File, io::BufReader, sync::Arc, time::Duration};
+use std::{
+    fs::File,
+    io::BufReader,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Json, Router};
@@ -11,8 +17,8 @@ use modama_agent::{
     platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
     share::MountedShare,
 };
-use modama_common::messages::{CurrentForegroundShare, EventChannelMessage, Share};
 use modama_common::logging::init_logging;
+use modama_common::messages::{CurrentForegroundShare, EventChannelMessage, Share};
 use rustls_pemfile::{certs, private_key};
 use tokio::sync::{Mutex, OnceCell};
 use tokio_rustls::rustls::{
@@ -149,10 +155,10 @@ async fn update_share_list(
 
 async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()> {
     let event_msg: EventChannelMessage =
-        serde_json::from_str(msg).context("Invalid message encountered")?;
+        serde_json::from_str(msg).with_context(|| format!("Invalid message encountered: {}", msg))?;
     match event_msg {
-        EventChannelMessage::UpdateShareList { .. } => {
-            info!("Received EventChannelMessage::UpdateShareList");
+        ref event @ EventChannelMessage::UpdateShareList { .. } => {
+            info!("Received EventChannelMessage::UpdateShareList: {event:?}");
         }
     }
 
@@ -172,10 +178,10 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()>
     }
 }
 
-fn get_root_cert_store() -> Result<RootCertStore> {
+fn get_root_cert_store(path: &Path) -> Result<RootCertStore> {
     let mut root_cert_store = RootCertStore::empty();
 
-    let ca_certs = File::open("./certs/ca/ca.cert.pem")?;
+    let ca_certs = File::open(path)?;
     for cert in certs(&mut BufReader::new(ca_certs)) {
         root_cert_store.add(cert?)?;
     }
@@ -183,15 +189,15 @@ fn get_root_cert_store() -> Result<RootCertStore> {
     Ok(root_cert_store)
 }
 
-fn get_client_chain() -> Result<Vec<CertificateDer<'static>>> {
-    let cert_file = File::open("./certs/clients/holo/dld.chain.pem")?;
+fn get_client_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
+    let cert_file = File::open(path)?;
 
     // FIXME: fail instead of flattening
     Ok(certs(&mut BufReader::new(cert_file)).flatten().collect())
 }
 
-fn get_client_key() -> Result<PrivateKeyDer<'static>> {
-    let key_file = File::open("./certs/clients/holo/dld.priv.pem")?;
+fn get_client_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
+    let key_file = File::open(path)?;
     let pk = private_key(&mut BufReader::new(key_file))?.expect("private key file contains a key");
     Ok(pk)
 }
@@ -286,26 +292,39 @@ async fn handler_shares_foreground(
     )
 }
 
-async fn serve_local_web_api(state: Arc<Mutex<AgentState>>) {
+async fn serve_local_web_api(state: Arc<Mutex<AgentState>>, listen_addr: String) {
     let app = Router::new()
         .route("/shares/foreground/", get(handler_shares_foreground))
         .with_state(ApiState::new(&state));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3003")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind(listen_addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(long, default_value="wss://localhost:5052")]
+    #[arg(long, default_value = "wss://localhost:5052")]
     event_url: String,
 
-    #[arg(long, default_value="moellenstedt.iff.kfa-juelich.de")]
+    #[arg(long, default_value = "https://localhost:5053")]
+    token_service: String,
+
+    #[arg(long, default_value = "localhost:3003")]
+    listen_local_api: String,
+
+    #[arg(long, default_value = "moellenstedt.iff.kfa-juelich.de")]
     smb_hostname: String,
-    
-    #[arg(long, default_value="ER-C-INGEST")]
+
+    #[arg(long, default_value = "ER-C-INGEST")]
     smb_domain: String,
+
+    #[arg(long, default_value = "ca.cert.pem")]
+    ca_cert: PathBuf,
+
+    #[arg(long, default_value = "chain.pem")]
+    chain: PathBuf,
+
+    #[arg(long, default_value = "priv.pem")]
+    key: PathBuf,
 }
 
 #[tokio::main]
@@ -314,13 +333,13 @@ async fn main() {
 
     let args = Args::parse();
 
-    let root_store = get_root_cert_store().unwrap();
-    let client_chain = get_client_chain().unwrap();
+    let root_store = get_root_cert_store(&args.ca_cert).unwrap();
+    let client_chain = get_client_chain(&args.chain).unwrap();
     let agent_id = AgentId::from_cert(client_chain.get(0).unwrap()).unwrap();
     let tls_config = Arc::new(
         ClientConfig::builder()
             .with_root_certificates(root_store)
-            .with_client_auth_cert(get_client_chain().unwrap(), get_client_key().unwrap())
+            .with_client_auth_cert(client_chain, get_client_key(&args.key).unwrap())
             .unwrap(),
     );
 
@@ -341,7 +360,10 @@ async fn main() {
 
     let state: Arc<Mutex<AgentState>> = Arc::new(Mutex::new(AgentState::new(config)));
 
-    tokio::spawn(serve_local_web_api(Arc::clone(&state)));
+    tokio::spawn(serve_local_web_api(
+        Arc::clone(&state),
+        args.listen_local_api.clone(),
+    ));
 
     message_loop(Arc::clone(&state), Arc::clone(&tls_config)).await;
 }
