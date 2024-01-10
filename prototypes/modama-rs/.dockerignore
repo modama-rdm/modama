@@ -1,4 +1,6 @@
 /target
 Dockerfile*
 .dockerignore
-stuff
+dev-env/data
+dev-env/certs
+dev-env/etc-smbdrop

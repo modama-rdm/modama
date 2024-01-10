@@ -1,1 +1,4 @@
 target
+dev-env/data
+dev-env/certs
+dev-env/etc-smbdrop
