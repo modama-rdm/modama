@@ -120,3 +120,25 @@ seals the session.
 * Keys/certs should be protected as well as possible, but we can't realistically
   prevent access to them on all `Producer`s.
     * If possible, use file permissions to protect key material
+
+# "Create Ingest Share" user interface
+
+## Requirements
+
+- the interface is served by the agent, but uses the API of the management interface
+    - can "proxy" through the session cookie after logging in
+    - attach a JWT to all requests to the mgmt interface, such that they are
+      allowed to set a resource to ingest shares created
+- the interface should indicate the status and what will happen before a share is created
+    - make sure it's clear which resource the share will be created for
+    - is there a current foreground share that will be replaced?
+    - which agents are running and available?
+- the interface should give some feedback as things are happening
+    - share creation start/error/success
+    - smbdrop event server needs to forward events from agents to all other
+      connected agents that belong to the same resource
+    - agents should broadcast their actions, event like this:
+        - share mount start/error/success
+        - share umount start/error/success
+    - the interface can show a "live" log of recent events (~last 48h or so?) as a feedback mechanism
+        - easy: just "long poll" some endpoint and put that into a <div/>?
