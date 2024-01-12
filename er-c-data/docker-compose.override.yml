@@ -85,10 +85,15 @@ services:
       - type: bind
         source: "./testfolder/etc/smbdrop"
         target: "/etc/smbdrop"
+      - type: bind
+        source: "../prototypes/modama-rs/dev-env/certs/"
+        target: "/certs/"
     ports:
       - "127.0.0.1:1446:445"
       # - "127.0.0.1:445:445"
       - "127.0.0.1:5051:5051"
+      - "127.0.0.1:5052:5052"
+      - "127.0.0.1:5053:5053"
   mgmtinterface:
     volumes:
       - type: bind
@@ -98,6 +103,10 @@ services:
       - type: bind
         source: "./mgmtinterface/config-override.py"
         target: "/config.py"
+        read_only: true
+      - type: bind
+        source: "../prototypes/modama-rs/dev-env/certs/"
+        target: "/certs/"
         read_only: true
     environment:
       - FLASK_APP=mgmtinterface:app

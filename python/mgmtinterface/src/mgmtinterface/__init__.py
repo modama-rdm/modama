@@ -27,6 +27,7 @@ import permissions_client.schema as proxy
 from mgmtinterface_client.schema import (
     CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
 )
+from .token_client import TokenClient
 
 
 app = Flask(__name__)
@@ -48,6 +49,10 @@ client = PermissionsClient(
 )
 smbclient = ShareClient(
     app.config['SHARE_API']
+)
+token_client = TokenClient(
+    app.config['TOKEN_SERVICE_URL'],
+    ca_cert=app.config['CA_CERT_PATH'],
 )
 
 
@@ -816,6 +821,15 @@ def api_create_share() -> Dict:
         raise RuntimeError(pr_info['message'])
     if user_info['errno'] != 0:
         raise RuntimeError(user_info['message'])
+
+    resource = None
+    token = request.headers.get('X-Agent-Token')
+    if token:
+        agent = token_client.verify_agent(token)
+        resource = agent.get_resource_name()
+        if resource != request_data["resource"]:
+            raise RuntimeError("resource does not match token")
+
     ds = None
     for ds in pr_info['datasets']:
         if ds['name'] == request_data["dataset"]:
@@ -824,15 +838,16 @@ def api_create_share() -> Dict:
         raise RuntimeError(
             f"Dataset not found in project {pr_info['project']['name']}"
         )
-    if apiauth.current_user() not in pr_info['project']['members']:
+    if apiauth.current_user() not in pr_info['project']['members'] and apiauth.current_user() != pr_info['project']['owner']:
         raise RuntimeError(
             f"API user {apiauth.current_user()} "
-            f"not in project members {pr_info['project']['members']}."
+            f"not in project members {pr_info['project']['members']} and is not the owner."
         )
     share = smbclient.create(
         dest_path=smbpath(pr_info['project'], ds['name']),
         uid=user_info['id']['uid'],
         gid=pr_info['project']['gid'],
+        resource=resource,
     )
     return dict(share)
 

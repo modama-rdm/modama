@@ -148,8 +148,8 @@ impl Ca {
         assert!(!resource_name.contains('@'));
         assert!(!resource_name.contains('/'));
         let full_name: String = format!("{agent_name}@{resource_name}");
-        // FIXME: instead of generating a key pair here, instead, generate it on the agent itself and
-        // only generate the final certificate from a CSR
+        // FIXME: instead of generating a key pair here, generate it on the
+        // agent itself and only generate the final certificate from a CSR
         let key_pair = KeyPair::generate(&PKCS_ED25519).context("generate client key pair")?;
         params.key_pair = Some(key_pair);
         params.distinguished_name = DistinguishedName::new();
@@ -181,9 +181,9 @@ impl Ca {
     pub fn server_cert(&self, server_names: &[String]) -> Result<Certificate> {
         let mut params = CertificateParams::new(server_names);
 
-        // FIXME: instead of generating a key pair here, instead, generate it on
-        // the server system itself and only generate the final certificate from
-        // a CSR
+        // FIXME: instead of generating a key pair here, generate it on the
+        // server system itself and only generate the final certificate from a
+        // CSR
         let key_pair = KeyPair::generate(&PKCS_ED25519).context("generate server key pair")?;
         let first_name = server_names.get(0).context("get first server name")?;
         params.key_pair = Some(key_pair);

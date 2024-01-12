@@ -16,6 +16,11 @@ CREATE_SHARE_REQUEST_SCHEMA = {
             "type": "string",
             "description": "Dataset within the project",
         },
+        "resource": {
+            "type": "string",
+            "description": "The name of the resource the created share "
+                           "should belong to",
+        }
     },
     "required": ["project", "dataset"],
 }

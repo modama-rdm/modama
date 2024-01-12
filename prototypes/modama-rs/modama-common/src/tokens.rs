@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use reqwest::{Certificate, Client, Identity};
+use reqwest::{Certificate, Client, Identity, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::AgentId;
@@ -28,6 +28,9 @@ impl TokenVerifyResponse {
 pub enum TokenError {
     #[error("fetch error: {0}")]
     FetchError(#[from] reqwest::Error),
+
+    #[error("error response code: {0}")]
+    ResponseCodeError(StatusCode),
 
     #[error("certificate error: {0}")]
     CertError(#[from] io::Error),
@@ -75,7 +78,12 @@ impl TokenFetcher {
             .send()
             .await
             .unwrap();
-        Ok(resp.text().await?)
+        if resp.status()  == StatusCode::OK {
+            Ok(resp.text().await?)
+        } else {
+            Err(TokenError::ResponseCodeError(resp.status()))
+        }
+    
     }
 }
 

@@ -43,6 +43,8 @@ tungstenite = "0.21.0"
 url = "2.5.0"
 x509-parser = "0.15.1"
 modama-common = { path = "../modama-common" }
+axum-extra = { version = "0.9.1", features = ["typed-header"] }
+minijinja = { version = "1.0.11", features = ["loader"] }
 
 [target.'cfg(windows)'.dependencies]
 

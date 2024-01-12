@@ -6,6 +6,7 @@ use axum::{
     Json, Router, response::IntoResponse,
 };
 use hyper::StatusCode;
+use log::info;
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
@@ -31,8 +32,10 @@ impl ApiState {
     }
 
     async fn send_state_update(&self) {
+        let new_state = self.share_manager.get_state().await.unwrap();
+        info!("sending state update: {:?}", &new_state);
         self.state_updates_tx
-            .send(self.share_manager.get_state().await.unwrap())
+            .send(new_state)
             .unwrap();
     }
 }
@@ -45,15 +48,15 @@ async fn create_share(
     State(state): State<ApiState>,
     Json(request): Json<CreateShareRequest>,
 ) -> Json<Share> {
-    // NOTE: this is the non-resource-specific API endpoint, so we don't set a
-    // resource for the created ingest share.
     let dest_path = PathBuf::from(&request.dest_path);
+    info!("creating share from request {request:?}");
     let share = state
         .share_manager
         .create_share(&dest_path, request.uid, request.gid, request.resource)
         .await
         .unwrap();
     state.send_state_update().await;
+    info!("created share {share:?}");
     Json(share)
 }
 
@@ -96,7 +99,7 @@ pub async fn serve_smbdrop_api(api_state: ApiState, listen_addr: &str) {
     let app = Router::new()
         .route("/share/", get(list_shares))
         .route("/share/", post(create_share))
-        .route("/share/:share_id", delete(delete_share))
+        .route("/share/:share_id/", delete(delete_share))
         .with_state(api_state);
     let listener = tokio::net::TcpListener::bind(listen_addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

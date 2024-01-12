@@ -35,6 +35,9 @@ pub struct AgentConfig {
     /// The resolved IP address of the Samba server (lazily looked up on first mount)
     pub smb_ip: OnceCell<String>,
 
+    /// The SMB port to connect to
+    pub smb_port: u32,
+
     /// The Samba domain to use for mounting
     pub smb_domain: String,
 

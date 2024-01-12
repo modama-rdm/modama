@@ -4,7 +4,7 @@ FROM rust:slim-bookworm AS builder
 
 WORKDIR /usr/src/modama-rs/
 
-RUN --mount=type=cache,target=/var/cache/apt apt-get update && apt-get -y install clang lld
+RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install clang lld
 
 COPY . .
 
@@ -12,7 +12,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,targ
 
 FROM debian:bookworm-slim
 
-RUN --mount=type=cache,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind strace
+RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind strace
 
 # the main samba config
 COPY ./smbdrop/smb.conf /etc/samba/smb.conf
@@ -23,13 +23,15 @@ RUN chown 1000:1000 -R /data/adhoc/proj1/
 EXPOSE 445/tcp
 EXPOSE 5051/tcp
 EXPOSE 5052/tcp
+EXPOSE 5053/tcp
 
 COPY --from=builder /usr/bin/smbdrop /usr/bin/smbdrop
 
-CMD [ \
-    "/usr/bin/smbdrop", \
+CMD [ "/usr/bin/smbdrop", \
+    "--ca-cert=/certs/ca/ca.cert.pem", \
+    "--chain=/certs/servers/smbdrop.chain.pem", \
+    "--privkey=/certs/servers/smbdrop.priv.pem", \
     "--api-listen=0.0.0.0:5051", \
-    "--token-api-listen=0.0.0.0:5053", \
-    "--ws-listen=0.0.0.0:5052" \
-]
+    "--ws-listen=0.0.0.0:5052", \
+    "--token-api-listen=0.0.0.0:5053" ]
 

@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 import requests
 
 
@@ -15,11 +15,11 @@ class ShareClient:
     def auth(self):
         return None
 
-    def create(self, dest_path: str, uid: int, gid: int) -> Dict:
+    def create(self, dest_path: str, uid: int, gid: int, resource: Optional[str] = None) -> Dict:
         """
         """
         url = _make_url(self._base_url, "/share/")
-        payload = {"dest_path": dest_path, "uid": uid, "gid": gid}
+        payload = {"dest_path": dest_path, "uid": uid, "gid": gid, "resource": resource}
         resp = requests.post(url, json=payload, auth=self.auth)
         if not resp.ok:
             raise RuntimeError(
@@ -40,7 +40,7 @@ class ShareClient:
         resp_data: Dict = resp.json()
         return resp_data
 
-    def delete(self, share_id: int) -> None:
+    def delete(self, share_id: str) -> None:
         url = _make_url(self._base_url, f"/share/{share_id}/")
         resp = requests.delete(url, auth=self.auth)
         if not resp.ok:

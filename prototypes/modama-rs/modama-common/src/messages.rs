@@ -5,6 +5,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::AgentId;
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Share {
     /// the name of the Resource this share belongs to; None if it wasn't
@@ -84,6 +86,7 @@ pub enum EventChannelMessage {
     UpdateShareList {
         shares: Vec<Share>,
         foreground_share: Option<Share>,
+        connected_agents: Vec<AgentId>,
     },
 }
 

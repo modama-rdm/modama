@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     io,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -13,6 +14,7 @@ use modama_common::{
     cert_helpers::CertHelperError,
     messages::{EventChannelMessage, EventChannelRequests, Share},
 };
+use serde::{Deserialize, Serialize};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -69,10 +71,19 @@ enum HandlerError {
     SerdeError(#[from] serde_json::Error),
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct EventSystemState {
+    /// Shares and users updated from external (triggered via the HTTP API)
+    pub inner_state: SmbDropState,
+
+    /// Updated from the connection handler
+    pub connected_agents: HashSet<AgentId>,
+}
+
 async fn handle_message(
     msg: &str,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
-    last_state: Arc<Mutex<SmbDropState>>,
+    last_state: Arc<Mutex<EventSystemState>>,
     agent_id: &AgentId,
 ) -> Result<(), HandlerError> {
     let msg: EventChannelRequests = serde_json::from_str(msg)?;
@@ -90,7 +101,10 @@ async fn handle_message(
     Ok(())
 }
 
-async fn update_msg_from_state(state: &SmbDropState, agent_id: &AgentId) -> EventChannelMessage {
+async fn update_msg_from_state(
+    state: &EventSystemState,
+    agent_id: &AgentId,
+) -> EventChannelMessage {
     let mut shares = share_list_from_state(state, agent_id);
     shares.sort_by_key(|share| share.get_created_systime());
 
@@ -100,12 +114,13 @@ async fn update_msg_from_state(state: &SmbDropState, agent_id: &AgentId) -> Even
     let msg = EventChannelMessage::UpdateShareList {
         shares: shares.clone(),
         foreground_share: shares.iter().last().cloned(),
+        connected_agents: state.connected_agents.iter().cloned().collect(),
     };
     msg
 }
 
 async fn handle_state_update(
-    state: &SmbDropState,
+    state: &EventSystemState,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     agent_id: &AgentId,
 ) -> Result<(), HandlerError> {
@@ -116,8 +131,9 @@ async fn handle_state_update(
     Ok(())
 }
 
-fn share_list_from_state(state: &SmbDropState, agent_id: &AgentId) -> Vec<Share> {
+fn share_list_from_state(state: &EventSystemState, agent_id: &AgentId) -> Vec<Share> {
     state
+        .inner_state
         .shares
         .values()
         .filter(|s| {
@@ -132,17 +148,17 @@ fn share_list_from_state(state: &SmbDropState, agent_id: &AgentId) -> Vec<Share>
 async fn handle_connection(
     peer: SocketAddr,
     stream: TlsStream<TcpStream>,
-    mut state_updates: broadcast::Receiver<SmbDropState>,
-    last_state: Arc<Mutex<SmbDropState>>,
+    mut state_updates_rx: broadcast::Receiver<SmbDropState>,
+    last_state: Arc<Mutex<EventSystemState>>,
     agent_id: AgentId,
-) -> Result<(), tungstenite::Error> {
+) -> Result<(), HandlerError> {
     let mut ws_stream = accept_async(stream).await?;
 
     info!("New connection: {}", peer);
 
     let state = { last_state.lock().await.clone() };
     let init_msg = update_msg_from_state(&state, &agent_id).await;
-    let init_msg = serde_json::to_string(&init_msg).unwrap();
+    let init_msg = serde_json::to_string(&init_msg)?;
 
     ws_stream
         .send(tungstenite::Message::Text(init_msg))
@@ -162,9 +178,15 @@ async fn handle_connection(
                     warn!("received non-text ws message or conversion failed");
                 }
             },
-            maybe_state = state_updates.recv() => {
-                let state = maybe_state.unwrap(); // FIXME
-                handle_state_update(&state, &mut ws_stream, &agent_id).await.unwrap();
+            maybe_state = state_updates_rx.recv() => {
+                let new_state = maybe_state.unwrap(); // FIXME
+                // compose the update of shares and users with connected shares:
+                info!("propagating state update from channel: {new_state:?}");
+                let comp_state = EventSystemState {
+                    inner_state: new_state,
+                    connected_agents: last_state.lock().await.connected_agents.clone(),
+                };
+                handle_state_update(&comp_state, &mut ws_stream, &agent_id).await.unwrap();
             }
         }
     }
@@ -176,8 +198,8 @@ async fn accept_agent_connection(
     peer: SocketAddr,
     stream: TcpStream,
     acceptor: TlsAcceptor,
-    last_state: Arc<Mutex<SmbDropState>>,
-    state_updates: broadcast::Receiver<SmbDropState>,
+    last_state: Arc<Mutex<EventSystemState>>,
+    state_updates_rx: broadcast::Receiver<SmbDropState>,
 ) {
     let stream = acceptor.accept(stream).await.unwrap();
     let (_, server_connection) = stream.get_ref();
@@ -189,16 +211,32 @@ async fn accept_agent_connection(
 
     info!("agent id: {agent_id:?}");
 
-    if let Err(e) =
-        handle_connection(peer, stream, state_updates, last_state, agent_id.clone()).await
+    last_state
+        .lock()
+        .await
+        .connected_agents
+        .insert(agent_id.clone());
+
+    let conn_last_state = Arc::clone(&last_state);
+
+    if let Err(e) = handle_connection(
+        peer,
+        stream,
+        state_updates_rx,
+        conn_last_state,
+        agent_id.clone(),
+    )
+    .await
     {
         match e {
-            tungstenite::Error::ConnectionClosed
-            | tungstenite::Error::Protocol(_)
-            | tungstenite::Error::Utf8 => (),
+            HandlerError::WsError(tungstenite::Error::ConnectionClosed)
+            | HandlerError::WsError(tungstenite::Error::Protocol(_))
+            | HandlerError::WsError(tungstenite::Error::Utf8) => (),
             err => error!("Error handling connection: {err}"),
         }
     }
+
+    last_state.lock().await.connected_agents.remove(&agent_id);
 }
 
 /// Start a websocket server that informs agents about currently active ingest
@@ -215,11 +253,15 @@ pub async fn start_event_server(
     privkey: &Path,
     state: &SmbDropState,
 ) -> Result<broadcast::Sender<SmbDropState>, ServerStartError> {
+    let state = EventSystemState {
+        inner_state: state.clone(),
+        connected_agents: HashSet::new(),
+    };
     let config = load_tls_config(ca_cert, chain, privkey, true)?;
-    let (tx, mut rx) = broadcast::channel(16);
+    let (tx, mut rx) = broadcast::channel::<SmbDropState>(16);
 
     // the state we have seen last, which will be sent to newly connecting agents:
-    let last_state = Arc::new(Mutex::new(state.clone()));
+    let last_state = Arc::new(Mutex::new(state));
 
     // and a coroutine to keep it up to date via the messages from the broadcast channel:
     let wr_last_state = Arc::clone(&last_state);
@@ -227,7 +269,7 @@ pub async fn start_event_server(
         loop {
             let maybe_state = rx.recv().await;
             if let Ok(state) = maybe_state {
-                *wr_last_state.lock().await = state;
+                wr_last_state.lock().await.inner_state = state;
             } else if let Err(RecvError::Closed) = maybe_state {
                 break;
             }

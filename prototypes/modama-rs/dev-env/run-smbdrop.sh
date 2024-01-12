@@ -7,8 +7,8 @@ docker run -eMODAMA_LOG_LEVEL=info -eRUST_BACKTRACE=1 \
     -v $(pwd)/data/:/data/ \
     smbdrop-rs smbdrop \
     --ca-cert=/certs/ca/ca.cert.pem \
-    --chain /certs/servers/localhost.chain.pem \
-    --privkey /certs/servers/localhost.priv.pem \
+    --chain /certs/servers/smbdrop.chain.pem \
+    --privkey /certs/servers/smbdrop.priv.pem \
     --api-listen 0.0.0.0:5051 \
     --ws-listen 0.0.0.0:5052 \
     --token-api-listen 0.0.0.0:5053

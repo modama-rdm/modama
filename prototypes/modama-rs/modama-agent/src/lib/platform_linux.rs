@@ -65,13 +65,14 @@ pub async fn ensure_mounted(
     }
 
     let options = format!(
-        "domain={},username={},password={},uid={},gid={},forceuid,forcegid,vers=3.1.1,ip={}",
+        "domain={},username={},password={},uid={},gid={},forceuid,forcegid,vers=3.1.1,ip={},port={}",
         &config.smb_domain,
         &share.username,
         &share.password,
         &linux_config.uid,
         linux_config.gid,
         &config.get_smb_ip().await?,
+        &config.smb_port,
     );
 
     if !target.exists() {

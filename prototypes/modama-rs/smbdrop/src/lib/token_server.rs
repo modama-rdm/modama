@@ -49,7 +49,7 @@ async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> 
     };
     eprintln!("agent id {:?}", &agent_id);
 
-    let sub = agent_id.san_encoded.as_str();
+    let sub = &agent_id.san_encoded;
     let claims = Claims {
         sub: sub.to_owned(),
         exp: (SystemTime::now() + Duration::from_secs(EXPIRY_DURATION))
@@ -82,7 +82,7 @@ async fn verify_jwt(
                 agent_id: decode_result.claims.sub.clone(),
             },
             Err(e) => {
-                warn!("error while validating jwt: {e} stuff");
+                warn!("error while validating jwt: {e}");
                 TokenVerifyResponse::Invalid
             }
         },

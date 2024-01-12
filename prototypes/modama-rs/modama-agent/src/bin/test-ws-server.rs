@@ -8,10 +8,9 @@ use std::{
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
-use modama_agent::cert_helpers::AgentId;
 use modama_common::{
     logging::init_logging,
-    messages::{EventChannelMessage, EventChannelRequests, Share},
+    messages::{EventChannelMessage, EventChannelRequests, Share}, agent::AgentId,
 };
 use rustls_pemfile::{certs, private_key};
 use serde::Deserialize;
@@ -84,6 +83,7 @@ async fn get_share_list() -> EventChannelMessage {
     EventChannelMessage::UpdateShareList {
         shares,
         foreground_share: Some(foreground_share),
+        connected_agents: Default::default(),
     }
 }
 

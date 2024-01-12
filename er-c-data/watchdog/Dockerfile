@@ -11,7 +11,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 COPY ./python/PyInotify /PyInotify
 
-RUN --mount=type=cache,target=/root/.cache python3 -m pip install -e /PyInotify
+RUN --mount=type=cache,sharing=private,target=/root/.cache python3 -m pip install -e /PyInotify
 
 COPY ./python/permissions/watchdog.py /watchdog.py
 

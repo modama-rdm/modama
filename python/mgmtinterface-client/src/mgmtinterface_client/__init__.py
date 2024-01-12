@@ -6,7 +6,12 @@ from permissions_client import PermissionsClient, quote
 
 
 class MgmtClient(PermissionsClient):
-    def __init__(self, base_url: str,  username: Optional[str] = None, password: Optional[str] = None):
+    def __init__(
+        self,
+        base_url: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+    ):
         PermissionsClient.__init__(
             self,
             base_url=base_url,
@@ -18,7 +23,7 @@ class MgmtClient(PermissionsClient):
     def auth(self):
         return requests.auth.HTTPBasicAuth(self.username, self.password)
 
-    def create_share(self, project: str, dataset: str) -> Dict:
+    def create_share(self, project: str, dataset: str, resource: Optional[str] = None) -> Dict:
         """
         """
         resp = requests.post(
@@ -26,6 +31,7 @@ class MgmtClient(PermissionsClient):
             json={
                 'project': project,
                 'dataset': dataset,
+                'resource': resource,
             },
             auth=self.auth
         )

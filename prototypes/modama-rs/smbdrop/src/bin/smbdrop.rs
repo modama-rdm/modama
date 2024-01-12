@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::Parser;
+use log::info;
 use modama_common::logging::init_logging;
 use smbdrop::{
     events::start_event_server,
@@ -52,14 +53,16 @@ async fn main() {
     )
     .await;
     sm.start().await.expect("could not start share manager");
-    let state = sm.get_state().await.context("get initial state").unwrap();
+    let initial_state = sm.get_state().await.context("get initial state").unwrap();
+
+    info!("initial state: {initial_state:?}");
 
     let state_updates_tx = start_event_server(
         &args.ws_listen,
         &args.ca_cert,
         &args.chain,
         &args.privkey,
-        &state,
+        &initial_state,
     )
     .await
     .context("start event server")

@@ -12,3 +12,5 @@ MAIN_SMB_BASE = '\\\\er-c-data-smb.fz-juelich.de\\er-c-data'
 SMB_URL_BASE = 'smb://er-c-data-smb.fz-juelich.de/er-c-data'
 SAMPLEDB_BASE = "https://erc-samples.fz-juelich.de/"
 SESSION_COOKIE_NAME = "mgmtinterface_session"
+TOKEN_SERVICE_URL = "https://smbdrop:5053"
+CA_CERT_PATH = '/certs/ca/ca.cert.pem'

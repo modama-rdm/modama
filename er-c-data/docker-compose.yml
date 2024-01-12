@@ -152,8 +152,8 @@ services:
     hostname: smbdrop
     restart: always
     build:
-      context: ..
-      dockerfile: er-c-data/smbdrop/Dockerfile
+      context: ../prototypes/modama-rs/
+      dockerfile: Dockerfile-smbdrop
     image: iffregistry.fz-juelich.de/weber/data-management-system/smbdrop:latest
     # cap_add:
     #   - SYS_ADMIN

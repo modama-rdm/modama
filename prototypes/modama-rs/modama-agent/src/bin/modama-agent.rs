@@ -1,17 +1,34 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use anyhow::{Context, Result};
-use axum::{extract::State, routing::get, Json, Router};
+use anyhow::{Context, Result as AnyResult};
+use axum::{
+    extract::{Path, State},
+    http::{header, StatusCode},
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
+use axum_extra::{
+    headers::{authorization::Basic, Authorization},
+    typed_header::TypedHeaderRejection,
+    TypedHeader,
+};
+use axum_macros::debug_handler;
 use clap::Parser;
 use futures_util::{future::join_all, StreamExt};
 use log::{error, info, warn};
+use minijinja::{Environment, context};
 use modama_agent::{
-    cert_helpers::AgentId,
     config::{AgentConfig, AgentLinuxConfig},
     platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
     share::MountedShare,
 };
-use modama_common::messages::{CurrentForegroundShare, EventChannelMessage, Share};
+use modama_common::{
+    agent::AgentId,
+    messages::{CurrentForegroundShare, EventChannelMessage, Share},
+    mgmt_client::{MgmtClient, MgmtError},
+    tokens::TokenFetcher,
+};
 use modama_common::{
     cert_helpers::{get_cert_chain, get_private_key, get_root_cert_store},
     logging::init_logging,
@@ -83,6 +100,8 @@ struct AgentState {
     current_shares: ShareState<MountedShare>,
     desired_shares: ShareState<Share>,
 
+    connected_agents: Vec<AgentId>,
+
     /// Runtime configuration
     config: AgentConfig,
 }
@@ -94,6 +113,7 @@ impl AgentState {
             connection: Default::default(),
             current_shares: Default::default(),
             desired_shares: Default::default(),
+            connected_agents: Default::default(),
             config,
         }
     }
@@ -102,7 +122,7 @@ impl AgentState {
 async fn update_share_list(
     state: &mut AgentState,
     desired_shares: ShareState<Share>,
-) -> Result<()> {
+) -> AnyResult<()> {
     let new_fg_share: Option<Share> = desired_shares.foreground_share;
     let old_fg_share: Option<&Share> = state
         .current_shares
@@ -146,25 +166,24 @@ async fn update_share_list(
     Ok(())
 }
 
-async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> Result<()> {
+async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<()> {
     let event_msg: EventChannelMessage = serde_json::from_str(msg)
         .with_context(|| format!("Invalid message encountered: {}", msg))?;
-    match event_msg {
-        ref event @ EventChannelMessage::UpdateShareList { .. } => {
-            info!("Received EventChannelMessage::UpdateShareList: {event:?}");
-        }
-    }
+    info!("Received EventChannelMessage: {event_msg:?}");
 
     match event_msg {
         EventChannelMessage::UpdateShareList {
             shares,
             foreground_share,
+            connected_agents,
         } => {
             let desired_shares: ShareState<Share> = ShareState {
                 foreground_share,
                 shares: shares.into_iter().map(Into::into).collect(),
             };
             state.lock().await.desired_shares = desired_shares.clone();
+            state.lock().await.connected_agents = connected_agents;
+
             update_share_list(&mut *state.lock().await, desired_shares).await?;
             Ok(())
         }
@@ -225,16 +244,35 @@ async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientConfi
     }
 }
 
+fn create_env() -> Environment<'static> {
+    let mut env = Environment::new();
+
+    env.set_loader(|name| {
+        match name {
+            "start_index_step3.html" => {
+                Ok(Some("<html><form action='.' method='post'><input type='submit'></form></html>".to_owned()))
+            },
+            _ => Ok(None)
+        }
+    });
+
+    env
+}
+
 /// Wrapper around the AgentState for the local API server
 #[derive(Clone)]
 struct ApiState {
     pub state: Arc<Mutex<AgentState>>,
+    pub token_fetcher: Arc<TokenFetcher>,
+    pub jinja_env: Environment<'static>,
 }
 
 impl ApiState {
-    fn new(state: &Arc<Mutex<AgentState>>) -> Self {
+    fn new(state: &Arc<Mutex<AgentState>>, token_fetcher: &Arc<TokenFetcher>) -> Self {
         Self {
             state: Arc::clone(state),
+            token_fetcher: Arc::clone(token_fetcher),
+            jinja_env: create_env(),
         }
     }
 }
@@ -261,10 +299,247 @@ async fn handler_shares_foreground(
     )
 }
 
-async fn serve_local_web_api(state: Arc<Mutex<AgentState>>, listen_addr: String) {
+#[debug_handler]
+async fn serve_index_page(
+    State(agent_state): State<ApiState>,
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+) -> impl IntoResponse {
+    let mut result = String::new();
+
+    let auth = match auth {
+        Ok(TypedHeader(auth)) => auth,
+        Err(e) => {
+            error!("error extracting authorization header: {e}");
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response();
+        }
+    };
+
+    let state = agent_state.state.lock().await;
+
+    let matching_agents = state
+        .connected_agents
+        .iter()
+        .filter(|a| a.resource == state.config.resource_name);
+
+    result += "Connected agents at this resource: ";
+    for a in matching_agents {
+        result += &(a.as_uri().to_string() + " ");
+    }
+    result += "\n";
+    result += &format!(
+        "This agent: {} at {}",
+        &state.config.agent_name, &state.config.resource_name
+    );
+
+    result += "\n";
+
+    let c = MgmtClient::new("http://localhost:5001", auth.username(), auth.password()).unwrap();
+
+    let projects = match c.list_projects().await {
+        Ok(p) => p,
+        Err(MgmtError::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("error listing projects: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR).into_response();
+        }
+    };
+
+    result += "Projects:\n";
+
+    for p in projects
+        .projects
+        .iter()
+        .filter(|p| p.members.contains(&auth.username().to_owned()) || p.owner == auth.username())
+    {
+        result += &p.name;
+        result += "\n";
+    }
+
+    result.into_response()
+}
+
+async fn start_ingest_step1(
+    Path(project_name): Path<String>,
+    State(agent_state): State<ApiState>,
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+) -> impl IntoResponse {
+    let auth = match auth {
+        Ok(TypedHeader(auth)) => auth,
+        Err(e) => {
+            error!("error extracting authorization header: {e}");
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response();
+        }
+    };
+
+    let c = MgmtClient::new("http://localhost:5001", auth.username(), auth.password()).unwrap();
+
+    let details = match c.project_details(&project_name).await {
+        Ok(p) => p,
+        Err(MgmtError::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("error getting project details for {project_name}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR).into_response();
+        }
+    };
+
+    let mut resp = String::new();
+
+    for d in &details.datasets {
+        resp += &d.name;
+        resp += "\n";
+    }
+
+    resp.into_response()
+}
+
+async fn start_ingest_step2(
+    Path((project_name, session_name)): Path<(String, String)>,
+    State(agent_state): State<ApiState>,
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+) -> impl IntoResponse {
+    let auth = match auth {
+        Ok(TypedHeader(auth)) => auth,
+        Err(e) => {
+            error!("error extracting authorization header: {e}");
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response();
+        }
+    };
+
+    let c = MgmtClient::new("http://localhost:5001", auth.username(), auth.password()).unwrap();
+
+    let details = match c.project_details(&project_name).await {
+        Ok(p) => p,
+        Err(MgmtError::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("error getting project details for {project_name}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR).into_response();
+        }
+    };
+
+    let mut resp = String::new();
+
+    if !details.datasets.iter().any(|d| d.name == session_name) {
+        return (StatusCode::NOT_FOUND).into_response();
+    }
+
+    resp += &format!(
+        "Starting ingest for resource {} and session {}\n",
+        agent_state.state.lock().await.config.resource_name, session_name,
+    );
+
+
+    let tpl = agent_state.jinja_env.get_template("start_index_step3.html").unwrap();
+    let res_name = &agent_state.state.lock().await.config.resource_name;
+    (
+        [(header::CONTENT_TYPE, "text/html")],
+        tpl.render(context! { resource => res_name, session => session_name }).unwrap(),
+    ).into_response()
+}
+
+async fn start_ingest_step3(
+    Path((project_name, session_name)): Path<(String, String)>,
+    State(agent_state): State<ApiState>,
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+) -> impl IntoResponse {
+    let auth = match auth {
+        Ok(TypedHeader(auth)) => auth,
+        Err(e) => {
+            error!("error extracting authorization header: {e}");
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response();
+        }
+    };
+
+    let c = MgmtClient::new("http://localhost:5001", auth.username(), auth.password()).unwrap();
+
+    let details = match c.project_details(&project_name).await {
+        Ok(p) => p,
+        Err(MgmtError::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("error getting project details for {project_name}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR).into_response();
+        }
+    };
+
+    let mut resp = String::new();
+
+    if !details.datasets.iter().any(|d| d.name == session_name) {
+        return (StatusCode::NOT_FOUND).into_response();
+    }
+
+    let agent_token = agent_state.token_fetcher.fetch_token().await.unwrap();
+
+    c.create_share(
+        &project_name,
+        &session_name,
+        &agent_state.state.lock().await.config.resource_name,
+        &agent_token,
+    )
+    .await
+    .unwrap();
+
+    resp += "share created!";
+
+    resp.into_response()
+}
+
+async fn serve_local_web_api(
+    state: Arc<Mutex<AgentState>>,
+    listen_addr: &str,
+    token_fetcher: TokenFetcher,
+) {
     let app = Router::new()
         .route("/shares/foreground/", get(handler_shares_foreground))
-        .with_state(ApiState::new(&state));
+        .route("/", get(serve_index_page))
+        .route("/start-ingest/:project_name/", get(start_ingest_step1))
+        .route(
+            "/start-ingest/:project_name/:session_name/",
+            get(start_ingest_step2),
+        )
+        .route(
+            "/start-ingest/:project_name/:session_name/",
+            post(start_ingest_step3),
+        )
+        .with_state(ApiState::new(&state, &Arc::new(token_fetcher)));
     let listener = tokio::net::TcpListener::bind(listen_addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -283,6 +558,9 @@ struct Args {
     #[arg(long, default_value = "moellenstedt.iff.kfa-juelich.de")]
     smb_hostname: String,
 
+    #[arg(long, default_value = "445")]
+    smb_port: u32,
+
     #[arg(long, default_value = "ER-C-INGEST")]
     smb_domain: String,
 
@@ -296,7 +574,7 @@ struct Args {
     key: PathBuf,
 }
 
-fn get_tls_config(args: &Args) -> Result<(Arc<ClientConfig>, AgentId)> {
+fn get_tls_config(args: &Args) -> AnyResult<(Arc<ClientConfig>, AgentId)> {
     let root_store = get_root_cert_store(&args.ca_cert)?;
     let client_chain = get_cert_chain(&args.chain)?;
     let agent_id = AgentId::from_cert(
@@ -330,6 +608,7 @@ async fn main() {
         smb_hostname: args.smb_hostname,
         smb_domain: args.smb_domain,
         smb_ip: OnceCell::new(),
+        smb_port: args.smb_port,
         agent_name: agent_id.agent.to_owned(),
         resource_name: agent_id.resource.to_owned(),
         linux_config: Some(AgentLinuxConfig::default()),
@@ -342,10 +621,18 @@ async fn main() {
 
     let state: Arc<Mutex<AgentState>> = Arc::new(Mutex::new(AgentState::new(config)));
 
-    tokio::spawn(serve_local_web_api(
-        Arc::clone(&state),
-        args.listen_local_api.clone(),
-    ));
+    let sign_url = Url::parse(&args.token_service)
+        .unwrap_or_else(|e| panic!("invalid sign url `{}`: {e}", &args.token_service))
+        .join("/sign/")
+        .unwrap_or_else(|e| panic!("invalid sign url `{}`: {e}", &args.token_service));
+
+    let token_fetcher =
+        TokenFetcher::new(sign_url.as_str(), &args.key, &args.chain, &args.ca_cert).unwrap();
+
+    let state_for_api = Arc::clone(&state);
+    tokio::spawn(async move {
+        serve_local_web_api(state_for_api, &args.listen_local_api, token_fetcher).await;
+    });
 
     message_loop(Arc::clone(&state), Arc::clone(&tls_config)).await;
 }

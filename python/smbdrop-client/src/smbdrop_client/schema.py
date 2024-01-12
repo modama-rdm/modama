@@ -1,4 +1,4 @@
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict, Optional
 
 
 CREATE_SHARE_REQUEST_SCHEMA = {
@@ -21,6 +21,10 @@ CREATE_SHARE_REQUEST_SCHEMA = {
             "description": "The numerical Unix GID of the primary group "
                            "for the user that we should impersonate",
         },
+        "resource": {
+            "type": "string",
+            "description": "The name of the resource this share belongs to",
+        }
     },
     "required": ["dest_path"],
 }
@@ -30,3 +34,4 @@ class CreateShareRequest(TypedDict):
     dest_path: str
     uid: int
     gid: int
+    resource: Optional[str]

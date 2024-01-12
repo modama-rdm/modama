@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use log::debug;
+use serde::{Serialize, Deserialize};
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use url::Url;
 use x509_parser::{
@@ -22,26 +23,31 @@ pub enum ClientCertError {
     X509Error(#[from] X509Error),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AgentId {
     pub resource: String,
     pub agent: String,
-    pub san_encoded: Url,
+    pub san_encoded: String,
 }
 
 impl AgentId {
     pub fn from_uri(uri: &str) -> Result<Self, ClientCertError> {
-        let uri = Url::from_str(uri).map_err(|_e| ClientCertError::InvalidURI(uri.to_owned()))?;
+        let uri_parsed = Url::from_str(uri).map_err(|_e| ClientCertError::InvalidURI(uri.to_owned()))?;
 
-        if uri.scheme() != "x-modama-agent" {
-            return Err(ClientCertError::InvalidURI(uri.to_string()));
+        if uri_parsed.scheme() != "x-modama-agent" {
+            return Err(ClientCertError::InvalidURI(uri_parsed.to_string()));
         }
 
         Ok(Self {
-            resource: uri.host_str().unwrap().to_string(),
-            agent: uri.fragment().unwrap().to_string(),
-            san_encoded: uri,
+            resource: uri_parsed.host_str().unwrap().to_string(),
+            agent: uri_parsed.fragment().unwrap().to_string(),
+            san_encoded: uri.to_owned(),
         })
+    }
+
+    pub fn as_uri(&self) -> Url {
+        // won't panic, as `san_encoded` is parsed into a Url in the constructors
+        Url::from_str(&self.san_encoded).unwrap()
     }
 
     pub fn from_cert(cert: &CertificateDer) -> Result<Self, ClientCertError> {
