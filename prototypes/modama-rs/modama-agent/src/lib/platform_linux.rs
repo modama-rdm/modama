@@ -151,7 +151,13 @@ fn get_mounts_in_prefix(config: &AgentConfig) -> Result<HashSet<PathBuf>, MountL
     let mounts = Process::myself()?.mountinfo()?;
     Ok(mounts
         .into_iter()
-        .flat_map(|m| m.mount_point.canonicalize().ok())
+        .map(|m| match m.mount_point.canonicalize() {
+            Ok(mp_canonical) => mp_canonical,
+            Err(e) => {
+                warn!("cannot canonicalize mount point {:?}: {e}", m.mount_point);
+                m.mount_point
+            },
+        })
         .filter(|m| m.starts_with(config.get_linux_config().mount_point_prefix))
         .collect())
 }
@@ -206,6 +212,15 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
             return;
         }
     };
+
+
+    debug!(
+        "mounts in prefix: {:?}",
+        mounts_in_prefix
+            .iter()
+            .map(|s| s.to_string_lossy().clone())
+            .collect::<Vec<_>>()
+    );
 
     let should_be_mounted: HashSet<PathBuf> = shares.iter().map(|s| s.mount_path.clone()).collect();
     join_all(

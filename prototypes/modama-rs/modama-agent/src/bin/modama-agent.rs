@@ -16,8 +16,8 @@ use axum_extra::{
 use axum_macros::debug_handler;
 use clap::Parser;
 use futures_util::{future::join_all, StreamExt};
-use log::{error, info, warn};
-use minijinja::{Environment, context};
+use log::{error, info, warn, debug};
+use minijinja::{context, Environment};
 use modama_agent::{
     config::{AgentConfig, AgentLinuxConfig},
     platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
@@ -160,6 +160,16 @@ async fn update_share_list(
         .collect(),
     );
 
+    debug!(
+        "desired mounts: {:?}",
+        &state
+            .current_shares
+            .shares
+            .iter()
+            .map(|s| s.mount_path.to_string_lossy().clone())
+            .collect::<Vec<_>>()
+    );
+
     umount_old_shares(&state.config, &state.current_shares.shares).await;
     cleanup_mount_points(&state.config);
 
@@ -247,13 +257,11 @@ async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientConfi
 fn create_env() -> Environment<'static> {
     let mut env = Environment::new();
 
-    env.set_loader(|name| {
-        match name {
-            "start_index_step3.html" => {
-                Ok(Some("<html><form action='.' method='post'><input type='submit'></form></html>".to_owned()))
-            },
-            _ => Ok(None)
-        }
+    env.set_loader(|name| match name {
+        "start_index_step3.html" => Ok(Some(
+            "<html><form action='.' method='post'><input type='submit'></form></html>".to_owned(),
+        )),
+        _ => Ok(None),
     });
 
     env
@@ -454,16 +462,21 @@ async fn start_ingest_step2(
 
     resp += &format!(
         "Starting ingest for resource {} and session {}\n",
-        agent_state.state.lock().await.config.resource_name, session_name,
+        agent_state.state.lock().await.config.resource_name,
+        session_name,
     );
 
-
-    let tpl = agent_state.jinja_env.get_template("start_index_step3.html").unwrap();
+    let tpl = agent_state
+        .jinja_env
+        .get_template("start_index_step3.html")
+        .unwrap();
     let res_name = &agent_state.state.lock().await.config.resource_name;
     (
         [(header::CONTENT_TYPE, "text/html")],
-        tpl.render(context! { resource => res_name, session => session_name }).unwrap(),
-    ).into_response()
+        tpl.render(context! { resource => res_name, session => session_name })
+            .unwrap(),
+    )
+        .into_response()
 }
 
 async fn start_ingest_step3(
