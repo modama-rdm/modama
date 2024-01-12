@@ -9,8 +9,9 @@ use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
 use modama_common::{
+    agent::AgentId,
     logging::init_logging,
-    messages::{EventChannelMessage, EventChannelRequests, Share}, agent::AgentId,
+    messages::{EventChannelMessage, EventChannelRequests, Share},
 };
 use rustls_pemfile::{certs, private_key};
 use serde::Deserialize;

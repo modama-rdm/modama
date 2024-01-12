@@ -2,8 +2,9 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use axum::{
     extract::{self, State},
+    response::IntoResponse,
     routing::{delete, get, post},
-    Json, Router, response::IntoResponse,
+    Json, Router,
 };
 use hyper::StatusCode;
 use log::info;
@@ -34,9 +35,7 @@ impl ApiState {
     async fn send_state_update(&self) {
         let new_state = self.share_manager.get_state().await.unwrap();
         info!("sending state update: {:?}", &new_state);
-        self.state_updates_tx
-            .send(new_state)
-            .unwrap();
+        self.state_updates_tx.send(new_state).unwrap();
     }
 }
 
@@ -89,7 +88,7 @@ async fn delete_share(
                 StatusCode::OK,
                 Json(DeleteResponse {
                     status: "ok".to_owned(),
-                })
+                }),
             )
         }
     }

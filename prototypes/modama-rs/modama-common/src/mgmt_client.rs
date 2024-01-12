@@ -87,9 +87,7 @@ impl MgmtClient {
             return Err(MgmtError::Unauthorized);
         }
 
-        Ok(resp
-            .json()
-            .await?)
+        Ok(resp.json().await?)
     }
 
     pub async fn project_details(
@@ -108,9 +106,7 @@ impl MgmtClient {
             return Err(MgmtError::Unauthorized);
         }
 
-        Ok(resp
-            .json()
-            .await?)
+        Ok(resp.json().await?)
     }
 
     pub async fn create_share(
@@ -140,8 +136,6 @@ impl MgmtClient {
             return Err(MgmtError::Unauthorized);
         }
 
-        Ok(resp
-            .json()
-            .await?)
+        Ok(resp.json().await?)
     }
 }

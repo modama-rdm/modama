@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use log::debug;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use url::Url;
 use x509_parser::{
@@ -32,7 +32,8 @@ pub struct AgentId {
 
 impl AgentId {
     pub fn from_uri(uri: &str) -> Result<Self, ClientCertError> {
-        let uri_parsed = Url::from_str(uri).map_err(|_e| ClientCertError::InvalidURI(uri.to_owned()))?;
+        let uri_parsed =
+            Url::from_str(uri).map_err(|_e| ClientCertError::InvalidURI(uri.to_owned()))?;
 
         if uri_parsed.scheme() != "x-modama-agent" {
             return Err(ClientCertError::InvalidURI(uri_parsed.to_string()));

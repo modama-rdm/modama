@@ -619,7 +619,7 @@ impl ShareManager {
         let userdel_res = Command::new("userdel")
             .args([
                 "-f", // force, even if there's a process from the user still running
-                &username
+                &username,
             ])
             .stdin(Stdio::null())
             .output()

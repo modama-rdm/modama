@@ -156,7 +156,7 @@ fn get_mounts_in_prefix(config: &AgentConfig) -> Result<HashSet<PathBuf>, MountL
             Err(e) => {
                 warn!("cannot canonicalize mount point {:?}: {e}", m.mount_point);
                 m.mount_point
-            },
+            }
         })
         .filter(|m| m.starts_with(config.get_linux_config().mount_point_prefix))
         .collect())
@@ -212,7 +212,6 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
             return;
         }
     };
-
 
     debug!(
         "mounts in prefix: {:?}",

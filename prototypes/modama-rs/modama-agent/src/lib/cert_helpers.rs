@@ -1,9 +1,5 @@
-
-
 use thiserror::Error;
-use x509_parser::{
-    error::X509Error, nom::Err,
-};
+use x509_parser::{error::X509Error, nom::Err};
 
 #[derive(Error, Debug)]
 pub enum ClientCertError {

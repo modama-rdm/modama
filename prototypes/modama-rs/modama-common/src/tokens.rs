@@ -78,12 +78,11 @@ impl TokenFetcher {
             .send()
             .await
             .unwrap();
-        if resp.status()  == StatusCode::OK {
+        if resp.status() == StatusCode::OK {
             Ok(resp.text().await?)
         } else {
             Err(TokenError::ResponseCodeError(resp.status()))
         }
-    
     }
 }
 

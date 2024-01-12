@@ -16,7 +16,7 @@ use axum_extra::{
 use axum_macros::debug_handler;
 use clap::Parser;
 use futures_util::{future::join_all, StreamExt};
-use log::{error, info, warn, debug};
+use log::{debug, error, info, warn};
 use minijinja::{context, Environment};
 use modama_agent::{
     config::{AgentConfig, AgentLinuxConfig},
