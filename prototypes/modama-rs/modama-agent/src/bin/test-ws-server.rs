@@ -31,7 +31,7 @@ async fn accept_agent_connection(peer: SocketAddr, stream: TcpStream, acceptor: 
     let (_, server_connection) = stream.get_ref();
 
     let peer_certs = server_connection.peer_certificates().unwrap();
-    let peer_cert = peer_certs.get(0).unwrap();
+    let peer_cert = peer_certs.first().unwrap();
 
     let agent_id = AgentId::from_cert(peer_cert).unwrap();
 

@@ -185,7 +185,7 @@ impl Ca {
         // server system itself and only generate the final certificate from a
         // CSR
         let key_pair = KeyPair::generate(&PKCS_ED25519).context("generate server key pair")?;
-        let first_name = server_names.get(0).context("get first server name")?;
+        let first_name = server_names.first().context("get first server name")?;
         params.key_pair = Some(key_pair);
         params.distinguished_name = DistinguishedName::new();
         params
