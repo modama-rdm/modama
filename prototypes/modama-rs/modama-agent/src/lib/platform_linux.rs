@@ -94,7 +94,7 @@ pub async fn ensure_mounted(
     })?)
 }
 
-pub fn is_mounted(share: &Share, config: &AgentConfig) -> Result<bool, MountListError> {
+fn is_mounted(share: &Share, config: &AgentConfig) -> Result<bool, MountListError> {
     let mounts = Process::myself()?.mountinfo()?;
     let target = target_for_share(share, config);
 
@@ -107,7 +107,7 @@ pub fn is_mounted(share: &Share, config: &AgentConfig) -> Result<bool, MountList
     }))
 }
 
-pub fn target_for_share(share: &Share, config: &AgentConfig) -> PathBuf {
+fn target_for_share(share: &Share, config: &AgentConfig) -> PathBuf {
     config
         .get_linux_config()
         .mount_point_prefix
@@ -131,7 +131,7 @@ pub async fn ensure_umounted(
 /// If the one of the paths doesn't canonicalize, either the path doesn't exist
 /// or is straight up invalid (both cases of TOCTOU?) -> log error and fall back
 /// to strict equality.
-pub fn mount_points_equal(m1: &Path, m2: &Path) -> bool {
+fn mount_points_equal(m1: &Path, m2: &Path) -> bool {
     (|| {
         let p1 = m1.canonicalize()?;
         let p2 = m2.canonicalize()?;
