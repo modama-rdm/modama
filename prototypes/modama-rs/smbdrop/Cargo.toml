@@ -22,10 +22,7 @@ anyhow = "1.0.76"
 axum = { version = "0.7.2", features = ["json"] }
 clap = { version = "4.4.11", features = ["derive"] } 
 env_logger = "0.10.1"
-etc-passwd = "0.2.0"
 log = "0.4.20"
-nix = { version = "0.27.1", features = [ "mount", "ioctl", "signal"] }
-procfs = "0.16.0"
 rand = "0.8.5"
 regex = "1.10.2"
 rustls-pemfile = "2.0.0"
@@ -47,3 +44,8 @@ hyper = "1.1.0"
 tower-service = "0.3.2"
 reqwest = { version = "0.11.23", features = ["rustls-tls", "json"], default_features = false }
 jsonwebtoken = "9.2.0"
+
+[target.'cfg(unix)'.dependencies]
+procfs = "0.16.0"
+etc-passwd = "0.2.0"
+nix = { version = "0.27.1", features = [ "mount", "ioctl", "signal"] }

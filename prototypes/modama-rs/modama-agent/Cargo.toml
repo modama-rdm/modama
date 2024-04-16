@@ -12,6 +12,10 @@ name = "test-ws-server"
 path = "src/bin/test-ws-server.rs"
 
 [[bin]]
+name = "testnetuse"
+path = "src/bin/testnetuse.rs"
+
+[[bin]]
 name = "ca"
 path = "src/bin/ca.rs"
 
@@ -47,6 +51,8 @@ axum-extra = { version = "0.9.1", features = ["typed-header"] }
 minijinja = { version = "1.0.11", features = ["loader"] }
 
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.56.0", features = ["Win32_NetworkManagement_WNet", "Win32_NetworkManagement_NetManagement"] }
+widestring = { version = "1.1.0" }
 
 [target.'cfg(unix)'.dependencies]
 async-dns = "0.1.0"

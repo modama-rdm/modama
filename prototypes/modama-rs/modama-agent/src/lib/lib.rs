@@ -8,3 +8,4 @@ pub mod platform;
 pub mod local_http_service;
 pub mod agent_state;
 pub mod message_loop;
+pub mod platform_common;
