@@ -1,7 +1,7 @@
 use log::{debug, info};
 use modama_common::messages::Share;
 use widestring::U16CString;
-use windows::{core::{s, w, PSTR, PWSTR}, Win32::NetworkManagement::{NetManagement::{USE_DISKDEV, USE_INFO_2, USE_OK}, WNet::{CONNECT_TEMPORARY, NETRESOURCEA, NETRESOURCEW, RESOURCETYPE_DISK}}};
+use windows::{core::{s, w, HRESULT, PSTR, PWSTR}, Win32::NetworkManagement::{NetManagement::{USE_DISKDEV, USE_INFO_2, USE_OK}, WNet::{CONNECT_TEMPORARY, NETRESOURCEA, NETRESOURCEW, RESOURCETYPE_DISK}}};
 
 use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
 
@@ -44,14 +44,16 @@ pub struct NetUseParams {
     /// Windows Domain
     pub domain: U16CString,
 
-    /// Username
+    /// Username without the domain prefix
     pub username: U16CString,
 
     /// Password
     pub password: U16CString,
 }
 
-pub fn perform_net_use(mut params: NetUseParams) -> Result<(), u32> {
+/// At least on Windows Server 2019, drives mapped don't immediately appear in the explorer,
+/// it has to be restarted before the action takes effect.
+pub fn perform_net_use_variant(mut params: NetUseParams) -> Result<(), u32> {
     let buf = USE_INFO_2 {
         ui2_local: PWSTR::from_raw(params.local_name.as_mut_ptr()),
         ui2_remote: PWSTR::from_raw(params.remote_name.as_mut_ptr()),
@@ -74,7 +76,7 @@ pub fn perform_net_use(mut params: NetUseParams) -> Result<(), u32> {
     Ok(())
 }
 
-pub fn perform_net_use_alt(mut params: NetUseParams) -> Result<(), String> {
+pub fn perform_net_use(mut params: NetUseParams) -> Result<(), HRESULT> {
     let resource = NETRESOURCEW {
         dwType: RESOURCETYPE_DISK,
         lpLocalName: PWSTR::from_raw(params.local_name.as_mut_ptr()),
@@ -93,11 +95,9 @@ pub fn perform_net_use_alt(mut params: NetUseParams) -> Result<(), String> {
         )
     };
 
-    println!("return value: {result:?}: {}", result.to_hresult().message());
-
     if result.is_ok() {
         Ok(())
     } else {
-        Err(result.to_hresult().message())
+        Err(result.to_hresult())
     }
 }
