@@ -19,6 +19,9 @@ pub enum EnsureMountedError {
     #[error("failed to execute mount: {0}")]
     MountFailed(String),
 
+    #[error("invalid credentials: {0}")]
+    CredentialsError(String),
+
     #[error("io error: {0}")]
     IOError(#[from] std::io::Error),
 }
