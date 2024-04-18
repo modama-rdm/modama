@@ -44,6 +44,7 @@ pub async fn ensure_mounted(
 
     // already mounted? okay!
     if let Some(md) = mapped_remote_shares.get(&resource_string) {
+        info!("share {} already mounted at {}", &share.share_name, &md.drive);
         return Ok(MountedShare {
             share: share.clone(),
             mount_path: PathBuf::from(&md.drive),
@@ -100,12 +101,16 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
         .collect();
     let should_be_mapped: HashSet<PathBuf> = shares.iter().map(|s| s.mount_path.clone()).collect();
 
+    info!("should_be_mapped: {:?}", should_be_mapped);
+
     join_all(
         our_drives
             .clone()
             .into_iter()
-            .filter(|m| should_be_mapped.contains(&PathBuf::from(&m.drive)))
-            .map(|m| async move { internal::ensure_umounted(&m.drive, &config).await }),
+            .filter(|m| !should_be_mapped.contains(&PathBuf::from(&m.drive)))
+            .map(|m| async move {
+                internal::ensure_umounted(&m.drive, &config).await
+            }),
     )
     .await
     .into_iter()
@@ -119,7 +124,7 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
 pub mod internal {
     use std::{collections::HashSet, ffi::c_void, mem::transmute};
 
-    use log::{debug, error};
+    use log::{debug, error, info};
     use thiserror::Error;
     use widestring::U16CString;
     use windows::{
@@ -166,6 +171,7 @@ pub mod internal {
         drive: &str,
         _config: &AgentConfig,
     ) -> Result<(), EnsureMountedError> {
+        info!("umounting drive {drive}");
         if net_use_delete(drive, false).is_err() {
             Err(EnsureMountedError::InUseError)
         } else {

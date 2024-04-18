@@ -1,35 +1,38 @@
-use log::info;
-use modama_agent::platform::internal::{
-    find_free_drive, get_mapped_drives, net_use_delete, perform_net_use, NetUseParams,
+use modama_agent::{
+    config::AgentConfig,
+    platform::{ensure_mounted, umount_old_shares},
 };
-use modama_common::logging::init_logging;
-use widestring::U16CString;
+use modama_common::{logging::init_logging, messages::Share};
+use tokio::sync::OnceCell;
+use url::Url;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     init_logging();
 
-    let drive = find_free_drive().unwrap();
-    info!("mounting at {drive}");
-
-    let net_use = NetUseParams {
-        remote_name: U16CString::from_str_truncate(
-            "\\\\moellenstedt.iff.kfa-juelich.de\\share-c6cda885-8e95-4919-a2b8-6e9e3909aa64",
-        ),
-        local_name: U16CString::from_str_truncate(&drive),
-        domain: U16CString::from_str_truncate("ER-C-INGEST"),
-        username: U16CString::from_str_truncate("sharef76b764d16a043ea805918305ce"),
-        password: U16CString::from_str_truncate("kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U"),
+    let share = Share {
+        resource: Some("holo".to_owned()),
+        share_id: "U-U-I-D".to_owned(),
+        share_name: "share-c6cda885-8e95-4919-a2b8-6e9e3909aa64".to_owned(),
+        dest_path: "/adhoc/holo-ingest-test/2024-04-11-ingest-test/".to_owned(),
+        created_timestamp: 0,
+        username: "sharef76b764d16a043ea805918305ce".to_owned(),
+        password: "kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U".to_owned(),
+        uid: 1000,
+        gid: 1000,
     };
-
-    get_mapped_drives().unwrap();
-
-    if let Err(e) = perform_net_use(net_use) {
-        panic!("error `net use`ing: {}", e.message());
+    let config = AgentConfig {
+        api_url: Url::parse("wss://localhost:5052").unwrap(),
+        smb_hostname: "moellenstedt.iff.kfa-juelich.de".to_owned(),
+        smb_ip: OnceCell::new(),
+        smb_port: 445,
+        smb_domain: "ER-C-INGEST".to_owned(),
+        agent_name: "dld".to_owned(),
+        resource_name: "holo".to_owned(),
+        linux_config: None,
+    };
+    if let Err(e) = ensure_mounted(&share, &config).await {
+        panic!("ensure_mounted: {e}");
     }
-
-    info!("{:#?}", get_mapped_drives().unwrap());
-
-    net_use_delete(&drive, false).unwrap();
-
-    info!("{:#?}", get_mapped_drives().unwrap());
+    umount_old_shares(&config, &[]).await;
 }
