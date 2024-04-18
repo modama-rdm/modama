@@ -19,6 +19,9 @@ pub enum EnsureMountedError {
     #[error("failed to execute mount: {0}")]
     MountFailed(String),
 
+    #[error("ingest share is in use, please re-try umount")]
+    InUseError,
+
     #[error("invalid credentials: {0}")]
     CredentialsError(String),
 

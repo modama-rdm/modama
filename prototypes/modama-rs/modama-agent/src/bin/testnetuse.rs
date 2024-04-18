@@ -1,19 +1,24 @@
-use modama_agent::platform::{find_free_drive, get_mapped_drives, perform_net_use, NetUseParams};
+use log::info;
+use modama_agent::platform::internal::{
+    find_free_drive, get_mapped_drives, net_use_delete, perform_net_use, NetUseParams,
+};
+use modama_common::logging::init_logging;
 use widestring::U16CString;
 
 fn main() {
+    init_logging();
+
     let drive = find_free_drive().unwrap();
-    eprintln!("mounting at {drive}");
+    info!("mounting at {drive}");
 
     let net_use = NetUseParams {
-        remote_name: U16CString::from_str(
+        remote_name: U16CString::from_str_truncate(
             "\\\\moellenstedt.iff.kfa-juelich.de\\share-c6cda885-8e95-4919-a2b8-6e9e3909aa64",
-        )
-        .unwrap(),
-        local_name: U16CString::from_str(&drive).unwrap(),
-        domain: U16CString::from_str("ER-C-INGEST").unwrap(),
-        username: U16CString::from_str("sharef76b764d16a043ea805918305ce").unwrap(),
-        password: U16CString::from_str("kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U").unwrap(),
+        ),
+        local_name: U16CString::from_str_truncate(&drive),
+        domain: U16CString::from_str_truncate("ER-C-INGEST"),
+        username: U16CString::from_str_truncate("sharef76b764d16a043ea805918305ce"),
+        password: U16CString::from_str_truncate("kubeFWCBMvw1AVTADZsM4wEXxECwBxgAAo8_9cAZ_5U"),
     };
 
     get_mapped_drives().unwrap();
@@ -22,5 +27,9 @@ fn main() {
         panic!("error `net use`ing: {}", e.message());
     }
 
-    get_mapped_drives().unwrap();
+    info!("{:#?}", get_mapped_drives().unwrap());
+
+    net_use_delete(&drive, false).unwrap();
+
+    info!("{:#?}", get_mapped_drives().unwrap());
 }

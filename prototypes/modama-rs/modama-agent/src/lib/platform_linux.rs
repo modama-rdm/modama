@@ -93,7 +93,7 @@ fn target_for_share(share: &Share, config: &AgentConfig) -> PathBuf {
         .join(&share.share_name)
 }
 
-pub async fn ensure_umounted(
+async fn ensure_umounted(
     mount_point: &Path,
     _config: &AgentConfig,
 ) -> Result<(), EnsureMountedError> {
