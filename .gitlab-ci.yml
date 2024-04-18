@@ -27,6 +27,13 @@ unit-tests:
     - python3 -m pip install -e ./python/mgmtinterface
     - cd python/mgmtinterface/ && pytest tests
 
+rust-tests:
+  stage: test
+  image: rust:1-slim-buster
+  script:
+    - apt-get -y update && apt-get -y install ldd
+    - cd prototypes/modama-rs/ && cargo check
+
 container-image-build:
   stage: build
   image:
