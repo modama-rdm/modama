@@ -1,10 +1,10 @@
 use std::{
-    fs::{create_dir_all, File},
+    fs::{create_dir_all, File, OpenOptions},
     io::{Read, Write},
-    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
-
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use modama_common::logging::init_logging;
@@ -32,6 +32,17 @@ struct Cli {
 }
 
 const CERT_PATH: &str = "./certs/";
+
+trait NoopMode {
+    fn mode(&mut self, mode: u32) -> &mut OpenOptions;
+}
+
+#[cfg(target_os = "windows")]
+impl NoopMode for OpenOptions {
+    fn mode(&mut self, _mode: u32) -> &mut OpenOptions {
+        self
+    }
+}
 
 struct Ca {
     path_prefix: PathBuf,
