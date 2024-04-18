@@ -4,14 +4,13 @@ use std::{
 };
 
 use futures_util::future::join_all;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use modama_common::messages::Share;
 use widestring::U16CString;
 
 use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
 
 // TODO:
-// - proper error handling (get rid of all `unwrap`s)
 // - double-check the unsafe blocks (miri?)
 // - get rid of `transmute`, if possible!
 // - check alignment requirements of the allocation for the enumeration of mapped drives
@@ -63,7 +62,8 @@ pub async fn ensure_mounted(
         ("", share.username.as_str())
     };
 
-    let drive = internal::find_free_drive().unwrap();
+    let drive =
+        internal::find_free_drive().map_err(|e| EnsureMountedError::MountFailed(e.to_string()))?;
 
     info!("mapping {resource_string} at {drive}");
 
@@ -86,7 +86,13 @@ pub async fn ensure_mounted(
 
 /// Umount all shares that are no longer supposed to be mounted
 pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
-    let all_drives = internal::get_mapped_drives().unwrap();
+    let all_drives = match internal::get_mapped_drives() {
+        Ok(drives) => drives,
+        Err(e) => {
+            error!("failed to get mapped drives: {e}");
+            return;
+        }
+    };
     let our_prefix = format!("\\\\{}", &config.smb_hostname);
     let our_drives: Vec<_> = all_drives
         .iter()
@@ -114,6 +120,7 @@ pub mod internal {
     use std::{collections::HashSet, ffi::c_void, mem::transmute};
 
     use log::{debug, error};
+    use thiserror::Error;
     use widestring::U16CString;
     use windows::{
         core::{HRESULT, PCWSTR, PWSTR},
@@ -132,18 +139,27 @@ pub mod internal {
 
     use crate::{config::AgentConfig, platform_common::EnsureMountedError};
 
-    /// Pick a free drive, returns for example "Z:". Returns `None` if there is no
-    /// free drive.
-    pub fn find_free_drive() -> Option<String> {
-        let drives = get_mapped_drives().unwrap();
+    #[derive(Error, Debug)]
+    pub enum FreeDriveError {
+        #[error("no free drive letter available")]
+        NoFreeDrive,
+
+        #[error("could not get mapped drives: {0}")]
+        OSError(String),
+    }
+
+    /// Pick a free drive, returns for example "Z:". Returns
+    /// `FreeDriveError::NoFreeDrive` if there is no free drive available
+    pub fn find_free_drive() -> Result<String, FreeDriveError> {
+        let drives = get_mapped_drives().map_err(|e| FreeDriveError::OSError(e.message()))?;
 
         let used_drives: HashSet<_> = drives.into_iter().map(|md| md.drive).collect();
         let all_drives: HashSet<_> = ('A'..='Z').map(|c| format!("{c}:")).collect();
 
-        all_drives
+        Ok(all_drives
             .difference(&used_drives)
             .max()
-            .map(|i| i.to_owned())
+            .map_or_else(|| Err(FreeDriveError::NoFreeDrive), |i| Ok(i.to_owned()))?)
     }
 
     pub async fn ensure_umounted(
@@ -314,9 +330,21 @@ pub mod internal {
 
                 // be sure to copy out any data needed, as it will become
                 // unavailable after `buffer_vec` is dropped!
+                let drive = res
+                    .lpLocalName
+                    .to_string()
+                    .inspect_err(|e| {
+                        error!(
+                            "invalid utf16 encountered in local name, returning dummy value! ({e})"
+                        );
+                    })
+                    .unwrap_or("".to_owned());
+                let remote_share = res.lpRemoteName.to_string().inspect_err(|e| {
+                    error!("invalid utf16 encountered in remote name, returning dummy value! ({e})");
+                }).unwrap_or("".to_owned());
                 return Some(Ok(MappedDrive {
-                    drive: res.lpLocalName.to_string().unwrap(),
-                    remote_share: res.lpRemoteName.to_string().unwrap(),
+                    drive,
+                    remote_share,
                 }));
             }
         }
