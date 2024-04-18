@@ -6,13 +6,12 @@ use std::{
 use futures_util::future::join_all;
 use log::{debug, info, warn};
 use modama_common::messages::Share;
-use nix::{errno::Errno, mount::MsFlags};
+use nix::mount::MsFlags;
 use procfs::{process::Process, ProcError};
 use thiserror::Error;
 
 use crate::{
-    config::{AgentConfig, AgentLinuxConfig, DNSLookupFailure},
-    share::MountedShare,
+    config::{AgentConfig, AgentLinuxConfig}, platform_common::EnsureMountedError, share::MountedShare
 };
 
 /// Ensure that `share` is mounted, and return a `MountedShare` if the mount succeeded.
@@ -36,7 +35,9 @@ pub async fn ensure_mounted(
     let source = format!("//{}/{}", &config.smb_hostname, share.share_name);
     let target = target_for_share(share, config);
 
-    if is_mounted(share, config)? {
+    if is_mounted(share, config).map_err(|e| {
+        EnsureMountedError::PlatformError(e.into())
+    })? {
         return Ok(MountedShare {
             share: share.clone(),
             mount_path: target,
@@ -60,7 +61,7 @@ pub async fn ensure_mounted(
 
     info!("Mounting {} at {}", &source, &target.to_string_lossy());
 
-    Ok(nix::mount::mount::<str, Path, str, str>(
+    nix::mount::mount::<str, Path, str, str>(
         Some(source.as_ref()),
         &target,
         Some("cifs"),
@@ -70,7 +71,22 @@ pub async fn ensure_mounted(
     .map(|_| MountedShare {
         share: share.clone(),
         mount_path: target,
-    })?)
+    }).map_err(|e| {
+        EnsureMountedError::PlatformError(e.into())
+    })
+}
+
+
+#[derive(Error, Debug)]
+pub enum MountListError {
+    #[error("procfs error: {0}")]
+    ProcError(#[from] ProcError),
+}
+
+impl From<MountListError> for EnsureMountedError {
+    fn from(val: MountListError) -> Self {
+        EnsureMountedError::MountFailed(val.to_string())
+    }
 }
 
 fn is_mounted(share: &Share, config: &AgentConfig) -> Result<bool, MountListError> {
@@ -99,7 +115,9 @@ async fn ensure_umounted(
 ) -> Result<(), EnsureMountedError> {
     {
         info!("Umounting {}", &mount_point.to_string_lossy());
-        nix::mount::umount(mount_point)?;
+        nix::mount::umount(mount_point).map_err(|e| {
+            EnsureMountedError::PlatformError(e.into())
+        })?;
         std::fs::remove_dir(mount_point)?;
         Ok(())
     }
