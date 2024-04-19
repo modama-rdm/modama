@@ -31,7 +31,7 @@ rust-tests:
   stage: test
   image: rust:1-slim-buster
   script:
-    - apt-get -y update && apt-get -y install ldd
+    - apt-get -y update && apt-get -y install lld
     - cd prototypes/modama-rs/ && cargo check
 
 container-image-build:
