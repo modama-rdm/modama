@@ -15,11 +15,11 @@ It also requires `sssd` running on the host: `sudo apt install sssd` on Debian.
 # Building
 
 The script `build.sh` sets the necessary environment variables and then builds
-the docker images using `docker-compose`.
+the docker images using `docker compose`.
 
 # Test and production deployment
 
-Both a test and a production deployment are available. The configuration for the test deployment is defined by a combination of `docker-compose.yml` and `docker-compose.override.yml`, which is the default when using `docker-compose up`. Test-specific configuration files except secrets are placed in `testconf/`.
+Both a test and a production deployment are available. The configuration for the test deployment is defined by a combination of `docker-compose.yml` and `docker-compose.override.yml`, which is the default when using `docker compose up`. Test-specific configuration files except secrets are placed in `testconf/`.
 
 The test deployment uses files in the `testfolder/` directory. The necessary
 subfolders with correct ownership and permissions can be created by running
