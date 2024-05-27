@@ -1,3 +1,17 @@
+# Cloning
+
+This project uses git submodules. After cloning, to initialize and clone the submodules:
+
+```
+git submodule init && git submodule update
+```
+
+# Installing requirements
+
+The system requires docker, see https://docs.docker.com/engine/install/
+
+It also requires `sssd` running on the host: `sudo apt install sssd` on Debian.
+
 # Building
 
 The script `build.sh` sets the necessary environment variables and then builds
@@ -47,7 +61,7 @@ normally as described in the Nextcloud documentation.
 
 The applyconfig.py script can apply all settings to a fresh installation that
 are required to bring it to a working state in the ER-C data management. It can
-be run with `docker-compose exec nextcloud python3 /applyconfig.py`. It is not run automatically
+be run with `docker compose exec nextcloud python3 /applyconfig.py`. It is not run automatically
 since the entrypoint script for Nextcloud is rather complex and doesn't allow to
 include custom extensions at the right point in the installation procedure.
 
@@ -62,6 +76,14 @@ It manages the following items:
 Sensitive settings are kept in separate read-protected files outside the repository, under `/var/local/data-mgmt/`.
 
 The externally supplied file `externalstorage_pw` contains the preshared password for the WebDAV gateway.
+
+## Secrets
+
+`/var/local/data-mgmt/mgmt_secret.py`
+
+```
+SECRET_KEY = 'I am so super secret'
+```
 
 ## NextCloud development setup
 
@@ -108,14 +130,14 @@ owned by root and not world-readable.
 After changing this file, restart the `nextcloud` container, as editing the file
 may actually create a new file that needs to be re-bind-mounted into the
 container. When this is done, re-generate the configuration using
-`docker-compose exec nextcloud python3 /applyconfig.py`. This will also disable
+`docker compose exec nextcloud python3 /applyconfig.py`. This will also disable
 the `root` user again. Then, login via LDAP should work.
 
 # Create database for SampleDB
 
-The sampledb container is configured to expect the `sampledb` database. It will not be created automatically. In order to create it, run `docker-compose exec db su - postgres -c "/usr/bin/createdb sampledb"`.
+The sampledb container is configured to expect the `sampledb` database. It will not be created automatically. In order to create it, run `docker compose exec db su - postgres -c "/usr/bin/createdb sampledb"`.
 
 # Backup
 
 The configuration for FZ Jülich IBM Spectrum Protect is only present for production, meaning any
-`docker-compose` command requires `-f docker-compose.yml -f docker-compose.prod.yml`. The necessary configuration and password are saved on iff1020 outside the repository. Resources for using the `dsmc` command line client: https://intranet.fz-juelich.de/de/organisation/it-portal/software_services/infrastruktur/datensicherung/nutzen-lernen
+`docker compose` command requires `-f docker-compose.yml -f docker-compose.prod.yml`. The necessary configuration and password are saved on iff1020 outside the repository. Resources for using the `dsmc` command line client: https://intranet.fz-juelich.de/de/organisation/it-portal/software_services/infrastruktur/datensicherung/nutzen-lernen
