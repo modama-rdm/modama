@@ -2,7 +2,7 @@
 
 FROM debian:12-slim
 
-RUN --mount=type=cache,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind python3.11 python3.11-venv python3-pip strace
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked apt-get update && apt-get -y install samba samba-client winbind python3.11 python3.11-venv python3-pip strace
 
 RUN --mount=type=cache,target=/root/.cache python3 -m venv /venv/
 
