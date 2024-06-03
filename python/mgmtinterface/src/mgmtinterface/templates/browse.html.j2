@@ -111,7 +111,7 @@
   <p>
     <a href="https://er-c-data.fz-juelich.de/#use-filesystem">SMB (Windows)</a>:
     <div style="display: flex; gap: 0.5em">
-      <input id="smb" value="{{ components.path | main_smbpath }}" readonly style="flex-grow: 1"/>
+      <input id="smb_windows" value="{{ components.path | main_smbpath }}" readonly style="flex-grow: 1"/>
       {{ copybutton(components.path | main_smbpath) }}
     </div>
   </p>
