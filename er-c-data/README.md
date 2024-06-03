@@ -1,6 +1,12 @@
 # Cloning
 
-This project uses git submodules. After cloning, to initialize and clone the submodules:
+This project uses git submodules. You can pull all of them automatically when cloning, like this:
+
+```
+git clone --recursive gitlab@iffgit.fz-juelich.de:weber/data-management-system.git
+```
+
+Or, after cloning, initialize and clone the submodules:
 
 ```
 git submodule init && git submodule update
