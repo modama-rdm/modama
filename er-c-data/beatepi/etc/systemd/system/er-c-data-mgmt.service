@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ssh -c aes128-ctr -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes -N -L 172.17.0.251:443:localhost:443 -i /var/local/sshvpn/beatepivpn moellenstedtvpn@iff1020.iff.kfa-juelich.de
+ExecStart=/usr/bin/ssh -c aes128-ctr -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes -N -L 172.17.0.251:80:localhost:80 -L 172.17.0.251:443:localhost:443 -i /var/local/sshvpn/beatepivpn moellenstedtvpn@iff1020.iff.kfa-juelich.de
 Restart=always
 RestartSec=30s
 
