@@ -1,0 +1,14 @@
+server {
+    listen 172.17.0.250:80;
+
+    location = /wpad.dat {
+        alias /var/local/wpad/wpad.dat;
+        types {
+            application/x-ns-proxy-autoconfig dat;
+        }
+    }
+
+    location / {
+        return 403;
+    }
+}

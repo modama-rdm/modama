@@ -1,0 +1,6 @@
+function FindProxyForURL(url, host) {
+    if (shExpMatch(host,"er-c-data-mgmt.fz-juelich.de")) {
+        return "DIRECT";
+    }  
+    return 'PROXY 172.17.0.250:3128; DIRECT';
+}
