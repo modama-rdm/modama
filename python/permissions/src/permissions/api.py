@@ -129,7 +129,15 @@ def is_group(name):
 
 
 def authenticate(username, password):
-    return pamela.authenticate(username, password)
+    try:
+        return pamela.authenticate(username, password)
+    except pamela.PAMError as e:
+        # temporary workaround because of PAM/SSSD change on iff1020
+        # errno 6 means authenticated, but permission denied due to config
+        if e.errno == 6:
+            return None  # emulate success
+        else:
+            raise
 
 
 def uid(username):
