@@ -7,7 +7,6 @@ import stat
 import shutil
 from typing import NamedTuple, List
 from collections.abc import Collection
-import time
 
 import pamela
 import posix1e  # pylibacl, needs libacl1-dev, https://pylibacl.k1024.org/
@@ -129,15 +128,7 @@ def is_group(name):
 
 
 def authenticate(username, password):
-    try:
-        return pamela.authenticate(username, password)
-    except pamela.PAMError as e:
-        # temporary workaround because of PAM/SSSD change on iff1020
-        # errno 6 means authenticated, but permission denied due to config
-        if e.errno == 6:
-            return None  # emulate success
-        else:
-            raise
+    return pamela.authenticate(username, password)
 
 
 def uid(username):

@@ -1,0 +1,25 @@
+[sssd]
+services = nss, pam
+domains = iff.kfa-juelich.de
+config_file_version = 2
+debug_level = 3
+
+[domain/iff.kfa-juelich.de]
+id_provider = ldap
+auth_provider = ldap
+access_provider = ldap
+ldap_access_filter = memberOf=cn=iff,cn=groups,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+ldap_schema = IPA
+ldap_uri = ldap://ldaps.iff.kfa-juelich.de
+ldap_default_bind_dn = uid={REDACTED},cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+ldap_default_authtok = {SECRET}
+ldap_search_base = cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+ldap_user_search_base = cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+ldap_group_search_base = cn=groups,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+ldap_tls_reqcert = never
+ldap_id_use_start_tls = true
+enumerate = false
+cache_credentials = true
+ldap_id_mapping = false
+use_fully_qualified_names = false
+debug_level = 3

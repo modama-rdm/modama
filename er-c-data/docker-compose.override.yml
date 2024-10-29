@@ -56,6 +56,7 @@ services:
     ports:
       - "127.0.0.1:1890:80"
   permissions:
+    restart: no
     volumes:
       - type: bind
         source: "./testfolder/data"
@@ -67,8 +68,10 @@ services:
     environment:
       - FLASK_APP=permissions.server:app
     working_dir: /
-    # command: gunicorn --bind 0.0.0.0:5050 permissions.server:app --log-level=debug
-    command: flask run --debug --port 5050 --host 0.0.0.0
+    # command: /venv/bin/gunicorn --bind 0.0.0.0:5050 permissions.server:app --log-level=debug
+    # Disable threading to avoid Flask server crashes after authenticate() function is called
+    # Might be related to https://sourceware.org/bugzilla/show_bug.cgi?id=21032
+    command: /venv/bin/flask run --without-threads --debug --port 5050 --host 0.0.0.0
   watchdog:
     volumes:
       - type: bind

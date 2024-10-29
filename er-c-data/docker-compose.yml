@@ -71,12 +71,10 @@ services:
     restart: always
 
     volumes:
-      # Use host's accounts
+      # Use accounts from sssd container
       # Requires libpam-sss and libnss-sss in container
       # https://jhrozek.wordpress.com/2015/03/31/authenticating-a-docker-container-against-hosts-unix-accounts/
-      - type: bind
-        source: "/var/lib/sss/pipes/"
-        target: "/var/lib/sss/pipes/"
+      - "ssspipes:/var/lib/sss/pipes/"
       - type: bind
         source: "./wsgidav.json"
         target: "/wsgidav.json"
@@ -119,12 +117,22 @@ services:
     image: iffregistry.fz-juelich.de/weber/data-management-system/permissions:latest
 
     volumes:
-       - type: bind
-         source: "/var/lib/sss/pipes/"
-         target: "/var/lib/sss/pipes/"
+      - "ssspipes:/var/lib/sss/pipes/"
     
     cap_add:
       - LINUX_IMMUTABLE
+
+  sssd:
+    hostname: sssd
+    build: './sssd'
+    image: iffregistry.fz-juelich.de/weber/data-management-system/sssd:latest
+    restart: always
+
+    volumes:
+      - type: bind
+        source: "/var/local/data-mgmt/sssd.conf"
+        target: "/etc/sssd/sssd.conf"
+      - "ssspipes:/var/lib/sss/pipes/"
 
   watchdog:
     hostname: watchdog
@@ -166,3 +174,4 @@ services:
 
 volumes:
   sockets:
+  ssspipes:

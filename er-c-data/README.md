@@ -91,6 +91,15 @@ The externally supplied file `externalstorage_pw` contains the preshared passwor
 SECRET_KEY = 'I am so super secret'
 ```
 
+## sssd.conf
+
+sssd.conf is private and placed in `/var/local/data-mgmt/` since it contains
+usename and password used to bind to LDAP. Unfortunately we didn't manage yet to
+split the configuration into generic and private parts. A redacted template with
+the working IFF configuration is included in `./sssd/sssd.conf.template`. Note
+that SSSD will only accept the config file if it is only readable by root. The LDAP
+configuration is very similar to the Nextcloud LDAP configuration.
+
 ## NextCloud development setup
 
 For setting up the NextCloud container for development for the first time, you need to configure its authentication. Currently, we authenticate against the production LDAP server. The following steps are necessary:
