@@ -16,8 +16,6 @@ git submodule init && git submodule update
 
 The system requires docker, see https://docs.docker.com/engine/install/
 
-It also requires `sssd` running on the host: `sudo apt install sssd` on Debian.
-
 # Building
 
 The script `build.sh` sets the necessary environment variables and then builds
