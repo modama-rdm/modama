@@ -79,6 +79,8 @@ services:
         source: "./wsgidav.json"
         target: "/wsgidav.json"
       - "sockets:/run/gunicorn/"
+    depends_on:
+      - "sssd"
 
   webdav:
     hostname: webdav
@@ -121,6 +123,8 @@ services:
     
     cap_add:
       - LINUX_IMMUTABLE
+    depends_on:
+      - "sssd"
 
   sssd:
     hostname: sssd
