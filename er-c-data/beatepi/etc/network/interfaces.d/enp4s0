@@ -1,0 +1,10 @@
+auto enp4s0
+
+iface enp4s0 inet static
+    address 172.17.0.250
+    netmask 255.255.0.0
+
+
+iface enp4s0 inet static
+    address 172.17.0.251
+    netmask 255.255.0.0
