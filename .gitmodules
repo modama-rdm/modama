@@ -16,4 +16,4 @@
 	url = https://github.com/uellue/PyInotify
 [submodule "er-c-data/gateway/acme.sh"]
 	path = er-c-data/gateway/acme.sh
-	url = git@github.com:acmesh-official/acme.sh.git
+	url = https://github.com/acmesh-official/acme.sh.git
