@@ -1,0 +1,12 @@
+services:
+    nginx-w-acme:
+        volumes:
+         - type: bind
+           source: ./test/servername.conf.snippet
+           target: /etc/nginx/conf.d/servername.conf.snippet
+           read_only: true
+        environment:
+         - ACME_DOMAIN=cloud-erc.fz-juelich.de
+         - ACME_CONTACT=a.clausen@fz-juelich.de
+         - ACME_SERVER=letsencrypt_test
+         - ACME_RENEW_TICK=60

@@ -1,0 +1,11 @@
+services:
+    nginx-w-acme:
+        volumes:
+         - type: bind
+           source: ./prod/servername.conf.snippet
+           target: /etc/nginx/conf.d/servername.conf.snippet
+           read_only: true
+        environment:
+         - ACME_DOMAIN=er-c-data.fz-juelich.de
+         - ACME_CONTACT=a.clausen@fz-juelich.de
+         - ACME_SERVER=letsencrypt
