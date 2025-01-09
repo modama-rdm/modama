@@ -34,6 +34,9 @@ container-image-build:
     entrypoint: [""]
   parallel:
     matrix:
+      - DOCKERFILE: er-c-data/gateway/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}/er-c-data/gateway"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/gateway
       - DOCKERFILE: er-c-data/nextcloud/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}/er-c-data/nextcloud"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/nextcloud
