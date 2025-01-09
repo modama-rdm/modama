@@ -79,6 +79,7 @@ container-image-retag:
     GIT_STRATEGY: none
   parallel:
     matrix:
+      - IMAGE_NAME: gateway
       - IMAGE_NAME: nextcloud
       - IMAGE_NAME: permissions
       - IMAGE_NAME: sssd
