@@ -21,15 +21,17 @@ mkdir -p $CA_DIR
 
 _install_cert() {
     $ACME --install-cert --domain $ACME_DOMAIN \
+	--home $CA_DIR \
         --key-file $PRIVKEY_PATH \
         --fullchain-file $FULLCHAIN_PATH \
         --reloadcmd "/usr/bin/reload-nginx.sh"
 }
 
 if [ ! -f $FULLCHAIN_PATH ]; then
-    $ACME --server $ACME_SERVER --home $CA_DIR --issue --domain $ACME_DOMAIN --webroot /var/www/html/
+    $ACME --server $ACME_SERVER --home $CA_DIR --issue --domain $ACME_DOMAIN --webroot /var/www/html/ # --debug
     _install_cert
 else
-    $ACME --server $ACME_SERVER --home $CA_DIR --renew --domain $ACME_DOMAIN --webroot /var/www/html/
+    # install cert even if we didn't renew
+    $ACME --server $ACME_SERVER --home $CA_DIR --renew --domain $ACME_DOMAIN --webroot /var/www/html/ || true
     _install_cert
 fi

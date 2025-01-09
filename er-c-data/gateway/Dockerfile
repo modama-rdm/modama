@@ -14,6 +14,7 @@ COPY nginx-site.conf /etc/nginx/sites-available/site.conf
 COPY nginx-start.sh /usr/bin/nginx-start.sh
 COPY ./acme.sh /opt/acme.sh
 COPY renew-cert.sh /usr/bin/renew-cert.sh
+COPY reload-nginx.sh /usr/bin/reload-nginx.sh
 COPY maybe-enable-https.sh /usr/bin/maybe-enable-https.sh
 
 # Additional config needed:

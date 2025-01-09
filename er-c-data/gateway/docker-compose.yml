@@ -7,8 +7,11 @@ services:
         network_mode: "host"
         volumes:
          - type: bind
-           source: /var/local/data-mgmt/ssl/
+           source: /var/local/data-mgmt/ssl-ca/
            target: /etc/letsencrypt/ssl/
+         - type: bind
+           source: /var/local/data-mgmt/ssl-deploy/
+           target: /etc/letsencrypt/live/
         environment:
          - ACME_DOMAIN=er-c-data.fz-juelich.de
          - ACME_CONTACT=a.clausen@fz-juelich.de
