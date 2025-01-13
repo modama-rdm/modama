@@ -4,7 +4,9 @@
 
 FROM debian:12-slim
 
-RUN --mount=type=cache,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind python3.9 python3-pip strace
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    apt-get update && apt-get -y install samba samba-client winbind python3.9 python3-pip strace
 
 COPY ./smbdrop/smb.conf /etc/samba/smb.conf
 
