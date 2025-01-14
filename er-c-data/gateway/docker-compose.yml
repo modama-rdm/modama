@@ -3,6 +3,7 @@ services:
         build:
             context: .
             dockerfile: ./Dockerfile
+        image: iffregistry.fz-juelich.de/weber/data-management-system/gateway:latest
         restart: always
         network_mode: "host"
         volumes:
