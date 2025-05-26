@@ -73,7 +73,7 @@
             "s01ldap_default_ppolicy_dn": "",
             "s01ldap_user_avatar_rule": "default",
             "s01ldap_ext_storage_home_attribute": "",
-            "s01ldap_host": "ldaps:\/\/ldaps.iff.kfa-juelich.de",
+            "s01ldap_host": "ldaps:\/\/iffldap.iff.kfa-juelich.de",
             "s01ldap_experienced_admin": "1",
             "s01ldap_display_name": "cn",
             "s01ldap_base": "cn=accounts,dc=iff,dc=kfa-juelich,dc=de",

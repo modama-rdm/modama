@@ -10,7 +10,7 @@ auth_provider = ldap
 access_provider = ldap
 ldap_access_filter = memberOf=cn=iff,cn=groups,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
 ldap_schema = IPA
-ldap_uri = ldap://ldaps.iff.kfa-juelich.de
+ldap_uri = ldaps://iffldap.iff.kfa-juelich.de
 ldap_default_bind_dn = uid={REDACTED},cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
 ldap_default_authtok = {SECRET}
 ldap_search_base = cn=accounts,dc=iff,dc=kfa-juelich,dc=de
