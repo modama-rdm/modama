@@ -29,6 +29,9 @@ pub struct AgentConfig {
     /// The base URL for the websocket API (ws:// or wss://)
     pub api_url: Url,
 
+    /// The base URL of the management API
+    pub mgmt_api_url: String, // FIXME: make this a `Url`?
+
     /// The hostname of the ingest Samba server
     pub smb_hostname: String,
 

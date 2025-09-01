@@ -26,6 +26,9 @@ struct Args {
     #[arg(long, default_value = "https://localhost:5053")]
     token_service: String,
 
+    #[arg(long, default_value = "http://localhost:5001")]
+    mgmt_api_url: String,
+
     #[arg(long, default_value = "localhost:3003")]
     listen_local_api: String,
 
@@ -79,6 +82,7 @@ async fn main() {
     let config = &AgentConfig {
         api_url: Url::parse(&args.event_url)
             .unwrap_or_else(|e| panic!("invalid websocket URL `{}`: {e}", &args.event_url)),
+        mgmt_api_url: args.mgmt_api_url,
         smb_hostname: args.smb_hostname,
         smb_domain: args.smb_domain,
         smb_ip: OnceCell::new(),

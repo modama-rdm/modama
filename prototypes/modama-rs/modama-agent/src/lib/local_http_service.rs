@@ -103,7 +103,7 @@ async fn serve_index_page(
 
     result += "\n";
 
-    let c = MgmtClient::new("http://localhost:5001", auth.username(), auth.password()).unwrap();
+    let c = MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password()).unwrap();
 
     let projects = match c.list_projects().await {
         Ok(p) => p,
@@ -136,7 +136,7 @@ async fn serve_index_page(
 
 async fn start_ingest_step1(
     Path(project_name): Path<String>,
-    State(_agent_state): State<ApiState>,
+    State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
 ) -> impl IntoResponse {
     let auth = match auth {
@@ -151,7 +151,10 @@ async fn start_ingest_step1(
         }
     };
 
-    let c = MgmtClient::new("http://localhost:5001", auth.username(), auth.password()).unwrap();
+    let c = {
+        let state = agent_state.state.lock().await;
+        MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password()).unwrap()
+    };
 
     let details = match c.project_details(&project_name).await {
         Ok(p) => p,
@@ -195,7 +198,11 @@ async fn start_ingest_step2(
         }
     };
 
-    let c = MgmtClient::new("http://localhost:5001", auth.username(), auth.password()).unwrap();
+    let c = MgmtClient::new(
+        &agent_state.state.lock().await.config.mgmt_api_url,
+        auth.username(),
+        auth.password(),
+    ).unwrap();
 
     let details = match c.project_details(&project_name).await {
         Ok(p) => p,
@@ -254,7 +261,11 @@ async fn start_ingest_step3(
         }
     };
 
-    let c = MgmtClient::new("http://localhost:5001", auth.username(), auth.password()).unwrap();
+    let c = MgmtClient::new(
+        &agent_state.state.lock().await.config.mgmt_api_url,
+        auth.username(),
+        auth.password(),
+    ).unwrap();
 
     let details = match c.project_details(&project_name).await {
         Ok(p) => p,
