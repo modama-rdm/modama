@@ -29,7 +29,7 @@ unit-tests:
 
 rust-tests:
   stage: test
-  image: rust:1-slim-buster
+  image: rust:1-slim-trixie
   script:
     - apt-get -y update && apt-get -y install lld build-essential
     - cd prototypes/modama-rs/ && cargo check
