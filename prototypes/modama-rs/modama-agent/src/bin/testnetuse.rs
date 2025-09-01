@@ -23,6 +23,7 @@ async fn main() {
     };
     let config = AgentConfig {
         api_url: Url::parse("wss://localhost:5052").unwrap(),
+        mgmt_api_url: "http://localhost:5001".to_owned(),
         smb_hostname: "moellenstedt.iff.kfa-juelich.de".to_owned(),
         smb_ip: OnceCell::new(),
         smb_port: 445,
