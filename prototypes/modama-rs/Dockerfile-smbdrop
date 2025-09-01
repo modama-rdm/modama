@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 
-FROM rust:slim-bookworm AS builder
+FROM rust:slim-trixie AS builder
 
 WORKDIR /usr/src/modama-rs/
 
@@ -10,7 +10,7 @@ COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo build --release --bin smbdrop && cp target/release/smbdrop /usr/bin/smbdrop
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind strace
 

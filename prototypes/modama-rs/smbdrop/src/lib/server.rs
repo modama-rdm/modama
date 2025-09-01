@@ -7,13 +7,13 @@ use axum::{
     Json, Router,
 };
 use hyper::StatusCode;
-use log::info;
+use log::{error, info};
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
-use crate::share_manager::{ShareManager, SmbDropState};
+use crate::share_manager::{ShareError, ShareManager, SmbDropState};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -43,20 +43,50 @@ async fn list_shares(State(state): State<ApiState>) -> Json<HashMap<String, Shar
     Json(state.share_manager.list_shares().await.unwrap())
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "status")]
+pub enum CreateShareResponse {
+    #[serde(rename = "ok")]
+    Ok { share: Share },
+    #[serde(rename = "error")]
+    Error { msg: String },
+}
+
 async fn create_share(
     State(state): State<ApiState>,
     Json(request): Json<CreateShareRequest>,
-) -> Json<Share> {
+) -> impl IntoResponse {
     let dest_path = PathBuf::from(&request.dest_path);
     info!("creating share from request {request:?}");
-    let share = state
+    match state
         .share_manager
         .create_share(&dest_path, request.uid, request.gid, request.resource)
         .await
-        .unwrap();
-    state.send_state_update().await;
-    info!("created share {share:?}");
-    Json(share)
+    {
+        Ok(share) => {
+            state.send_state_update().await;
+            info!("created share {share:?}");
+            (StatusCode::OK, Json(CreateShareResponse::Ok { share }))
+        }
+        Err(ShareError::ShareNotFound(share_id)) => {
+            error!("share '{share_id}' not found");
+            (
+                StatusCode::NOT_FOUND,
+                Json(CreateShareResponse::Error {
+                    msg: format!("share '{share_id}' not found"),
+                }),
+            )
+        }
+        Err(err) => {
+            error!("internal error when creating share: {err}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(CreateShareResponse::Error {
+                    msg: format!("error creating share: {err}"),
+                }),
+            )
+        }
+    }
 }
 
 // FIXME: move to modama-common?
