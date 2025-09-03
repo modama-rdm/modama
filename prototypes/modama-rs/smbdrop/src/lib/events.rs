@@ -156,15 +156,6 @@ async fn handle_connection(
 
     info!("New connection: {}", peer);
 
-    let state = { last_state.lock().await.clone() };
-    let init_msg = update_msg_from_state(&state, &agent_id).await;
-    let init_msg = serde_json::to_string(&init_msg)?;
-
-    ws_stream
-        .send(tungstenite::Message::Text(init_msg))
-        .await
-        .unwrap();
-
     loop {
         select! {
             msg = ws_stream.next() => {
@@ -200,6 +191,7 @@ async fn accept_agent_connection(
     acceptor: TlsAcceptor,
     last_state: Arc<Mutex<EventSystemState>>,
     state_updates_rx: broadcast::Receiver<SmbDropState>,
+    state_updates_tx: broadcast::Sender<SmbDropState>,
 ) {
     let stream = acceptor.accept(stream).await.unwrap();
     let (_, server_connection) = stream.get_ref();
@@ -211,11 +203,12 @@ async fn accept_agent_connection(
 
     info!("agent id: {agent_id:?}");
 
-    last_state
-        .lock()
-        .await
-        .connected_agents
-        .insert(agent_id.clone());
+    // update connected agents and broadcast a state update
+    {
+        let mut state_unlocked = last_state.lock().await;
+        state_unlocked.connected_agents.insert(agent_id.clone());
+        state_updates_tx.send(state_unlocked.inner_state.clone()).unwrap();
+    }
 
     let conn_last_state = Arc::clone(&last_state);
 
@@ -236,7 +229,14 @@ async fn accept_agent_connection(
         }
     }
 
-    last_state.lock().await.connected_agents.remove(&agent_id);
+    // FIXME: also remove from connected_agents on error (is there such a thing
+    // as an async drop guard yet in rust?)
+    // update connected agents and broadcast a state update
+    {
+        let mut state_unlocked = last_state.lock().await;
+        state_unlocked.connected_agents.remove(&agent_id);
+        state_updates_tx.send(state_unlocked.inner_state.clone()).unwrap();
+    }
 }
 
 /// Start a websocket server that informs agents about currently active ingest
@@ -291,6 +291,7 @@ pub async fn start_event_server(
                 acc,
                 Arc::clone(&moved_last_state),
                 tx.subscribe(),
+                tx.clone()
             ));
         }
     });
