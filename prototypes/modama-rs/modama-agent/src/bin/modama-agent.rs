@@ -57,11 +57,9 @@ fn get_tls_config(args: &Args) -> AnyResult<(Arc<ClientConfig>, AgentId)> {
     let agent_id = AgentId::from_cert(
         client_chain
             .first()
-            .context("need at least one cert in chain")
-            .unwrap(),
+            .context("need at least one cert in chain")?
     )
-    .context("loading agent id from client cert failed")
-    .unwrap();
+    .context("loading agent id from client cert failed")?;
     Ok((
         Arc::new(
             ClientConfig::builder()
@@ -73,15 +71,15 @@ fn get_tls_config(args: &Args) -> AnyResult<(Arc<ClientConfig>, AgentId)> {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> AnyResult<()> {
     init_logging();
 
     let args = Args::parse();
-    let (tls_config, agent_id) = get_tls_config(&args).unwrap();
+    let (tls_config, agent_id) = get_tls_config(&args)?;
 
     let config = &AgentConfig {
         api_url: Url::parse(&args.event_url)
-            .unwrap_or_else(|e| panic!("invalid websocket URL `{}`: {e}", &args.event_url)),
+            .with_context(|| format!("invalid websocket URL `{}`", &args.event_url))?,
         mgmt_api_url: args.mgmt_api_url,
         smb_hostname: args.smb_hostname,
         smb_domain: args.smb_domain,
@@ -100,12 +98,12 @@ async fn main() {
     let state: Arc<Mutex<AgentState>> = Arc::new(Mutex::new(AgentState::new(config)));
 
     let sign_url = Url::parse(&args.token_service)
-        .unwrap_or_else(|e| panic!("invalid sign url `{}`: {e}", &args.token_service))
+        .with_context(|| format!("invalid sign url `{}`", &args.token_service))?
         .join("/sign/")
-        .unwrap_or_else(|e| panic!("invalid sign url `{}`: {e}", &args.token_service));
+        .with_context(|| format!("invalid sign url `{}`", &args.token_service))?;
 
     let token_fetcher =
-        TokenFetcher::new(sign_url.as_str(), &args.key, &args.chain, &args.ca_cert).unwrap();
+        TokenFetcher::new(sign_url.as_str(), &args.key, &args.chain, &args.ca_cert)?;
 
     let state_for_api = Arc::clone(&state);
     tokio::spawn(async move {
@@ -113,4 +111,6 @@ async fn main() {
     });
 
     message_loop(Arc::clone(&state), Arc::clone(&tls_config)).await;
+
+    Ok(())
 }

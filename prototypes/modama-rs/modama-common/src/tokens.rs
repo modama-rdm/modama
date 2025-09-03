@@ -76,8 +76,7 @@ impl TokenFetcher {
             .client
             .put(&self.sign_service_url)
             .send()
-            .await
-            .unwrap();
+            .await?;
         if resp.status() == StatusCode::OK {
             Ok(resp.text().await?)
         } else {
