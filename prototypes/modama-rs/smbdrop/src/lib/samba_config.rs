@@ -6,12 +6,15 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::{mount_manager::BindMount, share_manager::make_temporary_fname};
+use crate::{mount_manager::BindMount, share_manager::{make_temporary_fname, TempConfigError}};
 
 #[derive(thiserror::Error, Debug)]
 pub enum UpdateSharesError {
     #[error("I/O error")]
     IoError(#[from] std::io::Error),
+
+    #[error("could not write temporary config: {0}")]
+    TempConfig(#[from] TempConfigError),
 }
 
 fn get_config_snippet(dest_path_bind: &Path, share: &Share) -> String {
@@ -44,7 +47,7 @@ impl SambaConfigManager {
     }
 
     async fn write_config(&self, contents: &str) -> Result<(), UpdateSharesError> {
-        let rand_name = make_temporary_fname(&self.config_path);
+        let rand_name = make_temporary_fname(&self.config_path)?;
         let mut opts = File::options();
         opts.mode(0o640).create_new(true).write(true);
         let mut f = opts.open(&rand_name).await?;

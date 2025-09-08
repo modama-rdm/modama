@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::Context;
+use anyhow::{Context, Result as AnyResult};
 use clap::Parser;
 use log::info;
 use modama_common::logging::init_logging;
@@ -43,7 +43,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> AnyResult<()> {
     init_logging();
     let args = Args::parse();
     let mut sm = ShareManager::new(
@@ -52,8 +52,8 @@ async fn main() {
         args.samba_config_file,
     )
     .await;
-    sm.start().await.expect("could not start share manager");
-    let initial_state = sm.get_state().await.context("get initial state").unwrap();
+    sm.start().await?;
+    let initial_state = sm.get_state().await.context("get initial state")?;
 
     info!("initial state: {initial_state:?}");
 
@@ -65,24 +65,22 @@ async fn main() {
         &initial_state,
     )
     .await
-    .context("start event server")
-    .unwrap();
+    .context("start event server")?;
 
     let api_state: ApiState = ApiState::new(sm, state_updates_tx);
 
     let api_listen = args.api_listen.clone();
-    let _join_handle = tokio::spawn(async move {
-        serve_smbdrop_api(api_state, &api_listen).await;
+    let smbdrop_join_handle = tokio::spawn(async move {
+        serve_smbdrop_api(api_state, &api_listen).await
     });
 
     let token_api_listen = args.token_api_listen.clone();
-    let _join_handle = tokio::spawn(async move {
+    let token_join_handle = tokio::spawn(async move {
         start_token_server(&token_api_listen, &args.ca_cert, &args.chain, &args.privkey)
             .await
-            .unwrap();
     });
 
-    let mut term_stream = tokio::signal::unix::signal(SignalKind::terminate()).unwrap();
+    let mut term_stream = tokio::signal::unix::signal(SignalKind::terminate())?;
 
     select! {
         _ = tokio::signal::ctrl_c() => {
@@ -91,5 +89,15 @@ async fn main() {
         _ = term_stream.recv() => {
             eprintln!("SIGTERM received, exiting");
         }
+        token_res = token_join_handle => {
+            eprintln!("token server terminated");
+            token_res??;  // propagate JoinError and ServerStartError
+        }
+        smbdrop_res = smbdrop_join_handle => {
+            eprintln!("smbdrop server terminated");
+            smbdrop_res??;  // propagate JoinError and ServerStartError
+        }
     }
+
+    Ok(())
 }

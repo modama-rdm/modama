@@ -29,7 +29,10 @@ struct TokenServerState {}
 
 #[derive(Clone)]
 struct ConnState {
+    /// Agent ID - None if client authentication didn't succeed
     pub agent_id: Option<AgentId>,
+
+    /// Private key, DER-encoded
     pub secret: Vec<u8>,
 }
 
@@ -41,11 +44,20 @@ struct Claims {
 
 const EXPIRY_DURATION: u64 = 3600;
 
-async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> {
+#[derive(Debug, Clone, thiserror::Error)]
+enum SignError {
+    #[error("authentication or client certificate failure")]
+    Auth,
+
+    #[error("JWT encoding error")]
+    Encoding,
+}
+
+async fn do_sign(state: &ConnState) -> Result<String, SignError> {
     let agent_id = if let Some(agent_id) = &state.agent_id {
         agent_id.clone()
     } else {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(SignError::Auth);
     };
     eprintln!("agent id {:?}", &agent_id);
 
@@ -54,15 +66,27 @@ async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> 
         sub: sub.to_owned(),
         exp: (SystemTime::now() + Duration::from_secs(EXPIRY_DURATION))
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .map_err(|_| SignError::Encoding)?  // something fishy...
             .as_secs(),
     };
-    Ok(encode(
+    if let Ok(jwt) = encode(
         &Header::default(),
         &claims,
         &EncodingKey::from_secret(&state.secret),
-    )
-    .unwrap())
+    ) {
+        Ok(jwt)
+    } else {
+        Err(SignError::Encoding)
+    }
+}
+
+async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> {
+    do_sign(&state).await.map_err(|e| {
+        match e {
+            SignError::Auth => StatusCode::FORBIDDEN,
+            SignError::Encoding => StatusCode::BAD_REQUEST,
+        }
+    })
 }
 
 async fn verify_jwt(
@@ -116,7 +140,9 @@ pub async fn start_token_server(
         let tls_acceptor = acceptor.clone();
         let secret = secret.clone();
 
-        let (conn, addr) = listener.accept().await.unwrap();
+        let (conn, addr) = listener.accept().await.map_err(|_| {
+            ServerStartError::ListenError
+        })?;
 
         tokio::spawn(async move {
             let Ok(stream) = tls_acceptor.accept(conn).await else {

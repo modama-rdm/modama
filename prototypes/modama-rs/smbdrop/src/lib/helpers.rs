@@ -106,7 +106,9 @@ pub struct ImmutableGuard {
 
 impl Drop for ImmutableGuard {
     fn drop(&mut self) {
-        set_immutable(&self.path, false).unwrap()
+        if let Err(e) = set_immutable(&self.path, false) {
+            log::error!("could not reset immutable flag for {:?}: {e}", &self.path);
+        }
     }
 }
 

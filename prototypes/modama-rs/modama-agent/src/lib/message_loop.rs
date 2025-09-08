@@ -83,7 +83,7 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
         } => {
             let desired_shares: ShareState<Share> = ShareState {
                 foreground_share,
-                shares: shares.into_iter().map(Into::into).collect(),
+                shares: shares.into_iter().collect(),
             };
             state.lock().await.desired_shares = desired_shares.clone();
             state.lock().await.connected_agents = connected_agents;

@@ -1,3 +1,4 @@
+use anyhow::Result as AnyResult;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use axum::{
@@ -6,7 +7,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use hyper::StatusCode;
+use hyper::{header, StatusCode};
 use log::{error, info};
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
@@ -33,14 +34,34 @@ impl ApiState {
     }
 
     async fn send_state_update(&self) {
-        let new_state = self.share_manager.get_state().await.unwrap();
-        info!("sending state update: {:?}", &new_state);
-        self.state_updates_tx.send(new_state).unwrap();
+        match self.share_manager.get_state().await {
+            Ok(new_state) => {
+                info!("sending state update: {:?}", &new_state);
+                if self.state_updates_tx.send(new_state).is_err() {
+                    error!("tried to send state update but no one cared...");
+                };
+            }
+            Err(e) => {
+                error!("could not get share manager state (maybe corrupt config?): {e}")
+            }
+        }
     }
 }
 
-async fn list_shares(State(state): State<ApiState>) -> Json<HashMap<String, Share>> {
-    Json(state.share_manager.list_shares().await.unwrap())
+async fn list_shares(State(state): State<ApiState>) -> impl IntoResponse {
+    let shares = state.share_manager.list_shares().await;
+    match shares {
+        Ok(shares) => Json(shares).into_response(),
+        Err(e) => {
+            error!("could not list shares: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::CONTENT_TYPE, "text/plain")],
+                "could not list shares: {e}",
+            )
+                .into_response()
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -124,12 +145,14 @@ async fn delete_share(
     }
 }
 
-pub async fn serve_smbdrop_api(api_state: ApiState, listen_addr: &str) {
+pub async fn serve_smbdrop_api(api_state: ApiState, listen_addr: &str) -> AnyResult<()> {
     let app = Router::new()
         .route("/share/", get(list_shares))
         .route("/share/", post(create_share))
         .route("/share/:share_id/", delete(delete_share))
         .with_state(api_state);
-    let listener = tokio::net::TcpListener::bind(listen_addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(listen_addr).await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
 }

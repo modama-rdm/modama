@@ -10,7 +10,7 @@ use crate::{cert_helpers::load_tls_config, share_manager::SmbDropState};
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
-    agent::AgentId,
+    agent::{AgentId, ClientCertError},
     cert_helpers::CertHelperError,
     messages::{EventChannelMessage, EventChannelRequests, Share},
 };
@@ -69,6 +69,9 @@ enum HandlerError {
 
     #[error("serialization failure: {0}")]
     SerdeError(#[from] serde_json::Error),
+
+    #[error("channel disconnected")]
+    Disconnected,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -80,7 +83,7 @@ pub struct EventSystemState {
     pub connected_agents: HashSet<AgentId>,
 }
 
-async fn handle_message(
+async fn handle_ws_message(
     msg: &str,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     last_state: Arc<Mutex<EventSystemState>>,
@@ -145,6 +148,11 @@ fn share_list_from_state(state: &EventSystemState, agent_id: &AgentId) -> Vec<Sh
         .collect()
 }
 
+/// Take care of a single websocket connection. This function has two purposes:
+/// 
+/// 1) Receive and reply to websockets sent to us from the agent on the other end
+/// 2) Send out state updates via the websocket as they come in from the
+///    internal broadcast channel
 async fn handle_connection(
     peer: SocketAddr,
     stream: TlsStream<TcpStream>,
@@ -162,27 +170,41 @@ async fn handle_connection(
                 let msg = if let Some(msg) = msg { msg? } else { break };
                 if let Ok(msg) = msg.into_text() {
                     info!("Got ws message: {}", msg);
-                    handle_message(&msg, &mut ws_stream, Arc::clone(&last_state), &agent_id)
-                        .await
-                        .unwrap(); // FIXME: unwrap -> thiserror
+                    handle_ws_message(&msg, &mut ws_stream, Arc::clone(&last_state), &agent_id)
+                        .await?;
                 } else {
                     warn!("received non-text ws message or conversion failed");
                 }
             },
             maybe_state = state_updates_rx.recv() => {
-                let new_state = maybe_state.unwrap(); // FIXME
+                let new_state = maybe_state.map_err(|_| HandlerError::Disconnected)?;
                 // compose the update of shares and users with connected shares:
                 info!("propagating state update from channel: {new_state:?}");
                 let comp_state = EventSystemState {
                     inner_state: new_state,
                     connected_agents: last_state.lock().await.connected_agents.clone(),
                 };
-                handle_state_update(&comp_state, &mut ws_stream, &agent_id).await.unwrap();
+                handle_state_update(&comp_state, &mut ws_stream, &agent_id).await?;
             }
         }
     }
 
     Ok(())
+}
+
+#[derive(thiserror::Error, Debug)]
+enum AcceptError {
+    #[error("I/O error: {0}")]
+    IO(#[from] std::io::Error),
+
+    #[error("Extract certificate")]
+    NoCertificate,
+
+    #[error("Validate agent ID: {0}")]
+    ClientCert(#[from] ClientCertError),
+
+    #[error("channel disconnected")]
+    Disconnected,
 }
 
 async fn accept_agent_connection(
@@ -192,14 +214,14 @@ async fn accept_agent_connection(
     last_state: Arc<Mutex<EventSystemState>>,
     state_updates_rx: broadcast::Receiver<SmbDropState>,
     state_updates_tx: broadcast::Sender<SmbDropState>,
-) {
-    let stream = acceptor.accept(stream).await.unwrap();
+) ->Result<(), AcceptError> {
+    let stream = acceptor.accept(stream).await?;
     let (_, server_connection) = stream.get_ref();
 
-    let peer_certs = server_connection.peer_certificates().unwrap();
-    let peer_cert = peer_certs.get(0).unwrap();
+    let peer_certs = server_connection.peer_certificates().ok_or(AcceptError::NoCertificate)?;
+    let peer_cert = peer_certs.get(0).ok_or(AcceptError::NoCertificate)?;
 
-    let agent_id = AgentId::from_cert(peer_cert).unwrap();
+    let agent_id = AgentId::from_cert(peer_cert)?;
 
     info!("agent id: {agent_id:?}");
 
@@ -207,7 +229,7 @@ async fn accept_agent_connection(
     {
         let mut state_unlocked = last_state.lock().await;
         state_unlocked.connected_agents.insert(agent_id.clone());
-        state_updates_tx.send(state_unlocked.inner_state.clone()).unwrap();
+        state_updates_tx.send(state_unlocked.inner_state.clone()).map_err(|_| AcceptError::Disconnected)?;
     }
 
     let conn_last_state = Arc::clone(&last_state);
@@ -235,8 +257,10 @@ async fn accept_agent_connection(
     {
         let mut state_unlocked = last_state.lock().await;
         state_unlocked.connected_agents.remove(&agent_id);
-        state_updates_tx.send(state_unlocked.inner_state.clone()).unwrap();
+        state_updates_tx.send(state_unlocked.inner_state.clone()).map_err(|_| AcceptError::Disconnected)?;
     }
+
+    Ok(())
 }
 
 /// Start a websocket server that informs agents about currently active ingest
@@ -277,22 +301,28 @@ pub async fn start_event_server(
     });
 
     let result_tx = tx.clone();
-    let listener = TcpListener::bind(&listen_addr).await.expect("Can't listen");
+    let listener = TcpListener::bind(&listen_addr).await.map_err(|e| {
+        error!("listen error: {e}");
+        ServerStartError::ListenError
+    })?;
     let acceptor = TlsAcceptor::from(Arc::new(config));
 
     let moved_last_state = Arc::clone(&last_state);
     tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
-            let peer = stream.peer_addr().expect("should have a peer address");
-            let acc = acceptor.clone();
-            tokio::spawn(accept_agent_connection(
-                peer,
-                stream,
-                acc,
-                Arc::clone(&moved_last_state),
-                tx.subscribe(),
-                tx.clone()
-            ));
+            if let Ok(peer) = stream.peer_addr() {
+                let acc = acceptor.clone();
+                tokio::spawn(accept_agent_connection(
+                    peer,
+                    stream,
+                    acc,
+                    Arc::clone(&moved_last_state),
+                    tx.subscribe(),
+                    tx.clone()
+                ));
+            } else {
+                error!("no peer addr, dropping client");
+            }
         }
     });
 

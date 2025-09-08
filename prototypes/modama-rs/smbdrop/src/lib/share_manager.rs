@@ -199,7 +199,7 @@ pub enum ShareError {
     #[error("share `{0}` not found")]
     ShareNotFound(String),
 
-    #[error("inconcsistent configuration: {0}")]
+    #[error("inconsistent configuration: {0}")]
     Inconsistent(String),
 
     #[error("could not sync mount state: {0}")]
@@ -218,24 +218,43 @@ pub enum ShareError {
     #[error("could not reload samba: {0}")]
     SambaError(#[from] SendError<PmCommand>),
 
+    #[error("could not set smb password")]
+    SmbpasswdError,
+
     #[error("could not add or remove system user {username}: {stderr}")]
     UsermgmtError { username: String, stderr: String },
 
     #[error("process manager in bad shape: {0}")]
     ProcessManagerError(String),
+
+    #[error("could not write temporary config: {0}")]
+    TempConfig(#[from] TempConfigError),
+
+    #[error("issues with system clock; before UNIX_EPOCH?")]
+    ClockIssues,
 }
 
-/// Return a path to a randomized temporariy filename in the same directory as
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum TempConfigError {
+    #[error("path must have a parent")]
+    MustHaveParent,
+
+    #[error("path must point to a file")]
+    MustBeFile,
+
+    #[error("path is not valid unicode")]
+    InvalidUnicode,
+}
+
+/// Return a path to a randomized temporary filename in the same directory as
 /// the file pointed to by the given `path`.
-pub fn make_temporary_fname(path: &Path) -> PathBuf {
-    let dirname = path
-        .parent()
-        .expect("config path must point to the configuration file");
+pub fn make_temporary_fname(path: &Path) -> Result<PathBuf, TempConfigError> {
+    let dirname = path.parent().ok_or(TempConfigError::MustBeFile)?;
     let filename = path
         .file_name()
-        .expect("config path must point to the configuration file")
+        .ok_or(TempConfigError::MustBeFile)?
         .to_str()
-        .expect("configuration path must be valid unicode");
+        .ok_or(TempConfigError::InvalidUnicode)?;
     loop {
         let rnd: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
@@ -245,7 +264,7 @@ pub fn make_temporary_fname(path: &Path) -> PathBuf {
         let rand_name = dirname.join(format!("{}-tmp{}", filename, rnd));
         let path = dirname.join(rand_name);
         if !path.exists() {
-            return path;
+            return Ok(path);
         }
     }
 }
@@ -299,7 +318,7 @@ impl ShareConfigFile {
             spawn_blocking(move || -> Result<_, serde_json::Error> { serde_json::to_vec(&config) })
                 .await??;
 
-        let rand_name = make_temporary_fname(&self.path);
+        let rand_name = make_temporary_fname(&self.path)?;
         debug!("write_config: writing to {rand_name:?}");
         let mut opts = File::options();
         opts.mode(0o600).create_new(true).write(true);
@@ -322,7 +341,10 @@ static PATH_RE: OnceCell<Regex> = OnceCell::const_new();
 
 async fn get_path_re() -> &'static Regex {
     PATH_RE
-        .get_or_init(|| async { Regex::new(r"^[-/a-zA-Z0-9_. ]*$").unwrap() })
+        .get_or_init(|| async {
+            #[allow(clippy::unwrap_used)]
+            Regex::new(r"^[-/a-zA-Z0-9_. ]*$").unwrap()  // statically correct..?
+        })
         .await
 }
 
@@ -469,7 +491,7 @@ impl ShareManager {
             gid,
             created_timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .expect("does not work before UNIX_EPOCH")
+                .map_err(|_| ShareError::ClockIssues)?
                 .as_secs(),
         };
 
@@ -580,7 +602,7 @@ impl ShareManager {
         let mut stdin = smbpasswd
             .stdin
             .take()
-            .expect("child did not have a handle to stdin");
+            .ok_or(ShareError::SmbpasswdError)?;
         let smbpasswd_in: String = format!("{}\n{}\n", &user.password, &user.password);
         stdin.write_all(smbpasswd_in.as_bytes()).await?;
         let res = smbpasswd.wait_with_output().await?;
