@@ -32,6 +32,7 @@ rust-tests:
   image: rust:1-slim-trixie
   script:
     - apt-get -y update && apt-get -y install lld build-essential
+    - rustup component add clippy
     - cd prototypes/modama-rs/ && cargo check && cargo clippy
 
 container-image-build:
