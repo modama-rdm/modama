@@ -17,3 +17,7 @@ thiserror = "1.0.56"
 tokio-rustls = "0.25.0"
 url = "2.5.0"
 x509-parser = "0.15.1"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

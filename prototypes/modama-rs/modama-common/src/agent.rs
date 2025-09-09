@@ -16,6 +16,9 @@ pub enum ClientCertError {
     #[error("invalid URI in SAN field: {0}")]
     InvalidURI(String),
 
+    #[error("invalid or missing URI parts in {0}")]
+    URIParts(String),
+
     #[error("error parsing the certificate")]
     X509ParsingError(#[from] Err<X509Error>),
 
@@ -40,15 +43,10 @@ impl AgentId {
         }
 
         Ok(Self {
-            resource: uri_parsed.host_str().unwrap().to_string(),
-            agent: uri_parsed.fragment().unwrap().to_string(),
+            resource: uri_parsed.host_str().ok_or_else(|| ClientCertError::URIParts(uri.to_owned()))?.to_string(),
+            agent: uri_parsed.fragment().ok_or_else(|| ClientCertError::URIParts(uri.to_owned()))?.to_string(),
             san_encoded: uri.to_owned(),
         })
-    }
-
-    pub fn as_uri(&self) -> Url {
-        // won't panic, as `san_encoded` is parsed into a Url in the constructors
-        Url::from_str(&self.san_encoded).unwrap()
     }
 
     pub fn from_cert(cert: &CertificateDer) -> Result<Self, ClientCertError> {

@@ -14,7 +14,7 @@ use modama_common::{
     cert_helpers::{get_cert_chain, get_private_key, get_root_cert_store},
     logging::init_logging,
 };
-use tokio::sync::{Mutex, OnceCell};
+use tokio::{select, sync::{Mutex, OnceCell}};
 use tokio_rustls::rustls::ClientConfig;
 use url::Url;
 
@@ -106,11 +106,18 @@ async fn main() -> AnyResult<()> {
         TokenFetcher::new(sign_url.as_str(), &args.key, &args.chain, &args.ca_cert)?;
 
     let state_for_api = Arc::clone(&state);
-    tokio::spawn(async move {
-        serve_local_web_api(state_for_api, &args.listen_local_api, token_fetcher).await;
+    let join_handle = tokio::spawn(async move {
+        serve_local_web_api(state_for_api, &args.listen_local_api, token_fetcher).await
     });
 
-    message_loop(Arc::clone(&state), Arc::clone(&tls_config)).await;
+    select! {
+        _ = message_loop(Arc::clone(&state), Arc::clone(&tls_config)) => {
+            Ok(())
+        }
+        res = join_handle => {
+            res?
+        }
+    }?;
 
     Ok(())
 }

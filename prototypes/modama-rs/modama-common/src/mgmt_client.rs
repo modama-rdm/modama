@@ -15,7 +15,6 @@ pub enum MgmtError {
     #[error("url parse error: {0}")]
     UrlParseError(#[from] url::ParseError),
 }
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateShareRequest {
     pub project: String,

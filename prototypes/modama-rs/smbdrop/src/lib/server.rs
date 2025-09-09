@@ -1,5 +1,5 @@
 use anyhow::Result as AnyResult;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     extract::{self, State},

@@ -1,16 +1,28 @@
 use std::sync::Arc;
 
-use axum::{extract::{Path, State}, http::{header, StatusCode}, response::IntoResponse, routing::{get, post}, Json, Router};
-use axum_extra::{headers::{authorization::Basic, Authorization}, typed_header::TypedHeaderRejection, TypedHeader};
+use axum::{
+    extract::{Path, State},
+    http::{header, StatusCode},
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
+use axum_extra::{
+    headers::{authorization::Basic, Authorization},
+    typed_header::TypedHeaderRejection,
+    TypedHeader,
+};
 use axum_macros::debug_handler;
 use log::{error, warn};
 use minijinja::{context, Environment};
-use modama_common::{messages::CurrentForegroundShare, mgmt_client::{MgmtClient, MgmtError}, tokens::TokenFetcher};
+use modama_common::{
+    messages::CurrentForegroundShare,
+    mgmt_client::{MgmtClient, MgmtError},
+    tokens::{TokenError, TokenFetcher},
+};
 use tokio::sync::Mutex;
 
 use crate::agent_state::AgentState;
-
-
 
 fn create_env() -> Environment<'static> {
     let mut env = Environment::new();
@@ -43,6 +55,72 @@ impl ApiState {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum LocalAPIError {
+    #[error("error in backend API: {0}")]
+    BackendAPI(#[from] MgmtError),
+
+    #[error("token error: {0}")]
+    Token(#[from] TokenError),
+
+    #[error("authentication failed")]
+    Auth,
+
+    #[error("template error: {0}")]
+    Template(#[from] minijinja::Error),
+
+    #[error("bind error: {0}")]
+    Listen(#[from] std::io::Error),
+}
+
+impl IntoResponse for LocalAPIError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            LocalAPIError::BackendAPI(MgmtError::Unauthorized) | LocalAPIError::Auth => (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+            )
+                .into_response(),
+            LocalAPIError::BackendAPI(e) => {
+                error!("backend API error: {e}");
+                // FIXME: json/text depending on accept?
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    "internal server error",
+                )
+                    .into_response()
+            }
+            LocalAPIError::Token(token_error) => {
+                error!("token error: {token_error}");
+                // content-type? status code? could be internal server error in some cases, ...?
+                (
+                    StatusCode::BAD_REQUEST,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    "bad request",
+                )
+                    .into_response()
+            }
+            LocalAPIError::Template(error) => {
+                error!("template error: {error}");
+                // FIXME: json/text depending on accept?
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    "internal server error",
+                )
+                    .into_response()
+            }
+            LocalAPIError::Listen(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::CONTENT_TYPE, "text/plain")],
+                "internal server error",
+            )
+                .into_response(),
+        }
+    }
+}
+
 // #[debug_handler]
 async fn handler_shares_foreground(
     State(api_state): State<ApiState>,
@@ -65,24 +143,25 @@ async fn handler_shares_foreground(
     )
 }
 
+async fn get_auth(
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+) -> Result<Authorization<Basic>, LocalAPIError> {
+    match auth {
+        Ok(TypedHeader(auth)) => Ok(auth),
+        Err(e) => {
+            error!("error extracting authorization header: {e}");
+            Err(LocalAPIError::Auth)
+        }
+    }
+}
+
 #[debug_handler]
 async fn serve_index_page(
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, LocalAPIError> {
     let mut result = String::new();
-
-    let auth = match auth {
-        Ok(TypedHeader(auth)) => auth,
-        Err(e) => {
-            error!("error extracting authorization header: {e}");
-            return (
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
-            )
-                .into_response();
-        }
-    };
+    let auth = get_auth(auth).await?;
 
     let state = agent_state.state.lock().await;
 
@@ -93,7 +172,7 @@ async fn serve_index_page(
 
     result += "Connected agents at this resource: ";
     for a in matching_agents {
-        result += &(a.as_uri().to_string() + " ");
+        result += &(a.san_encoded.to_owned() + " ");
     }
     result += "\n";
     result += &format!(
@@ -103,20 +182,20 @@ async fn serve_index_page(
 
     result += "\n";
 
-    let c = MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password()).unwrap();
+    let c = MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password())?;
 
     let projects = match c.list_projects().await {
         Ok(p) => p,
         Err(MgmtError::Unauthorized) => {
-            return (
+            return Ok((
                 StatusCode::UNAUTHORIZED,
                 [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
             )
-                .into_response();
+                .into_response());
         }
         Err(e) => {
             error!("error listing projects: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR).into_response();
+            return Ok((StatusCode::INTERNAL_SERVER_ERROR).into_response());
         }
     };
 
@@ -131,43 +210,33 @@ async fn serve_index_page(
         result += "\n";
     }
 
-    result.into_response()
+    Ok(result.into_response())
 }
 
 async fn start_ingest_step1(
     Path(project_name): Path<String>,
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> impl IntoResponse {
-    let auth = match auth {
-        Ok(TypedHeader(auth)) => auth,
-        Err(e) => {
-            error!("error extracting authorization header: {e}");
-            return (
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
-            )
-                .into_response();
-        }
-    };
+) -> Result<impl IntoResponse, LocalAPIError> {
+    let auth = get_auth(auth).await?;
 
     let c = {
         let state = agent_state.state.lock().await;
-        MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password()).unwrap()
+        MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password())?
     };
 
     let details = match c.project_details(&project_name).await {
         Ok(p) => p,
         Err(MgmtError::Unauthorized) => {
-            return (
+            return Ok((
                 StatusCode::UNAUTHORIZED,
                 [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
             )
-                .into_response();
+                .into_response());
         }
         Err(e) => {
             error!("error getting project details for {project_name}: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR).into_response();
+            return Ok((StatusCode::INTERNAL_SERVER_ERROR).into_response());
         }
     };
 
@@ -178,51 +247,41 @@ async fn start_ingest_step1(
         resp += "\n";
     }
 
-    resp.into_response()
+    Ok(resp.into_response())
 }
 
 async fn start_ingest_step2(
     Path((project_name, session_name)): Path<(String, String)>,
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> impl IntoResponse {
-    let auth = match auth {
-        Ok(TypedHeader(auth)) => auth,
-        Err(e) => {
-            error!("error extracting authorization header: {e}");
-            return (
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
-            )
-                .into_response();
-        }
-    };
+) -> Result<impl IntoResponse, LocalAPIError> {
+    let auth = get_auth(auth).await?;
 
     let c = MgmtClient::new(
         &agent_state.state.lock().await.config.mgmt_api_url,
         auth.username(),
         auth.password(),
-    ).unwrap();
+    )?;
 
     let details = match c.project_details(&project_name).await {
         Ok(p) => p,
         Err(MgmtError::Unauthorized) => {
-            return (
+            return Ok((
                 StatusCode::UNAUTHORIZED,
                 [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
             )
-                .into_response();
+                .into_response());
         }
         Err(e) => {
             error!("error getting project details for {project_name}: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR).into_response();
+            return Ok((StatusCode::INTERNAL_SERVER_ERROR).into_response());
         }
     };
 
     let mut resp = String::new();
 
     if !details.datasets.iter().any(|d| d.name == session_name) {
-        return (StatusCode::NOT_FOUND).into_response();
+        return Ok((StatusCode::NOT_FOUND).into_response());
     }
 
     resp += &format!(
@@ -233,62 +292,50 @@ async fn start_ingest_step2(
 
     let tpl = agent_state
         .jinja_env
-        .get_template("start_index_step3.html")
-        .unwrap();
+        .get_template("start_index_step3.html")?;
     let res_name = &agent_state.state.lock().await.config.resource_name;
-    (
+    Ok((
         [(header::CONTENT_TYPE, "text/html")],
-        tpl.render(context! { resource => res_name, session => session_name })
-            .unwrap(),
+        tpl.render(context! { resource => res_name, session => session_name })?,
     )
-        .into_response()
+        .into_response())
 }
 
 async fn start_ingest_step3(
     Path((project_name, session_name)): Path<(String, String)>,
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> impl IntoResponse {
-    let auth = match auth {
-        Ok(TypedHeader(auth)) => auth,
-        Err(e) => {
-            error!("error extracting authorization header: {e}");
-            return (
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
-            )
-                .into_response();
-        }
-    };
+) -> Result<impl IntoResponse, LocalAPIError> {
+    let auth = get_auth(auth).await?;
 
     let c = MgmtClient::new(
         &agent_state.state.lock().await.config.mgmt_api_url,
         auth.username(),
         auth.password(),
-    ).unwrap();
+    )?;
 
     let details = match c.project_details(&project_name).await {
         Ok(p) => p,
         Err(MgmtError::Unauthorized) => {
-            return (
+            return Ok((
                 StatusCode::UNAUTHORIZED,
                 [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
             )
-                .into_response();
+                .into_response());
         }
         Err(e) => {
             error!("error getting project details for {project_name}: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR).into_response();
+            return Ok((StatusCode::INTERNAL_SERVER_ERROR).into_response());
         }
     };
 
     let mut resp = String::new();
 
     if !details.datasets.iter().any(|d| d.name == session_name) {
-        return (StatusCode::NOT_FOUND).into_response();
+        return Ok((StatusCode::NOT_FOUND).into_response());
     }
 
-    let agent_token = agent_state.token_fetcher.fetch_token().await.unwrap();
+    let agent_token = agent_state.token_fetcher.fetch_token().await?;
 
     c.create_share(
         &project_name,
@@ -296,19 +343,18 @@ async fn start_ingest_step3(
         &agent_state.state.lock().await.config.resource_name,
         &agent_token,
     )
-    .await
-    .unwrap();
+    .await?;
 
     resp += "share created!";
 
-    resp.into_response()
+    Ok(resp.into_response())
 }
 
 pub async fn serve_local_web_api(
     state: Arc<Mutex<AgentState>>,
     listen_addr: &str,
     token_fetcher: TokenFetcher,
-) {
+) -> Result<(), LocalAPIError> {
     let app = Router::new()
         .route("/shares/foreground/", get(handler_shares_foreground))
         .route("/", get(serve_index_page))
@@ -322,6 +368,10 @@ pub async fn serve_local_web_api(
             post(start_ingest_step3),
         )
         .with_state(ApiState::new(&state, &Arc::new(token_fetcher)));
-    let listener = tokio::net::TcpListener::bind(listen_addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(listen_addr).await?;
+
+    #[allow(clippy::unwrap_used)] // infallible
     axum::serve(listener, app).await.unwrap();
+
+    Ok(())
 }

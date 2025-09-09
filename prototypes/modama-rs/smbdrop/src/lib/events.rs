@@ -219,7 +219,7 @@ async fn accept_agent_connection(
     let (_, server_connection) = stream.get_ref();
 
     let peer_certs = server_connection.peer_certificates().ok_or(AcceptError::NoCertificate)?;
-    let peer_cert = peer_certs.get(0).ok_or(AcceptError::NoCertificate)?;
+    let peer_cert = peer_certs.first().ok_or(AcceptError::NoCertificate)?;
 
     let agent_id = AgentId::from_cert(peer_cert)?;
 

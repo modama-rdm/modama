@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use modama_agent::{
     config::AgentConfig,
     platform::{ensure_mounted, umount_old_shares},

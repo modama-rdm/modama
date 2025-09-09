@@ -286,7 +286,7 @@ fn enroll_server(_args: &Cli, server_names: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn main() {
+fn main() -> Result<()> {
     init_logging();
 
     let args = Cli::parse();
@@ -299,5 +299,4 @@ fn main() {
             agent_name,
         } => enroll_agent(&args, agent_name, resource_name),
     }
-    .unwrap()
 }

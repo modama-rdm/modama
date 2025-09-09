@@ -622,7 +622,7 @@ impl ShareManager {
 
     async fn remove_system_user(&self, username: &str) -> Result<(), ShareError> {
         let smbpasswd_res = Command::new("smbpasswd")
-            .args(["-x", &username])
+            .args(["-x", username])
             .stdin(Stdio::null())
             .kill_on_drop(true)
             .output()
@@ -641,7 +641,7 @@ impl ShareManager {
         let userdel_res = Command::new("userdel")
             .args([
                 "-f", // force, even if there's a process from the user still running
-                &username,
+                username,
             ])
             .stdin(Stdio::null())
             .output()

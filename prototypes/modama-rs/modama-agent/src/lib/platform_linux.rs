@@ -56,7 +56,7 @@ pub async fn ensure_mounted(
     );
 
     if !target.exists() {
-        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&target)?;
     }
 
     info!("Mounting {} at {}", &source, &target.to_string_lossy());

@@ -59,3 +59,7 @@ widestring = { version = "1.1.0" }
 async-dns = "0.1.0"
 procfs = "0.16.0"
 nix = { version = "0.27.1", features = ["mount"] }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
