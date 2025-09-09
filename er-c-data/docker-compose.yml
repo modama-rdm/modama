@@ -131,6 +131,8 @@ services:
     build: './sssd'
     image: iffregistry.fz-juelich.de/weber/data-management-system/sssd:latest
     restart: always
+    tmpfs:
+      - /run
 
     volumes:
       - type: bind
