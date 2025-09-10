@@ -7,7 +7,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use hyper::{header, StatusCode};
+use hyper::StatusCode;
 use log::{error, info};
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
@@ -48,66 +48,71 @@ impl ApiState {
     }
 }
 
-async fn list_shares(State(state): State<ApiState>) -> impl IntoResponse {
-    let shares = state.share_manager.list_shares().await;
-    match shares {
-        Ok(shares) => Json(shares).into_response(),
-        Err(e) => {
-            error!("could not list shares: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(header::CONTENT_TYPE, "text/plain")],
-                "could not list shares: {e}",
-            )
-                .into_response()
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "status")]
 pub enum CreateShareResponse {
     #[serde(rename = "ok")]
     Ok { share: Share },
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "status")]
+pub enum ShareAPIErrorResponse {
     #[serde(rename = "error")]
     Error { msg: String },
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ShareAPIError {
+    #[error("share manager error: {0}")]
+    Manager(#[from] ShareError),
+}
+
+impl IntoResponse for ShareAPIError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::Manager(ShareError::ShareNotFound(share_id)) => {
+                error!("share '{share_id}' not found");
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(ShareAPIErrorResponse::Error {
+                        msg: format!("share '{share_id}' not found"),
+                    }),
+                )
+                    .into_response()
+            }
+            Self::Manager(err) => {
+                error!("internal error when creating share: {err}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ShareAPIErrorResponse::Error {
+                        msg: format!("error creating share: {err}"),
+                    }),
+                )
+                    .into_response()
+            }
+        }
+    }
+}
+
+async fn list_shares(State(state): State<ApiState>) -> Result<impl IntoResponse, ShareAPIError> {
+    let shares = state.share_manager.list_shares().await?;
+    Ok(Json(shares).into_response())
 }
 
 async fn create_share(
     State(state): State<ApiState>,
     Json(request): Json<CreateShareRequest>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ShareAPIError> {
     let dest_path = PathBuf::from(&request.dest_path);
     info!("creating share from request {request:?}");
-    match state
+    let share = state
         .share_manager
         .create_share(&dest_path, request.uid, request.gid, request.resource)
-        .await
-    {
-        Ok(share) => {
-            state.send_state_update().await;
-            info!("created share {share:?}");
-            (StatusCode::OK, Json(CreateShareResponse::Ok { share }))
-        }
-        Err(ShareError::ShareNotFound(share_id)) => {
-            error!("share '{share_id}' not found");
-            (
-                StatusCode::NOT_FOUND,
-                Json(CreateShareResponse::Error {
-                    msg: format!("share '{share_id}' not found"),
-                }),
-            )
-        }
-        Err(err) => {
-            error!("internal error when creating share: {err}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(CreateShareResponse::Error {
-                    msg: format!("error creating share: {err}"),
-                }),
-            )
-        }
-    }
+        .await?;
+    state.send_state_update().await;
+    info!("created share {share:?}");
+    Ok((StatusCode::OK, Json(CreateShareResponse::Ok { share })).into_response())
 }
 
 // FIXME: move to modama-common?
@@ -119,30 +124,16 @@ pub struct DeleteResponse {
 async fn delete_share(
     State(state): State<ApiState>,
     extract::Path(share_id): extract::Path<String>,
-) -> impl IntoResponse {
-    match state.share_manager.delete_share(&share_id).await {
-        Err(crate::share_manager::ShareError::ShareNotFound(_)) => (
-            StatusCode::NOT_FOUND,
-            Json(DeleteResponse {
-                status: "error".to_owned(),
-            }),
-        ),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(DeleteResponse {
-                status: "error".to_owned(),
-            }),
-        ),
-        Ok(_) => {
-            state.send_state_update().await;
-            (
-                StatusCode::OK,
-                Json(DeleteResponse {
-                    status: "ok".to_owned(),
-                }),
-            )
-        }
-    }
+) -> Result<impl IntoResponse, ShareAPIError> {
+    state.share_manager.delete_share(&share_id).await?;
+    state.send_state_update().await;
+    Ok((
+        StatusCode::OK,
+        Json(DeleteResponse {
+            status: "ok".to_owned(),
+        }),
+    )
+        .into_response())
 }
 
 pub async fn serve_smbdrop_api(api_state: ApiState, listen_addr: &str) -> AnyResult<()> {

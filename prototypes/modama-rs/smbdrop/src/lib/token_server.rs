@@ -25,9 +25,6 @@ use crate::{
 };
 
 #[derive(Clone)]
-struct TokenServerState {}
-
-#[derive(Clone)]
 struct ConnState {
     /// Agent ID - None if client authentication didn't succeed
     pub agent_id: Option<AgentId>,
