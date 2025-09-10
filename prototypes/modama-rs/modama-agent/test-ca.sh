@@ -1,7 +1,7 @@
 #!/bin/bash
 set -ex
 
-rm -r certs/
+rm -r certs/ || true
 
 cargo run -r --bin ca initialize-ca
 

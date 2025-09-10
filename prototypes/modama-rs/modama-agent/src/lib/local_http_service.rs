@@ -111,7 +111,7 @@ impl IntoResponse for LocalAPIError {
                 )
                     .into_response()
             }
-            LocalAPIError::Listen(error) => (
+            LocalAPIError::Listen(_error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [(header::CONTENT_TYPE, "text/plain")],
                 "internal server error",

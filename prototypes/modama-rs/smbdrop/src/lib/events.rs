@@ -97,7 +97,7 @@ async fn handle_ws_message(
             let state = { last_state.lock().await.clone() };
             let msg = update_msg_from_state(&state, agent_id).await;
             let json_msg = serde_json::to_string(&msg)?;
-            ws_stream.send(tungstenite::Message::Text(json_msg)).await?;
+            ws_stream.send(tungstenite::Message::Text(json_msg.into())).await?;
         }
     }
 
@@ -129,7 +129,7 @@ async fn handle_state_update(
 ) -> Result<(), HandlerError> {
     let msg = update_msg_from_state(state, agent_id).await;
     let json_msg = serde_json::to_string(&msg)?;
-    ws_stream.send(tungstenite::Message::Text(json_msg)).await?;
+    ws_stream.send(tungstenite::Message::Text(json_msg.into())).await?;
 
     Ok(())
 }
@@ -246,7 +246,7 @@ async fn accept_agent_connection(
         match e {
             HandlerError::WsError(tungstenite::Error::ConnectionClosed)
             | HandlerError::WsError(tungstenite::Error::Protocol(_))
-            | HandlerError::WsError(tungstenite::Error::Utf8) => (),
+            | HandlerError::WsError(tungstenite::Error::Utf8(_)) => (),
             err => error!("Error handling connection: {err}"),
         }
     }

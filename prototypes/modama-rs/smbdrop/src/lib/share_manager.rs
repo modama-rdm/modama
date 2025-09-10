@@ -1,6 +1,6 @@
 use log::{debug, error, info, warn};
 use modama_common::messages::Share;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, Rng};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -256,7 +256,7 @@ pub fn make_temporary_fname(path: &Path) -> Result<PathBuf, TempConfigError> {
         .to_str()
         .ok_or(TempConfigError::InvalidUnicode)?;
     loop {
-        let rnd: String = rand::thread_rng()
+        let rnd: String = rand::rng()
             .sample_iter(&Alphanumeric)
             .take(15)
             .map(char::from)
@@ -274,11 +274,11 @@ fn make_password() -> String {
                              abcdefghijklmnopqrstuvwxyz\
                              0123456789+/";
     const PASSWORD_LEN: usize = 32;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     (0..PASSWORD_LEN)
         .map(|_| {
-            let idx = rng.gen_range(0..CHARSET.len());
+            let idx = rng.random_range(0..CHARSET.len());
             CHARSET[idx] as char
         })
         .collect()

@@ -42,7 +42,7 @@ async fn accept_agent_connection(peer: SocketAddr, stream: TcpStream, acceptor: 
         match e {
             tungstenite::Error::ConnectionClosed
             | tungstenite::Error::Protocol(_)
-            | tungstenite::Error::Utf8 => (),
+            | tungstenite::Error::Utf8(_) => (),
             err => error!("Error handling connection: {err}"),
         }
     }
@@ -59,7 +59,7 @@ async fn handle_message(
             let msg = get_share_list().await;
             let json_msg = serde_json::to_string(&msg)?;
 
-            ws_stream.send(tungstenite::Message::Text(json_msg)).await?;
+            ws_stream.send(tungstenite::Message::Text(json_msg.into())).await?;
         }
     }
 
@@ -101,7 +101,7 @@ async fn handle_connection(
     let json_msg = serde_json::to_string(&msg).unwrap();
 
     ws_stream
-        .send(tungstenite::Message::Text(json_msg))
+        .send(tungstenite::Message::Text(json_msg.into()))
         .await
         .unwrap();
 

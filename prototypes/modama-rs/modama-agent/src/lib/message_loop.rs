@@ -100,7 +100,7 @@ pub async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientC
     loop {
         state.lock().await.connection = ConnectionState::Connecting;
         let (conn, _response) = match connect_async_tls_with_config(
-            &config.api_url,
+            &config.api_url.to_string(),
             None,
             false,
             Some(tokio_tungstenite::Connector::Rustls(Arc::clone(
@@ -113,7 +113,7 @@ pub async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientC
             Err(e) => {
                 let url = &config.api_url;
                 error!("Could not connect to {url} ({e}) reconnecting...");
-                error!("{}", e.to_string());
+                error!("{}", e);
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 continue;
             }

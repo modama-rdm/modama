@@ -1,16 +1,17 @@
-use std::{
-    fs::{create_dir_all, File, OpenOptions},
-    io::{Read, Write},
-    path::{Path, PathBuf},
-};
-#[cfg(target_os = "linux")]
-use std::os::unix::fs::OpenOptionsExt;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use modama_common::logging::init_logging;
 use rcgen::{
-    Certificate, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
-    KeyPair, PKCS_ED25519,
+    string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
+    ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, PKCS_ED25519,
+};
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
+use std::{
+    fs::{create_dir_all, File, OpenOptions},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    str::FromStr,
 };
 
 #[derive(Debug, Subcommand)]
@@ -46,7 +47,9 @@ impl NoopMode for OpenOptions {
 
 struct Ca {
     path_prefix: PathBuf,
-    cert: Certificate,
+    key_pair: KeyPair,
+    ca_cert_pem: String,
+    ca_params: CertificateParams,
 }
 
 impl Ca {
@@ -54,10 +57,13 @@ impl Ca {
     where
         P: Into<PathBuf>,
     {
-        let cert = Self::generate_ca_cert()?;
+        let (key_pair, cert) = Self::generate_ca_cert()?;
+
         Ok(Self {
             path_prefix: path_prefix.into(),
-            cert,
+            key_pair,
+            ca_cert_pem: cert.pem(),
+            ca_params: Self::ca_params()?,
         })
     }
 
@@ -82,13 +88,11 @@ impl Ca {
         opts.open(Self::get_cert_path(&prefix))?
             .read_to_end(&mut cert_pem)?;
 
-        let params = CertificateParams::from_ca_cert_pem(&String::from_utf8(cert_pem)?, key_pair)?;
-
-        let cert = Certificate::from_params(params)?;
-
         Ok(Self {
             path_prefix: prefix,
-            cert,
+            key_pair,
+            ca_cert_pem: String::from_utf8(cert_pem)?,
+            ca_params: Self::ca_params()?,
         })
     }
 
@@ -124,8 +128,9 @@ impl Ca {
         dir: &Path,
         name_prefix: &str,
         cert: &Certificate,
+        key_pair: &KeyPair,
     ) -> Result<()> {
-        let cert_signed_pem = cert.serialize_pem_with_signer(&self.cert)?;
+        let cert_signed_pem = cert.pem();
         let mut opts = File::options();
         opts.write(true).create_new(true).mode(0o600);
         create_dir_all(dir)?;
@@ -138,22 +143,22 @@ impl Ca {
         let pubkey_path = dir.join(format!("{name_prefix}.pub.pem"));
         opts.mode(0o644)
             .open(pubkey_path)?
-            .write_all(cert.get_key_pair().public_key_pem().as_bytes())?;
+            .write_all(key_pair.public_key_pem().as_bytes())?;
 
         let privkey_path = dir.join(format!("{name_prefix}.priv.pem"));
         opts.open(privkey_path)?
-            .write_all(cert.get_key_pair().serialize_pem().as_bytes())?;
+            .write_all(key_pair.serialize_pem().as_bytes())?;
 
         let chain_path = dir.join(format!("{name_prefix}.chain.pem"));
         let mut chain = opts.open(chain_path)?;
         chain.write_all(cert_signed_pem.as_bytes())?;
-        chain.write_all(self.cert.serialize_pem()?.as_bytes())?;
+        chain.write_all(self.ca_cert_pem.as_bytes())?;
 
         Ok(())
     }
 
     pub fn client_cert(&self, agent_name: &str, resource_name: &str) -> Result<Certificate> {
-        let mut params = CertificateParams::new(vec![]);
+        let mut params = CertificateParams::new(vec![])?;
         assert!(!agent_name.contains('@'));
         assert!(!agent_name.contains('/'));
         assert!(!resource_name.contains('@'));
@@ -161,66 +166,68 @@ impl Ca {
         let full_name: String = format!("{agent_name}@{resource_name}");
         // FIXME: instead of generating a key pair here, generate it on the
         // agent itself and only generate the final certificate from a CSR
-        let key_pair = KeyPair::generate(&PKCS_ED25519).context("generate client key pair")?;
-        params.key_pair = Some(key_pair);
+
+        let key_pair = KeyPair::generate_for(&PKCS_ED25519).context("generate client key pair")?;
         params.distinguished_name = DistinguishedName::new();
         params
             .distinguished_name
             .push(DnType::CommonName, full_name);
         params.is_ca = IsCa::NoCa;
-        params.alg = &PKCS_ED25519;
         // FIXME: constrain key usage?
         params.extended_key_usages = Vec::new();
         params
             .extended_key_usages
             .push(ExtendedKeyUsagePurpose::ClientAuth);
-        params.subject_alt_names.push(rcgen::SanType::URI(format!(
-            "x-modama-agent://{resource_name}#{agent_name}"
-        )));
-        let client_cert: Certificate = Certificate::from_params(params)?;
+        params
+            .subject_alt_names
+            .push(rcgen::SanType::URI(Ia5String::from_str(&format!(
+                "x-modama-agent://{resource_name}#{agent_name}"
+            ))?));
+        let client_cert = params.signed_by(&key_pair, &self.issuer())?;
 
         let mut opts = File::options();
         opts.write(true).create_new(true).mode(0o644);
         let resource_path = Self::get_client_certs_path(&self.path_prefix).join(resource_name);
         create_dir_all(&resource_path)?;
 
-        self.write_signed_cert_files(&resource_path, agent_name, &client_cert)?;
+        self.write_signed_cert_files(&resource_path, agent_name, &client_cert, &key_pair)?;
 
         Ok(client_cert)
     }
 
     pub fn server_cert(&self, server_names: &[String]) -> Result<Certificate> {
-        let mut params = CertificateParams::new(server_names);
+        let mut params = CertificateParams::new(server_names)?;
 
         // FIXME: instead of generating a key pair here, generate it on the
         // server system itself and only generate the final certificate from a
         // CSR
-        let key_pair = KeyPair::generate(&PKCS_ED25519).context("generate server key pair")?;
+        let key_pair = KeyPair::generate_for(&PKCS_ED25519).context("generate server key pair")?;
         let first_name = server_names.first().context("get first server name")?;
-        params.key_pair = Some(key_pair);
         params.distinguished_name = DistinguishedName::new();
         params
             .distinguished_name
             .push(DnType::CommonName, first_name);
         params.is_ca = IsCa::NoCa;
-        params.alg = &PKCS_ED25519;
         params.extended_key_usages = Vec::new();
         params
             .extended_key_usages
             .push(ExtendedKeyUsagePurpose::ServerAuth);
-        let server_cert: Certificate = Certificate::from_params(params)?;
+        let server_cert: Certificate = params.signed_by(&key_pair, &self.issuer())?;
         let server_certs_path = Self::get_server_certs_path(&self.path_prefix);
-        self.write_signed_cert_files(&server_certs_path, first_name, &server_cert)?;
+        self.write_signed_cert_files(&server_certs_path, first_name, &server_cert, &key_pair)?;
 
         Ok(server_cert)
     }
 
-    fn generate_ca_cert() -> Result<Certificate> {
-        let mut params = CertificateParams::new(vec![]);
-        let key_pair = KeyPair::generate(&PKCS_ED25519).context("generate key pair")?;
-        params.key_pair = Some(key_pair);
+    fn generate_ca_cert() -> Result<(KeyPair, Certificate)> {
+        let key_pair = KeyPair::generate_for(&PKCS_ED25519).context("generate key pair")?;
+        let cert = Self::ca_params()?.self_signed(&key_pair)?;
+        Ok((key_pair, cert))
+    }
+
+    fn ca_params() -> Result<CertificateParams> {
+        let mut params = CertificateParams::new(vec![])?;
         params.distinguished_name = DistinguishedName::new();
-        params.alg = &PKCS_ED25519;
         params
             .distinguished_name
             .push(DnType::CommonName, "modama CA root certificate");
@@ -231,14 +238,16 @@ impl Ca {
             ExtendedKeyUsagePurpose::ServerAuth,
             ExtendedKeyUsagePurpose::ClientAuth,
         ];
-        let ca_cert = Certificate::from_params(params).context("generate CA certificate")?;
-        Ok(ca_cert)
+        Ok(params)
+    }
+
+    fn issuer<'a>(&'a self) -> Issuer<'a, KeyPair> {
+        Issuer::from_params(&self.ca_params, &self.key_pair)
     }
 
     pub fn serialize_ca_to_files(&self) -> Result<()> {
-        let pubkey_serialized = self.cert.get_key_pair().public_key_pem();
-        let privkey_serialized = self.cert.get_key_pair().serialize_pem();
-        let ca_cert_serialized = self.cert.serialize_pem()?;
+        let pubkey_serialized = self.key_pair.public_key_pem();
+        let privkey_serialized = self.key_pair.serialize_pem();
 
         let ca_dir = Self::get_ca_path(&self.path_prefix);
         create_dir_all(ca_dir)?;
@@ -256,7 +265,7 @@ impl Ca {
         opts.mode(0o644)
             .open(Self::get_cert_path(&self.path_prefix))
             .context("create ca cert file")?
-            .write_all(ca_cert_serialized.as_bytes())?;
+            .write_all(self.ca_cert_pem.as_bytes())?;
 
         Ok(())
     }
