@@ -184,20 +184,7 @@ async fn serve_index_page(
 
     let c = MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password())?;
 
-    let projects = match c.list_projects().await {
-        Ok(p) => p,
-        Err(MgmtError::Unauthorized) => {
-            return Ok((
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
-            )
-                .into_response());
-        }
-        Err(e) => {
-            error!("error listing projects: {e}");
-            return Ok((StatusCode::INTERNAL_SERVER_ERROR).into_response());
-        }
-    };
+    let projects = c.list_projects().await?;
 
     result += "Projects:\n";
 
@@ -225,21 +212,7 @@ async fn start_ingest_step1(
         MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password())?
     };
 
-    let details = match c.project_details(&project_name).await {
-        Ok(p) => p,
-        Err(MgmtError::Unauthorized) => {
-            return Ok((
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
-            )
-                .into_response());
-        }
-        Err(e) => {
-            error!("error getting project details for {project_name}: {e}");
-            return Ok((StatusCode::INTERNAL_SERVER_ERROR).into_response());
-        }
-    };
-
+    let details = c.project_details(&project_name).await?;
     let mut resp = String::new();
 
     for d in &details.datasets {
@@ -263,21 +236,7 @@ async fn start_ingest_step2(
         auth.password(),
     )?;
 
-    let details = match c.project_details(&project_name).await {
-        Ok(p) => p,
-        Err(MgmtError::Unauthorized) => {
-            return Ok((
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
-            )
-                .into_response());
-        }
-        Err(e) => {
-            error!("error getting project details for {project_name}: {e}");
-            return Ok((StatusCode::INTERNAL_SERVER_ERROR).into_response());
-        }
-    };
-
+    let details = c.project_details(&project_name).await?;
     let mut resp = String::new();
 
     if !details.datasets.iter().any(|d| d.name == session_name) {
@@ -314,21 +273,7 @@ async fn start_ingest_step3(
         auth.password(),
     )?;
 
-    let details = match c.project_details(&project_name).await {
-        Ok(p) => p,
-        Err(MgmtError::Unauthorized) => {
-            return Ok((
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
-            )
-                .into_response());
-        }
-        Err(e) => {
-            error!("error getting project details for {project_name}: {e}");
-            return Ok((StatusCode::INTERNAL_SERVER_ERROR).into_response());
-        }
-    };
-
+    let details = c.project_details(&project_name).await?;
     let mut resp = String::new();
 
     if !details.datasets.iter().any(|d| d.name == session_name) {
