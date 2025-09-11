@@ -6,7 +6,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::{mount_manager::BindMount, share_manager::{make_temporary_fname, TempConfigError}};
+use crate::{mount::BindMount, share_manager::{make_temporary_fname, TempConfigError}};
 
 #[derive(thiserror::Error, Debug)]
 pub enum UpdateSharesError {

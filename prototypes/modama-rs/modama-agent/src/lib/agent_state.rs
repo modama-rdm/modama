@@ -58,8 +58,6 @@ where
 }
 
 
-
-
 #[derive(Debug)]
 pub struct AgentState {
     pub connection: ConnectionState,
@@ -85,4 +83,3 @@ impl AgentState {
         }
     }
 }
-

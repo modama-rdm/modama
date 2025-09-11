@@ -25,9 +25,7 @@ use tokio::{
 };
 
 use crate::{
-    mount_manager::{BindMount, CompoundMountError, MountError, MountManager, SetStateError},
-    process_manager::{PmCommand, SambaProcessManager},
-    samba_config::{SambaConfigManager, UpdateSharesError},
+    mount::{BindMount, CompoundMountError, MountError}, mount_manager::{LinuxMountBackend, MountManager, SetStateError}, process_manager::{ProcessManagerCommand, SambaProcessManager}, samba_config::{SambaConfigManager, UpdateSharesError}
 };
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -216,7 +214,7 @@ pub enum ShareError {
     UpdateShares(#[from] UpdateSharesError),
 
     #[error("could not reload samba: {0}")]
-    SambaError(#[from] SendError<PmCommand>),
+    SambaError(#[from] SendError<ProcessManagerCommand>),
 
     #[error("could not set smb password")]
     SmbpasswdError,
@@ -352,8 +350,8 @@ async fn get_path_re() -> &'static Regex {
 pub struct ShareManager {
     config_file: Arc<Mutex<ShareConfigFile>>,
     sm: SambaConfigManager,
-    mm: MountManager,
-    pm_tx: Option<Sender<PmCommand>>,
+    bind_mount_prefix: PathBuf,
+    pm_tx: Option<Sender<ProcessManagerCommand>>,
 }
 
 impl ShareManager {
@@ -364,14 +362,17 @@ impl ShareManager {
     ) -> Self {
         let config_file = Arc::new(Mutex::new(ShareConfigFile::new(shares_config)));
         let sm = SambaConfigManager::new(&samba_config_path, &bind_mount_prefix);
-        let mm = MountManager::new(&bind_mount_prefix);
 
         Self {
             config_file,
             pm_tx: None,
-            mm,
             sm,
+            bind_mount_prefix,
         }
+    }
+
+    fn mm(&self) -> MountManager {
+        MountManager::new(&self.bind_mount_prefix, LinuxMountBackend::new())
     }
 
     pub async fn start(&mut self) -> Result<(), ShareError> {
@@ -381,10 +382,10 @@ impl ShareManager {
 
         let failed_mounts: HashSet<BindMount> = match self.update_mounts(&state).await {
             Ok(_) => HashSet::default(),
-            Err(SetStateError::MountError(CompoundMountError::Error(mounts))) => {
+            Err(SetStateError::MountError(CompoundMountError::MultiFailure(mounts))) => {
                 mounts.iter().cloned().collect()
             }
-            Err(e @ SetStateError::ProcError(_)) => {
+            Err(e @ SetStateError::BackendError(_)) => {
                 return Err(ShareError::StateError(e));
             }
         };
@@ -412,7 +413,7 @@ impl ShareManager {
     pub async fn reload(&self) -> Result<(), ShareError> {
         if let Some(ref pm_tx) = self.pm_tx {
             pm_tx
-                .send(PmCommand::Reload)
+                .send(ProcessManagerCommand::Reload)
                 .await
                 .map_err(|e| ShareError::ProcessManagerError(e.to_string()))?;
             Ok(())
@@ -426,7 +427,7 @@ impl ShareManager {
     pub async fn stop(&self) -> Result<(), ShareError> {
         if let Some(ref pm_tx) = self.pm_tx {
             pm_tx
-                .send(PmCommand::Stop)
+                .send(ProcessManagerCommand::Stop)
                 .await
                 .map_err(|e| ShareError::ProcessManagerError(e.to_string()))?;
             Ok(())
@@ -511,10 +512,10 @@ impl ShareManager {
         debug!("create_share: updating mounts...");
         let failed_mounts: HashSet<BindMount> = match self.update_mounts(&state).await {
             Ok(_) => HashSet::default(),
-            Err(SetStateError::MountError(CompoundMountError::Error(mounts))) => {
+            Err(SetStateError::MountError(CompoundMountError::MultiFailure(mounts))) => {
                 mounts.iter().cloned().collect()
             }
-            Err(e @ SetStateError::ProcError(_)) => {
+            Err(e @ SetStateError::BackendError(_)) => {
                 return Err(ShareError::StateError(e));
             }
         };
@@ -522,7 +523,7 @@ impl ShareManager {
         self.update_samba(&state, &failed_mounts).await?;
         self.reload().await?;
 
-        let this_mount = BindMount::from_share(&share, self.mm.get_prefix());
+        let this_mount = BindMount::from_share(&share, self.mm().get_prefix());
         if failed_mounts.contains(&this_mount) {
             return Err(ShareError::OtherMountError);
         }
@@ -661,8 +662,8 @@ impl ShareManager {
     }
 
     async fn share_preflight_checks(&self, share: &Share) -> Result<(), ShareError> {
-        let mount = BindMount::from_share(share, self.mm.get_prefix());
-        self.mm.preflight(&mount)?;
+        let mount = BindMount::from_share(share, self.mm().get_prefix());
+        self.mm().preflight(&mount)?;
 
         Ok(())
     }
@@ -671,9 +672,9 @@ impl ShareManager {
         let desired_mounts: HashSet<BindMount> = config
             .shares
             .values()
-            .map(|share| BindMount::from_share(share, self.mm.get_prefix()))
+            .map(|share| BindMount::from_share(share, self.mm().get_prefix()))
             .collect();
-        self.mm.set_state(desired_mounts)?;
+        self.mm().set_state(desired_mounts)?;
 
         Ok(())
     }

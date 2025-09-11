@@ -5,84 +5,105 @@ use std::{
 };
 
 use anyhow::Result;
-use modama_common::messages::Share;
 use nix::mount::MsFlags;
-use procfs::{process::Process, ProcError};
+use procfs::process::Process;
 
-use crate::helpers::{have_trailing_slash, keep_immutable, strip_trailing_slash, ImmutableError};
-
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
-pub struct BindMount {
-    pub mount_source: PathBuf,
-    pub mount_point: PathBuf,
-}
-
-impl BindMount {
-    pub fn from_share(share: &Share, bind_mount_prefix: &Path) -> Self {
-        let mount_point = bind_mount_prefix.join("shares").join(&share.share_id);
-        BindMount {
-            mount_source: share.get_dest_path(),
-            mount_point,
-        }
-    }
-}
+use crate::{
+    helpers::{have_trailing_slash, keep_immutable, strip_trailing_slash},
+    mount::{BindMount, CompoundMountError, MountBackend, MountBackendError},
+};
 
 #[derive(Clone, Debug)]
-pub struct MountManager {
-    path_prefix: PathBuf,
-}
+pub struct LinuxMountBackend {}
 
-#[derive(thiserror::Error, Debug)]
-pub enum CompoundMountError {
-    #[error("one or more mounts failed")]
-    Error(Vec<BindMount>),
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum MountError {
-    #[error("pre-mount checks failed: {0}")]
-    Preflight(String),
-    #[error("mounting failed: {0}")]
-    Error(String),
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum SetStateError {
-    #[error("error getting current mounts: {0}")]
-    ProcError(#[from] ProcError),
-
-    #[error("setting state failed: {0}")]
-    MountError(#[from] CompoundMountError),
-}
-
-impl From<ImmutableError> for MountError {
-    fn from(value: ImmutableError) -> Self {
-        MountError::Preflight(format!("immutable error: {}", value))
+impl LinuxMountBackend {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
-impl MountManager {
-    pub fn new(path_prefix: &Path) -> Self {
-        Self {
-            path_prefix: path_prefix.to_owned(),
+impl Default for LinuxMountBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MountBackend for LinuxMountBackend {
+    fn mount(&self, mount: &BindMount) -> std::result::Result<(), MountBackendError> {
+        self.preflight(mount)?;
+        // 0) Pre-flight checks: make sure the source is a directory, and it
+        //    stays this way. We do this here by setting the immutable flag, and
+        //    keeping it until after the mount finished successfully:
+        // if we do `chattr +i /some/symlink/` (with a trailing slash),  we
+        // actually _follow_ the symlink, and set the link target immutable.
+        // Can't have that...
+        let src_path = strip_trailing_slash(&mount.mount_source);
+
+        let _guard =
+            keep_immutable(&src_path).map_err(|e| MountBackendError::Preflight(e.to_string()))?;
+        if src_path.is_symlink() || !src_path.is_dir() {
+            Err(MountBackendError::Preflight(format!(
+                "source path `{src_path:?}` is not a directory"
+            )))?;
         }
+        if !mount.mount_point.exists() {
+            if let Err(e) = create_dir_all(&mount.mount_point) {
+                Err(MountBackendError::Preflight(format!(
+                    "could not create mount point `{:?}`: {e}",
+                    &mount.mount_point
+                )))?;
+            }
+        }
+
+        nix::mount::mount::<Path, Path, str, str>(
+            Some(&src_path),
+            &mount.mount_point,
+            None,
+            MsFlags::MS_BIND,
+            None,
+        )
+        .map_err(|e| MountBackendError::Mount(Box::new(e)))
     }
 
-    pub fn get_prefix(&self) -> &Path {
-        &self.path_prefix
+    /// Pre-flight check that doesn't set the immutable flag. Some code is
+    /// duplicated in `mount_single`, where we make sure the given source path
+    /// is not modified concurrently.
+    fn preflight(&self, mount: &BindMount) -> Result<(), MountBackendError> {
+        let src_path = strip_trailing_slash(&mount.mount_source);
+        // if we do `chattr +i /some/symlink/` at some point (with a trailing
+        // slash),  we actually _follow_ the symlink, and set the link target
+        // immutable.  Can't have that... (paranoid, as we remove the trailing
+        // slash above)
+        if have_trailing_slash(&src_path) {
+            Err(MountBackendError::Preflight(format!(
+                "source path `{src_path:?}` has trailing slash"
+            )))?;
+        }
+        // make sure the source path is a directory
+        if src_path.is_symlink() || !src_path.is_dir() {
+            Err(MountBackendError::Preflight(format!(
+                "source path `{src_path:?}` is not a directory"
+            )))?;
+        }
+
+        Ok(())
     }
 
-    /// Reconcile state such that the given `desired_mounts` are mounted, and other
-    /// mounts in the prefix are umounted.
-    pub fn set_state(&self, desired_mounts: HashSet<BindMount>) -> Result<(), SetStateError> {
-        let current_mounts = Process::myself()?.mountinfo()?;
+    fn umount(&self, mount_point: &Path) -> std::result::Result<(), MountBackendError> {
+        nix::mount::umount(mount_point).map_err(|e| MountBackendError::Umount(Box::new(e)))
+    }
 
+    fn list_mounts(&self, path_prefix: &Path) -> Result<HashSet<BindMount>, MountBackendError> {
+        let current_mounts = Process::myself()
+            .map_err(|e| MountBackendError::List(Box::new(e)))?
+            .mountinfo()
+            .map_err(|e| MountBackendError::List(Box::new(e)))?;
         let active_mounts: HashSet<BindMount> = current_mounts
             .into_iter()
             .filter_map(|mi| {
                 if let Some(ms) = mi.mount_source {
                     let ms_path = PathBuf::from(ms);
-                    if ms_path.starts_with(&self.path_prefix) {
+                    if ms_path.starts_with(path_prefix) {
                         Some(BindMount {
                             mount_source: ms_path.canonicalize().unwrap_or(ms_path),
                             mount_point: mi.mount_point.canonicalize().unwrap_or(mi.mount_point),
@@ -95,7 +116,41 @@ impl MountManager {
                 }
             })
             .collect();
+        Ok(active_mounts)
+    }
+}
 
+#[derive(thiserror::Error, Debug)]
+pub enum SetStateError {
+    #[error("mount backend error: {0}")]
+    BackendError(#[from] MountBackendError),
+
+    #[error("setting state failed: {0}")]
+    MountError(#[from] CompoundMountError),
+}
+
+#[derive(Debug)]
+pub struct MountManager {
+    path_prefix: PathBuf,
+    backend: Box<dyn MountBackend>,
+}
+
+impl MountManager {
+    pub fn new<B: MountBackend + 'static>(path_prefix: &Path, backend: B) -> Self {
+        Self {
+            path_prefix: path_prefix.to_owned(),
+            backend: Box::new(backend),
+        }
+    }
+
+    pub fn get_prefix(&self) -> &Path {
+        &self.path_prefix
+    }
+
+    /// Reconcile state such that the given `desired_mounts` are mounted, and other
+    /// mounts in the prefix are umounted.
+    pub fn set_state(&self, desired_mounts: HashSet<BindMount>) -> Result<(), SetStateError> {
+        let active_mounts = self.backend.list_mounts(&self.path_prefix)?;
         let to_umount = active_mounts.difference(&desired_mounts);
         let to_mount = desired_mounts.difference(&active_mounts);
 
@@ -110,6 +165,10 @@ impl MountManager {
         Ok(())
     }
 
+    pub fn preflight(&self, mount: &BindMount) -> Result<(), SetStateError> {
+        Ok(self.backend.preflight(mount)?)
+    }
+
     fn umount<'a>(
         &self,
         bind_mounts: impl Iterator<Item = &'a BindMount>,
@@ -117,7 +176,7 @@ impl MountManager {
         // TODO: can probably share some code with `mount` below...
         let failed_mounts: Vec<BindMount> = bind_mounts
             .filter(|bm| {
-                if let Err(e) = nix::mount::umount(&bm.mount_point) {
+                if let Err(e) = self.backend.umount(&bm.mount_point) {
                     log::error!("umount of {:?} failed: {e}", &bm.mount_point);
                     true
                 } else {
@@ -129,68 +188,7 @@ impl MountManager {
         if failed_mounts.is_empty() {
             Ok(())
         } else {
-            Err(CompoundMountError::Error(failed_mounts))
-        }
-    }
-
-    /// Pre-flight check that doesn't set the immutable flag. Some code is
-    /// duplicated in `mount_single`, where we make sure the given source path
-    /// is not modified concurrently.
-    pub fn preflight(&self, mount: &BindMount) -> Result<(), MountError> {
-        let src_path = strip_trailing_slash(&mount.mount_source);
-        // if we do `chattr +i /some/symlink/` at some point (with a trailing
-        // slash),  we actually _follow_ the symlink, and set the link target
-        // immutable.  Can't have that... (paranoid, as we remove the trailing
-        // slash above)
-        if have_trailing_slash(&src_path) {
-            Err(MountError::Preflight(format!(
-                "source path `{src_path:?}` has trailing slash"
-            )))?;
-        }
-        // make sure the source path is a directory
-        if src_path.is_symlink() || !src_path.is_dir() {
-            Err(MountError::Preflight(format!(
-                "source path `{src_path:?}` is not a directory"
-            )))?;
-        }
-
-        Ok(())
-    }
-
-    fn mount_single(&self, mount: &BindMount) -> Result<(), MountError> {
-        self.preflight(mount)?;
-        // 0) Pre-flight checks: make sure the source is a directory, and it
-        //    stays this way. We do this here by setting the immutable flag, and
-        //    keeping it until after the mount finished successfully:
-        // if we do `chattr +i /some/symlink/` (with a trailing slash),  we
-        // actually _follow_ the symlink, and set the link target immutable.
-        // Can't have that...
-        let src_path = strip_trailing_slash(&mount.mount_source);
-
-        let _guard = keep_immutable(&src_path)?;
-        if src_path.is_symlink() || !src_path.is_dir() {
-            Err(MountError::Preflight(format!(
-                "source path `{src_path:?}` is not a directory"
-            )))?;
-        }
-        if !mount.mount_point.exists() {
-            if let Err(e) = create_dir_all(&mount.mount_point) {
-                Err(MountError::Preflight(format!(
-                    "could not create mount point `{:?}`: {e}",
-                    &mount.mount_point
-                )))?;
-            }
-        }
-        if let Err(e) = nix::mount::mount::<PathBuf, Path, str, str>(
-            Some(&src_path),
-            &mount.mount_point,
-            None,
-            MsFlags::MS_BIND,
-            None,
-        ) {
-            Err(MountError::Error(e.to_string()))
-        } else {
-            Ok(())
+            Err(CompoundMountError::MultiFailure(failed_mounts))
         }
     }
 
@@ -200,7 +198,7 @@ impl MountManager {
     ) -> Result<(), CompoundMountError> {
         let failed_mounts: Vec<BindMount> = bind_mounts
             .filter(|bm| {
-                if let Err(e) = self.mount_single(bm) {
+                if let Err(e) = self.backend.mount(bm) {
                     log::error!(
                         "bind mount from {:?} to {:?} failed: {e}",
                         &bm.mount_source,
@@ -216,7 +214,61 @@ impl MountManager {
         if failed_mounts.is_empty() {
             Ok(())
         } else {
-            Err(CompoundMountError::Error(failed_mounts))
+            Err(CompoundMountError::MultiFailure(failed_mounts))
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        collections::HashSet,
+        path::{Path, PathBuf},
+        str::FromStr,
+    };
+
+    use crate::{
+        mount::{BindMount, MountBackend, MountBackendError},
+        mount_manager::MountManager,
+    };
+
+    #[derive(Clone, Debug)]
+    struct EmptyMountBackend {}
+
+    impl MountBackend for EmptyMountBackend {
+        fn mount(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
+            Ok(())
+        }
+
+        fn umount(&self, _mount_point: &Path) -> Result<(), MountBackendError> {
+            Ok(())
+        }
+
+        fn list_mounts(
+            &self,
+            _path_prefix: &Path,
+        ) -> Result<HashSet<BindMount>, MountBackendError> {
+            Ok(HashSet::new())
+        }
+
+        fn preflight(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
+            Ok(())
+        }
+    }
+
+    #[allow(clippy::unwrap_used)]
+    #[test]
+    fn test_happy_case() {
+        let backend = EmptyMountBackend {};
+        let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
+        assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
+
+        let mut desired_mounts = HashSet::new();
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/").unwrap(),
+            mount_point: PathBuf::from_str("/run/modama/a").unwrap(),
+        });
+
+        mm.set_state(desired_mounts).unwrap();
     }
 }

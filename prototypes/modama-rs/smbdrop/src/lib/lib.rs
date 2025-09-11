@@ -7,3 +7,4 @@ pub mod samba_config;
 pub mod server;
 pub mod share_manager;
 pub mod token_server;
+pub mod mount;

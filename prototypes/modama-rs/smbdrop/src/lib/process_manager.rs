@@ -16,7 +16,7 @@ pub struct SambaProcessManager {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum PmCommand {
+pub enum ProcessManagerCommand {
     Reload,
     Stop,
 }
@@ -38,7 +38,7 @@ pub enum PmCommandOutcome {
 
 async fn handle_pm_command(
     mut pm: SambaProcessManager,
-    cmd: &Option<PmCommand>,
+    cmd: &Option<ProcessManagerCommand>,
 ) -> Result<SambaProcessManager, PmCommandOutcome> {
     match cmd {
         None => {
@@ -46,12 +46,12 @@ async fn handle_pm_command(
             pm.stop().await?;
             Err(PmCommandOutcome::Stopping)
         }
-        Some(PmCommand::Reload) => {
+        Some(ProcessManagerCommand::Reload) => {
             info!("reloading child process...");
             pm.reload().await?;
             Ok(pm)
         }
-        Some(PmCommand::Stop) => {
+        Some(ProcessManagerCommand::Stop) => {
             pm.stop().await?;
             Err(PmCommandOutcome::Stopping)
         }
@@ -61,8 +61,8 @@ async fn handle_pm_command(
 impl SambaProcessManager {
     /// Start the samba process in the background and keep restarting.
     /// Reload or stop the process by sending commands to the channel that is returned.
-    pub async fn start_in_background(debug: bool) -> mpsc::Sender<PmCommand> {
-        let (tx, mut rx) = mpsc::channel::<PmCommand>(16);
+    pub async fn start_in_background(debug: bool) -> mpsc::Sender<ProcessManagerCommand> {
+        let (tx, mut rx) = mpsc::channel::<ProcessManagerCommand>(16);
         tokio::spawn(async move {
             'outer: loop {
                 let mut pm = match Self::start(debug).await {
