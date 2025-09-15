@@ -219,6 +219,7 @@ impl MountManager {
     }
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod test {
     use std::{
@@ -228,15 +229,159 @@ mod test {
     };
 
     use crate::{
-        mount::{BindMount, MountBackend, MountBackendError},
-        mount_manager::MountManager,
+        mount::{BindMount, CompoundMountError, MountBackend, MountBackendError},
+        mount_manager::{MountManager, SetStateError},
     };
 
     #[derive(Clone, Debug)]
-    struct EmptyMountBackend {}
+    struct MaybeFailMountBackend {}
 
-    impl MountBackend for EmptyMountBackend {
-        fn mount(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
+    #[derive(thiserror::Error, Debug)]
+    enum FakeError {
+        #[error("stuff")]
+        Stuff,
+    }
+
+    // fails for mounts with mount_source == /fail/, in mount/umount
+    impl MountBackend for MaybeFailMountBackend {
+        fn mount(&self, mount: &BindMount) -> Result<(), MountBackendError> {
+            self.preflight(mount)?;
+            if mount.mount_source.to_str().unwrap() == "/fail/" {
+                Err(MountBackendError::Mount(Box::new(FakeError::Stuff)))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn umount(&self, mount_point: &Path) -> Result<(), MountBackendError> {
+            if mount_point.to_str().unwrap() == "/fail/" {
+                Err(MountBackendError::Mount(Box::new(FakeError::Stuff)))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn list_mounts(
+            &self,
+            _path_prefix: &Path,
+        ) -> Result<HashSet<BindMount>, MountBackendError> {
+            let mut existing_mounts = HashSet::new();
+            existing_mounts.insert(BindMount {
+                mount_source: PathBuf::from_str("/sauce/1/").unwrap(),
+                mount_point: PathBuf::from_str("/fail/").unwrap(),
+            });
+            existing_mounts.insert(BindMount {
+                mount_source: PathBuf::from_str("/sauce/2/").unwrap(),
+                mount_point: PathBuf::from_str("/success/").unwrap(),
+            });
+            Ok(existing_mounts)
+        }
+
+        fn preflight(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_happy_case() {
+        let backend = MaybeFailMountBackend {};
+        let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
+        assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
+
+        let mut desired_mounts = HashSet::new();
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/").unwrap(),
+            mount_point: PathBuf::from_str("/run/modama/a").unwrap(),
+        });
+        // keep the pre-existing mounts:
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/1/").unwrap(),
+            mount_point: PathBuf::from_str("/fail/").unwrap(),
+        });
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/2/").unwrap(),
+            mount_point: PathBuf::from_str("/success/").unwrap(),
+        });
+
+        mm.set_state(desired_mounts).unwrap();
+    }
+
+    #[test]
+    fn test_noop_case() {
+        let backend = MaybeFailMountBackend {};
+        let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
+        assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
+
+        let mut desired_mounts = HashSet::new();
+        // only the pre-existing mount:
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/1/").unwrap(),
+            mount_point: PathBuf::from_str("/fail/").unwrap(),
+        });
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/2/").unwrap(),
+            mount_point: PathBuf::from_str("/success/").unwrap(),
+        });
+        mm.set_state(desired_mounts).unwrap();
+    }
+
+    #[test]
+    fn test_umount_success() {
+        let backend = MaybeFailMountBackend {};
+        let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
+        assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
+
+        let mut desired_mounts = HashSet::new();
+        // only keep the fail mount:
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/1/").unwrap(),
+            mount_point: PathBuf::from_str("/fail/").unwrap(),
+        });
+        mm.set_state(desired_mounts).unwrap();
+    }
+
+
+    #[test]
+    fn test_mount_failed() {
+        let backend = MaybeFailMountBackend {};
+        let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
+        assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
+
+        let mut desired_mounts = HashSet::new();
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/fail/").unwrap(),
+            mount_point: PathBuf::from_str("/run/modama/a").unwrap(),
+        });
+        // keep the existing mount:
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/1/").unwrap(),
+            mount_point: PathBuf::from_str("/fail/").unwrap(),
+        });
+
+        assert!(mm.set_state(desired_mounts).is_err());
+    }
+
+    #[test]
+    fn test_umount_failed() {
+        let backend = MaybeFailMountBackend {};
+        let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
+        assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
+
+        let mut desired_mounts = HashSet::new();
+        desired_mounts.insert(BindMount {
+            mount_source: PathBuf::from_str("/sauce/").unwrap(),
+            mount_point: PathBuf::from_str("/fail/").unwrap(),
+        });
+
+        assert!(mm.set_state(HashSet::new()).is_err());
+    }
+
+    #[derive(Clone, Debug)]
+    struct PreflightFailMountBackend {}
+
+    impl MountBackend for PreflightFailMountBackend {
+        fn mount(&self, mount: &BindMount) -> Result<(), MountBackendError> {
+            self.preflight(mount)?;
             Ok(())
         }
 
@@ -251,24 +396,48 @@ mod test {
             Ok(HashSet::new())
         }
 
-        fn preflight(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
-            Ok(())
+        fn preflight(&self, mount: &BindMount) -> Result<(), MountBackendError> {
+            if mount.mount_source.to_str().unwrap() == "/fail/" {
+                Err(MountBackendError::Preflight(
+                    "preconditions not met".to_owned(),
+                ))
+            } else {
+                Ok(())
+            }
         }
     }
 
-    #[allow(clippy::unwrap_used)]
     #[test]
-    fn test_happy_case() {
-        let backend = EmptyMountBackend {};
+    fn test_preflight_failure() {
+        let backend = PreflightFailMountBackend {};
         let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
         assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
 
         let mut desired_mounts = HashSet::new();
-        desired_mounts.insert(BindMount {
-            mount_source: PathBuf::from_str("/sauce/").unwrap(),
+        let bm_fail = BindMount {
+            mount_source: PathBuf::from_str("/fail/").unwrap(),
             mount_point: PathBuf::from_str("/run/modama/a").unwrap(),
-        });
+        };
+        desired_mounts.insert(bm_fail.clone());
+        let bm_succ = BindMount {
+            mount_source: PathBuf::from_str("/succeed/").unwrap(),
+            mount_point: PathBuf::from_str("/run/modama/b").unwrap(),
+        };
+        desired_mounts.insert(bm_succ.clone());
 
-        mm.set_state(desired_mounts).unwrap();
+        // explicit preflight check:
+        assert!(mm.preflight(&bm_fail).is_err());
+
+        // `mount` should also do a preflight check; although it depends on the implementation.
+        // here we test that the requested mount is in the list of failed mounts:
+        // via set_state -> mount -> preflight:
+        let res = mm.set_state(desired_mounts);
+        match res {
+            Err(SetStateError::MountError(CompoundMountError::MultiFailure(failed_mounts))) => {
+                // bm_succ is not in here:
+                assert_eq!(vec![bm_fail], failed_mounts);
+            }
+            x => panic!("should not happen: {x:?}"),
+        }
     }
 }

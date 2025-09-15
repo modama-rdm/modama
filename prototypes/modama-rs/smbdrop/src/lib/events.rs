@@ -2,11 +2,11 @@ use std::{
     collections::HashSet,
     io,
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
 
-use crate::{cert_helpers::load_tls_config, share_manager::SmbDropState};
+use crate::share_manager::SmbDropState;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
@@ -14,6 +14,7 @@ use modama_common::{
     cert_helpers::CertHelperError,
     messages::{EventChannelMessage, EventChannelRequests, Share},
 };
+use rustls::ServerConfig;
 use serde::{Deserialize, Serialize};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -154,15 +155,12 @@ fn share_list_from_state(state: &EventSystemState, agent_id: &AgentId) -> Vec<Sh
 /// 2) Send out state updates via the websocket as they come in from the
 ///    internal broadcast channel
 async fn handle_connection(
-    peer: SocketAddr,
     stream: TlsStream<TcpStream>,
     mut state_updates_rx: broadcast::Receiver<SmbDropState>,
     last_state: Arc<Mutex<EventSystemState>>,
     agent_id: AgentId,
 ) -> Result<(), HandlerError> {
     let mut ws_stream = accept_async(stream).await?;
-
-    info!("New connection: {}", peer);
 
     loop {
         select! {
@@ -223,7 +221,7 @@ async fn accept_agent_connection(
 
     let agent_id = AgentId::from_cert(peer_cert)?;
 
-    info!("agent id: {agent_id:?}");
+    info!("connection from agent id: {agent_id:?} @ {peer}");
 
     // update connected agents and broadcast a state update
     {
@@ -235,7 +233,6 @@ async fn accept_agent_connection(
     let conn_last_state = Arc::clone(&last_state);
 
     if let Err(e) = handle_connection(
-        peer,
         stream,
         state_updates_rx,
         conn_last_state,
@@ -272,16 +269,13 @@ async fn accept_agent_connection(
 /// returned broadcast `Sender` to update the state when it changes.
 pub async fn start_event_server(
     listen_addr: &str,
-    ca_cert: &Path,
-    chain: &Path,
-    privkey: &Path,
+    tls_config: ServerConfig,
     state: &SmbDropState,
 ) -> Result<broadcast::Sender<SmbDropState>, ServerStartError> {
     let state = EventSystemState {
         inner_state: state.clone(),
         connected_agents: HashSet::new(),
     };
-    let config = load_tls_config(ca_cert, chain, privkey, true)?;
     let (tx, mut rx) = broadcast::channel::<SmbDropState>(16);
 
     // the state we have seen last, which will be sent to newly connecting agents:
@@ -305,7 +299,7 @@ pub async fn start_event_server(
         error!("listen error: {e}");
         ServerStartError::ListenError
     })?;
-    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
     let moved_last_state = Arc::clone(&last_state);
     tokio::spawn(async move {
@@ -327,4 +321,13 @@ pub async fn start_event_server(
     });
 
     Ok(result_tx)
+}
+
+
+#[cfg(test)]
+mod test {
+    #[tokio::test]
+    async fn test_websocket_api() {
+        
+    }
 }
