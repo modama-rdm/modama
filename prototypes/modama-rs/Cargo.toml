@@ -38,3 +38,6 @@ procfs = "0.18.0"
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
