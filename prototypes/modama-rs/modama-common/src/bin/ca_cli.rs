@@ -33,7 +33,8 @@ fn initialize_ca(_args: &Cli) -> Result<()> {
 /// Enroll the given agent for the given resource by creating a client certificate.
 fn enroll_agent(_args: &Cli, agent_name: &str, resource_name: &str) -> Result<()> {
     let ca = Ca::load(CERT_PATH)?;
-    ca.client_cert(agent_name, resource_name)?;
+    let key_and_cert = ca.client_cert(agent_name, resource_name)?;
+    ca.save_client_cert(agent_name, resource_name, &key_and_cert)?;
 
     Ok(())
 }
@@ -41,7 +42,8 @@ fn enroll_agent(_args: &Cli, agent_name: &str, resource_name: &str) -> Result<()
 /// Enroll a server by creating a certificate.
 fn enroll_server(_args: &Cli, server_names: &[String]) -> Result<()> {
     let ca = Ca::load(CERT_PATH)?;
-    ca.server_cert(server_names)?;
+    let key_and_cert = ca.server_cert(server_names)?;
+    ca.save_server_cert(server_names, &key_and_cert)?;
 
     Ok(())
 }

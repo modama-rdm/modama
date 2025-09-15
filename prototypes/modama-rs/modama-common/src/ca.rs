@@ -2,7 +2,8 @@ use std::{
     fs::{create_dir_all, File},
     io::{Read, Write},
     path::{Path, PathBuf},
-    str::FromStr, string::FromUtf8Error,
+    str::FromStr,
+    string::FromUtf8Error,
 };
 
 #[cfg(target_os = "linux")]
@@ -14,7 +15,6 @@ impl NoopMode for OpenOptions {
         self
     }
 }
-
 
 use rcgen::{
     string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
@@ -41,6 +41,11 @@ pub struct Ca {
     key_pair: KeyPair,
     ca_cert_pem: String,
     ca_params: CertificateParams,
+}
+
+pub struct KeyPairAndCert {
+    pub cert: Certificate,
+    pub key_pair: KeyPair,
 }
 
 impl Ca {
@@ -152,12 +157,14 @@ impl Ca {
         &self,
         agent_name: &str,
         resource_name: &str,
-    ) -> Result<Certificate, CAError> {
+    ) -> Result<KeyPairAndCert, CAError> {
         let mut params = CertificateParams::new(vec![])?;
         assert!(!agent_name.contains('@'));
         assert!(!agent_name.contains('/'));
+        assert!(!agent_name.contains('#'));
         assert!(!resource_name.contains('@'));
         assert!(!resource_name.contains('/'));
+        assert!(!resource_name.contains('#'));
         let full_name: String = format!("{agent_name}@{resource_name}");
         // FIXME: instead of generating a key pair here, generate it on the
         // agent itself and only generate the final certificate from a CSR
@@ -180,17 +187,23 @@ impl Ca {
             ))?));
         let client_cert = params.signed_by(&key_pair, &self.issuer())?;
 
-        let mut opts = File::options();
-        opts.write(true).create_new(true).mode(0o644);
+        Ok(KeyPairAndCert { cert: client_cert, key_pair })
+    }
+
+    pub fn save_client_cert(
+        &self,
+        agent_name: &str,
+        resource_name: &str,
+        key_and_cert: &KeyPairAndCert,
+    ) -> Result<(), CAError> {
         let resource_path = Self::get_client_certs_path(&self.path_prefix).join(resource_name);
         create_dir_all(&resource_path)?;
 
-        self.write_signed_cert_files(&resource_path, agent_name, &client_cert, &key_pair)?;
-
-        Ok(client_cert)
+        self.write_signed_cert_files(&resource_path, agent_name, &key_and_cert.cert, &key_and_cert.key_pair)?;
+        Ok(())
     }
 
-    pub fn server_cert(&self, server_names: &[String]) -> Result<Certificate, CAError> {
+    pub fn server_cert(&self, server_names: &[String]) -> Result<KeyPairAndCert, CAError> {
         let mut params = CertificateParams::new(server_names)?;
 
         // FIXME: instead of generating a key pair here, generate it on the
@@ -210,10 +223,31 @@ impl Ca {
             .extended_key_usages
             .push(ExtendedKeyUsagePurpose::ServerAuth);
         let server_cert: Certificate = params.signed_by(&key_pair, &self.issuer())?;
-        let server_certs_path = Self::get_server_certs_path(&self.path_prefix);
-        self.write_signed_cert_files(&server_certs_path, first_name, &server_cert, &key_pair)?;
 
-        Ok(server_cert)
+        Ok(KeyPairAndCert {
+            cert: server_cert,
+            key_pair,
+        })
+    }
+
+    pub fn save_server_cert(
+        &self,
+        server_names: &[String],
+        key_and_cert: &KeyPairAndCert,
+    ) -> Result<(), CAError> {
+        let first_name = server_names.first().ok_or_else(|| {
+            CAError::InvalidParam("must have at least one server name".to_owned())
+        })?;
+
+        let server_certs_path = Self::get_server_certs_path(&self.path_prefix);
+        self.write_signed_cert_files(
+            &server_certs_path,
+            first_name,
+            &key_and_cert.cert,
+            &key_and_cert.key_pair,
+        )?;
+
+        Ok(())
     }
 
     fn generate_ca_cert() -> Result<(KeyPair, Certificate), CAError> {
