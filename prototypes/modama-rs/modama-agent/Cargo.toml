@@ -15,10 +15,6 @@ path = "src/bin/test-ws-server.rs"
 name = "testnetuse"
 path = "src/bin/testnetuse.rs"
 
-[[bin]]
-name = "ca"
-path = "src/bin/ca.rs"
-
 [lib]
 name = "modama_agent"
 path = "src/lib/lib.rs"
@@ -33,7 +29,6 @@ clap = { workspace = true, features = ["derive"] }
 env_logger = { workspace = true }
 futures-util = "0.3.29"
 log = { workspace = true }
-rcgen = { version = "0.14.4", features = ["x509-parser"] }
 rustls-pemfile = { workspace = true }
 scopeguard = "1.2.0"
 serde = { workspace = true, features=["derive"] }

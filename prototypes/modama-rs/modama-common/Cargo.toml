@@ -5,7 +5,14 @@ edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "ca"
+path = "src/bin/ca_cli.rs"
+
 [dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+rcgen = { version = "0.14.4", features = ["x509-parser"] }
 env_logger = { workspace = true }
 log = { workspace = true}
 reqwest = { workspace = true, features = ["rustls-tls", "json"], default-features = false }

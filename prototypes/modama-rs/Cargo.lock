@@ -1416,7 +1416,6 @@ dependencies = [
  "modama-common",
  "nix",
  "procfs",
- "rcgen",
  "rustls-pemfile",
  "scopeguard",
  "serde",
@@ -1438,8 +1437,11 @@ dependencies = [
 name = "modama-common"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "clap",
  "env_logger",
  "log",
+ "rcgen",
  "reqwest",
  "rustls",
  "rustls-pemfile",

@@ -1,42 +1,12 @@
-use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
-use modama_common::logging::init_logging;
-use rcgen::{
-    string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, PKCS_ED25519,
-};
-#[cfg(target_os = "linux")]
-use std::os::unix::fs::OpenOptionsExt;
 use std::{
-    fs::{create_dir_all, File, OpenOptions},
+    fs::{create_dir_all, File},
     io::{Read, Write},
     path::{Path, PathBuf},
-    str::FromStr,
+    str::FromStr, string::FromUtf8Error,
 };
 
-#[derive(Debug, Subcommand)]
-enum Commands {
-    InitializeCa {},
-    EnrollServer {
-        server_names: Vec<String>,
-    },
-    EnrollAgent {
-        agent_name: String,
-        resource_name: String,
-    },
-}
-
-#[derive(Debug, Parser)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-const CERT_PATH: &str = "./certs/";
-
-trait NoopMode {
-    fn mode(&mut self, mode: u32) -> &mut OpenOptions;
-}
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
 
 #[cfg(target_os = "windows")]
 impl NoopMode for OpenOptions {
@@ -45,7 +15,28 @@ impl NoopMode for OpenOptions {
     }
 }
 
-struct Ca {
+
+use rcgen::{
+    string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
+    ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, PKCS_ED25519,
+};
+
+#[derive(thiserror::Error, Debug)]
+pub enum CAError {
+    #[error("i/o error: {0}")]
+    IO(#[from] std::io::Error),
+
+    #[error("certificate generation error: {0}")]
+    RcGen(#[from] rcgen::Error),
+
+    #[error("unicode error: {0}")]
+    FromUtf8(#[from] FromUtf8Error),
+
+    #[error("invalid parameter: {0}")]
+    InvalidParam(String),
+}
+
+pub struct Ca {
     path_prefix: PathBuf,
     key_pair: KeyPair,
     ca_cert_pem: String,
@@ -53,7 +44,7 @@ struct Ca {
 }
 
 impl Ca {
-    pub fn new<P>(path_prefix: P) -> Result<Self>
+    pub fn new<P>(path_prefix: P) -> Result<Self, CAError>
     where
         P: Into<PathBuf>,
     {
@@ -67,7 +58,7 @@ impl Ca {
         })
     }
 
-    pub fn load<P>(path_prefix: P) -> Result<Self>
+    pub fn load<P>(path_prefix: P) -> Result<Self, CAError>
     where
         P: Into<PathBuf>,
     {
@@ -129,7 +120,7 @@ impl Ca {
         name_prefix: &str,
         cert: &Certificate,
         key_pair: &KeyPair,
-    ) -> Result<()> {
+    ) -> Result<(), CAError> {
         let cert_signed_pem = cert.pem();
         let mut opts = File::options();
         opts.write(true).create_new(true).mode(0o600);
@@ -157,7 +148,11 @@ impl Ca {
         Ok(())
     }
 
-    pub fn client_cert(&self, agent_name: &str, resource_name: &str) -> Result<Certificate> {
+    pub fn client_cert(
+        &self,
+        agent_name: &str,
+        resource_name: &str,
+    ) -> Result<Certificate, CAError> {
         let mut params = CertificateParams::new(vec![])?;
         assert!(!agent_name.contains('@'));
         assert!(!agent_name.contains('/'));
@@ -167,7 +162,7 @@ impl Ca {
         // FIXME: instead of generating a key pair here, generate it on the
         // agent itself and only generate the final certificate from a CSR
 
-        let key_pair = KeyPair::generate_for(&PKCS_ED25519).context("generate client key pair")?;
+        let key_pair = KeyPair::generate_for(&PKCS_ED25519)?;
         params.distinguished_name = DistinguishedName::new();
         params
             .distinguished_name
@@ -195,14 +190,16 @@ impl Ca {
         Ok(client_cert)
     }
 
-    pub fn server_cert(&self, server_names: &[String]) -> Result<Certificate> {
+    pub fn server_cert(&self, server_names: &[String]) -> Result<Certificate, CAError> {
         let mut params = CertificateParams::new(server_names)?;
 
         // FIXME: instead of generating a key pair here, generate it on the
         // server system itself and only generate the final certificate from a
         // CSR
-        let key_pair = KeyPair::generate_for(&PKCS_ED25519).context("generate server key pair")?;
-        let first_name = server_names.first().context("get first server name")?;
+        let key_pair = KeyPair::generate_for(&PKCS_ED25519)?;
+        let first_name = server_names.first().ok_or_else(|| {
+            CAError::InvalidParam("must have at least one server name".to_owned())
+        })?;
         params.distinguished_name = DistinguishedName::new();
         params
             .distinguished_name
@@ -219,13 +216,13 @@ impl Ca {
         Ok(server_cert)
     }
 
-    fn generate_ca_cert() -> Result<(KeyPair, Certificate)> {
-        let key_pair = KeyPair::generate_for(&PKCS_ED25519).context("generate key pair")?;
+    fn generate_ca_cert() -> Result<(KeyPair, Certificate), CAError> {
+        let key_pair = KeyPair::generate_for(&PKCS_ED25519)?;
         let cert = Self::ca_params()?.self_signed(&key_pair)?;
         Ok((key_pair, cert))
     }
 
-    fn ca_params() -> Result<CertificateParams> {
+    fn ca_params() -> Result<CertificateParams, CAError> {
         let mut params = CertificateParams::new(vec![])?;
         params.distinguished_name = DistinguishedName::new();
         params
@@ -245,7 +242,7 @@ impl Ca {
         Issuer::from_params(&self.ca_params, &self.key_pair)
     }
 
-    pub fn serialize_ca_to_files(&self) -> Result<()> {
+    pub fn serialize_ca_to_files(&self) -> Result<(), CAError> {
         let pubkey_serialized = self.key_pair.public_key_pem();
         let privkey_serialized = self.key_pair.serialize_pem();
 
@@ -256,56 +253,14 @@ impl Ca {
         opts.write(true).create_new(true).mode(0o600);
 
         opts.mode(0o644)
-            .open(Self::get_pubkey_path(&self.path_prefix))
-            .context("create pubkey file")?
+            .open(Self::get_pubkey_path(&self.path_prefix))?
             .write_all(pubkey_serialized.as_bytes())?;
-        opts.open(Self::get_privkey_path(&self.path_prefix))
-            .context("create privkey file")?
+        opts.open(Self::get_privkey_path(&self.path_prefix))?
             .write_all(privkey_serialized.as_bytes())?;
         opts.mode(0o644)
-            .open(Self::get_cert_path(&self.path_prefix))
-            .context("create ca cert file")?
+            .open(Self::get_cert_path(&self.path_prefix))?
             .write_all(self.ca_cert_pem.as_bytes())?;
 
         Ok(())
-    }
-}
-
-/// Generate a new keypair and a CA root certificate using the private key.
-fn initialize_ca(_args: &Cli) -> Result<()> {
-    let ca = Ca::new(CERT_PATH)?;
-    ca.serialize_ca_to_files()?;
-
-    Ok(())
-}
-
-/// Enroll the given agent for the given resource by creating a client certificate.
-fn enroll_agent(_args: &Cli, agent_name: &str, resource_name: &str) -> Result<()> {
-    let ca = Ca::load(CERT_PATH)?;
-    ca.client_cert(agent_name, resource_name)?;
-
-    Ok(())
-}
-
-/// Enroll a server by creating a certificate.
-fn enroll_server(_args: &Cli, server_names: &[String]) -> Result<()> {
-    let ca = Ca::load(CERT_PATH)?;
-    ca.server_cert(server_names)?;
-
-    Ok(())
-}
-
-fn main() -> Result<()> {
-    init_logging();
-
-    let args = Cli::parse();
-
-    match &args.command {
-        Commands::InitializeCa {} => initialize_ca(&args),
-        Commands::EnrollServer { server_names } => enroll_server(&args, server_names),
-        Commands::EnrollAgent {
-            resource_name,
-            agent_name,
-        } => enroll_agent(&args, agent_name, resource_name),
     }
 }
