@@ -38,11 +38,11 @@ url = { workspace = true }
 uuid = { version = "1.6.1", features = ["v4"] }
 futures-util = "0.3.30"
 modama-common = { path = "../modama-common" }
-rustls = { workspace = true }
+rustls = { workspace = true, features = ["ring"] }
 hyper-util = { workspace = true }
 hyper = { workspace = true }
 tower-service = { workspace = true }
-reqwest = { workspace = true, features = ["rustls-tls", "json"], default-features = false }
+reqwest = { workspace = true, features = ["rustls-tls-no-provider", "json"], default-features = false }
 jsonwebtoken = "9.2.0"
 
 [target.'cfg(unix)'.dependencies]

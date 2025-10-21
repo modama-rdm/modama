@@ -21,11 +21,11 @@ tungstenite = "0.27.0"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 env_logger = "0.11.8"
-reqwest = { version = "0.12.23", features = ["rustls-tls", "json"], default-features = false }
-rustls = "0.23"
+reqwest = { version = "0.12.23", features = ["rustls-tls-no-provider", "json"], default-features = false }
+rustls = { version = "0.23", features = ["ring"], default-features = false }
 url = "2.5.0"
 toml = "0.9.5"
-tokio-rustls = "0.26.2"
+tokio-rustls = { version = "0.26.2", default-features = false }
 regex = "1.10.2"
 hyper-util = "0.1.2"
 hyper = "1.1.0"

@@ -12,15 +12,15 @@ path = "src/bin/ca_cli.rs"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-rcgen = { version = "0.14.4", features = ["x509-parser"] }
+rcgen = { version = "0.14.4", features = ["x509-parser", "ring"] }
 env_logger = { workspace = true }
 log = { workspace = true}
-reqwest = { workspace = true, features = ["rustls-tls", "json"], default-features = false }
-rustls = { workspace = true}
+reqwest = { workspace = true, features = ["rustls-tls-no-provider", "json"], default-features = false }
+rustls = { workspace = true, features=["ring"] }
 rustls-pemfile = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true}
-thiserror = { workspace = true}
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 tokio-rustls = { workspace = true }
 url = { workspace = true }
 x509-parser = { workspace = true }

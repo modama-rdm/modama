@@ -24,7 +24,7 @@ const CERT_PATH: &str = "./certs/";
 
 /// Generate a new keypair and a CA root certificate using the private key.
 fn initialize_ca(_args: &Cli) -> Result<()> {
-    let ca = Ca::new(CERT_PATH)?;
+    let ca = Ca::new(Some(CERT_PATH))?;
     ca.serialize_ca_to_files()?;
 
     Ok(())

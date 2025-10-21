@@ -34,10 +34,13 @@ pub enum CAError {
 
     #[error("invalid parameter: {0}")]
     InvalidParam(String),
+
+    #[error("no save path configured")]
+    NoSavePath,
 }
 
 pub struct Ca {
-    path_prefix: PathBuf,
+    path_prefix: Option<PathBuf>,
     key_pair: KeyPair,
     ca_cert_pem: String,
     ca_params: CertificateParams,
@@ -49,18 +52,26 @@ pub struct KeyPairAndCert {
 }
 
 impl Ca {
-    pub fn new<P>(path_prefix: P) -> Result<Self, CAError>
+    pub fn new<P>(path_prefix: Option<P>) -> Result<Self, CAError>
     where
         P: Into<PathBuf>,
     {
         let (key_pair, cert) = Self::generate_ca_cert()?;
 
         Ok(Self {
-            path_prefix: path_prefix.into(),
+            path_prefix: path_prefix.map(|p| p.into()),
             key_pair,
             ca_cert_pem: cert.pem(),
             ca_params: Self::ca_params()?,
         })
+    }
+
+    fn get_path_prefix(&self) -> Result<PathBuf, CAError> {
+        self.path_prefix.clone().ok_or(CAError::NoSavePath)
+    }
+
+    pub fn get_ca_cert_pem(&self) -> &str {
+        &self.ca_cert_pem
     }
 
     pub fn load<P>(path_prefix: P) -> Result<Self, CAError>
@@ -85,7 +96,7 @@ impl Ca {
             .read_to_end(&mut cert_pem)?;
 
         Ok(Self {
-            path_prefix: prefix,
+            path_prefix: Some(prefix),
             key_pair,
             ca_cert_pem: String::from_utf8(cert_pem)?,
             ca_params: Self::ca_params()?,
@@ -187,7 +198,10 @@ impl Ca {
             ))?));
         let client_cert = params.signed_by(&key_pair, &self.issuer())?;
 
-        Ok(KeyPairAndCert { cert: client_cert, key_pair })
+        Ok(KeyPairAndCert {
+            cert: client_cert,
+            key_pair,
+        })
     }
 
     pub fn save_client_cert(
@@ -196,10 +210,15 @@ impl Ca {
         resource_name: &str,
         key_and_cert: &KeyPairAndCert,
     ) -> Result<(), CAError> {
-        let resource_path = Self::get_client_certs_path(&self.path_prefix).join(resource_name);
+        let resource_path = Self::get_client_certs_path(&self.get_path_prefix()?).join(resource_name);
         create_dir_all(&resource_path)?;
 
-        self.write_signed_cert_files(&resource_path, agent_name, &key_and_cert.cert, &key_and_cert.key_pair)?;
+        self.write_signed_cert_files(
+            &resource_path,
+            agent_name,
+            &key_and_cert.cert,
+            &key_and_cert.key_pair,
+        )?;
         Ok(())
     }
 
@@ -239,7 +258,7 @@ impl Ca {
             CAError::InvalidParam("must have at least one server name".to_owned())
         })?;
 
-        let server_certs_path = Self::get_server_certs_path(&self.path_prefix);
+        let server_certs_path = Self::get_server_certs_path(&self.get_path_prefix()?);
         self.write_signed_cert_files(
             &server_certs_path,
             first_name,
@@ -280,19 +299,21 @@ impl Ca {
         let pubkey_serialized = self.key_pair.public_key_pem();
         let privkey_serialized = self.key_pair.serialize_pem();
 
-        let ca_dir = Self::get_ca_path(&self.path_prefix);
+        let prefix = &self.get_path_prefix()?;
+
+        let ca_dir = Self::get_ca_path(prefix);
         create_dir_all(ca_dir)?;
 
         let mut opts = File::options();
         opts.write(true).create_new(true).mode(0o600);
 
         opts.mode(0o644)
-            .open(Self::get_pubkey_path(&self.path_prefix))?
+            .open(Self::get_pubkey_path(prefix))?
             .write_all(pubkey_serialized.as_bytes())?;
-        opts.open(Self::get_privkey_path(&self.path_prefix))?
+        opts.open(Self::get_privkey_path(prefix))?
             .write_all(privkey_serialized.as_bytes())?;
         opts.mode(0o644)
-            .open(Self::get_cert_path(&self.path_prefix))?
+            .open(Self::get_cert_path(prefix))?
             .write_all(self.ca_cert_pem.as_bytes())?;
 
         Ok(())
