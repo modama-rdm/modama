@@ -24,6 +24,164 @@ use crate::{
     events::ServerStartError,
 };
 
+#[derive(Clone)]
+struct ConnState {
+    /// Agent ID - None if client authentication didn't succeed
+    pub agent_id: Option<AgentId>,
+
+    /// Private key, DER-encoded
+    pub secret: Vec<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    exp: u64,
+}
+
+const EXPIRY_DURATION: u64 = 3600;
+
+#[derive(Debug, Clone, thiserror::Error)]
+enum SignError {
+    #[error("authentication or client certificate failure")]
+    Auth,
+
+    #[error("JWT encoding error")]
+    Encoding,
+}
+
+async fn do_sign(state: &ConnState) -> Result<String, SignError> {
+    let agent_id = if let Some(agent_id) = &state.agent_id {
+        agent_id.clone()
+    } else {
+        return Err(SignError::Auth);
+    };
+    eprintln!("agent id {:?}", &agent_id);
+
+    let sub = &agent_id.san_encoded;
+    let claims = Claims {
+        sub: sub.to_owned(),
+        exp: (SystemTime::now() + Duration::from_secs(EXPIRY_DURATION))
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| SignError::Encoding)? // something fishy...
+            .as_secs(),
+    };
+    if let Ok(jwt) = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(&state.secret),
+    ) {
+        Ok(jwt)
+    } else {
+        Err(SignError::Encoding)
+    }
+}
+
+async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> {
+    do_sign(&state).await.map_err(|e| match e {
+        SignError::Auth => StatusCode::FORBIDDEN,
+        SignError::Encoding => StatusCode::BAD_REQUEST,
+    })
+}
+
+async fn verify_jwt(
+    State(state): State<ConnState>,
+    request: String,
+) -> Result<Json<TokenVerifyResponse>, StatusCode> {
+    let mut validation = Validation::default();
+    validation.validate_exp = true; // in case the default _ever_ changes...
+
+    Ok(Json(
+        match decode::<Claims>(
+            &request,
+            &DecodingKey::from_secret(&state.secret),
+            &validation,
+        ) {
+            Ok(decode_result) => TokenVerifyResponse::VerifiedAgent {
+                agent_id: decode_result.claims.sub.clone(),
+            },
+            Err(e) => {
+                warn!("error while validating jwt: {e}");
+                TokenVerifyResponse::Invalid
+            }
+        },
+    ))
+}
+
+/// Start a HTTP server on the given `listen_addr` with optional client
+/// certificate verification. If a valid certificate for an agent is
+/// presented, a JWT (JSON Web Token) for the agents' resource can be issued.
+///
+/// Without client certificate, the verification endpoint can be used
+/// to check if a given JWT is valid.
+pub async fn start_token_server(
+    listen_addr: &str,
+    ca_cert: &Path,
+    chain: &Path,
+    privkey: &Path,
+) -> Result<(), ServerStartError> {
+    let config = load_tls_config(ca_cert, chain, privkey, false)?;
+    let pk = get_private_key(privkey)?;
+    let secret = Vec::from(pk.secret_der());
+
+    let listener = TcpListener::bind(&listen_addr).await?;
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let app = Router::<ConnState>::new()
+        .route("/sign/", put(sign_jwt))
+        .route("/verify/", put(verify_jwt));
+
+    serve_token_server_with_listener(listener, acceptor, secret, app).await
+}
+
+/// Serve requests using an already-bound TcpListener
+async fn serve_token_server_with_listener(
+    listener: TcpListener,
+    acceptor: TlsAcceptor,
+    secret: Vec<u8>,
+    app: Router<ConnState>,
+) -> Result<(), ServerStartError> {
+    loop {
+        let tower_service = app.clone();
+        let tls_acceptor = acceptor.clone();
+        let secret = secret.clone();
+
+        let (conn, addr) = listener
+            .accept()
+            .await
+            .map_err(|_| ServerStartError::ListenError)?;
+
+        tokio::spawn(async move {
+            let Ok(stream) = tls_acceptor.accept(conn).await else {
+                error!("error during handshake from {addr}");
+                return;
+            };
+
+            let agent_id = agent_id_from_stream(&stream);
+
+            let stream = TokioIo::new(stream);
+
+            let hyper_service = hyper::service::service_fn(move |request: Request<Incoming>| {
+                tower_service
+                    .clone()
+                    .with_state(ConnState {
+                        agent_id: agent_id.clone(),
+                        secret: secret.clone(),
+                    })
+                    .call(request)
+            });
+
+            let ret = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(stream, hyper_service)
+                .await;
+
+            if let Err(err) = ret {
+                warn!("error serving connection from {}: {}", addr, err);
+            }
+        });
+    }
+}
+
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
@@ -194,162 +352,5 @@ mod tests {
         let resp = fetcher.fetch_token().await;
         assert_eq!(resp.status(), 403);
         server.server_handle.abort();
-    }
-}
-
-#[derive(Clone)]
-struct ConnState {
-    /// Agent ID - None if client authentication didn't succeed
-    pub agent_id: Option<AgentId>,
-
-    /// Private key, DER-encoded
-    pub secret: Vec<u8>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Claims {
-    sub: String,
-    exp: u64,
-}
-
-const EXPIRY_DURATION: u64 = 3600;
-
-#[derive(Debug, Clone, thiserror::Error)]
-enum SignError {
-    #[error("authentication or client certificate failure")]
-    Auth,
-
-    #[error("JWT encoding error")]
-    Encoding,
-}
-
-async fn do_sign(state: &ConnState) -> Result<String, SignError> {
-    let agent_id = if let Some(agent_id) = &state.agent_id {
-        agent_id.clone()
-    } else {
-        return Err(SignError::Auth);
-    };
-    eprintln!("agent id {:?}", &agent_id);
-
-    let sub = &agent_id.san_encoded;
-    let claims = Claims {
-        sub: sub.to_owned(),
-        exp: (SystemTime::now() + Duration::from_secs(EXPIRY_DURATION))
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| SignError::Encoding)? // something fishy...
-            .as_secs(),
-    };
-    if let Ok(jwt) = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(&state.secret),
-    ) {
-        Ok(jwt)
-    } else {
-        Err(SignError::Encoding)
-    }
-}
-
-async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> {
-    do_sign(&state).await.map_err(|e| match e {
-        SignError::Auth => StatusCode::FORBIDDEN,
-        SignError::Encoding => StatusCode::BAD_REQUEST,
-    })
-}
-
-async fn verify_jwt(
-    State(state): State<ConnState>,
-    request: String,
-) -> Result<Json<TokenVerifyResponse>, StatusCode> {
-    let mut validation = Validation::default();
-    validation.validate_exp = true; // in case the default _ever_ changes...
-
-    Ok(Json(
-        match decode::<Claims>(
-            &request,
-            &DecodingKey::from_secret(&state.secret),
-            &validation,
-        ) {
-            Ok(decode_result) => TokenVerifyResponse::VerifiedAgent {
-                agent_id: decode_result.claims.sub.clone(),
-            },
-            Err(e) => {
-                warn!("error while validating jwt: {e}");
-                TokenVerifyResponse::Invalid
-            }
-        },
-    ))
-}
-
-/// Start a HTTP server on the given `listen_addr` with optional client
-/// certificate verification. If a valid certificate for an agent is
-/// presented, a JWT (JSON Web Token) for the agents' resource can be issued.
-///
-/// Without client certificate, the verification endpoint can be used
-/// to check if a given JWT is valid.
-pub async fn start_token_server(
-    listen_addr: &str,
-    ca_cert: &Path,
-    chain: &Path,
-    privkey: &Path,
-) -> Result<(), ServerStartError> {
-    let config = load_tls_config(ca_cert, chain, privkey, false)?;
-    let pk = get_private_key(privkey)?;
-    let secret = Vec::from(pk.secret_der());
-
-    let listener = TcpListener::bind(&listen_addr).await?;
-    let acceptor = TlsAcceptor::from(Arc::new(config));
-    let app = Router::<ConnState>::new()
-        .route("/sign/", put(sign_jwt))
-        .route("/verify/", put(verify_jwt));
-
-    serve_token_server_with_listener(listener, acceptor, secret, app).await
-}
-
-/// Serve requests using an already-bound TcpListener
-async fn serve_token_server_with_listener(
-    listener: TcpListener,
-    acceptor: TlsAcceptor,
-    secret: Vec<u8>,
-    app: Router<ConnState>,
-) -> Result<(), ServerStartError> {
-    loop {
-        let tower_service = app.clone();
-        let tls_acceptor = acceptor.clone();
-        let secret = secret.clone();
-
-        let (conn, addr) = listener
-            .accept()
-            .await
-            .map_err(|_| ServerStartError::ListenError)?;
-
-        tokio::spawn(async move {
-            let Ok(stream) = tls_acceptor.accept(conn).await else {
-                error!("error during handshake from {addr}");
-                return;
-            };
-
-            let agent_id = agent_id_from_stream(&stream);
-
-            let stream = TokioIo::new(stream);
-
-            let hyper_service = hyper::service::service_fn(move |request: Request<Incoming>| {
-                tower_service
-                    .clone()
-                    .with_state(ConnState {
-                        agent_id: agent_id.clone(),
-                        secret: secret.clone(),
-                    })
-                    .call(request)
-            });
-
-            let ret = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-                .serve_connection_with_upgrades(stream, hyper_service)
-                .await;
-
-            if let Err(err) = ret {
-                warn!("error serving connection from {}: {}", addr, err);
-            }
-        });
     }
 }
