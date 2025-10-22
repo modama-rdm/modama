@@ -57,3 +57,7 @@ nix = { workspace = true, features = ["mount"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+smbdrop = { path = "../smbdrop" }
+rustls = { workspace = true }

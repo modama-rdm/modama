@@ -351,7 +351,7 @@ mod test {
         server::WebPkiClientVerifier,
         ClientConfig, RootCertStore, ServerConfig,
     };
-    use tokio::{net, sync::broadcast::Sender, time::timeout};
+    use tokio::{net, sync::broadcast::Sender, task::JoinHandle, time::timeout};
     use tokio_tungstenite::{
         connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
     };
@@ -445,6 +445,7 @@ mod test {
         pub event_queue: Sender<SmbDropState>,
         pub ws_url: String,
         pub certs: CertsForTesting,
+        pub handle: JoinHandle<()>
     }
 
     async fn make_test_event_server() -> TestEventServer {
@@ -478,6 +479,7 @@ mod test {
             event_queue: event_server_queue,
             ws_url,
             certs,
+            handle: task,
         }
     }
 
@@ -511,6 +513,8 @@ mod test {
         // no other messages:
         let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
         assert!(res.is_err());
+
+        server.handle.abort();
     }
 
     #[tokio::test]
@@ -624,6 +628,7 @@ mod test {
         // no other messages:
         let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
         assert!(res.is_err());
+        server.handle.abort();
     }
 
     #[tokio::test]
@@ -688,6 +693,7 @@ mod test {
                 }],
             }
         );
+        server.handle.abort();
     }
 
     #[tokio::test]
@@ -767,5 +773,6 @@ mod test {
                 }],
             }
         );
+        server.handle.abort();
     }
 }

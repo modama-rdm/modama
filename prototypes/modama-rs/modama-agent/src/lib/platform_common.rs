@@ -20,5 +20,5 @@ pub enum EnsureMountedError {
     IOError(#[from] std::io::Error),
 
     #[error("platform error: {0}")]
-    PlatformError(Box<dyn std::error::Error>),
+    PlatformError(Box<dyn std::error::Error + Send + Sync>),
 }

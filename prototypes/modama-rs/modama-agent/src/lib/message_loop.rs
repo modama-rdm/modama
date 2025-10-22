@@ -158,3 +158,174 @@ pub async fn message_loop(
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
+    use modama_common::ca::Ca;
+    use modama_common::messages;
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
+    use smbdrop::events::start_event_server;
+    use smbdrop::share_manager::SmbDropState;
+    use std::{path::PathBuf, sync::Arc};
+    use tokio::sync::{mpsc, Mutex};
+    use url::Url;
+
+    #[derive(Debug)]
+    struct MockMountBackend {
+        calls: mpsc::Sender<messages::Share>,
+        base: PathBuf,
+    }
+
+    impl MockMountBackend {
+        fn new(calls: mpsc::Sender<messages::Share>, base: PathBuf) -> Self {
+            Self { calls, base }
+        }
+    }
+
+    impl MountBackend for MockMountBackend {
+        async fn cleanup_mount_points(&self, _config: &AgentConfig) {}
+
+        fn ensure_mounted(
+            &self,
+            share: &messages::Share,
+            _config: &AgentConfig,
+        ) -> impl std::future::Future<Output = Result<MountedShare, EnsureMountedError>> + Send
+        {
+            let s = share.clone();
+            let calls = self.calls.clone();
+            let base = self.base.clone();
+            async move {
+                // send the recorded share to the test via channel; ignore send errors
+                calls.send(s.clone()).await.unwrap();
+                Ok(MountedShare {
+                    share: s,
+                    mount_path: base.join("mounted"),
+                })
+            }
+        }
+
+        async fn umount_old_shares(&self, _config: &AgentConfig, _shares: &[MountedShare]) {}
+    }
+
+    #[tokio::test]
+    async fn test_message_loop() {
+        // prepare a share to send
+        let test_share = messages::Share {
+            resource: Some("test_resource".to_owned()),
+            share_id: "test-id-1".to_owned(),
+            share_name: "share1".to_owned(),
+            dest_path: "/data/dest".to_owned(),
+            created_timestamp: 0,
+            username: "u".to_owned(),
+            password: "p".to_owned(),
+            uid: 1000,
+            gid: 1000,
+        };
+
+        let ca = Ca::new::<String>(None).unwrap();
+        let server_cert = ca.server_cert(&["localhost".to_string()]).unwrap();
+        let mut roots = RootCertStore::empty();
+        let ca_cert = ca.get_ca_cert_pem();
+        roots
+            .add(CertificateDer::from_pem_slice(ca_cert.as_bytes()).unwrap())
+            .unwrap();
+        let client_cert_verifier = WebPkiClientVerifier::builder(roots.clone().into())
+            .build()
+            .unwrap();
+
+        // server config
+        let server_chain: Vec<CertificateDer> = vec![
+            server_cert.cert.clone().into(),
+            CertificateDer::from_pem_slice(ca_cert.as_bytes()).unwrap(),
+        ];
+        let server_pk_der = PrivateKeyDer::Pkcs8(server_cert.key_pair.serialize_der().into());
+        let server_config = rustls::server::ServerConfig::builder()
+            .with_client_cert_verifier(client_cert_verifier)
+            .with_single_cert(server_chain, server_pk_der)
+            .unwrap();
+
+        let initial_state = SmbDropState {
+            shares: std::collections::HashMap::new(),
+            users: std::collections::HashMap::new(),
+        };
+        let (event_server_task, event_queue, port) =
+            start_event_server("localhost:0", server_config, &initial_state)
+                .await
+                .expect("start_event_server");
+
+        // build AgentConfig pointing at our server
+        let api_url = Url::parse(&format!("wss://localhost:{port}")).expect("url");
+        let config = AgentConfig {
+            api_url,
+            mgmt_api_url: "http://localhost".to_string(),
+            smb_hostname: "example.local".to_string(),
+            smb_ip: tokio::sync::OnceCell::new(),
+            smb_port: 445,
+            smb_domain: "WORKGROUP".to_string(),
+            agent_name: "test-agent".to_string(),
+            resource_name: "test_resource".to_string(),
+            linux_config: None,
+        };
+
+        let state = Arc::new(Mutex::new(AgentState::new(&config)));
+
+        let client_cert = ca.client_cert("test_agent", "test_resource").unwrap();
+        let client_chain: Vec<CertificateDer> = vec![
+            client_cert.cert.clone().into(),
+            CertificateDer::from_pem_slice(ca_cert.as_bytes()).unwrap(),
+        ];
+        let client_pk_der = PrivateKeyDer::Pkcs8(client_cert.key_pair.serialize_der().into());
+        let client_conf: ClientConfig = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_client_auth_cert(client_chain, client_pk_der)
+            .unwrap();
+        let client_config = Arc::new(client_conf);
+
+        // create an mpsc channel to receive mount calls from the mock backend
+        let (tx, mut rx) = mpsc::channel::<messages::Share>(8);
+        let mock = Arc::new(MockMountBackend::new(tx, std::env::temp_dir()));
+
+        // run message_loop in background
+        let message_loop_state = Arc::clone(&state);
+        let message_loop_task = tokio::spawn(async move {
+            // message_loop runs forever; it will return only if the connection loop ends
+            // we run it and let it process the single message from our server
+            message_loop(&*mock, message_loop_state, client_config).await;
+        });
+
+        // send a state update via the event server's broadcast channel
+        let mut new_state = initial_state.clone();
+        new_state
+            .shares
+            .insert(test_share.share_id.clone(), test_share.clone());
+        event_queue.send(new_state).unwrap();
+
+        // verify the mock backend was asked to mount the share (with timeout)
+        let recv = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for mount call");
+        let recorded_share = recv.expect("mock sender dropped");
+        assert_eq!(recorded_share.share_id, "test-id-1");
+
+        // assert state updated
+        let st = state.lock().await;
+        println!(
+            "agent state after update: connection={:?}, shares.len={}",
+            st.connection,
+            st.current_shares.shares.len()
+        );
+        assert_eq!(st.current_shares.shares.len(), 1);
+        assert!(st.current_shares.foreground_share.is_some());
+        let fg = st.current_shares.foreground_share.as_ref().unwrap();
+        assert_eq!(fg.share.share_id, "test-id-1");
+
+        event_server_task.abort();
+        message_loop_task.abort();
+    }
+}
