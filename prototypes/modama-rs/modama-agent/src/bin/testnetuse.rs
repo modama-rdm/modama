@@ -1,8 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use modama_agent::{
-    config::AgentConfig,
-    platform::{ensure_mounted, umount_old_shares},
-};
+use modama_agent::{config::AgentConfig, mount_backend::MountBackend, platform::CurrentPlatformMountBackend};
 use modama_common::{logging::init_logging, messages::Share};
 use tokio::sync::OnceCell;
 use url::Url;
@@ -10,6 +7,7 @@ use url::Url;
 #[tokio::main]
 async fn main() {
     init_logging();
+    let backend = CurrentPlatformMountBackend {};
 
     let share = Share {
         resource: Some("holo".to_owned()),
@@ -33,8 +31,8 @@ async fn main() {
         resource_name: "holo".to_owned(),
         linux_config: None,
     };
-    if let Err(e) = ensure_mounted(&share, &config).await {
+    if let Err(e) = backend.ensure_mounted(&share, &config).await {
         panic!("ensure_mounted: {e}");
     }
-    umount_old_shares(&config, &[]).await;
+    backend.umount_old_shares(&config, &[]).await;
 }

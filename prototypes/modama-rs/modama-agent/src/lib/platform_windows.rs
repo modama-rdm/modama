@@ -362,3 +362,20 @@ pub mod internal {
         Ok(mapped_drives)
     }
 }
+
+pub struct CurrentPlatformMountBackend {
+}
+
+impl MountBackend for CurrentPlatformMountBackend {
+    async fn cleanup_mount_points(&self, config: &AgentConfig) {
+        cleanup_mount_points(config)
+    }
+
+    async fn ensure_mounted(&self, share: &Share, config: &AgentConfig) -> Result<MountedShare, EnsureMountedError> {
+        ensure_mounted(share, config).await
+    }
+
+    async fn umount_old_shares(&self, config: &AgentConfig, shares: &[MountedShare]) {
+        umount_old_shares(config, shares).await
+    }
+}

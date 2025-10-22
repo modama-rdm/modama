@@ -4,7 +4,7 @@ use anyhow::{Context, Result as AnyResult};
 
 use crate::{
     agent_state::{AgentState, ConnectionState, ShareState},
-    platform::{cleanup_mount_points, ensure_mounted, umount_old_shares},
+    mount_backend::MountBackend,
 };
 use futures_util::{future::join_all, StreamExt};
 use log::{debug, error, info, warn};
@@ -14,6 +14,7 @@ use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
 
 async fn update_share_list(
+    backend: &impl MountBackend,
     state: &mut AgentState,
     desired_shares: ShareState<Share>,
 ) -> AnyResult<()> {
@@ -26,7 +27,7 @@ async fn update_share_list(
     if old_fg_share != new_fg_share.as_ref() {
         if let Some(share) = new_fg_share {
             state.current_shares.set_foreground_share(
-                match ensure_mounted(&share, &state.config).await {
+                match backend.ensure_mounted(&share, &state.config).await {
                     Ok(s) => Some(s),
                     Err(e) => {
                         error!("Mount failed: {e}");
@@ -41,7 +42,7 @@ async fn update_share_list(
     state.current_shares.set_shares(
         join_all(desired_shares.shares.into_iter().map(|s| async {
             let s2 = s;
-            ensure_mounted(&s2, &state.config).await
+            backend.ensure_mounted(&s2, &state.config).await
         }))
         .await
         .into_iter()
@@ -64,13 +65,19 @@ async fn update_share_list(
             .collect::<Vec<_>>()
     );
 
-    umount_old_shares(&state.config, &state.current_shares.shares).await;
-    cleanup_mount_points(&state.config);
+    backend
+        .umount_old_shares(&state.config, &state.current_shares.shares)
+        .await;
+    backend.cleanup_mount_points(&state.config).await;
 
     Ok(())
 }
 
-async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<()> {
+async fn handle_message(
+    backend: &impl MountBackend,
+    state: &Arc<Mutex<AgentState>>,
+    msg: &str,
+) -> AnyResult<()> {
     let event_msg: EventChannelMessage = serde_json::from_str(msg)
         .with_context(|| format!("Invalid message encountered: {}", msg))?;
     info!("Received EventChannelMessage: {event_msg:?}");
@@ -88,13 +95,17 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
             state.lock().await.desired_shares = desired_shares.clone();
             state.lock().await.connected_agents = connected_agents;
 
-            update_share_list(&mut *state.lock().await, desired_shares).await?;
+            update_share_list(backend, &mut *state.lock().await, desired_shares).await?;
             Ok(())
         }
     }
 }
 
-pub async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientConfig>) {
+pub async fn message_loop(
+    backend: &impl MountBackend,
+    state: Arc<Mutex<AgentState>>,
+    tls_config: Arc<ClientConfig>,
+) {
     let config = state.lock().await.config.clone();
 
     loop {
@@ -126,7 +137,7 @@ pub async fn message_loop(state: Arc<Mutex<AgentState>>, tls_config: Arc<ClientC
             match ws_read.next().await {
                 Some(Ok(msg)) => {
                     if let Ok(msg) = msg.into_text() {
-                        if let Err(e) = handle_message(&state, &msg).await {
+                        if let Err(e) = handle_message(backend, &state, &msg).await {
                             error!("Error while handing message: {e}");
                         }
                     } else {

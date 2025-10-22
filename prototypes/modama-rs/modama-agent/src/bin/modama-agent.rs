@@ -8,13 +8,17 @@ use modama_agent::{
     config::{AgentConfig, AgentLinuxConfig},
     local_http_service::serve_local_web_api,
     message_loop::message_loop,
+    platform::CurrentPlatformMountBackend,
 };
 use modama_common::{agent::AgentId, tokens::TokenFetcher};
 use modama_common::{
     cert_helpers::{get_cert_chain, get_private_key, get_root_cert_store},
     logging::init_logging,
 };
-use tokio::{select, sync::{Mutex, OnceCell}};
+use tokio::{
+    select,
+    sync::{Mutex, OnceCell},
+};
 use tokio_rustls::rustls::ClientConfig;
 use url::Url;
 
@@ -57,7 +61,7 @@ fn get_tls_config(args: &Args) -> AnyResult<(Arc<ClientConfig>, AgentId)> {
     let agent_id = AgentId::from_cert(
         client_chain
             .first()
-            .context("need at least one cert in chain")?
+            .context("need at least one cert in chain")?,
     )
     .context("loading agent id from client cert failed")?;
     Ok((
@@ -110,8 +114,10 @@ async fn main() -> AnyResult<()> {
         serve_local_web_api(state_for_api, &args.listen_local_api, token_fetcher).await
     });
 
+    let backend = CurrentPlatformMountBackend {};
+
     select! {
-        _ = message_loop(Arc::clone(&state), Arc::clone(&tls_config)) => {
+        _ = message_loop(&backend, Arc::clone(&state), Arc::clone(&tls_config)) => {
             Ok(())
         }
         res = join_handle => {

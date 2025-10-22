@@ -11,11 +11,11 @@ use procfs::{process::Process, ProcError};
 use thiserror::Error;
 
 use crate::{
-    config::{AgentConfig, AgentLinuxConfig}, platform_common::EnsureMountedError, share::MountedShare
+    config::{AgentConfig, AgentLinuxConfig}, mount_backend::MountBackend, platform_common::EnsureMountedError, share::MountedShare
 };
 
 /// Ensure that `share` is mounted, and return a `MountedShare` if the mount succeeded.
-pub async fn ensure_mounted(
+async fn ensure_mounted(
     share: &Share,
     config: &AgentConfig,
 ) -> Result<MountedShare, EnsureMountedError> {
@@ -163,7 +163,7 @@ fn get_mounts_in_prefix(config: &AgentConfig) -> Result<HashSet<PathBuf>, MountL
 /// remove all directories that are not currently active mount points.
 /// Best-effort; ignores and logs errors and continues to hopefully converge
 /// in a clean situation eventually.
-pub fn cleanup_mount_points(config: &AgentConfig) {
+fn cleanup_mount_points(config: &AgentConfig) {
     let mounts_in_prefix = match get_mounts_in_prefix(config) {
         Ok(m) => m,
         Err(e) => {
@@ -201,7 +201,7 @@ pub fn cleanup_mount_points(config: &AgentConfig) {
 }
 
 /// Umount all shares that are no longer supposed to be mounted
-pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
+async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
     let mounts_in_prefix = match get_mounts_in_prefix(config) {
         Ok(m) => m,
         Err(e) => {
@@ -233,4 +233,21 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
             warn!("Umounting failed: {err}");
         }
     });
+}
+
+pub struct CurrentPlatformMountBackend {
+}
+
+impl MountBackend for CurrentPlatformMountBackend {
+    async fn cleanup_mount_points(&self, config: &AgentConfig) {
+        cleanup_mount_points(config)
+    }
+
+    async fn ensure_mounted(&self, share: &Share, config: &AgentConfig) -> Result<MountedShare, EnsureMountedError> {
+        ensure_mounted(share, config).await
+    }
+
+    async fn umount_old_shares(&self, config: &AgentConfig, shares: &[MountedShare]) {
+        umount_old_shares(config, shares).await
+    }
 }
