@@ -112,10 +112,12 @@ async fn update_msg_from_state(
     // FIXME: right now, the foreground share is always the latest share
     // for the resource, by creation timestamp. This might need to be
     // re-evaluated.
+    let mut connected_agents: Vec<AgentId> = state.connected_agents.iter().cloned().collect();
+    connected_agents.sort_by(|id1, id2| id1.san_encoded.cmp(&id2.san_encoded));
     let msg = EventChannelMessage::UpdateShareList {
         shares: shares.clone(),
         foreground_share: shares.iter().last().cloned(),
-        connected_agents: state.connected_agents.iter().cloned().collect(),
+        connected_agents,
     };
     msg
 }
@@ -339,14 +341,12 @@ mod test {
         stream::{SplitSink, SplitStream},
         SinkExt, StreamExt,
     };
-    use hyper::client;
     use modama_common::{
         agent::AgentId,
         ca::Ca,
-        messages::{EventChannelMessage, EventChannelRequests},
+        messages::{EventChannelMessage, EventChannelRequests, Share},
     };
     use rustls::{
-        crypto::{self, CryptoProvider},
         pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
         server::WebPkiClientVerifier,
         ClientConfig, RootCertStore, ServerConfig,
@@ -579,13 +579,13 @@ mod test {
                     connected_agents: vec![
                         AgentId {
                             resource: "test_resource".to_owned(),
-                            agent: "test_agent_2".to_owned(),
-                            san_encoded: "x-modama-agent://test_resource#test_agent_2".to_owned()
+                            agent: "test_agent".to_owned(),
+                            san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
                         },
                         AgentId {
                             resource: "test_resource".to_owned(),
-                            agent: "test_agent".to_owned(),
-                            san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
+                            agent: "test_agent_2".to_owned(),
+                            san_encoded: "x-modama-agent://test_resource#test_agent_2".to_owned()
                         },
                     ],
                 }
@@ -673,6 +673,7 @@ mod test {
             .unwrap()
             .unwrap()
             .unwrap();
+
         // we get the shares and agents again:
         let msg: EventChannelMessage =
             serde_json::from_str(&update_msg_resp.into_text().unwrap()).unwrap();
@@ -682,6 +683,85 @@ mod test {
             EventChannelMessage::UpdateShareList {
                 shares: vec![],
                 foreground_share: None,
+                connected_agents: vec![AgentId {
+                    resource: "test_resource".to_owned(),
+                    agent: "test_agent".to_owned(),
+                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
+                }],
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_websocket_api_share_added() {
+        let mut server = make_test_event_server().await;
+
+        let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        let msg: EventChannelMessage =
+            serde_json::from_str(&greeting.into_text().unwrap()).unwrap();
+        println!("{msg:?}");
+        assert_eq!(
+            msg,
+            EventChannelMessage::UpdateShareList {
+                shares: vec![],
+                foreground_share: None,
+                connected_agents: vec![AgentId {
+                    resource: "test_resource".to_owned(),
+                    agent: "test_agent".to_owned(),
+                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
+                }],
+            }
+        );
+
+        // no other messages:
+        let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
+        assert!(res.is_err());
+
+        let shares = HashMap::new();
+        let users = HashMap::new();
+        let mut state = SmbDropState { shares, users };
+
+        let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let share = Share {
+            resource: Some("test_resource".to_owned()),
+            share_id: share_id.clone(),
+            share_name: share_id.clone(),
+            dest_path: "/dest/path".to_owned(),
+            created_timestamp: 0,
+            username: "testuser".to_owned(),
+            password: "testpasswod".to_owned(),
+            uid: 1001,
+            gid: 1001,
+        };
+
+        state
+            .get_or_create_user(1001, share_id.clone())
+            .await
+            .unwrap();
+        state.add_share(share.clone()).await.unwrap();
+        server.event_queue.send(state).unwrap();
+
+        // the share manager informs us about the change:
+        let state_update_msg = timeout(Duration::from_millis(100), server.ws_read.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        // the new share is in the list of shares:
+        let msg: EventChannelMessage =
+            serde_json::from_str(&state_update_msg.into_text().unwrap()).unwrap();
+        println!("{msg:?}");
+        assert_eq!(
+            msg,
+            EventChannelMessage::UpdateShareList {
+                shares: vec![share.clone()],
+                foreground_share: Some(share),
                 connected_agents: vec![AgentId {
                     resource: "test_resource".to_owned(),
                     agent: "test_agent".to_owned(),

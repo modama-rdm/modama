@@ -128,7 +128,7 @@ impl SmbDropState {
 
     /// Get the User for the given uid, or create a new one with a random password.
     /// Note that this will not create a system user, which is done separately.
-    async fn get_or_create_user(&mut self, uid: u32, share_id: String) -> Result<User, ShareError> {
+    pub async fn get_or_create_user(&mut self, uid: u32, share_id: String) -> Result<User, ShareError> {
         let key = uid.to_string();
         if let Some(user) = self.users.get(&key) {
             debug!("get_or_create_user: returning existing user for {key}");
@@ -148,13 +148,13 @@ impl SmbDropState {
         }
     }
 
-    async fn add_share(&mut self, share: Share) -> Result<(), ShareError> {
+    pub async fn add_share(&mut self, share: Share) -> Result<(), ShareError> {
         let key = share.share_id.clone();
         self.shares.insert(key, share);
         Ok(())
     }
 
-    async fn remove_share(&mut self, share_id: &str) -> Result<Share, ShareError> {
+    pub async fn remove_share(&mut self, share_id: &str) -> Result<Share, ShareError> {
         info!("removing share {share_id}");
         if let Some(share) = self.shares.remove(share_id) {
             Ok(share)
@@ -166,7 +166,7 @@ impl SmbDropState {
     /// Remove shares that are broken in some way, for example those that
     /// point to symlinks or non-directories (normal files, special files etc.).
     /// The idea is that over time, invalid shares are removed from the system.
-    fn clean_shares(&mut self) {
+    pub fn clean_shares(&mut self) {
         self.shares.retain(|_share_id, share| {
             let dest_path = share.get_dest_path();
             dest_path.is_dir() && !dest_path.is_symlink()
@@ -174,7 +174,7 @@ impl SmbDropState {
     }
 
     /// Remove users that match the given UID
-    fn remove_user(&mut self, uid_to_remove: u32) {
+    pub fn remove_user(&mut self, uid_to_remove: u32) {
         self.users
             .retain(|_user_id, user| uid_to_remove != user.uid);
     }
