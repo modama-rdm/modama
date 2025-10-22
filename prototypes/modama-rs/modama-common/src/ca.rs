@@ -324,51 +324,7 @@ impl Ca {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use rand::{distr::Alphanumeric, Rng};
-
-    use crate::ca::{CAError, Ca};
-    use std::{
-        env::temp_dir,
-        ops::Deref,
-        path::{Path, PathBuf},
-    };
-
-    struct TempDir {
-        pub path: PathBuf,
-    }
-
-    impl TempDir {
-        pub fn new(prefix: &str) -> Self {
-            let tmp_base = temp_dir();
-            loop {
-                let rnd: String = rand::rng()
-                    .sample_iter(&Alphanumeric)
-                    .take(15)
-                    .map(char::from)
-                    .collect();
-                let rand_name = tmp_base.join(format!("{}-tmp{}", prefix, rnd));
-                let path = tmp_base.join(rand_name);
-                if !path.exists() {
-                    std::fs::create_dir(&path).unwrap();
-                    return Self { path };
-                }
-            }
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            std::fs::remove_dir_all(&self.path).unwrap();
-        }
-    }
-
-    impl Deref for TempDir {
-        type Target = Path;
-
-        fn deref(&self) -> &Self::Target {
-            &self.path
-        }
-    }
+    use crate::{ca::{CAError, Ca}, test_helpers::TempDir};
 
     #[test]
     fn test_new_ca() {
