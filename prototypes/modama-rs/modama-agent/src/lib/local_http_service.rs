@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
@@ -20,6 +18,9 @@ use modama_common::{
     mgmt_client::{MgmtClient, MgmtError},
     tokens::{TokenError, TokenFetcher},
 };
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::agent_state::AgentState;
@@ -41,17 +42,33 @@ fn create_env() -> Environment<'static> {
 #[derive(Clone)]
 struct ApiState {
     pub state: Arc<Mutex<AgentState>>,
-    pub token_fetcher: Arc<TokenFetcher>,
+    pub token_provider: Arc<dyn TokenProvider + Send + Sync>,
     pub jinja_env: Environment<'static>,
 }
 
 impl ApiState {
-    fn new(state: &Arc<Mutex<AgentState>>, token_fetcher: &Arc<TokenFetcher>) -> Self {
+    fn new(
+        state: &Arc<Mutex<AgentState>>,
+        token_provider: &Arc<dyn TokenProvider + Send + Sync>,
+    ) -> Self {
         Self {
             state: Arc::clone(state),
-            token_fetcher: Arc::clone(token_fetcher),
+            token_provider: Arc::clone(token_provider),
             jinja_env: create_env(),
         }
+    }
+}
+
+// Trait to abstract token fetching so tests can provide a stub implementation.
+type BoxFutureToken = Pin<Box<dyn Future<Output = Result<String, TokenError>> + Send>>;
+
+pub trait TokenProvider: Send + Sync {
+    fn fetch_token(self: Arc<Self>) -> BoxFutureToken;
+}
+
+impl TokenProvider for TokenFetcher {
+    fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
+        Box::pin(async move { TokenFetcher::fetch_token(&self).await })
     }
 }
 
@@ -280,7 +297,7 @@ async fn start_ingest_step3(
         return Ok((StatusCode::NOT_FOUND).into_response());
     }
 
-    let agent_token = agent_state.token_fetcher.fetch_token().await?;
+    let agent_token = agent_state.token_provider.fetch_token().await?;
 
     c.create_share(
         &project_name,
@@ -300,23 +317,104 @@ pub async fn serve_local_web_api(
     listen_addr: &str,
     token_fetcher: TokenFetcher,
 ) -> Result<(), LocalAPIError> {
-    let app = Router::new()
-        .route("/shares/foreground/", get(handler_shares_foreground))
-        .route("/", get(serve_index_page))
-        .route("/start-ingest/:project_name/", get(start_ingest_step1))
-        .route(
-            "/start-ingest/:project_name/:session_name/",
-            get(start_ingest_step2),
-        )
-        .route(
-            "/start-ingest/:project_name/:session_name/",
-            post(start_ingest_step3),
-        )
-        .with_state(ApiState::new(&state, &Arc::new(token_fetcher)));
+    let token_fetcher: Arc<dyn TokenProvider + Send + Sync> = Arc::new(token_fetcher);
+    let app = make_app(ApiState::new(&state, &token_fetcher));
     let listener = tokio::net::TcpListener::bind(listen_addr).await?;
 
     #[allow(clippy::unwrap_used)] // infallible
     axum::serve(listener, app).await.unwrap();
 
     Ok(())
+}
+
+fn make_app(state: ApiState) -> Router {
+    Router::new()
+        .route("/shares/foreground/", get(handler_shares_foreground))
+        .route("/", get(serve_index_page))
+        .route("/start-ingest/{project_name}/", get(start_ingest_step1))
+        .route(
+            "/start-ingest/{project_name}/{session_name}/",
+            get(start_ingest_step2),
+        )
+        .route(
+            "/start-ingest/{project_name}/{session_name}/",
+            post(start_ingest_step3),
+        )
+        .with_state(state)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::share::MountedShare;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use modama_common::messages::Share as MessageShare;
+    use serde_json::Value;
+    use std::path::PathBuf;
+    use tower::ServiceExt;
+
+    // Dummy token provider that returns a fixed token
+    struct DummyTokenProvider;
+
+    impl TokenProvider for DummyTokenProvider {
+        fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
+            Box::pin(async move { Ok("dummy-token".to_string()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_shares_foreground_endpoint_returns_share() {
+        // Build AgentState with a foreground mounted share
+        let cfg = crate::config::AgentConfig {
+            api_url: url::Url::parse("http://localhost/").unwrap(),
+            mgmt_api_url: "http://localhost/".to_string(),
+            smb_hostname: "host".to_string(),
+            smb_ip: tokio::sync::OnceCell::new(),
+            smb_port: 445,
+            smb_domain: "WINDOWS_FOR_WORKGROUPS".to_string(),
+            agent_name: "agent".to_string(),
+            resource_name: "res".to_string(),
+            linux_config: None,
+        };
+        let mut state_inner = crate::agent_state::AgentState::new(&cfg);
+        let mshare = MountedShare {
+            share: MessageShare {
+                resource: None,
+                share_id: "id".to_string(),
+                share_name: "sname".to_string(),
+                dest_path: "dest".to_string(),
+                created_timestamp: 0,
+                username: "u".to_string(),
+                password: "p".to_string(),
+                uid: 1000,
+                gid: 1000,
+            },
+            mount_path: PathBuf::from("/mnt/point"),
+        };
+        state_inner.current_shares.foreground_share = Some(mshare.clone());
+        let shared_state = Arc::new(Mutex::new(state_inner));
+
+        let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
+        let api_state = ApiState::new(&shared_state, &token_provider);
+        let app = make_app(api_state);
+
+        let req = Request::builder()
+            .uri("/shares/foreground/")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let got: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(got["type"], "Share");
+        assert_eq!(got["dest_path"], "dest");
+        assert_eq!(got["mount_path"], "/mnt/point");
+    }
 }
