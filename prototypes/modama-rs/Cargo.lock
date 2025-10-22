@@ -1305,6 +1305,7 @@ dependencies = [
  "clap",
  "env_logger",
  "log",
+ "rand",
  "rcgen",
  "reqwest",
  "rustls",

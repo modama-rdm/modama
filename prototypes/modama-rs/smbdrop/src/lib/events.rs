@@ -447,9 +447,7 @@ mod test {
         pub certs: CertsForTesting,
     }
 
-    async fn make_test_event_server() -> (TestEventServer) {
-        // CryptoProvider::get_default().unwrap();
-        // CryptoProvider::install_default(crypto::aws_lc_rs::default_provider()).unwrap();
+    async fn make_test_event_server() -> TestEventServer {
         let certs = CertsForTesting::generate();
         let state = SmbDropState {
             shares: HashMap::new(),

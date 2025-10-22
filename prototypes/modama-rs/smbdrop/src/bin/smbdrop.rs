@@ -60,7 +60,7 @@ async fn main() -> AnyResult<()> {
 
     let tls_config = load_tls_config(&args.ca_cert, &args.chain, &args.privkey, true)?;
 
-    let (_event_server_task, state_updates_tx, event_server_port) = start_event_server(&args.ws_listen, tls_config, &initial_state)
+    let (_event_server_task, state_updates_tx, _event_server_port) = start_event_server(&args.ws_listen, tls_config, &initial_state)
         .await
         .context("start event server")?;
 

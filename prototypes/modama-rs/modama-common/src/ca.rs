@@ -210,7 +210,8 @@ impl Ca {
         resource_name: &str,
         key_and_cert: &KeyPairAndCert,
     ) -> Result<(), CAError> {
-        let resource_path = Self::get_client_certs_path(&self.get_path_prefix()?).join(resource_name);
+        let resource_path =
+            Self::get_client_certs_path(&self.get_path_prefix()?).join(resource_name);
         create_dir_all(&resource_path)?;
 
         self.write_signed_cert_files(
@@ -317,5 +318,216 @@ impl Ca {
             .write_all(self.ca_cert_pem.as_bytes())?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use rand::{distr::Alphanumeric, Rng};
+
+    use crate::ca::{CAError, Ca};
+    use std::{
+        env::temp_dir,
+        ops::Deref,
+        path::{Path, PathBuf},
+    };
+
+    struct TempDir {
+        pub path: PathBuf,
+    }
+
+    impl TempDir {
+        pub fn new(prefix: &str) -> Self {
+            let tmp_base = temp_dir();
+            loop {
+                let rnd: String = rand::rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(15)
+                    .map(char::from)
+                    .collect();
+                let rand_name = tmp_base.join(format!("{}-tmp{}", prefix, rnd));
+                let path = tmp_base.join(rand_name);
+                if !path.exists() {
+                    std::fs::create_dir(&path).unwrap();
+                    return Self { path };
+                }
+            }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.path).unwrap();
+        }
+    }
+
+    impl Deref for TempDir {
+        type Target = Path;
+
+        fn deref(&self) -> &Self::Target {
+            &self.path
+        }
+    }
+
+    #[test]
+    fn test_new_ca() {
+        let tmpdir = TempDir::new("test-ca");
+        let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
+        ca.serialize_ca_to_files().unwrap();
+
+        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca")).unwrap();
+        let mut ca_files = ca_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        ca_files.sort();
+        assert_eq!(ca_files, &["ca.cert.pem", "ca.priv.pem", "ca.pub.pem"]);
+    }
+
+    #[test]
+    fn test_ca_make_client_and_server_certs() {
+        let tmpdir = TempDir::new("test-ca");
+        let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
+
+        let server_names = &["localhost".to_owned(), "smbdrop".to_owned()];
+        let key_and_cert = ca.server_cert(server_names).unwrap();
+        ca.save_server_cert(server_names, &key_and_cert).unwrap();
+
+        let agent_name = "test_agent";
+        let resource_name = "test_resource";
+        let key_and_cert = ca.client_cert(agent_name, resource_name).unwrap();
+        ca.save_client_cert(agent_name, resource_name, &key_and_cert)
+            .unwrap();
+
+        ca.serialize_ca_to_files().unwrap();
+
+        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca")).unwrap();
+        let mut ca_files = ca_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        ca_files.sort();
+        assert_eq!(ca_files, &["ca.cert.pem", "ca.priv.pem", "ca.pub.pem"]);
+
+        let servers_dir = std::fs::read_dir(&*tmpdir.join("servers")).unwrap();
+        let mut servers_files = servers_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        servers_files.sort();
+        assert_eq!(
+            servers_files,
+            &[
+                "localhost.cert.pem",
+                "localhost.chain.pem",
+                "localhost.priv.pem",
+                "localhost.pub.pem"
+            ]
+        );
+
+        let clients_dir =
+            std::fs::read_dir(&*tmpdir.join("clients").join("test_resource")).unwrap();
+        let mut clients_files = clients_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        clients_files.sort();
+        assert_eq!(
+            clients_files,
+            &[
+                "test_agent.cert.pem",
+                "test_agent.chain.pem",
+                "test_agent.priv.pem",
+                "test_agent.pub.pem"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_ca_load_and_make_certs() {
+        let tmpdir = TempDir::new("test-ca");
+        {
+            let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
+            ca.serialize_ca_to_files().unwrap();
+        }
+
+        let ca = Ca::load(tmpdir.to_owned()).unwrap();
+
+        let server_names = &["localhost".to_owned(), "smbdrop".to_owned()];
+        let key_and_cert = ca.server_cert(server_names).unwrap();
+        ca.save_server_cert(server_names, &key_and_cert).unwrap();
+
+        let agent_name = "test_agent";
+        let resource_name = "test_resource";
+        let key_and_cert = ca.client_cert(agent_name, resource_name).unwrap();
+        ca.save_client_cert(agent_name, resource_name, &key_and_cert)
+            .unwrap();
+
+        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca")).unwrap();
+        let mut ca_files = ca_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        ca_files.sort();
+        assert_eq!(ca_files, &["ca.cert.pem", "ca.priv.pem", "ca.pub.pem"]);
+
+        let servers_dir = std::fs::read_dir(&*tmpdir.join("servers")).unwrap();
+        let mut servers_files = servers_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        servers_files.sort();
+        assert_eq!(
+            servers_files,
+            &[
+                "localhost.cert.pem",
+                "localhost.chain.pem",
+                "localhost.priv.pem",
+                "localhost.pub.pem"
+            ]
+        );
+
+        let clients_dir =
+            std::fs::read_dir(&*tmpdir.join("clients").join("test_resource")).unwrap();
+        let mut clients_files = clients_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        clients_files.sort();
+        assert_eq!(
+            clients_files,
+            &[
+                "test_agent.cert.pem",
+                "test_agent.chain.pem",
+                "test_agent.priv.pem",
+                "test_agent.pub.pem"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_ca_must_have_one_server_name() {
+        let tmpdir = TempDir::new("test-ca");
+        let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
+
+        // both when making a cert..
+        let server_names_empty = &[];
+        assert!(matches!(ca.server_cert(server_names_empty), Err(CAError::InvalidParam(_))));
+
+        // ... and when saving it, an empty server name list is an error:
+        let server_names = &["localhost".to_owned(), "smbdrop".to_owned()];
+        let key_and_cert = ca.server_cert(server_names).unwrap();
+        assert!(matches!(
+            ca.save_server_cert(server_names_empty, &key_and_cert),
+            Err(CAError::InvalidParam(_)
+        )));
     }
 }
