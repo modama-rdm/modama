@@ -15,7 +15,7 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use log::{error, warn};
 use modama_common::{agent::AgentId, cert_helpers::get_private_key, tokens::TokenVerifyResponse};
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
@@ -108,29 +108,50 @@ async fn verify_jwt(
     ))
 }
 
-/// Start a HTTP server on the given `listen_addr` with optional client
-/// certificate verification. If a valid certificate for an agent is
-/// presented, a JWT (JSON Web Token) for the agents' resource can be issued.
-///
-/// Without client certificate, the verification endpoint can be used
-/// to check if a given JWT is valid.
-pub async fn start_token_server(
-    listen_addr: &str,
-    ca_cert: &Path,
-    chain: &Path,
-    privkey: &Path,
-) -> Result<(), ServerStartError> {
-    let config = load_tls_config(ca_cert, chain, privkey, false)?;
-    let pk = get_private_key(privkey)?;
-    let secret = Vec::from(pk.secret_der());
+pub struct TokenServer {
+    listen_port: u16,
+    pub handle: JoinHandle<Result<(), ServerStartError>>,
+}
 
-    let listener = TcpListener::bind(&listen_addr).await?;
-    let acceptor = TlsAcceptor::from(Arc::new(config));
-    let app = Router::<ConnState>::new()
-        .route("/sign/", put(sign_jwt))
-        .route("/verify/", put(verify_jwt));
+impl TokenServer {
+    /// Start a HTTP server on the given `listen_addr` with optional client
+    /// certificate verification. If a valid certificate for an agent is
+    /// presented, a JWT (JSON Web Token) for the agents' resource can be issued.
+    ///
+    /// Without client certificate, the verification endpoint can be used
+    /// to check if a given JWT is valid.
+    ///
+    /// The server is running in a background task
+    pub async fn start(
+        listen_addr: &str,
+        ca_cert: &Path,
+        chain: &Path,
+        privkey: &Path,
+    ) -> Result<Self, ServerStartError> {
+        let config = load_tls_config(ca_cert, chain, privkey, false)?;
+        let pk = get_private_key(privkey)?;
+        let secret = Vec::from(pk.secret_der());
 
-    serve_token_server_with_listener(listener, acceptor, secret, app).await
+        let listener = TcpListener::bind(&listen_addr).await?;
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let app = Router::<ConnState>::new()
+            .route("/sign/", put(sign_jwt))
+            .route("/verify/", put(verify_jwt));
+
+        let listen_port = listener.local_addr()?.port();
+        let server_handle = tokio::spawn(async move {
+            serve_token_server_with_listener(listener, acceptor, secret, app).await
+        });
+
+        Ok(Self {
+            listen_port,
+            handle: server_handle,
+        })
+    }
+
+    pub fn port(&self) -> u16 {
+        self.listen_port
+    }
 }
 
 /// Serve requests using an already-bound TcpListener
@@ -181,7 +202,6 @@ async fn serve_token_server_with_listener(
     }
 }
 
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
@@ -194,14 +214,12 @@ mod tests {
 
     use modama_common::test_helpers::TempDir;
     use reqwest::{Certificate, Client};
-    use tokio::task::JoinHandle;
 
     struct TestTokenServer {
         ca: Ca,
         ca_cert: PathBuf,
-        server_handle: JoinHandle<()>,
-        port: u16,
         tmpdir: TempDir,
+        token_server: TokenServer,
     }
 
     async fn run_test_token_server() -> TestTokenServer {
@@ -223,70 +241,54 @@ mod tests {
         let server_chain = tmpdir.join("servers").join("localhost.chain.pem");
         let server_priv = tmpdir.join("servers").join("localhost.priv.pem");
 
-        // spawn token server on an ephemeral port
-        let listener = TcpListener::bind("127.0.0.1:0")
+        let token_server = TokenServer::start("127.0.0.1:0", &ca_cert, &server_chain, &server_priv)
             .await
-            .expect("bind ephemeral");
-        let port = listener.local_addr().expect("local addr").port();
-
-        let config =
-            load_tls_config(&ca_cert, &server_chain, &server_priv, false).expect("load tls");
-        let pk = get_private_key(&server_priv).expect("get private key");
-        let secret = Vec::from(pk.secret_der());
-        let acceptor = TlsAcceptor::from(Arc::new(config));
-        let app = Router::<ConnState>::new()
-            .route("/sign/", put(sign_jwt))
-            .route("/verify/", put(verify_jwt));
-
-        let server_handle = tokio::spawn(async move {
-            let _ = serve_token_server_with_listener(listener, acceptor, secret, app).await;
-        });
+            .unwrap();
 
         TestTokenServer {
             ca,
             ca_cert,
-            server_handle,
-            port,
             tmpdir,
+            token_server,
         }
     }
 
     #[tokio::test]
     async fn test_token_server_sign_with_client_cert() {
-        let server = run_test_token_server().await;
+        let test_server = run_test_token_server().await;
         // create client cert
         let agent_name = "test_agent";
         let resource_name = "test_resource";
-        let client_kc = server
+        let client_kc = test_server
             .ca
             .client_cert(agent_name, resource_name)
             .expect("client cert");
-        server
+        test_server
             .ca
             .save_client_cert(agent_name, resource_name, &client_kc)
             .expect("save client cert");
 
         // Use TokenFetcher to perform an authenticated request and TokenVerifier
         // to ensure the token can be verified by the server's verify endpoint.
-        let client_key_path = server
+        let client_key_path = test_server
             .tmpdir
             .join("clients")
             .join(resource_name)
             .join(format!("{}.priv.pem", agent_name));
-        let client_chain_path = server
+        let client_chain_path = test_server
             .tmpdir
             .join("clients")
             .join(resource_name)
             .join(format!("{}.chain.pem", agent_name));
 
-        let sign_url = format!("https://localhost:{}/sign/", server.port);
-        let verify_url = format!("https://localhost:{}/verify/", server.port);
+        let sign_url = format!("https://localhost:{}/sign/", test_server.token_server.port());
+        let verify_url = format!("https://localhost:{}/verify/", test_server.token_server.port());
 
         let fetcher = TokenFetcher::new(
             sign_url.as_str(),
             &client_key_path,
             &client_chain_path,
-            &server.ca_cert,
+            &test_server.ca_cert,
         )
         .expect("make token fetcher");
 
@@ -294,7 +296,7 @@ mod tests {
         let jwt = fetcher.fetch_token().await.expect("fetch token");
 
         let verifier =
-            TokenVerifier::new(verify_url.as_str(), &server.ca_cert).expect("make verifier");
+            TokenVerifier::new(verify_url.as_str(), &test_server.ca_cert).expect("make verifier");
         let resp = verifier.verify(&jwt).await.expect("verify");
         assert_eq!(
             resp.get_agent_id().unwrap(),
@@ -307,7 +309,7 @@ mod tests {
             modama_common::tokens::TokenVerifyResponse::Invalid => panic!("token invalid"),
         }
 
-        server.server_handle.abort();
+        test_server.token_server.handle.abort();
     }
 
     /// broken token fetcher without client certificate - requests made using
@@ -346,11 +348,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_without_client_cert() {
-        let server = run_test_token_server().await;
-        let sign_url = format!("https://localhost:{}/sign/", server.port);
-        let fetcher = TokenFetcherWithoutCertificate::new(sign_url.as_str(), &server.ca_cert);
+        let test_server = run_test_token_server().await;
+        let sign_url = format!("https://localhost:{}/sign/", test_server.token_server.port());
+        let fetcher = TokenFetcherWithoutCertificate::new(sign_url.as_str(), &test_server.ca_cert);
         let resp = fetcher.fetch_token().await;
         assert_eq!(resp.status(), 403);
-        server.server_handle.abort();
+        test_server.token_server.handle.abort();
     }
 }

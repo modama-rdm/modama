@@ -9,7 +9,7 @@ use smbdrop::{
     events::start_event_server,
     server::{serve_smbdrop_api, ApiState},
     share_manager::ShareManager,
-    token_server::start_token_server,
+    token_server::TokenServer,
 };
 use tokio::{select, signal::unix::SignalKind};
 
@@ -71,9 +71,7 @@ async fn main() -> AnyResult<()> {
         tokio::spawn(async move { serve_smbdrop_api(api_state, &api_listen).await });
 
     let token_api_listen = args.token_api_listen.clone();
-    let token_join_handle = tokio::spawn(async move {
-        start_token_server(&token_api_listen, &args.ca_cert, &args.chain, &args.privkey).await
-    });
+    let token_server = TokenServer::start(&token_api_listen, &args.ca_cert, &args.chain, &args.privkey).await?;
 
     let mut term_stream = tokio::signal::unix::signal(SignalKind::terminate())?;
 
@@ -84,7 +82,7 @@ async fn main() -> AnyResult<()> {
         _ = term_stream.recv() => {
             eprintln!("SIGTERM received, exiting");
         }
-        token_res = token_join_handle => {
+        token_res = token_server.handle => {
             eprintln!("token server terminated");
             token_res??;  // propagate JoinError and ServerStartError
         }
