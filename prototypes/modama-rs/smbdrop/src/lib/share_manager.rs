@@ -25,7 +25,10 @@ use tokio::{
 };
 
 use crate::{
-    mount::{BindMount, CompoundMountError, MountError}, mount_manager::{LinuxMountBackend, MountManager, SetStateError}, process_manager::{ProcessManagerCommand, SambaProcessManager}, samba_config::{SambaConfigManager, UpdateSharesError}
+    mount::{BindMount, CompoundMountError, MountError},
+    mount_manager::{LinuxMountBackend, MountManager, SetStateError},
+    process_manager::{ProcessManagerCommand, SambaProcessManager},
+    samba_config::{SambaConfigManager, UpdateSharesError},
 };
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -128,12 +131,19 @@ impl SmbDropState {
 
     /// Get the User for the given uid, or create a new one with a random password.
     /// Note that this will not create a system user, which is done separately.
-    pub async fn get_or_create_user(&mut self, uid: u32, share_id: String) -> Result<User, ShareError> {
+    pub async fn get_or_create_user(
+        &mut self,
+        uid: u32,
+        share_id: String,
+    ) -> Result<User, ShareError> {
         let key = uid.to_string();
         if let Some(user) = self.users.get(&key) {
             debug!("get_or_create_user: returning existing user for {key}");
             Ok((*user).clone())
         } else {
+            if share_id.len() < 36 {
+                return Err(ShareError::InvalidShareId(share_id));
+            }
             let mut username = format!("share{share_id}").replace('-', "");
             let _rest = username.split_off(31);
             debug!("get_or_create_user: adding user {username}");
@@ -190,6 +200,9 @@ pub enum ShareError {
 
     #[error("background task failed: {0}")]
     JoinError(#[from] JoinError),
+
+    #[error("invalid share id: {0}")]
+    InvalidShareId(String),
 
     #[error("Path name can only contain characters /, a-z, A-Z, 0-9, '_', '-', ' ' and '.'.")]
     PathError,
@@ -341,7 +354,7 @@ async fn get_path_re() -> &'static Regex {
     PATH_RE
         .get_or_init(|| async {
             #[allow(clippy::unwrap_used)]
-            Regex::new(r"^[-/a-zA-Z0-9_. ]*$").unwrap()  // statically correct..?
+            Regex::new(r"^[-/a-zA-Z0-9_. ]*$").unwrap() // statically correct..?
         })
         .await
 }
@@ -600,10 +613,7 @@ impl ShareManager {
             .stdin(Stdio::piped())
             .kill_on_drop(true)
             .spawn()?;
-        let mut stdin = smbpasswd
-            .stdin
-            .take()
-            .ok_or(ShareError::SmbpasswdError)?;
+        let mut stdin = smbpasswd.stdin.take().ok_or(ShareError::SmbpasswdError)?;
         let smbpasswd_in: String = format!("{}\n{}\n", &user.password, &user.password);
         stdin.write_all(smbpasswd_in.as_bytes()).await?;
         let res = smbpasswd.wait_with_output().await?;
@@ -695,5 +705,48 @@ impl ShareManager {
             .filter(|s| !failed_dest_paths.contains(&s.get_dest_path()));
         self.sm.update_shares(shares).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::share_manager::{ShareError, SmbDropState};
+
+    #[tokio::test]
+    async fn test_smbdrop_state_get_or_create_user() {
+        let shares = HashMap::new();
+        let users = HashMap::new();
+        let mut state = SmbDropState { shares, users };
+
+        let share_id = uuid::Uuid::new_v4();
+        let share_id = share_id.hyphenated().to_string();
+
+        // same uid:
+        let u1 = state.get_or_create_user(1001, share_id.clone()).await.unwrap();
+        let u2 = state.get_or_create_user(1001, share_id.clone()).await.unwrap();
+        assert_eq!(u1, u2);
+
+        // different uid, different share id:
+        let share_id_2 = uuid::Uuid::new_v4();
+        let share_id_2 = share_id_2.hyphenated().to_string();
+        let u3 = state.get_or_create_user(1002, share_id_2.clone()).await.unwrap();
+        assert_ne!(u1, u3);
+    }
+
+    #[tokio::test]
+    async fn test_smbdrop_state_invalid_share_id() {
+        let shares = HashMap::new();
+        let users = HashMap::new();
+        let mut state = SmbDropState { shares, users };
+
+        assert!(matches!(
+            state
+                .get_or_create_user(1001, "something-unique".to_owned())
+                .await,
+            Err(ShareError::InvalidShareId(_))
+        ));
     }
 }
