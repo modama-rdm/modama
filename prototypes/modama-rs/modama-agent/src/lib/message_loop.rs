@@ -449,4 +449,111 @@ mod tests {
         test_setup.event_server_task.abort();
         test_setup.message_loop_task.abort();
     }
+
+
+    #[tokio::test]
+    async fn test_message_loop_swith_out_fg_share() {
+        let mut test_setup = MessageLoopTestSetup::start().await;
+
+        // send a state update via the event server's broadcast channel
+        let test_share = messages::Share {
+            resource: Some("test_resource".to_owned()),
+            share_id: "test-id-1".to_owned(),
+            share_name: "share1".to_owned(),
+            dest_path: "/data/dest/1".to_owned(),
+            created_timestamp: 0,
+            username: "u".to_owned(),
+            password: "p".to_owned(),
+            uid: 1000,
+            gid: 1000,
+        };
+        let mut new_state_1 = test_setup.initial_state.clone();
+        new_state_1
+            .shares
+            .insert(test_share.share_id.clone(), test_share.clone());
+        test_setup.event_queue.send(new_state_1.clone()).unwrap();
+
+        // verify the mock backend was asked to mount the share (with timeout)
+        let recv = tokio::time::timeout(Duration::from_secs(2), test_setup.rx_mount.recv())
+            .await
+            .expect("timeout waiting for mount message");
+        let recorded_share = recv.expect("mock sender dropped");
+        assert_eq!(recorded_share.share_id, "test-id-1");
+
+        // verify the mock backend was asked to umount (i.e. make sure nothing extra is mounted)
+        let recv = tokio::time::timeout(Duration::from_secs(2), test_setup.rx_umount.recv())
+            .await
+            .expect("timeout waiting for umount");
+        let vec_of_still_to_be_mounted_shares = recv.expect("mock sender dropped");
+        assert_eq!(vec_of_still_to_be_mounted_shares.len(), 1);
+
+        // assert state updated
+        {
+            let st = test_setup.state.lock().await;
+            println!(
+                "agent state after update: connection={:?}, shares.len={}",
+                st.connection,
+                st.current_shares.shares.len()
+            );
+            assert_eq!(st.current_shares.shares.len(), 1);
+            assert!(st.current_shares.foreground_share.is_some());
+            let fg = st.current_shares.foreground_share.as_ref().unwrap();
+            assert_eq!(fg.share.share_id, "test-id-1");
+        }
+
+        // one more share
+        let test_share = messages::Share {
+            resource: Some("test_resource".to_owned()),
+            share_id: "test-id-2".to_owned(),
+            share_name: "share2".to_owned(),
+            dest_path: "/data/dest/2".to_owned(),
+            created_timestamp: 1, // NOTE the updated timestamp here!
+            username: "u".to_owned(),
+            password: "p".to_owned(),
+            uid: 1000,
+            gid: 1000,
+        };
+        let mut new_state_2 = new_state_1.clone();
+        new_state_2
+            .shares
+            .insert(test_share.share_id.clone(), test_share.clone());
+        test_setup.event_queue.send(new_state_2).unwrap();
+
+        // verify the mock backend was asked to mount the share (with timeout)
+        let recv = tokio::time::timeout(Duration::from_secs(2), test_setup.rx_mount.recv())
+            .await
+            .expect("timeout waiting for mount message");
+        let recorded_share = recv.expect("mock sender dropped");
+        assert_eq!(recorded_share.share_id, "test-id-1");
+        let recv = tokio::time::timeout(Duration::from_secs(2), test_setup.rx_mount.recv())
+            .await
+            .expect("timeout waiting for mount message");
+        let recorded_share = recv.expect("mock sender dropped");
+        assert_eq!(recorded_share.share_id, "test-id-2");
+
+        // verify the mock backend was asked to umount (i.e. make sure nothing extra is mounted)
+        let recv = tokio::time::timeout(Duration::from_secs(2), test_setup.rx_umount.recv())
+            .await
+            .expect("timeout waiting for umount");
+        let vec_of_still_to_be_mounted_shares = recv.expect("mock sender dropped");
+        assert_eq!(vec_of_still_to_be_mounted_shares.len(), 2);
+
+        // assert state updated
+        {
+            let st = test_setup.state.lock().await;
+            println!(
+                "agent state after update: connection={:?}, shares.len={}",
+                st.connection,
+                st.current_shares.shares.len()
+            );
+            assert_eq!(st.current_shares.shares.len(), 2);
+            assert!(st.current_shares.foreground_share.is_some());
+            let fg = st.current_shares.foreground_share.as_ref().unwrap();
+            assert_eq!(fg.share.share_id, "test-id-2");
+        }
+
+        test_setup.event_server_task.abort();
+        test_setup.message_loop_task.abort();
+    }
 }
+
