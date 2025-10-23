@@ -14,17 +14,17 @@ use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
-use crate::share_manager::{ShareError, ShareManager, SmbDropState};
+use crate::share_manager::{DefaultUserProvider, ShareError, ShareManager, SmbDropState};
 
 #[derive(Clone)]
 pub struct ApiState {
-    share_manager: Arc<ShareManager>,
+    share_manager: Arc<ShareManager<DefaultUserProvider>>,
     state_updates_tx: broadcast::Sender<SmbDropState>,
 }
 
 impl ApiState {
     pub fn new(
-        share_manager: ShareManager,
+        share_manager: ShareManager<DefaultUserProvider>,
         state_updates_tx: broadcast::Sender<SmbDropState>,
     ) -> Self {
         Self {

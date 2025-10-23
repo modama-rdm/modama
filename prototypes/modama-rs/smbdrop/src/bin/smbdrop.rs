@@ -8,7 +8,7 @@ use smbdrop::{
     cert_helpers::load_tls_config,
     events::start_event_server,
     server::{serve_smbdrop_api, ApiState},
-    share_manager::ShareManager,
+    share_manager::{DefaultUserProvider, ShareManager},
     token_server::TokenServer,
 };
 use tokio::{select, signal::unix::SignalKind};
@@ -51,6 +51,7 @@ async fn main() -> AnyResult<()> {
         args.bind_mount_prefix,
         args.shares_config,
         args.samba_config_file,
+        DefaultUserProvider::new(),
     )
     .await;
     sm.start().await?;

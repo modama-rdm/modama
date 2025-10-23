@@ -329,13 +329,17 @@ fn make_password() -> String {
 /// Utility to manipulate on-disk configuration for smbdrop. Read-modify-write
 /// cycles should be guarded by an external mutex.
 #[derive(Clone, Debug)]
-struct ShareConfigFile {
+struct ShareConfigFile<U: UserProvider> {
     path: PathBuf,
+    user_provider: U,
 }
 
-impl ShareConfigFile {
-    fn new(path: PathBuf) -> Self {
-        Self { path }
+impl<U: UserProvider> ShareConfigFile<U> {
+    fn new(path: PathBuf, user_provider: U) -> Self {
+        Self {
+            path,
+            user_provider,
+        }
     }
 
     async fn read_config(&self) -> Result<SmbDropState, ShareError> {
@@ -352,7 +356,7 @@ impl ShareConfigFile {
     }
 
     async fn write_config(&self, config: &SmbDropState) -> Result<(), ShareError> {
-        config.check_consistent(&DefaultUserProvider::new())?;
+        config.check_consistent(&self.user_provider)?;
         debug!("write_config");
         let config = config.clone();
 
@@ -391,20 +395,24 @@ async fn get_path_re() -> &'static Regex {
 }
 
 #[derive(Clone, Debug)]
-pub struct ShareManager {
-    config_file: Arc<Mutex<ShareConfigFile>>,
+pub struct ShareManager<U: UserProvider> {
+    config_file: Arc<Mutex<ShareConfigFile<U>>>,
     sm: SambaConfigManager,
     bind_mount_prefix: PathBuf,
     pm_tx: Option<Sender<ProcessManagerCommand>>,
 }
 
-impl ShareManager {
+impl<U: UserProvider> ShareManager<U> {
     pub async fn new(
         bind_mount_prefix: PathBuf,
         shares_config: PathBuf,
         samba_config_path: PathBuf,
+        user_provider: U,
     ) -> Self {
-        let config_file = Arc::new(Mutex::new(ShareConfigFile::new(shares_config)));
+        let config_file = Arc::new(Mutex::new(ShareConfigFile::new(
+            shares_config,
+            user_provider,
+        )));
         let sm = SambaConfigManager::new(&samba_config_path, &bind_mount_prefix);
 
         Self {
@@ -749,9 +757,9 @@ mod tests {
     };
 
     use etc_passwd::Passwd;
-    use modama_common::messages::Share;
+    use modama_common::{messages::Share, test_helpers::TempDir};
 
-    use crate::share_manager::{ShareError, SmbDropState, UserProvider};
+    use crate::share_manager::{ShareConfigFile, ShareError, SmbDropState, UserProvider};
 
     #[tokio::test]
     async fn test_smbdrop_state_get_or_create_user() {
@@ -797,58 +805,60 @@ mod tests {
         ));
     }
 
+    #[derive(Clone)]
+    struct MockUserProvider {
+        users: Vec<(String, u32)>,
+    }
+
+    impl MockUserProvider {
+        fn new(users: Vec<(String, u32)>) -> Self {
+            Self { users }
+        }
+    }
+
+    impl UserProvider for MockUserProvider {
+        fn passwd_from_name(
+            &self,
+            name: impl AsRef<CStr>,
+        ) -> io::Result<Option<etc_passwd::Passwd>> {
+            let name: &CStr = name.as_ref();
+
+            for entry in self.users.iter() {
+                if String::from_utf8(name.to_bytes().to_owned()).unwrap() == entry.0 {
+                    return Ok(Some(Passwd {
+                        name: CString::new(entry.0.as_bytes()).unwrap(),
+                        passwd: CString::new("x".as_bytes()).unwrap(),
+                        uid: entry.1,
+                        gid: entry.1,
+                        gecos: CString::new("".as_bytes()).unwrap(),
+                        dir: CString::new("".as_bytes()).unwrap(),
+                        shell: CString::new("".as_bytes()).unwrap(),
+                    }));
+                }
+            }
+            Ok(None)
+        }
+
+        fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>> {
+            for entry in self.users.iter() {
+                if uid == entry.1 {
+                    return Ok(Some(Passwd {
+                        name: CString::new(entry.0.as_bytes()).unwrap(),
+                        passwd: CString::new("x".as_bytes()).unwrap(),
+                        uid: entry.1,
+                        gid: entry.1,
+                        gecos: CString::new("".as_bytes()).unwrap(),
+                        dir: CString::new("".as_bytes()).unwrap(),
+                        shell: CString::new("".as_bytes()).unwrap(),
+                    }));
+                }
+            }
+            Ok(None)
+        }
+    }
+
     #[tokio::test]
     async fn test_smbdrop_consistency() {
-        struct MockUserProvider {
-            users: Vec<(String, u32)>,
-        }
-
-        impl MockUserProvider {
-            fn new(users: Vec<(String, u32)>) -> Self {
-                Self { users }
-            }
-        }
-
-        impl UserProvider for MockUserProvider {
-            fn passwd_from_name(
-                &self,
-                name: impl AsRef<CStr>,
-            ) -> io::Result<Option<etc_passwd::Passwd>> {
-                let name: &CStr = name.as_ref();
-
-                for entry in self.users.iter() {
-                    if String::from_utf8(name.to_bytes().to_owned()).unwrap() == entry.0 {
-                        return Ok(Some(Passwd {
-                            name: CString::new(entry.0.as_bytes()).unwrap(),
-                            passwd: CString::new("x".as_bytes()).unwrap(),
-                            uid: entry.1,
-                            gid: entry.1,
-                            gecos: CString::new("".as_bytes()).unwrap(),
-                            dir: CString::new("".as_bytes()).unwrap(),
-                            shell: CString::new("".as_bytes()).unwrap(),
-                        }));
-                    }
-                }
-                Ok(None)
-            }
-
-            fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>> {
-                for entry in self.users.iter() {
-                    if uid == entry.1 {
-                        return Ok(Some(Passwd {
-                            name: CString::new(entry.0.as_bytes()).unwrap(),
-                            passwd: CString::new("x".as_bytes()).unwrap(),
-                            uid: entry.1,
-                            gid: entry.1,
-                            gecos: CString::new("".as_bytes()).unwrap(),
-                            dir: CString::new("".as_bytes()).unwrap(),
-                            shell: CString::new("".as_bytes()).unwrap(),
-                        }));
-                    }
-                }
-                Ok(None)
-            }
-        }
         let mut state = SmbDropState {
             shares: HashMap::new(),
             users: HashMap::new(),
@@ -1061,5 +1071,44 @@ mod tests {
             .unwrap();
         let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
         state.check_consistent(&user_provider).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_share_config_file() {
+        let tmp = TempDir::new("share_config_file");
+        let cfg_path = tmp.join("shares.json");
+        let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let username = "shareb4fdcdf6e8704ac5994278463f";
+        let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
+        let f = ShareConfigFile::new(cfg_path.clone(), user_provider.clone());
+
+        let shares = HashMap::new();
+        let users = HashMap::new();
+        let mut state = SmbDropState { shares, users };
+
+        let share = Share {
+            resource: Some("res".to_owned()),
+            share_id: share_id.clone(),
+            share_name: share_id.clone(),
+            dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            created_timestamp: 0,
+            username: username.to_owned(),
+            password: "share-pass".to_owned(),
+            uid: 1001,
+            gid: 1001,
+        };
+
+        state.add_share(share.clone()).await.unwrap();
+        state
+            .get_or_create_user(1001, share_id.clone())
+            .await
+            .unwrap();
+
+        f.write_config(&state).await.unwrap();
+
+        let f2 = ShareConfigFile::new(cfg_path.clone(), user_provider.clone());
+        let state2 = f2.read_config().await.unwrap();
+
+        assert_eq!(state, state2);
     }
 }
