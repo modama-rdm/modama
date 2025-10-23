@@ -6,7 +6,10 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::{mount::BindMount, share_manager::{make_temporary_fname, TempConfigError}};
+use crate::{
+    mount::BindMount,
+    share_manager::{make_temporary_fname, TempConfigError},
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum UpdateSharesError {
@@ -74,5 +77,60 @@ impl SambaConfigManager {
         self.write_config(&new_config).await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use std::{path::PathBuf, str::FromStr};
+
+    use modama_common::{messages::Share, test_helpers::TempDir};
+    use tokio::{fs::File, io::AsyncReadExt};
+
+    use crate::samba_config::SambaConfigManager;
+
+    #[tokio::test]
+    async fn test_empty_config() {
+        let tmp = TempDir::new("samba_config");
+        let smb_cfg = tmp.join("smb.conf");
+        let scm = SambaConfigManager::new(&smb_cfg, &PathBuf::from_str("/run/mounts/").unwrap());
+        scm.update_shares([].iter()).await.unwrap();
+
+        let mut f = File::open(&smb_cfg).await.unwrap();
+        let mut contents = String::new();
+        f.read_to_string(&mut contents).await.unwrap();
+
+        assert_eq!(contents, "");
+    }
+
+    #[tokio::test]
+    async fn test_simple_config() {
+        let tmp = TempDir::new("samba_config");
+        let smb_cfg = tmp.join("smb.conf");
+        let scm = SambaConfigManager::new(&smb_cfg, &PathBuf::from_str("/run/mounts/").unwrap());
+        scm.update_shares(
+            [Share {
+                resource: Some("res".to_owned()),
+                share_id: "share-123".to_owned(),
+                share_name: "share-123".to_owned(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: "share-user".to_owned(),
+                password: "share-pass".to_owned(),
+                uid: 1001,
+                gid: 1001,
+            }]
+            .iter(),
+        )
+        .await
+        .unwrap();
+
+        let mut f = File::open(&smb_cfg).await.unwrap();
+        let mut contents = String::new();
+        f.read_to_string(&mut contents).await.unwrap();
+
+        assert_eq!(contents, "\n[share-123]\npath = \"/run/mounts/shares/share-123\"\nread only = no\nforce create mode = 0600\nforce directory mode = 0700\nvalid users = share-user\n")
     }
 }
