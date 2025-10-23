@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use log::{debug, error, info, warn};
 use modama_common::messages::Share;
 use rand::{distr::Alphanumeric, Rng};
@@ -5,8 +6,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    ffi::CString,
+    ffi::{CStr, CString},
     io,
+    option::Option,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -31,7 +33,7 @@ use crate::{
     samba_config::{SambaConfigManager, UpdateSharesError},
 };
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct User {
     pub uid: u32,
     pub username: String,
@@ -48,6 +50,35 @@ impl std::fmt::Debug for User {
     }
 }
 
+pub trait UserProvider {
+    fn passwd_from_name(&self, name: impl AsRef<CStr>) -> io::Result<Option<etc_passwd::Passwd>>;
+    fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>>;
+}
+
+pub struct DefaultUserProvider {}
+
+impl DefaultUserProvider {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for DefaultUserProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UserProvider for DefaultUserProvider {
+    fn passwd_from_name(&self, name: impl AsRef<CStr>) -> io::Result<Option<etc_passwd::Passwd>> {
+        etc_passwd::Passwd::from_name(name)
+    }
+
+    fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>> {
+        etc_passwd::Passwd::from_uid(uid)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SmbDropState {
     pub shares: HashMap<String, Share>,
@@ -59,7 +90,7 @@ impl SmbDropState {
     // the state to JSON and abort - we might want to instead try to "heal" the
     // configuration and try to continue, such that an error in one share cannot
     // influence other shares being created or removed.
-    pub fn check_consistent(&self) -> Result<(), ShareError> {
+    pub fn check_consistent(&self, user_provider: &impl UserProvider) -> Result<(), ShareError> {
         let share_uids: HashSet<u32> = self.shares.values().map(|s| s.uid).collect();
         let user_uids: HashSet<u32> = self.users.values().map(|u| u.uid).collect();
         if share_uids != user_uids {
@@ -68,7 +99,7 @@ impl SmbDropState {
             )));
         }
 
-        for (_uid, user) in self.users.iter() {
+        for (_uid, user) in self.users.iter().sorted() {
             let c_username = if let Ok(c_username) = CString::new(user.username.as_bytes()) {
                 c_username
             } else {
@@ -77,7 +108,7 @@ impl SmbDropState {
                     &user.username
                 )));
             };
-            let pwd = etc_passwd::Passwd::from_name(&c_username)?;
+            let pwd = user_provider.passwd_from_name(&c_username)?;
             if let Some(pwd) = pwd {
                 if pwd.uid != user.uid {
                     return Err(ShareError::Inconsistent(format!(
@@ -92,12 +123,12 @@ impl SmbDropState {
                 )));
             }
 
-            let pwd = etc_passwd::Passwd::from_uid(user.uid)?;
+            let pwd = user_provider.passwd_from_uid(user.uid)?;
             if let Some(pwd) = pwd {
                 let pwd_name = pwd.name.to_string_lossy();
                 if pwd_name != user.username {
                     return Err(ShareError::Inconsistent(format!(
-                        "username misatch for {}: `{}` (system) vs `{}` (share config)",
+                        "username mismatch for {}: `{}` (system) vs `{}` (share config)",
                         user.uid, &pwd_name, &user.username
                     )));
                 }
@@ -321,7 +352,7 @@ impl ShareConfigFile {
     }
 
     async fn write_config(&self, config: &SmbDropState) -> Result<(), ShareError> {
-        config.check_consistent()?;
+        config.check_consistent(&DefaultUserProvider::new())?;
         debug!("write_config");
         let config = config.clone();
 
@@ -711,9 +742,16 @@ impl ShareManager {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        ffi::{CStr, CString},
+        io,
+    };
 
-    use crate::share_manager::{ShareError, SmbDropState};
+    use etc_passwd::Passwd;
+    use modama_common::messages::Share;
+
+    use crate::share_manager::{ShareError, SmbDropState, UserProvider};
 
     #[tokio::test]
     async fn test_smbdrop_state_get_or_create_user() {
@@ -725,14 +763,23 @@ mod tests {
         let share_id = share_id.hyphenated().to_string();
 
         // same uid:
-        let u1 = state.get_or_create_user(1001, share_id.clone()).await.unwrap();
-        let u2 = state.get_or_create_user(1001, share_id.clone()).await.unwrap();
+        let u1 = state
+            .get_or_create_user(1001, share_id.clone())
+            .await
+            .unwrap();
+        let u2 = state
+            .get_or_create_user(1001, share_id.clone())
+            .await
+            .unwrap();
         assert_eq!(u1, u2);
 
         // different uid, different share id:
         let share_id_2 = uuid::Uuid::new_v4();
         let share_id_2 = share_id_2.hyphenated().to_string();
-        let u3 = state.get_or_create_user(1002, share_id_2.clone()).await.unwrap();
+        let u3 = state
+            .get_or_create_user(1002, share_id_2.clone())
+            .await
+            .unwrap();
         assert_ne!(u1, u3);
     }
 
@@ -748,5 +795,271 @@ mod tests {
                 .await,
             Err(ShareError::InvalidShareId(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn test_smbdrop_consistency() {
+        struct MockUserProvider {
+            users: Vec<(String, u32)>,
+        }
+
+        impl MockUserProvider {
+            fn new(users: Vec<(String, u32)>) -> Self {
+                Self { users }
+            }
+        }
+
+        impl UserProvider for MockUserProvider {
+            fn passwd_from_name(
+                &self,
+                name: impl AsRef<CStr>,
+            ) -> io::Result<Option<etc_passwd::Passwd>> {
+                let name: &CStr = name.as_ref();
+
+                for entry in self.users.iter() {
+                    if String::from_utf8(name.to_bytes().to_owned()).unwrap() == entry.0 {
+                        return Ok(Some(Passwd {
+                            name: CString::new(entry.0.as_bytes()).unwrap(),
+                            passwd: CString::new("x".as_bytes()).unwrap(),
+                            uid: entry.1,
+                            gid: entry.1,
+                            gecos: CString::new("".as_bytes()).unwrap(),
+                            dir: CString::new("".as_bytes()).unwrap(),
+                            shell: CString::new("".as_bytes()).unwrap(),
+                        }));
+                    }
+                }
+                Ok(None)
+            }
+
+            fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>> {
+                for entry in self.users.iter() {
+                    if uid == entry.1 {
+                        return Ok(Some(Passwd {
+                            name: CString::new(entry.0.as_bytes()).unwrap(),
+                            passwd: CString::new("x".as_bytes()).unwrap(),
+                            uid: entry.1,
+                            gid: entry.1,
+                            gecos: CString::new("".as_bytes()).unwrap(),
+                            dir: CString::new("".as_bytes()).unwrap(),
+                            shell: CString::new("".as_bytes()).unwrap(),
+                        }));
+                    }
+                }
+                Ok(None)
+            }
+        }
+        let mut state = SmbDropState {
+            shares: HashMap::new(),
+            users: HashMap::new(),
+        };
+        let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let username = "shareb4fdcdf6e8704ac5994278463f";
+
+        let share_id_2 = String::from("Y4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let username_2 = "shareY4fdcdf6e8704ac5994278463f";
+
+        {
+            let mut state = state.clone();
+            let share = Share {
+                resource: Some("res".to_owned()),
+                share_id: share_id.clone(),
+                share_name: share_id.clone(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: "different".to_owned(),
+                password: "share-pass".to_owned(),
+                uid: 1001,
+                gid: 1001,
+            };
+            state.add_share(share.clone()).await.unwrap();
+            state
+                .get_or_create_user(1001, share_id.clone())
+                .await
+                .unwrap();
+            let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
+            match state.check_consistent(&user_provider) {
+                Err(ShareError::Inconsistent(m)) => {
+                    assert_eq!(
+                        m,
+                        "username mismatch for 1001: user entry `shareb4fdcdf6e8704ac5994278463f` vs share `different`".to_owned()
+                    )
+                }
+                res => {
+                    panic!("unexpected result: {res:?}");
+                }
+            };
+        }
+
+        {
+            let mut state = state.clone();
+            let share = Share {
+                resource: Some("res".to_owned()),
+                share_id: share_id.clone(),
+                share_name: share_id.clone(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: username.to_owned(),
+                password: "share-pass".to_owned(),
+                uid: 1002, // XXX uid mismatch
+                gid: 1002,
+            };
+            state.add_share(share.clone()).await.unwrap();
+            state
+                .get_or_create_user(1001, share_id.clone())
+                .await
+                .unwrap();
+            let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
+            match state.check_consistent(&user_provider) {
+                Err(ShareError::Inconsistent(m)) => {
+                    assert_eq!(
+                        m,
+                        "mismatch in UIDs of shares ({1002}) and users ({1001})".to_owned()
+                    )
+                }
+                res => {
+                    panic!("unexpected result: {res:?}");
+                }
+            };
+        }
+
+        {
+            let mut state = state.clone();
+            let share = Share {
+                resource: Some("res".to_owned()),
+                share_id: share_id.clone(),
+                share_name: share_id.clone(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: username.to_owned(),
+                password: "share-pass".to_owned(),
+                uid: 1001,
+                gid: 1001,
+            };
+            state.add_share(share.clone()).await.unwrap();
+            // uid mismatch here:
+            state
+                .get_or_create_user(1002, share_id.clone())
+                .await
+                .unwrap();
+            let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
+            match state.check_consistent(&user_provider) {
+                Err(ShareError::Inconsistent(m)) => {
+                    assert_eq!(
+                        m,
+                        "mismatch in UIDs of shares ({1001}) and users ({1002})".to_owned()
+                    )
+                }
+                res => {
+                    panic!("unexpected result: {res:?}");
+                }
+            };
+        }
+
+        // multiple shares, multiple uesrs, but with a uid mismatch:
+        {
+            let mut state = state.clone();
+            let share = Share {
+                resource: Some("res".to_owned()),
+                share_id: share_id.clone(),
+                share_name: share_id.clone(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: username.to_owned(),
+                password: "share-pass".to_owned(),
+                uid: 1001,
+                gid: 1001,
+            };
+            state.add_share(share.clone()).await.unwrap();
+
+            let share = Share {
+                resource: Some("res".to_owned()),
+                share_id: share_id_2.clone(),
+                share_name: share_id_2.clone(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: username_2.to_owned(),
+                password: "share-pass".to_owned(),
+                uid: 1002,
+                gid: 1002,
+            };
+            state.add_share(share.clone()).await.unwrap();
+
+            // add the uesrs, but with a "crossover"
+            state
+                .get_or_create_user(1002, share_id.clone())
+                .await
+                .unwrap();
+            state
+                .get_or_create_user(1001, share_id_2.clone())
+                .await
+                .unwrap();
+
+            let user_provider = MockUserProvider::new(vec![
+                (username.to_owned(), 1001),
+                (username_2.to_owned(), 1002),
+            ]);
+            match state.check_consistent(&user_provider) {
+                Err(ShareError::Inconsistent(m)) => {
+                    assert_eq!(
+                        m,
+                        "uid mismatch: 1002 (system) vs 1001 (share config)".to_owned()
+                    )
+                }
+                res => {
+                    panic!("unexpected result: {res:?}");
+                }
+            };
+        }
+
+        let share = Share {
+            resource: Some("res".to_owned()),
+            share_id: share_id.clone(),
+            share_name: share_id.clone(),
+            dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            created_timestamp: 0,
+            username: username.to_owned(),
+            password: "share-pass".to_owned(),
+            uid: 1001,
+            gid: 1001,
+        };
+
+        // adding a share without a user:
+        state.add_share(share.clone()).await.unwrap();
+        let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
+        assert!(matches!(
+            state.check_consistent(&user_provider),
+            Err(ShareError::Inconsistent(_)),
+        ));
+
+        {
+            // if we add the wrong user...
+            let mut state = state.clone();
+
+            state
+                .get_or_create_user(1001, "XXXXXdf6-e870-4ac5-9942-78463f051c5c".to_owned())
+                .await
+                .unwrap();
+            let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
+            match state.check_consistent(&user_provider) {
+                Err(ShareError::Inconsistent(m)) => {
+                    assert_eq!(
+                        m,
+                        "user `shareXXXXXdf6e8704ac5994278463f` not found".to_owned()
+                    )
+                }
+                res => {
+                    panic!("unexpected result: {res:?}");
+                }
+            };
+        }
+
+        // fix by adding a matching user:
+        state
+            .get_or_create_user(1001, share_id.clone())
+            .await
+            .unwrap();
+        let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
+        state.check_consistent(&user_provider).unwrap();
     }
 }

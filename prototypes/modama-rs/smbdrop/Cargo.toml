@@ -44,6 +44,7 @@ hyper = { workspace = true }
 tower-service = { workspace = true }
 reqwest = { workspace = true, features = ["rustls-tls-no-provider", "json"], default-features = false }
 jsonwebtoken = "9.2.0"
+itertools = "0.14.0"
 
 [target.'cfg(unix)'.dependencies]
 procfs = { workspace = true }
