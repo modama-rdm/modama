@@ -353,6 +353,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use modama_common::messages::Share as MessageShare;
+    use modama_common::mgmt_client::{AdhocProject, ListProjectsResponse};
     use serde_json::Value;
     use std::path::PathBuf;
     use tower::ServiceExt;
@@ -366,49 +367,69 @@ mod tests {
         }
     }
 
+    struct TestSetup {
+        pub app: Router,
+        pub shared_state: Arc<Mutex<AgentState>>,
+    }
+
+    impl TestSetup {
+        pub async fn start() -> Self {
+            let cfg = crate::config::AgentConfig {
+                api_url: url::Url::parse("http://localhost/").unwrap(),
+                mgmt_api_url: "http://localhost/".to_string(),
+                smb_hostname: "host".to_string(),
+                smb_ip: tokio::sync::OnceCell::new(),
+                smb_port: 445,
+                smb_domain: "WINDOWS_FOR_WORKGROUPS".to_string(),
+                agent_name: "agent-name".to_string(),
+                resource_name: "res".to_string(),
+                linux_config: None,
+            };
+            let mut state_inner = crate::agent_state::AgentState::new(&cfg);
+            let mshare = MountedShare {
+                share: MessageShare {
+                    resource: None,
+                    share_id: "id".to_string(),
+                    share_name: "sname".to_string(),
+                    dest_path: "dest".to_string(),
+                    created_timestamp: 0,
+                    username: "u".to_string(),
+                    password: "p".to_string(),
+                    uid: 1000,
+                    gid: 1000,
+                },
+                mount_path: PathBuf::from("/mnt/point"),
+            };
+            state_inner.current_shares.foreground_share = Some(mshare.clone());
+
+            state_inner
+                .connected_agents
+                .push(modama_common::agent::AgentId {
+                    resource: "res".to_string(),
+                    agent: "agent".to_string(),
+                    san_encoded: "x-modama-agent://res#agent".to_string(),
+                });
+
+            let shared_state = Arc::new(Mutex::new(state_inner));
+
+            let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
+            let api_state = ApiState::new(&shared_state, &token_provider);
+            let app = make_app(api_state);
+
+            Self { app, shared_state }
+        }
+    }
+
     #[tokio::test]
     async fn test_shares_foreground_endpoint_returns_share() {
-        // Build AgentState with a foreground mounted share
-        let cfg = crate::config::AgentConfig {
-            api_url: url::Url::parse("http://localhost/").unwrap(),
-            mgmt_api_url: "http://localhost/".to_string(),
-            smb_hostname: "host".to_string(),
-            smb_ip: tokio::sync::OnceCell::new(),
-            smb_port: 445,
-            smb_domain: "WINDOWS_FOR_WORKGROUPS".to_string(),
-            agent_name: "agent".to_string(),
-            resource_name: "res".to_string(),
-            linux_config: None,
-        };
-        let mut state_inner = crate::agent_state::AgentState::new(&cfg);
-        let mshare = MountedShare {
-            share: MessageShare {
-                resource: None,
-                share_id: "id".to_string(),
-                share_name: "sname".to_string(),
-                dest_path: "dest".to_string(),
-                created_timestamp: 0,
-                username: "u".to_string(),
-                password: "p".to_string(),
-                uid: 1000,
-                gid: 1000,
-            },
-            mount_path: PathBuf::from("/mnt/point"),
-        };
-        state_inner.current_shares.foreground_share = Some(mshare.clone());
-        let shared_state = Arc::new(Mutex::new(state_inner));
-
-        let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
-        let api_state = ApiState::new(&shared_state, &token_provider);
-        let app = make_app(api_state);
-
+        let test_setup = TestSetup::start().await;
         let req = Request::builder()
             .uri("/shares/foreground/")
             .method("GET")
             .body(Body::empty())
             .unwrap();
 
-        let resp = app.oneshot(req).await.unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -416,5 +437,55 @@ mod tests {
         assert_eq!(got["type"], "Share");
         assert_eq!(got["dest_path"], "dest");
         assert_eq!(got["mount_path"], "/mnt/point");
+    }
+
+    #[tokio::test]
+    async fn test_index_page_shows_connected_agents_and_projects() {
+        let test_setup = TestSetup::start().await;
+
+        let list_projects_resp: ListProjectsResponse = ListProjectsResponse {
+            errno: 0,
+            projects: vec![AdhocProject {
+                relpath: "the-project".to_owned(),
+                name: "the-project".to_owned(),
+                owner: "testuser".to_owned(),
+                members: vec!["testuser".to_owned()],
+                ctime: 0.0,
+                mtime: 0.0,
+                gid: 1001,
+                usage_bytes: Some(42),
+            }],
+        };
+
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&list_projects_resp).unwrap())
+            .create_async()
+            .await;
+
+        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+
+        // Build request to index with Basic auth for user 'testuser'
+        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
+        let req = Request::builder()
+            .uri("/")
+            .method("GET")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
+
+        // Should contain connected agent SAN and agent name
+        assert!(body_str.contains("x-modama-agent://res#agent"));
+        assert!(body_str.contains("agent-name"));
+        assert!(body_str.contains("the-project"));
     }
 }
