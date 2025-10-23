@@ -1,4 +1,4 @@
-use reqwest::{Client, ClientBuilder, StatusCode};
+use reqwest::{Client, ClientBuilder, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -12,6 +12,9 @@ pub enum MgmtError {
     #[error("unathorized")]
     Unauthorized,
 
+    #[error("object not found")]
+    NotFound,
+
     #[error("url parse error: {0}")]
     UrlParseError(#[from] url::ParseError),
 }
@@ -22,7 +25,7 @@ pub struct CreateShareRequest {
     pub resource: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AdhocProject {
     pub relpath: String,
     pub name: String,
@@ -62,6 +65,18 @@ pub struct MgmtClient {
     base_url: Url,
 }
 
+fn maybe_status_to_err(resp: &Response) -> Result<(), MgmtError> {
+    if resp.status() == StatusCode::UNAUTHORIZED {
+        return Err(MgmtError::Unauthorized);
+    }
+
+    if resp.status() == StatusCode::NOT_FOUND {
+        return Err(MgmtError::NotFound);
+    }
+
+    Ok(())
+}
+
 impl MgmtClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Result<Self, MgmtError> {
         let client = ClientBuilder::new().build()?;
@@ -81,11 +96,7 @@ impl MgmtClient {
             .basic_auth(&self.username, Some(&self.password))
             .send()
             .await?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED {
-            return Err(MgmtError::Unauthorized);
-        }
-
+        maybe_status_to_err(&resp)?;
         Ok(resp.json().await?)
     }
 
@@ -100,11 +111,7 @@ impl MgmtClient {
             .basic_auth(&self.username, Some(&self.password))
             .send()
             .await?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED {
-            return Err(MgmtError::Unauthorized);
-        }
-
+        maybe_status_to_err(&resp)?;
         Ok(resp.json().await?)
     }
 
@@ -130,11 +137,7 @@ impl MgmtClient {
             .json(&request)
             .send()
             .await?;
-
-        if resp.status() == StatusCode::UNAUTHORIZED {
-            return Err(MgmtError::Unauthorized);
-        }
-
+        maybe_status_to_err(&resp)?;
         Ok(resp.json().await?)
     }
 }

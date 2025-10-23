@@ -29,7 +29,7 @@ fn create_env() -> Environment<'static> {
     let mut env = Environment::new();
 
     env.set_loader(|name| match name {
-        "start_index_step3.html" => Ok(Some(
+        "start_ingest_step2.html" => Ok(Some(
             "<html><form action='.' method='post'><input type='submit'></form></html>".to_owned(),
         )),
         _ => Ok(None),
@@ -98,6 +98,15 @@ impl IntoResponse for LocalAPIError {
                 [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
             )
                 .into_response(),
+            LocalAPIError::BackendAPI(MgmtError::NotFound) => {
+                // FIXME: json/text depending on accept?
+                (
+                    StatusCode::NOT_FOUND,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    "object not found",
+                )
+                    .into_response()
+            }
             LocalAPIError::BackendAPI(e) => {
                 error!("backend API error: {e}");
                 // FIXME: json/text depending on accept?
@@ -254,21 +263,14 @@ async fn start_ingest_step2(
     )?;
 
     let details = c.project_details(&project_name).await?;
-    let mut resp = String::new();
 
     if !details.datasets.iter().any(|d| d.name == session_name) {
         return Ok((StatusCode::NOT_FOUND).into_response());
     }
 
-    resp += &format!(
-        "Starting ingest for resource {} and session {}\n",
-        agent_state.state.lock().await.config.resource_name,
-        session_name,
-    );
-
     let tpl = agent_state
         .jinja_env
-        .get_template("start_index_step3.html")?;
+        .get_template("start_ingest_step2.html")?;
     let res_name = &agent_state.state.lock().await.config.resource_name;
     Ok((
         [(header::CONTENT_TYPE, "text/html")],
@@ -352,8 +354,10 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
-    use modama_common::messages::Share as MessageShare;
-    use modama_common::mgmt_client::{AdhocProject, ListProjectsResponse};
+    use modama_common::messages::{self, Share as MessageShare};
+    use modama_common::mgmt_client::{
+        AdhocProject, DataInProject, ListProjectsResponse, ProjectDetailsResponse,
+    };
     use serde_json::Value;
     use std::path::PathBuf;
     use tower::ServiceExt;
@@ -386,21 +390,6 @@ mod tests {
                 linux_config: None,
             };
             let mut state_inner = crate::agent_state::AgentState::new(&cfg);
-            let mshare = MountedShare {
-                share: MessageShare {
-                    resource: None,
-                    share_id: "id".to_string(),
-                    share_name: "sname".to_string(),
-                    dest_path: "dest".to_string(),
-                    created_timestamp: 0,
-                    username: "u".to_string(),
-                    password: "p".to_string(),
-                    uid: 1000,
-                    gid: 1000,
-                },
-                mount_path: PathBuf::from("/mnt/point"),
-            };
-            state_inner.current_shares.foreground_share = Some(mshare.clone());
 
             state_inner
                 .connected_agents
@@ -423,6 +412,27 @@ mod tests {
     #[tokio::test]
     async fn test_shares_foreground_endpoint_returns_share() {
         let test_setup = TestSetup::start().await;
+
+        let mshare = MountedShare {
+            share: MessageShare {
+                resource: None,
+                share_id: "id".to_string(),
+                share_name: "sname".to_string(),
+                dest_path: "dest".to_string(),
+                created_timestamp: 0,
+                username: "u".to_string(),
+                password: "p".to_string(),
+                uid: 1000,
+                gid: 1000,
+            },
+            mount_path: PathBuf::from("/mnt/point"),
+        };
+        test_setup
+            .shared_state
+            .lock()
+            .await
+            .current_shares
+            .foreground_share = Some(mshare.clone());
         let req = Request::builder()
             .uri("/shares/foreground/")
             .method("GET")
@@ -437,6 +447,25 @@ mod tests {
         assert_eq!(got["type"], "Share");
         assert_eq!(got["dest_path"], "dest");
         assert_eq!(got["mount_path"], "/mnt/point");
+    }
+
+    #[tokio::test]
+    async fn test_no_fg_share_by_default() {
+        let test_setup = TestSetup::start().await;
+
+        let req = Request::builder()
+            .uri("/shares/foreground/")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let got: Value = serde_json::from_slice(&bytes).unwrap();
+        println!("{got}");
+        assert_eq!(got["type"], "None");
     }
 
     #[tokio::test]
@@ -482,10 +511,386 @@ mod tests {
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let body_str = String::from_utf8(bytes.to_vec()).unwrap();
-
-        // Should contain connected agent SAN and agent name
         assert!(body_str.contains("x-modama-agent://res#agent"));
         assert!(body_str.contains("agent-name"));
         assert!(body_str.contains("the-project"));
+    }
+
+    #[tokio::test]
+    async fn test_ingest_step1() {
+        let test_setup = TestSetup::start().await;
+
+        let proj = AdhocProject {
+            relpath: "the-project".to_owned(),
+            name: "the-project".to_owned(),
+            owner: "testuser".to_owned(),
+            members: vec!["testuser".to_owned()],
+            ctime: 0.0,
+            mtime: 0.0,
+            gid: 1001,
+            usage_bytes: Some(42),
+        };
+
+        let list_projects_resp: ListProjectsResponse = ListProjectsResponse {
+            errno: 0,
+            projects: vec![proj.clone()],
+        };
+
+        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
+            errno: 0,
+            project: proj.clone(),
+            datasets: vec![DataInProject {
+                name: "test-session".to_owned(),
+                immutable: false,
+                ctime: 0.0,
+                mtime: 0.0,
+            }],
+        };
+
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&list_projects_resp).unwrap())
+            .create_async()
+            .await;
+
+        server
+            .mock("GET", "/api/project/the-project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&project_details_resp).unwrap())
+            .create_async()
+            .await;
+
+        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+
+        // Build request to index with Basic auth for user 'testuser'
+        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/")
+            .method("GET")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
+
+        assert!(body_str.contains("test-session"));
+    }
+
+    #[tokio::test]
+    async fn test_ingest_step2_invalid_session_name() {
+        let test_setup = TestSetup::start().await;
+
+        let proj = AdhocProject {
+            relpath: "the-project".to_owned(),
+            name: "the-project".to_owned(),
+            owner: "testuser".to_owned(),
+            members: vec!["testuser".to_owned()],
+            ctime: 0.0,
+            mtime: 0.0,
+            gid: 1001,
+            usage_bytes: Some(42),
+        };
+
+        let list_projects_resp: ListProjectsResponse = ListProjectsResponse {
+            errno: 0,
+            projects: vec![proj.clone()],
+        };
+
+        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
+            errno: 0,
+            project: proj.clone(),
+            datasets: vec![DataInProject {
+                name: "test-session".to_owned(),
+                immutable: false,
+                ctime: 0.0,
+                mtime: 0.0,
+            }],
+        };
+
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&list_projects_resp).unwrap())
+            .create_async()
+            .await;
+
+        server
+            .mock("GET", "/api/project/the-project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&project_details_resp).unwrap())
+            .create_async()
+            .await;
+
+        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+
+        // Build request to index with Basic auth for user 'testuser'
+        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/invalid-session/")
+            .method("GET")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_ingest_step2_valid() {
+        let test_setup = TestSetup::start().await;
+
+        let proj = AdhocProject {
+            relpath: "the-project".to_owned(),
+            name: "the-project".to_owned(),
+            owner: "testuser".to_owned(),
+            members: vec!["testuser".to_owned()],
+            ctime: 0.0,
+            mtime: 0.0,
+            gid: 1001,
+            usage_bytes: Some(42),
+        };
+
+        let list_projects_resp: ListProjectsResponse = ListProjectsResponse {
+            errno: 0,
+            projects: vec![proj.clone()],
+        };
+
+        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
+            errno: 0,
+            project: proj.clone(),
+            datasets: vec![DataInProject {
+                name: "test-session".to_owned(),
+                immutable: false,
+                ctime: 0.0,
+                mtime: 0.0,
+            }],
+        };
+
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&list_projects_resp).unwrap())
+            .create_async()
+            .await;
+
+        server
+            .mock("GET", "/api/project/the-project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&project_details_resp).unwrap())
+            .create_async()
+            .await;
+
+        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+
+        // Build request to index with Basic auth for user 'testuser'
+        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/test-session/")
+            .method("GET")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
+
+        assert!(body_str.contains("<form action='.' method='post'"));
+    }
+
+    #[tokio::test]
+    async fn test_ingest_step2_invalid_project_name() {
+        let test_setup = TestSetup::start().await;
+
+        let mut server = mockito::Server::new_async().await;
+        // explicit 404 response for the invalid project name
+        let mock = server
+            .mock("GET", "/api/project/invalid-project/")
+            .with_status(404)
+            .with_header("content-type", "text/plain")
+            .with_body("not found")
+            .create_async()
+            .await;
+
+        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+
+        // Build request to index with Basic auth for user 'testuser'
+        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
+        let req = Request::builder()
+            .uri("/start-ingest/invalid-project/test-session/")
+            .method("GET")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_ingest_step3() {
+        let test_setup = TestSetup::start().await;
+
+        let proj = AdhocProject {
+            relpath: "the-project".to_owned(),
+            name: "the-project".to_owned(),
+            owner: "testuser".to_owned(),
+            members: vec!["testuser".to_owned()],
+            ctime: 0.0,
+            mtime: 0.0,
+            gid: 1001,
+            usage_bytes: Some(42),
+        };
+
+        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
+            errno: 0,
+            project: proj.clone(),
+            datasets: vec![DataInProject {
+                name: "test-session".to_owned(),
+                immutable: false,
+                ctime: 0.0,
+                mtime: 0.0,
+            }],
+        };
+
+        let mut server = mockito::Server::new_async().await;
+        let mock_details = server
+            .mock("GET", "/api/project/the-project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&project_details_resp).unwrap())
+            .create_async()
+            .await;
+
+        let share_response = messages::Share {
+            resource: Some("res".to_owned()),
+            share_id: "share-123".to_owned(),
+            share_name: "share-123".to_owned(),
+            dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            created_timestamp: 0,
+            username: "share-user".to_owned(),
+            password: "share-pass".to_owned(),
+            uid: 1001,
+            gid: 1001,
+        };
+
+        let mock_create_share = server
+            .mock("POST", "/api/share/")
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&share_response).unwrap())
+            .create_async()
+            .await;
+
+        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+
+        // Build request to index with Basic auth for user 'testuser'
+        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/test-session/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        mock_details.assert_async().await;
+        mock_create_share.assert_async().await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
+
+        assert!(body_str.contains("share created!"));
+    }
+
+    #[tokio::test]
+    async fn test_ingest_step3_invalid_session_name() {
+        let test_setup = TestSetup::start().await;
+
+        let proj = AdhocProject {
+            relpath: "the-project".to_owned(),
+            name: "the-project".to_owned(),
+            owner: "testuser".to_owned(),
+            members: vec!["testuser".to_owned()],
+            ctime: 0.0,
+            mtime: 0.0,
+            gid: 1001,
+            usage_bytes: Some(42),
+        };
+
+        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
+            errno: 0,
+            project: proj.clone(),
+            datasets: vec![DataInProject {
+                name: "test-session".to_owned(),
+                immutable: false,
+                ctime: 0.0,
+                mtime: 0.0,
+            }],
+        };
+
+        let mut server = mockito::Server::new_async().await;
+        let mock_details = server
+            .mock("GET", "/api/project/the-project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&project_details_resp).unwrap())
+            .create_async()
+            .await;
+
+        let share_response = messages::Share {
+            resource: Some("res".to_owned()),
+            share_id: "share-123".to_owned(),
+            share_name: "share-123".to_owned(),
+            dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            created_timestamp: 0,
+            username: "share-user".to_owned(),
+            password: "share-pass".to_owned(),
+            uid: 1001,
+            gid: 1001,
+        };
+
+        let mock_create_share = server
+            .mock("POST", "/api/share/")
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&share_response).unwrap())
+            .expect_at_most(0)
+            .create_async()
+            .await;
+
+        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+
+        // Build request to index with Basic auth for user 'testuser'
+        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/invalid-session/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        mock_details.assert_async().await;
+        mock_create_share.assert_async().await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }
