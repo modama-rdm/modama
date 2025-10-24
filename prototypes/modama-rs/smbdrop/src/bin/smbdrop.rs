@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result as AnyResult};
 use clap::Parser;
 use log::info;
-use modama_common::logging::init_logging;
+use modama_common::{cert_helpers::get_private_key, logging::init_logging};
 use smbdrop::{
     cert_helpers::load_tls_config,
     events::start_event_server,
@@ -60,10 +60,12 @@ async fn main() -> AnyResult<()> {
     info!("initial state: {initial_state:?}");
 
     let tls_config = load_tls_config(&args.ca_cert, &args.chain, &args.privkey, true)?;
+    let secret_key = get_private_key(&args.privkey)?;
 
-    let (_event_server_task, state_updates_tx, _event_server_port) = start_event_server(&args.ws_listen, tls_config, &initial_state)
-        .await
-        .context("start event server")?;
+    let (_event_server_task, state_updates_tx, _event_server_port) =
+        start_event_server(&args.ws_listen, tls_config, secret_key.secret_der(), &initial_state)
+            .await
+            .context("start event server")?;
 
     let api_state: ApiState = ApiState::new(sm, state_updates_tx);
 
@@ -72,7 +74,8 @@ async fn main() -> AnyResult<()> {
         tokio::spawn(async move { serve_smbdrop_api(api_state, &api_listen).await });
 
     let token_api_listen = args.token_api_listen.clone();
-    let token_server = TokenServer::start(&token_api_listen, &args.ca_cert, &args.chain, &args.privkey).await?;
+    let token_server =
+        TokenServer::start(&token_api_listen, &args.ca_cert, &args.chain, &args.privkey).await?;
 
     let mut term_stream = tokio::signal::unix::signal(SignalKind::terminate())?;
 

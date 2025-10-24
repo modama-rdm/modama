@@ -95,3 +95,10 @@ pub enum EventChannelMessage {
 pub enum EventChannelRequests {
     ShareListUpdate,
 }
+
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum EventChannelInitialMessages {
+    Login { token: String },
+}

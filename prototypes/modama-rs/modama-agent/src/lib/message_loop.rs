@@ -6,9 +6,9 @@ use crate::{
     agent_state::{AgentState, ConnectionState, ShareState},
     mount_backend::MountBackend,
 };
-use futures_util::{future::join_all, StreamExt};
+use futures_util::{future::join_all, SinkExt, StreamExt};
 use log::{debug, error, info, warn};
-use modama_common::messages::{EventChannelMessage, Share};
+use modama_common::messages::{EventChannelInitialMessages, EventChannelMessage, Share};
 use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -129,10 +129,30 @@ pub async fn message_loop(
                 continue;
             }
         };
+
+        state.lock().await.connection = ConnectionState::Authenticating;
+        let (mut ws_write, mut ws_read) = conn.split();
+        
+        let token = "".to_owned();
+        let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login { token }) {
+            Ok(msg) => msg,
+            Err(e) => {
+                error!("Could not serialize authentication message, reconnecting...");
+                error!("{}", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+
+        if let Err(e) = ws_write.send(tungstenite::Message::Text(login_msg.into())).await {
+            let url = &config.api_url;
+            error!("Error while authenticating to {url}, reconnecting...");
+            error!("{}", e);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
+        }
+
         state.lock().await.connection = ConnectionState::Connected;
-
-        let (mut _ws_write, mut ws_read) = conn.split();
-
         loop {
             match ws_read.next().await {
                 Some(Ok(msg)) => {
@@ -172,6 +192,7 @@ mod tests {
     use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
     use smbdrop::events::start_event_server;
     use smbdrop::share_manager::SmbDropState;
+    use smbdrop::token_server::LocalTokenSigner;
     use std::{path::PathBuf, sync::Arc};
     use tokio::sync::broadcast::Sender;
     use tokio::sync::{mpsc, Mutex};
@@ -253,17 +274,22 @@ mod tests {
             let server_pk_der = PrivateKeyDer::Pkcs8(server_cert.key_pair.serialize_der().into());
             let server_config = rustls::server::ServerConfig::builder()
                 .with_client_cert_verifier(client_cert_verifier)
-                .with_single_cert(server_chain, server_pk_der)
+                .with_single_cert(server_chain, server_pk_der.clone_key())
                 .unwrap();
+            let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
 
             let initial_state = SmbDropState {
                 shares: std::collections::HashMap::new(),
                 users: std::collections::HashMap::new(),
             };
-            let (event_server_task, event_queue, port) =
-                start_event_server("localhost:0", server_config, &initial_state)
-                    .await
-                    .expect("start_event_server");
+            let (event_server_task, event_queue, port) = start_event_server(
+                "localhost:0",
+                server_config,
+                server_pk_der.secret_der(),
+                &initial_state,
+            )
+            .await
+            .expect("start_event_server");
 
             // build AgentConfig pointing at our server
             let api_url = Url::parse(&format!("wss://localhost:{port}")).expect("url");
@@ -450,9 +476,8 @@ mod tests {
         test_setup.message_loop_task.abort();
     }
 
-
     #[tokio::test]
-    async fn test_message_loop_swith_out_fg_share() {
+    async fn test_message_loop_without_fg_share() {
         let mut test_setup = MessageLoopTestSetup::start().await;
 
         // send a state update via the event server's broadcast channel
@@ -556,4 +581,3 @@ mod tests {
         test_setup.message_loop_task.abort();
     }
 }
-

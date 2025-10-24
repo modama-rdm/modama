@@ -31,18 +31,21 @@ struct ConnState {
 
     /// Private key, DER-encoded
     pub secret: Vec<u8>,
+
+    /// Token verifier
+    pub token_verifier: LocalTokenVerifier,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Claims {
-    sub: String,
-    exp: u64,
+pub struct Claims {
+    pub sub: String,
+    pub exp: u64,
 }
 
 const EXPIRY_DURATION: u64 = 3600;
 
 #[derive(Debug, Clone, thiserror::Error)]
-enum SignError {
+pub enum SignError {
     #[error("authentication or client certificate failure")]
     Auth,
 
@@ -66,15 +69,8 @@ async fn do_sign(state: &ConnState) -> Result<String, SignError> {
             .map_err(|_| SignError::Encoding)? // something fishy...
             .as_secs(),
     };
-    if let Ok(jwt) = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(&state.secret),
-    ) {
-        Ok(jwt)
-    } else {
-        Err(SignError::Encoding)
-    }
+    let signer = LocalTokenSigner::new(&state.secret);
+    signer.sign(&claims)
 }
 
 async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> {
@@ -84,28 +80,68 @@ async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> 
     })
 }
 
+#[derive(Clone)]
+pub struct LocalTokenSigner {
+    secret: Vec<u8>,
+}
+
+impl LocalTokenSigner {
+    pub fn new(secret: &[u8]) -> Self {
+        Self {
+            secret: secret.to_vec(),
+        }
+    }
+
+    pub fn sign(&self, claims: &Claims) -> Result<String, SignError> {
+        if let Ok(jwt) = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(&self.secret),
+        ) {
+            Ok(jwt)
+        } else {
+            Err(SignError::Encoding)
+        }
+    }
+}
+
 async fn verify_jwt(
     State(state): State<ConnState>,
     request: String,
 ) -> Result<Json<TokenVerifyResponse>, StatusCode> {
-    let mut validation = Validation::default();
-    validation.validate_exp = true; // in case the default _ever_ changes...
+    Ok(Json(match state.token_verifier.verify(&request) {
+        Some(claims) => TokenVerifyResponse::VerifiedAgent {
+            agent_id: claims.sub.clone(),
+        },
+        None => TokenVerifyResponse::Invalid,
+    }))
+}
 
-    Ok(Json(
-        match decode::<Claims>(
-            &request,
-            &DecodingKey::from_secret(&state.secret),
-            &validation,
-        ) {
-            Ok(decode_result) => TokenVerifyResponse::VerifiedAgent {
-                agent_id: decode_result.claims.sub.clone(),
-            },
+#[derive(Clone)]
+pub struct LocalTokenVerifier {
+    secret: Vec<u8>,
+}
+
+impl LocalTokenVerifier {
+    /// Create a local token verifier, the secret key is given DER-encoded
+    pub fn new(secret: &[u8]) -> Self {
+        Self {
+            secret: secret.to_vec(),
+        }
+    }
+
+    pub fn verify(&self, token: &str) -> Option<Claims> {
+        let key = DecodingKey::from_secret(&self.secret);
+        let mut validation = Validation::default();
+        validation.validate_exp = true; // in case the default _ever_ changes...
+        match decode::<Claims>(token, &key, &validation) {
+            Ok(decode_result) => Some(decode_result.claims),
             Err(e) => {
                 warn!("error while validating jwt: {e}");
-                TokenVerifyResponse::Invalid
+                None
             }
-        },
-    ))
+        }
+    }
 }
 
 pub struct TokenServer {
@@ -181,12 +217,14 @@ async fn serve_token_server_with_listener(
 
             let stream = TokioIo::new(stream);
 
+            let token_verifier = LocalTokenVerifier::new(&secret);
             let hyper_service = hyper::service::service_fn(move |request: Request<Incoming>| {
                 tower_service
                     .clone()
                     .with_state(ConnState {
                         agent_id: agent_id.clone(),
                         secret: secret.clone(),
+                        token_verifier: token_verifier.clone(),
                     })
                     .call(request)
             });
@@ -281,8 +319,14 @@ mod tests {
             .join(resource_name)
             .join(format!("{}.chain.pem", agent_name));
 
-        let sign_url = format!("https://localhost:{}/sign/", test_server.token_server.port());
-        let verify_url = format!("https://localhost:{}/verify/", test_server.token_server.port());
+        let sign_url = format!(
+            "https://localhost:{}/sign/",
+            test_server.token_server.port()
+        );
+        let verify_url = format!(
+            "https://localhost:{}/verify/",
+            test_server.token_server.port()
+        );
 
         let fetcher = TokenFetcher::new(
             sign_url.as_str(),
@@ -349,7 +393,10 @@ mod tests {
     #[tokio::test]
     async fn test_without_client_cert() {
         let test_server = run_test_token_server().await;
-        let sign_url = format!("https://localhost:{}/sign/", test_server.token_server.port());
+        let sign_url = format!(
+            "https://localhost:{}/sign/",
+            test_server.token_server.port()
+        );
         let fetcher = TokenFetcherWithoutCertificate::new(sign_url.as_str(), &test_server.ca_cert);
         let resp = fetcher.fetch_token().await;
         assert_eq!(resp.status(), 403);

@@ -6,6 +6,7 @@ use crate::{config::AgentConfig, share::MountedShare};
 pub enum ConnectionState {
     #[default]
     Connecting,
+    Authenticating,
     Connected,
 }
 

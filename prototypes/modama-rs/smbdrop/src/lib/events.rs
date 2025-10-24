@@ -1,12 +1,15 @@
 use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc};
 
-use crate::share_manager::SmbDropState;
+use crate::{
+    share_manager::SmbDropState,
+    token_server::{Claims, LocalTokenVerifier},
+};
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
     agent::{AgentId, ClientCertError},
     cert_helpers::CertHelperError,
-    messages::{EventChannelMessage, EventChannelRequests, Share},
+    messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share},
 };
 use rustls::ServerConfig;
 use serde::{Deserialize, Serialize};
@@ -66,6 +69,12 @@ enum HandlerError {
     #[error("serialization failure: {0}")]
     SerdeError(#[from] serde_json::Error),
 
+    #[error("Authentication failed: {0}")]
+    Auth(String),
+
+    #[error("Validate agent ID: {0}")]
+    ClientCert(#[from] ClientCertError),
+
     #[error("channel disconnected")]
     Disconnected,
 }
@@ -88,7 +97,6 @@ async fn handle_ws_message(
     let msg: EventChannelRequests = serde_json::from_str(msg)?;
 
     match msg {
-        // explicit request of the current share list
         EventChannelRequests::ShareListUpdate => {
             let state = { last_state.lock().await.clone() };
             let msg = update_msg_from_state(&state, agent_id).await;
@@ -156,20 +164,18 @@ fn share_list_from_state(state: &EventSystemState, agent_id: &AgentId) -> Vec<Sh
 /// 2) Send out state updates via the websocket as they come in from the
 ///    internal broadcast channel
 async fn handle_connection(
-    stream: TlsStream<TcpStream>,
+    ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     mut state_updates_rx: broadcast::Receiver<SmbDropState>,
     last_state: Arc<Mutex<EventSystemState>>,
     agent_id: AgentId,
 ) -> Result<(), HandlerError> {
-    let mut ws_stream = accept_async(stream).await?;
-
     loop {
         select! {
             msg = ws_stream.next() => {
                 let msg = if let Some(msg) = msg { msg? } else { break };
                 if let Ok(msg) = msg.into_text() {
                     info!("Got ws message: {}", msg);
-                    handle_ws_message(&msg, &mut ws_stream, Arc::clone(&last_state), &agent_id)
+                    handle_ws_message(&msg, ws_stream, Arc::clone(&last_state), &agent_id)
                         .await?;
                 } else {
                     warn!("received non-text ws message or conversion failed");
@@ -183,7 +189,7 @@ async fn handle_connection(
                     inner_state: new_state,
                     connected_agents: last_state.lock().await.connected_agents.clone(),
                 };
-                handle_state_update(&comp_state, &mut ws_stream, &agent_id).await?;
+                handle_state_update(&comp_state, ws_stream, &agent_id).await?;
             }
         }
     }
@@ -196,35 +202,24 @@ enum AcceptError {
     #[error("I/O error: {0}")]
     IO(#[from] std::io::Error),
 
-    #[error("Extract certificate")]
-    NoCertificate,
-
-    #[error("Validate agent ID: {0}")]
-    ClientCert(#[from] ClientCertError),
-
-    #[error("channel disconnected")]
-    Disconnected,
+    #[error("Websocket I/O failed: {0}")]
+    MessagingError(#[from] tungstenite::Error),
 }
 
-async fn accept_agent_connection(
+async fn handle_authenticated_connection(
     peer: SocketAddr,
-    stream: TcpStream,
-    acceptor: TlsAcceptor,
+    mut ws_stream: WebSocketStream<TlsStream<TcpStream>>,
+    claims: Claims,
     last_state: Arc<Mutex<EventSystemState>>,
     state_updates_rx: broadcast::Receiver<SmbDropState>,
     state_updates_tx: broadcast::Sender<SmbDropState>,
-) -> Result<(), AcceptError> {
-    let stream = acceptor.accept(stream).await?;
-    let (_, server_connection) = stream.get_ref();
+) -> Result<(), HandlerError> {
+    info!(
+        "connection {peer} authenticated with token from {}",
+        claims.sub
+    );
 
-    let peer_certs = server_connection
-        .peer_certificates()
-        .ok_or(AcceptError::NoCertificate)?;
-    let peer_cert = peer_certs.first().ok_or(AcceptError::NoCertificate)?;
-
-    let agent_id = AgentId::from_cert(peer_cert)?;
-
-    info!("connection from agent id: {agent_id:?} @ {peer}");
+    let agent_id = AgentId::from_uri(&claims.sub)?;
 
     // update connected agents and broadcast a state update
     {
@@ -232,13 +227,18 @@ async fn accept_agent_connection(
         state_unlocked.connected_agents.insert(agent_id.clone());
         state_updates_tx
             .send(state_unlocked.inner_state.clone())
-            .map_err(|_| AcceptError::Disconnected)?;
+            .map_err(|_| HandlerError::Disconnected)?;
     }
 
     let conn_last_state = Arc::clone(&last_state);
 
-    if let Err(e) =
-        handle_connection(stream, state_updates_rx, conn_last_state, agent_id.clone()).await
+    if let Err(e) = handle_connection(
+        &mut ws_stream,
+        state_updates_rx,
+        conn_last_state,
+        agent_id.clone(),
+    )
+    .await
     {
         match e {
             HandlerError::WsError(tungstenite::Error::ConnectionClosed)
@@ -248,15 +248,93 @@ async fn accept_agent_connection(
         }
     }
 
-    // FIXME: also remove from connected_agents on error (is there such a thing
-    // as an async drop guard yet in rust?)
-    // update connected agents and broadcast a state update
+    // NOTE: be careful not to put anything that can panic or return between the
+    // update at the top and this one, so the state is properly updated on
+    // errors, too
     {
         let mut state_unlocked = last_state.lock().await;
         state_unlocked.connected_agents.remove(&agent_id);
         state_updates_tx
             .send(state_unlocked.inner_state.clone())
-            .map_err(|_| AcceptError::Disconnected)?;
+            .map_err(|_| HandlerError::Disconnected)?;
+    }
+
+    todo!();
+}
+
+async fn authenticate_agent_connection(
+    peer: SocketAddr,
+    stream: TlsStream<TcpStream>,
+    token_verifier: &LocalTokenVerifier,
+    last_state: Arc<Mutex<EventSystemState>>,
+    state_updates_rx: broadcast::Receiver<SmbDropState>,
+    state_updates_tx: broadcast::Sender<SmbDropState>,
+) -> Result<(), HandlerError> {
+    let mut ws_stream = accept_async(stream).await?;
+
+    // the first message must be the authentication, otherwise we err out:
+    let auth_msg = ws_stream.next().await;
+    match auth_msg {
+        Some(res) => {
+            let msg = res?;
+            if let Ok(msg) = msg.into_text() {
+                let msg: EventChannelInitialMessages =
+                    serde_json::from_str(&msg).map_err(|e| HandlerError::Auth(e.to_string()))?;
+
+                match msg {
+                    EventChannelInitialMessages::Login { token } => {
+                        if let Some(claims) = token_verifier.verify(&token) {
+                            handle_authenticated_connection(
+                                peer,
+                                ws_stream,
+                                claims,
+                                last_state,
+                                state_updates_rx,
+                                state_updates_tx,
+                            )
+                            .await?;
+                            Ok(())
+                        } else {
+                            Err(HandlerError::Auth("token verification failed".to_owned()))
+                        }
+                    }
+                }
+            } else {
+                Err(HandlerError::Auth("first message must be text".to_owned()))
+            }
+        }
+        None => Err(HandlerError::Auth(
+            "first message could not be received".to_owned(),
+        )),
+    }
+}
+
+async fn accept_agent_connection(
+    peer: SocketAddr,
+    stream: TcpStream,
+    acceptor: TlsAcceptor,
+    last_state: Arc<Mutex<EventSystemState>>,
+    state_updates_rx: broadcast::Receiver<SmbDropState>,
+    state_updates_tx: broadcast::Sender<SmbDropState>,
+    token_verifier: LocalTokenVerifier,
+) -> Result<(), AcceptError> {
+    let stream: TlsStream<TcpStream> = acceptor.accept(stream).await?;
+
+    info!("connection from agent @ {peer}");
+
+    if let Err(e) = authenticate_agent_connection(
+        peer,
+        stream,
+        &token_verifier,
+        last_state,
+        state_updates_rx,
+        state_updates_tx,
+    )
+    .await
+    {
+        error!("error in agent connection: {e:?}");
+    } else {
+        info!("finished handling connection from {peer}")
     }
 
     Ok(())
@@ -272,6 +350,7 @@ async fn accept_agent_connection(
 pub async fn start_event_server(
     listen_addr: &str,
     tls_config: ServerConfig,
+    secret_key: &[u8],
     state: &SmbDropState,
 ) -> Result<(JoinHandle<()>, broadcast::Sender<SmbDropState>, u16), ServerStartError> {
     let state = EventSystemState {
@@ -279,6 +358,7 @@ pub async fn start_event_server(
         connected_agents: HashSet::new(),
     };
     let (tx, mut rx) = broadcast::channel::<SmbDropState>(16);
+    let token_verifier = LocalTokenVerifier::new(secret_key);
 
     // the state we have seen last, which will be sent to newly connecting agents:
     let last_state = Arc::new(Mutex::new(state));
@@ -311,6 +391,7 @@ pub async fn start_event_server(
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
     let moved_last_state = Arc::clone(&last_state);
+    let local_token_verifier = token_verifier.clone();
     let task = tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
             if let Ok(peer) = stream.peer_addr() {
@@ -322,6 +403,7 @@ pub async fn start_event_server(
                     Arc::clone(&moved_last_state),
                     tx.subscribe(),
                     tx.clone(),
+                    local_token_verifier.clone(),
                 ));
             } else {
                 error!("no peer addr, dropping client");
@@ -361,6 +443,7 @@ mod test {
 
     struct CertsForTesting {
         pub server_config: ServerConfig,
+        pub server_secret: Vec<u8>,
         pub client_config_1: ClientConfig,
         pub client_config_2: ClientConfig,
     }
@@ -394,7 +477,7 @@ mod test {
 
             let server_config: ServerConfig = ServerConfig::builder()
                 .with_client_cert_verifier(client_cert_verifier)
-                .with_single_cert(server_chain, server_pk_der)
+                .with_single_cert(server_chain, server_pk_der.clone_key())
                 .unwrap();
 
             let client_config_1 = {
@@ -435,6 +518,7 @@ mod test {
                 server_config,
                 client_config_1,
                 client_config_2,
+                server_secret: server_pk_der.secret_der().to_vec(),
             }
         }
     }
@@ -445,7 +529,7 @@ mod test {
         pub event_queue: Sender<SmbDropState>,
         pub ws_url: String,
         pub certs: CertsForTesting,
-        pub handle: JoinHandle<()>
+        pub handle: JoinHandle<()>,
     }
 
     async fn make_test_event_server() -> TestEventServer {
@@ -455,8 +539,9 @@ mod test {
             users: HashMap::new(),
         };
         let listen_addr = "localhost:0";
+        let secret = &certs.server_secret;
         let (task, event_server_queue, port) =
-            start_event_server(listen_addr, certs.server_config.clone(), &state)
+            start_event_server(listen_addr, certs.server_config.clone(), secret, &state)
                 .await
                 .unwrap();
 
