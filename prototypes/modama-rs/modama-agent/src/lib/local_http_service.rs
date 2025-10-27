@@ -16,10 +16,8 @@ use minijinja::{context, Environment};
 use modama_common::{
     messages::CurrentForegroundShare,
     mgmt_client::{MgmtClient, MgmtError},
-    tokens::{TokenError, TokenFetcher},
+    tokens::{TokenError, TokenFetcher, TokenProvider},
 };
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -56,19 +54,6 @@ impl ApiState {
             token_provider: Arc::clone(token_provider),
             jinja_env: create_env(),
         }
-    }
-}
-
-// Trait to abstract token fetching so tests can provide a stub implementation.
-type BoxFutureToken = Pin<Box<dyn Future<Output = Result<String, TokenError>> + Send>>;
-
-pub trait TokenProvider: Send + Sync {
-    fn fetch_token(self: Arc<Self>) -> BoxFutureToken;
-}
-
-impl TokenProvider for TokenFetcher {
-    fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
-        Box::pin(async move { TokenFetcher::fetch_token(&self).await })
     }
 }
 
@@ -358,11 +343,13 @@ mod tests {
     use modama_common::mgmt_client::{
         AdhocProject, DataInProject, ListProjectsResponse, ProjectDetailsResponse,
     };
+    use modama_common::tokens::BoxFutureToken;
     use serde_json::Value;
     use std::path::PathBuf;
     use tower::ServiceExt;
 
     // Dummy token provider that returns a fixed token
+    #[derive(Debug)]
     struct DummyTokenProvider;
 
     impl TokenProvider for DummyTokenProvider {

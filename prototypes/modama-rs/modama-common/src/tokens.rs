@@ -1,7 +1,5 @@
 use std::{
-    fs::File,
-    io::{self, Read},
-    path::Path,
+    fmt::Debug, fs::File, future::Future, io::{self, Read}, path::Path, pin::Pin, sync::Arc
 };
 
 use reqwest::{Certificate, Client, Identity, StatusCode};
@@ -27,15 +25,19 @@ impl TokenVerifyResponse {
 #[derive(thiserror::Error, Debug)]
 pub enum TokenError {
     #[error("fetch error: {0}")]
-    FetchError(#[from] reqwest::Error),
+    Fetch(#[from] reqwest::Error),
 
     #[error("error response code: {0}")]
-    ResponseCodeError(StatusCode),
+    ResponseCode(StatusCode),
 
-    #[error("certificate error: {0}")]
-    CertError(#[from] io::Error),
+    #[error("I/O error: {0}")]
+    IO(#[from] io::Error),
+
+    #[error("No token source found")]
+    NoSource,
 }
 
+#[derive(Debug)]
 pub struct TokenFetcher {
     client: Client,
     sign_service_url: String,
@@ -80,10 +82,24 @@ impl TokenFetcher {
         if resp.status() == StatusCode::OK {
             Ok(resp.text().await?)
         } else {
-            Err(TokenError::ResponseCodeError(resp.status()))
+            Err(TokenError::ResponseCode(resp.status()))
         }
     }
 }
+
+// Trait to abstract token fetching so tests can provide a stub implementation.
+pub type BoxFutureToken = Pin<Box<dyn Future<Output = Result<String, TokenError>> + Send>>;
+
+pub trait TokenProvider: Send + Sync + Debug {
+    fn fetch_token(self: Arc<Self>) -> BoxFutureToken;
+}
+
+impl TokenProvider for TokenFetcher {
+    fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
+        Box::pin(async move { TokenFetcher::fetch_token(&self).await })
+    }
+}
+
 
 pub struct TokenVerifier {
     client: Client,

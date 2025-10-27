@@ -8,7 +8,7 @@ use crate::{
 };
 use futures_util::{future::join_all, SinkExt, StreamExt};
 use log::{debug, error, info, warn};
-use modama_common::messages::{EventChannelInitialMessages, EventChannelMessage, Share};
+use modama_common::{messages::{EventChannelInitialMessages, EventChannelMessage, Share}, tokens::{BoxFutureToken, TokenError, TokenProvider}};
 use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -101,10 +101,22 @@ async fn handle_message(
     }
 }
 
+/// Acquire a token, either directly from the token server via the client cert,
+/// or if we don't have a client cert, we delegate to another agent in the local network
+pub async fn acquire_token(
+    state: &Arc<Mutex<AgentState>>,
+    token_provider: &Arc<dyn TokenProvider>,
+) -> Result<String, TokenError> {
+    todo!();
+    // FIXME: check if we have a client cert, then directly get from upstream
+    // server, otherwise ask p2p
+}
+
 pub async fn message_loop(
     backend: &impl MountBackend,
     state: Arc<Mutex<AgentState>>,
     tls_config: Arc<ClientConfig>,
+    local_net_token_provider: Arc<dyn TokenProvider>,
 ) {
     let config = state.lock().await.config.clone();
 
@@ -133,7 +145,14 @@ pub async fn message_loop(
         state.lock().await.connection = ConnectionState::Authenticating;
         let (mut ws_write, mut ws_read) = conn.split();
         
-        let token = "".to_owned();
+        let token = match acquire_token(&state, &local_net_token_provider).await {
+            Ok(t) => t,
+            Err(e) => {
+                error!("Could not acquire token (`{e}`), reconnecting...");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
         let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login { token }) {
             Ok(msg) => msg,
             Err(e) => {
