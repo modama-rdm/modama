@@ -199,6 +199,11 @@ impl LocalNetTokenProvider {
             .add_root_certificate(root_cert)
             .build()?;
 
+        // FIXME: instead of passing in `local_addr`, we can start a
+        // `discovery_loop` for every "local" interface, where "local" might
+        // mean that it has a rfc1918 address (maybe need to re-scan every N
+        // seconds? addresses change, ugh...)
+
         let agents = RemoteAgents::new().await;
 
         let bg_agents = agents.clone();
