@@ -10,7 +10,7 @@ use modama_agent::{
     message_loop::message_loop,
     platform::CurrentPlatformMountBackend,
 };
-use modama_common::{agent::AgentId, tokens::TokenFetcher};
+use modama_common::{agent::AgentId, tokens::{TokenFetcher, TokenProvider}};
 use modama_common::{
     cert_helpers::{get_cert_chain, get_private_key, get_root_cert_store},
     logging::init_logging,
@@ -114,10 +114,14 @@ async fn main() -> AnyResult<()> {
         serve_local_web_api(state_for_api, &args.listen_local_api, token_fetcher).await
     });
 
+    let token_fetcher =
+        TokenFetcher::new(sign_url.as_str(), &args.key, &args.chain, &args.ca_cert)?;
+    let token_provider: Arc<dyn TokenProvider> = Arc::new(token_fetcher);
+
     let backend = CurrentPlatformMountBackend {};
 
     select! {
-        _ = message_loop(&backend, Arc::clone(&state), Arc::clone(&tls_config)) => {
+        _ = message_loop(&backend, Arc::clone(&state), Arc::clone(&tls_config), Arc::clone(&token_provider)) => {
             Ok(())
         }
         res = join_handle => {

@@ -1,7 +1,5 @@
 use std::{
-    path::Path,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    fmt::Debug, path::Path, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}
 };
 
 use axum::{
@@ -83,6 +81,12 @@ async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> 
 #[derive(Clone)]
 pub struct LocalTokenSigner {
     secret: Vec<u8>,
+}
+
+impl Debug for LocalTokenSigner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalTokenSigner").field("secret", &"[redacted]".to_owned()).finish()
+    }
 }
 
 impl LocalTokenSigner {

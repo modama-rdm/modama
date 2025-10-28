@@ -8,7 +8,10 @@ use crate::{
 };
 use futures_util::{future::join_all, SinkExt, StreamExt};
 use log::{debug, error, info, warn};
-use modama_common::{messages::{EventChannelInitialMessages, EventChannelMessage, Share}, tokens::{BoxFutureToken, TokenError, TokenProvider}};
+use modama_common::{
+    messages::{EventChannelInitialMessages, EventChannelMessage, Share},
+    tokens::{TokenError, TokenProvider},
+};
 use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -107,9 +110,7 @@ pub async fn acquire_token(
     state: &Arc<Mutex<AgentState>>,
     token_provider: &Arc<dyn TokenProvider>,
 ) -> Result<String, TokenError> {
-    todo!();
-    // FIXME: check if we have a client cert, then directly get from upstream
-    // server, otherwise ask p2p
+    (Arc::clone(token_provider)).fetch_token().await
 }
 
 pub async fn message_loop(
@@ -144,7 +145,7 @@ pub async fn message_loop(
 
         state.lock().await.connection = ConnectionState::Authenticating;
         let (mut ws_write, mut ws_read) = conn.split();
-        
+
         let token = match acquire_token(&state, &local_net_token_provider).await {
             Ok(t) => t,
             Err(e) => {
@@ -163,7 +164,10 @@ pub async fn message_loop(
             }
         };
 
-        if let Err(e) = ws_write.send(tungstenite::Message::Text(login_msg.into())).await {
+        if let Err(e) = ws_write
+            .send(tungstenite::Message::Text(login_msg.into()))
+            .await
+        {
             let url = &config.api_url;
             error!("Error while authenticating to {url}, reconnecting...");
             error!("{}", e);
@@ -206,12 +210,13 @@ mod tests {
     use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
     use modama_common::ca::Ca;
     use modama_common::messages;
+    use modama_common::tokens::BoxFutureToken;
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
     use smbdrop::events::start_event_server;
     use smbdrop::share_manager::SmbDropState;
-    use smbdrop::token_server::LocalTokenSigner;
+    use smbdrop::token_server::{Claims, LocalTokenSigner};
     use std::{path::PathBuf, sync::Arc};
     use tokio::sync::broadcast::Sender;
     use tokio::sync::{mpsc, Mutex};
@@ -295,7 +300,6 @@ mod tests {
                 .with_client_cert_verifier(client_cert_verifier)
                 .with_single_cert(server_chain, server_pk_der.clone_key())
                 .unwrap();
-            let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
 
             let initial_state = SmbDropState {
                 shares: std::collections::HashMap::new(),
@@ -347,12 +351,40 @@ mod tests {
                 std::env::temp_dir(),
             ));
 
+            let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
+
+            #[derive(Debug)]
+            struct MockTokenProvider {
+                pub signer: LocalTokenSigner,
+                pub claims: Claims,
+            }
+
+            impl TokenProvider for MockTokenProvider {
+                fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
+                    Box::pin(async move { Ok(self.signer.sign(&self.claims).unwrap()) })
+                }
+            }
+
+            let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
+                signer: token_signer,
+                claims: Claims {
+                    sub: "x-modama-agent://test-resource#test-agent".to_owned(),
+                    exp: 0,
+                },
+            });
+
             // run message_loop in background
             let message_loop_state = Arc::clone(&state);
             let message_loop_task = tokio::spawn(async move {
                 // message_loop runs forever; it will return only if the connection loop ends
                 // we run it and let it process the single message from our server
-                message_loop(&*mock, message_loop_state, client_config).await;
+                message_loop(
+                    &*mock,
+                    message_loop_state,
+                    client_config,
+                    Arc::clone(&token_provider),
+                )
+                .await;
             });
 
             Self {
