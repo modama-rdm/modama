@@ -209,6 +209,7 @@ mod tests {
     use super::*;
     use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
     use modama_common::ca::Ca;
+    use modama_common::logging::init_logging;
     use modama_common::messages;
     use modama_common::tokens::BoxFutureToken;
     use rustls::pki_types::pem::PemObject;
@@ -217,6 +218,7 @@ mod tests {
     use smbdrop::events::start_event_server;
     use smbdrop::share_manager::SmbDropState;
     use smbdrop::token_server::{Claims, LocalTokenSigner};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use std::{path::PathBuf, sync::Arc};
     use tokio::sync::broadcast::Sender;
     use tokio::sync::{mpsc, Mutex};
@@ -279,6 +281,8 @@ mod tests {
 
     impl MessageLoopTestSetup {
         async fn start() -> Self {
+            init_logging();
+
             let ca = Ca::new::<String>(None).unwrap();
             let server_cert = ca.server_cert(&["localhost".to_string()]).unwrap();
             let mut roots = RootCertStore::empty();
@@ -368,8 +372,11 @@ mod tests {
             let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
                 signer: token_signer,
                 claims: Claims {
-                    sub: "x-modama-agent://test-resource#test-agent".to_owned(),
-                    exp: 0,
+                    sub: "x-modama-agent://test_resource#test-agent".to_owned(),
+                    exp: (SystemTime::now() + Duration::from_secs(1000))
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
                 },
             });
 
