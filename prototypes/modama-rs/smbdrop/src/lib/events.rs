@@ -417,7 +417,7 @@ pub async fn start_event_server(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use std::{collections::HashMap, sync::Arc, time::Duration};
+    use std::{collections::HashMap, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 
     use futures_util::{
         stream::{SplitSink, SplitStream},
@@ -426,7 +426,7 @@ mod test {
     use modama_common::{
         agent::AgentId,
         ca::Ca,
-        messages::{EventChannelMessage, EventChannelRequests, Share},
+        messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share}, tokens::{BoxFutureToken, TokenProvider},
     };
     use rustls::{
         pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
@@ -439,7 +439,7 @@ mod test {
     };
     use tungstenite::Message;
 
-    use crate::{events::start_event_server, share_manager::SmbDropState};
+    use crate::{events::start_event_server, share_manager::SmbDropState, token_server::{Claims, LocalTokenSigner}};
 
     struct CertsForTesting {
         pub server_config: ServerConfig,
@@ -530,6 +530,7 @@ mod test {
         pub ws_url: String,
         pub certs: CertsForTesting,
         pub handle: JoinHandle<()>,
+        pub token_provider: Arc<dyn TokenProvider>,
     }
 
     async fn make_test_event_server() -> TestEventServer {
@@ -558,12 +559,38 @@ mod test {
 
         let (ws_write, ws_read) = conn.split();
 
+        let token_signer = LocalTokenSigner::new(&certs.server_secret);
+
+        #[derive(Debug)]
+        struct MockTokenProvider {
+            pub signer: LocalTokenSigner,
+            pub claims: Claims,
+        }
+
+        impl TokenProvider for MockTokenProvider {
+            fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
+                Box::pin(async move { Ok(self.signer.sign(&self.claims).unwrap()) })
+            }
+        }
+
+        let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
+            signer: token_signer,
+            claims: Claims {
+                sub: "x-modama-agent://test_resource#test_agent".to_owned(),
+                exp: (SystemTime::now() + Duration::from_secs(1000))
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            },
+        });
+
         TestEventServer {
             ws_read,
             ws_write,
             event_queue: event_server_queue,
             ws_url,
             certs,
+            token_provider,
             handle: task,
         }
     }
@@ -571,6 +598,11 @@ mod test {
     #[tokio::test]
     async fn test_websocket_api_initial_message() {
         let mut server = make_test_event_server().await;
+
+        let token = server.token_provider.fetch_token().await.unwrap();
+        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+        server.ws_write.send(Message::Text(login_msg.into())).await.unwrap();
+
         let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
             .await
             .unwrap()
@@ -605,6 +637,10 @@ mod test {
     #[tokio::test]
     async fn test_websocket_api_second_agent() {
         let mut server = make_test_event_server().await;
+
+        let token = Arc::clone(&server.token_provider).fetch_token().await.unwrap();
+        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+        server.ws_write.send(Message::Text(login_msg.into())).await.unwrap();
 
         let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
             .await
@@ -645,6 +681,10 @@ mod test {
             )
             .await
             .unwrap();
+
+            let token_2 = Arc::clone(&server.token_provider).fetch_token().await.unwrap();
+            let login_msg_2 = serde_json::to_string(&EventChannelInitialMessages::Login { token: token_2 }).unwrap();
+            conn.send(Message::Text(login_msg_2.into())).await.unwrap();
 
             // and we get an updated list of connected agents:
             let update_msg = timeout(Duration::from_millis(100), server.ws_read.next())
@@ -720,6 +760,10 @@ mod test {
     async fn test_websocket_api_request_share_update() {
         let mut server = make_test_event_server().await;
 
+        let token = server.token_provider.fetch_token().await.unwrap();
+        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+        server.ws_write.send(Message::Text(login_msg.into())).await.unwrap();
+
         let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
             .await
             .unwrap()
@@ -784,6 +828,10 @@ mod test {
     #[tokio::test]
     async fn test_websocket_api_share_added() {
         let mut server = make_test_event_server().await;
+
+        let token = server.token_provider.fetch_token().await.unwrap();
+        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+        server.ws_write.send(Message::Text(login_msg.into())).await.unwrap();
 
         let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
             .await
