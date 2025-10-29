@@ -1452,6 +1452,7 @@ dependencies = [
  "anyhow",
  "clap",
  "env_logger",
+ "jsonwebtoken",
  "log",
  "rand",
  "rcgen",

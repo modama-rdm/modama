@@ -2,10 +2,17 @@ use std::{
     fmt::Debug, fs::File, future::Future, io::{self, Read}, path::Path, pin::Pin, sync::Arc
 };
 
+use jsonwebtoken::{EncodingKey, Header, encode};
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::AgentId;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: String,
+    pub exp: u64,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum TokenVerifyResponse {
@@ -130,5 +137,46 @@ impl TokenVerifier {
             .await?;
         let resp: TokenVerifyResponse = resp.json().await?;
         Ok(resp)
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum SignError {
+    #[error("authentication or client certificate failure")]
+    Auth,
+
+    #[error("JWT encoding error")]
+    Encoding,
+}
+
+
+#[derive(Clone)]
+pub struct LocalTokenSigner {
+    secret: Vec<u8>,
+}
+
+impl Debug for LocalTokenSigner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalTokenSigner").field("secret", &"[redacted]".to_owned()).finish()
+    }
+}
+
+impl LocalTokenSigner {
+    pub fn new(secret: &[u8]) -> Self {
+        Self {
+            secret: secret.to_vec(),
+        }
+    }
+
+    pub fn sign(&self, claims: &Claims) -> Result<String, SignError> {
+        if let Ok(jwt) = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(&self.secret),
+        ) {
+            Ok(jwt)
+        } else {
+            Err(SignError::Encoding)
+        }
     }
 }

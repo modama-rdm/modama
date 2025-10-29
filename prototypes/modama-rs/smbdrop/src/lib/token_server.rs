@@ -11,7 +11,7 @@ use hyper::{body::Incoming, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use log::{error, warn};
-use modama_common::{agent::AgentId, cert_helpers::get_private_key, tokens::TokenVerifyResponse};
+use modama_common::{agent::AgentId, cert_helpers::get_private_key, tokens::{Claims, LocalTokenSigner, SignError, TokenVerifyResponse}};
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_rustls::TlsAcceptor;
@@ -34,22 +34,7 @@ struct ConnState {
     pub token_verifier: LocalTokenVerifier,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
-    pub sub: String,
-    pub exp: u64,
-}
-
 const EXPIRY_DURATION: u64 = 3600;
-
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum SignError {
-    #[error("authentication or client certificate failure")]
-    Auth,
-
-    #[error("JWT encoding error")]
-    Encoding,
-}
 
 async fn do_sign(state: &ConnState) -> Result<String, SignError> {
     let agent_id = if let Some(agent_id) = &state.agent_id {
@@ -76,37 +61,6 @@ async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> 
         SignError::Auth => StatusCode::FORBIDDEN,
         SignError::Encoding => StatusCode::BAD_REQUEST,
     })
-}
-
-#[derive(Clone)]
-pub struct LocalTokenSigner {
-    secret: Vec<u8>,
-}
-
-impl Debug for LocalTokenSigner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalTokenSigner").field("secret", &"[redacted]".to_owned()).finish()
-    }
-}
-
-impl LocalTokenSigner {
-    pub fn new(secret: &[u8]) -> Self {
-        Self {
-            secret: secret.to_vec(),
-        }
-    }
-
-    pub fn sign(&self, claims: &Claims) -> Result<String, SignError> {
-        if let Ok(jwt) = encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(&self.secret),
-        ) {
-            Ok(jwt)
-        } else {
-            Err(SignError::Encoding)
-        }
-    }
 }
 
 async fn verify_jwt(

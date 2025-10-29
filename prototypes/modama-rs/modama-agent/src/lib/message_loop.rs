@@ -211,13 +211,13 @@ mod tests {
     use modama_common::ca::Ca;
     use modama_common::logging::init_logging;
     use modama_common::messages;
-    use modama_common::tokens::BoxFutureToken;
+    use modama_common::test_helpers::MockTokenProvider;
+    use modama_common::tokens::{BoxFutureToken, Claims, LocalTokenSigner};
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
     use smbdrop::events::start_event_server;
     use smbdrop::share_manager::SmbDropState;
-    use smbdrop::token_server::{Claims, LocalTokenSigner};
     use std::time::{SystemTime, UNIX_EPOCH};
     use std::{path::PathBuf, sync::Arc};
     use tokio::sync::broadcast::Sender;
@@ -356,19 +356,6 @@ mod tests {
             ));
 
             let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
-
-            #[derive(Debug)]
-            struct MockTokenProvider {
-                pub signer: LocalTokenSigner,
-                pub claims: Claims,
-            }
-
-            impl TokenProvider for MockTokenProvider {
-                fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
-                    Box::pin(async move { Ok(self.signer.sign(&self.claims).unwrap()) })
-                }
-            }
-
             let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
                 signer: token_signer,
                 claims: Claims {

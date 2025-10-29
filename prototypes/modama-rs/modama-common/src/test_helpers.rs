@@ -2,10 +2,12 @@
 use std::{
     env::temp_dir,
     ops::Deref,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, sync::Arc,
 };
 
 use rand::{distr::Alphanumeric, Rng};
+
+use crate::tokens::{BoxFutureToken, Claims, LocalTokenSigner, TokenProvider};
 
 pub struct TempDir {
     pub path: PathBuf,
@@ -40,5 +42,18 @@ impl Deref for TempDir {
 
     fn deref(&self) -> &Self::Target {
         &self.path
+    }
+}
+
+
+#[derive(Debug)]
+pub struct MockTokenProvider {
+    pub signer: LocalTokenSigner,
+    pub claims: Claims,
+}
+
+impl TokenProvider for MockTokenProvider {
+    fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
+        Box::pin(async move { Ok(self.signer.sign(&self.claims).unwrap()) })
     }
 }

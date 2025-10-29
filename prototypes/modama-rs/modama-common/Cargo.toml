@@ -25,6 +25,7 @@ tokio-rustls = { workspace = true }
 url = { workspace = true }
 x509-parser = { workspace = true }
 rand = { workspace = true }
+jsonwebtoken = "9.2.0"
 
 [lints]
 workspace = true

@@ -1,15 +1,14 @@
 use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use crate::{
-    share_manager::SmbDropState,
-    token_server::{Claims, LocalTokenVerifier},
+    share_manager::SmbDropState, token_server::LocalTokenVerifier,
 };
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
     agent::{AgentId, ClientCertError},
     cert_helpers::CertHelperError,
-    messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share},
+    messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share}, tokens::Claims,
 };
 use rustls::ServerConfig;
 use serde::{Deserialize, Serialize};
@@ -424,9 +423,7 @@ mod test {
         SinkExt, StreamExt,
     };
     use modama_common::{
-        agent::AgentId,
-        ca::Ca,
-        messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share}, tokens::{BoxFutureToken, TokenProvider},
+        agent::AgentId, ca::Ca, messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share}, test_helpers::MockTokenProvider, tokens::{BoxFutureToken, Claims, LocalTokenSigner, TokenProvider}
     };
     use rustls::{
         pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
@@ -439,7 +436,7 @@ mod test {
     };
     use tungstenite::Message;
 
-    use crate::{events::start_event_server, share_manager::SmbDropState, token_server::{Claims, LocalTokenSigner}};
+    use crate::{events::start_event_server, share_manager::SmbDropState};
 
     struct CertsForTesting {
         pub server_config: ServerConfig,
@@ -561,18 +558,6 @@ mod test {
 
         let token_signer = LocalTokenSigner::new(&certs.server_secret);
 
-        #[derive(Debug)]
-        struct MockTokenProvider {
-            pub signer: LocalTokenSigner,
-            pub claims: Claims,
-        }
-
-        impl TokenProvider for MockTokenProvider {
-            fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
-                Box::pin(async move { Ok(self.signer.sign(&self.claims).unwrap()) })
-            }
-        }
-
         let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
             signer: token_signer,
             claims: Claims {
@@ -682,7 +667,19 @@ mod test {
             .await
             .unwrap();
 
-            let token_2 = Arc::clone(&server.token_provider).fetch_token().await.unwrap();
+            let token_signer = LocalTokenSigner::new(&server.certs.server_secret);
+            let second_token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
+                signer: token_signer,
+                claims: Claims {
+                    sub: "x-modama-agent://test_resource#test_agent_2".to_owned(),
+                    exp: (SystemTime::now() + Duration::from_secs(1000))
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                },
+            });
+
+            let token_2 = Arc::clone(&second_token_provider).fetch_token().await.unwrap();
             let login_msg_2 = serde_json::to_string(&EventChannelInitialMessages::Login { token: token_2 }).unwrap();
             conn.send(Message::Text(login_msg_2.into())).await.unwrap();
 
@@ -698,6 +695,11 @@ mod test {
 
             println!("{update:?}");
 
+            // no other messages:
+            let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
+            assert!(res.is_err());
+
+            // now compare the actual messages:
             assert_eq!(
                 update,
                 EventChannelMessage::UpdateShareList {
@@ -717,10 +719,6 @@ mod test {
                     ],
                 }
             );
-
-            // no other messages:
-            let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
-            assert!(res.is_err());
 
             conn.close(None).await.unwrap();
         }
