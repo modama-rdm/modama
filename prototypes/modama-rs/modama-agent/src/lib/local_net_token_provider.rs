@@ -12,7 +12,6 @@ use std::{
 use log::{error, warn};
 use modama_common::tokens::{BoxFutureToken, TokenError, TokenProvider};
 use reqwest::{Certificate, Client, StatusCode};
-use serde::{Deserialize, Serialize};
 use tokio::{
     net::UdpSocket,
     spawn,
@@ -21,51 +20,9 @@ use tokio::{
 };
 use url::Url;
 
-pub const NOTIFY_HEADER: &str = "MODAMA-AGENT-NOTIFY";
-pub const NOTIFY_PORT: u32 = 5055;
-pub const NOTIFY_MCAST_ADDR: Ipv4Addr = const { Ipv4Addr::new(239, 192, 0, 1) };
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DiscoveryInner {
-    pub version: u32,
-    pub api: String,
-}
-
-// TODO: move to modama-common
-#[derive(Debug, PartialEq, Eq)]
-pub struct DiscoveryMessage {
-    pub inner: DiscoveryInner,
-}
-
-impl DiscoveryMessage {
-    /// Serialize the discovery message to a String.
-    pub fn serialize(&self) -> String {
-        #[allow(clippy::unwrap_used)] // infalliable
-        let payload = serde_json::to_string(&self.inner).unwrap();
-        format!("{NOTIFY_HEADER}\n{payload}",)
-    }
-
-    pub fn api_url(&self) -> &str {
-        &self.inner.api
-    }
-
-    /// Try to parse from the string representation to a `DiscoveryMessage`,
-    /// returning None if this is not possible.
-    pub fn try_parse(value: &str) -> Option<Self> {
-        if !value.contains("\n") {
-            return None;
-        }
-        let mut parts = value.split("\n");
-        let header = parts.next()?;
-        if header != NOTIFY_HEADER {
-            return None;
-        }
-        let payload = parts.next()?;
-        Some(Self {
-            inner: serde_json::from_str(payload).ok()?,
-        })
-    }
-}
+use crate::local_net_common::{
+    create_mcast_socket, DiscoveryMessage, NOTIFY_MCAST_ADDR, NOTIFY_PORT,
+};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct RemoteAgent {
@@ -119,19 +76,6 @@ impl TokenProvider for LocalNetTokenProvider {
         let myself = Arc::clone(&self);
         Box::pin(async move { myself.get_token_from_local_net().await })
     }
-}
-
-async fn create_mcast_socket(
-    port: u32,
-    group: Ipv4Addr,
-    local: Ipv4Addr,
-) -> Result<UdpSocket, std::io::Error> {
-    let group_w_port = format!("{group}:{port}", group = group, port = port);
-    let socket = UdpSocket::bind(&group_w_port).await?;
-    // let group_addr: Ipv4Addr = group.parse()?;
-    // let local_addr: Ipv4Addr = local.parse()?;
-    socket.join_multicast_v4(group, local)?;
-    Ok(socket)
 }
 
 async fn try_recv_discovery_message(
@@ -232,14 +176,21 @@ impl LocalNetTokenProvider {
                 let text = match resp.text().await {
                     Ok(t) => t,
                     Err(e) => {
-                        warn!("error reading response text from {} (`{e}`), trying next agent", agent.url);
+                        warn!(
+                            "error reading response text from {} (`{e}`), trying next agent",
+                            agent.url
+                        );
                         sleep(Duration::from_millis(200)).await;
                         continue;
                     }
                 };
-                return Ok(text)
+                return Ok(text);
             } else {
-                warn!("bad response code {} from from {}, trying next agent", resp.status(), agent.url);
+                warn!(
+                    "bad response code {} from from {}, trying next agent",
+                    resp.status(),
+                    agent.url
+                );
                 sleep(Duration::from_millis(200)).await;
                 continue;
             }
@@ -251,7 +202,7 @@ impl LocalNetTokenProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::local_net_token_provider::{DiscoveryInner, DiscoveryMessage};
+    use crate::{local_net_common::DiscoveryInner, local_net_token_provider::DiscoveryMessage};
 
     #[test]
     fn test_disco_parse_invalid_1() {

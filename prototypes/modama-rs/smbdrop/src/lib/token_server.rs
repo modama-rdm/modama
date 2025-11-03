@@ -1,5 +1,5 @@
 use std::{
-    fmt::Debug, path::Path, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}
+    path::Path, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}
 };
 
 use axum::{
@@ -9,10 +9,9 @@ use axum::{
 };
 use hyper::{body::Incoming, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, DecodingKey, Validation};
 use log::{error, warn};
 use modama_common::{agent::AgentId, cert_helpers::get_private_key, tokens::{Claims, LocalTokenSigner, SignError, TokenVerifyResponse}};
-use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_rustls::TlsAcceptor;
 use tower_service::Service;

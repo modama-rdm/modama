@@ -25,6 +25,18 @@ impl Default for AgentLinuxConfig {
 }
 
 #[derive(Debug, Clone)]
+pub enum Identity {
+    Anonymous { hostname: String },
+    AgentId {
+        /// A user-readable short description of the data producer, like "DLD"
+        agent_name: String,
+
+        /// A short name of the resouce this agent belongs to, for example "Holo"
+        resource_name: String,
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct AgentConfig {
     /// The base URL for the websocket API (ws:// or wss://)
     pub api_url: Url,
@@ -44,11 +56,8 @@ pub struct AgentConfig {
     /// The Samba domain to use for mounting
     pub smb_domain: String,
 
-    /// A user-readable short description of the data producer, like "DLD"
-    pub agent_name: String,
-
-    /// A short name of the resouce this agent belongs to, for example "Holo"
-    pub resource_name: String,
+    /// The identity (agent and resource, or anonymous)
+    pub identity: Identity,
 
     // FIXME: find a better way?
     pub linux_config: Option<AgentLinuxConfig>,

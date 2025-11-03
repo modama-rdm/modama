@@ -13,17 +13,23 @@ pub enum ClientCertError {
     #[error("invalid or missing SAN")]
     InvalidSan(Option<String>),
 
-    #[error("invalid URI in SAN field: {0}")]
-    InvalidURI(String),
-
-    #[error("invalid or missing URI parts in {0}")]
-    URIParts(String),
+    #[error("invalid URI: {0}")]
+    InvalidURI(#[from] FromURIError),
 
     #[error("error parsing the certificate")]
     X509ParsingError(#[from] Err<X509Error>),
 
     #[error("x509 error")]
     X509Error(#[from] X509Error),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum FromURIError {
+    #[error("invalid URI in SAN field: {0}")]
+    InvalidURI(String),
+
+    #[error("invalid or missing URI parts in {0}")]
+    URIParts(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -34,17 +40,17 @@ pub struct AgentId {
 }
 
 impl AgentId {
-    pub fn from_uri(uri: &str) -> Result<Self, ClientCertError> {
+    pub fn from_uri(uri: &str) -> Result<Self, FromURIError> {
         let uri_parsed =
-            Url::from_str(uri).map_err(|_e| ClientCertError::InvalidURI(uri.to_owned()))?;
+            Url::from_str(uri).map_err(|_e| FromURIError::InvalidURI(uri.to_owned()))?;
 
         if uri_parsed.scheme() != "x-modama-agent" {
-            return Err(ClientCertError::InvalidURI(uri_parsed.to_string()));
+            return Err(FromURIError::InvalidURI(uri_parsed.to_string()));
         }
 
         Ok(Self {
-            resource: uri_parsed.host_str().ok_or_else(|| ClientCertError::URIParts(uri.to_owned()))?.to_string(),
-            agent: uri_parsed.fragment().ok_or_else(|| ClientCertError::URIParts(uri.to_owned()))?.to_string(),
+            resource: uri_parsed.host_str().ok_or_else(|| FromURIError::URIParts(uri.to_owned()))?.to_string(),
+            agent: uri_parsed.fragment().ok_or_else(|| FromURIError::URIParts(uri.to_owned()))?.to_string(),
             san_encoded: uri.to_owned(),
         })
     }
@@ -62,7 +68,7 @@ impl AgentId {
             .ok_or(ClientCertError::InvalidSan(None))?;
         debug!("client SAN: {name}");
         match name {
-            x509_parser::extensions::GeneralName::URI(u) => Self::from_uri(u),
+            x509_parser::extensions::GeneralName::URI(u) => Ok(Self::from_uri(u)?),
             _ => Err(ClientCertError::InvalidSan(Some(name.to_string()))),
         }
     }

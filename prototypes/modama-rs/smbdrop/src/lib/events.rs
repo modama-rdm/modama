@@ -1,14 +1,13 @@
 use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc};
 
-use crate::{
-    share_manager::SmbDropState, token_server::LocalTokenVerifier,
-};
+use crate::{share_manager::SmbDropState, token_server::LocalTokenVerifier};
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
     agent::{AgentId, ClientCertError},
     cert_helpers::CertHelperError,
-    messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share}, tokens::Claims,
+    messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share},
+    tokens::Claims,
 };
 use rustls::ServerConfig;
 use serde::{Deserialize, Serialize};
@@ -416,14 +415,22 @@ pub async fn start_event_server(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use std::{collections::HashMap, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+    use std::{
+        collections::HashMap,
+        sync::Arc,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
 
     use futures_util::{
         stream::{SplitSink, SplitStream},
         SinkExt, StreamExt,
     };
     use modama_common::{
-        agent::AgentId, ca::Ca, messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share}, test_helpers::MockTokenProvider, tokens::{BoxFutureToken, Claims, LocalTokenSigner, TokenProvider}
+        agent::AgentId,
+        ca::Ca,
+        messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share},
+        test_helpers::MockTokenProvider,
+        tokens::{Claims, LocalTokenSigner, TokenProvider},
     };
     use rustls::{
         pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
@@ -585,8 +592,13 @@ mod test {
         let mut server = make_test_event_server().await;
 
         let token = server.token_provider.fetch_token().await.unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
-        server.ws_write.send(Message::Text(login_msg.into())).await.unwrap();
+        let login_msg =
+            serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+        server
+            .ws_write
+            .send(Message::Text(login_msg.into()))
+            .await
+            .unwrap();
 
         let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
             .await
@@ -623,9 +635,17 @@ mod test {
     async fn test_websocket_api_second_agent() {
         let mut server = make_test_event_server().await;
 
-        let token = Arc::clone(&server.token_provider).fetch_token().await.unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
-        server.ws_write.send(Message::Text(login_msg.into())).await.unwrap();
+        let token = Arc::clone(&server.token_provider)
+            .fetch_token()
+            .await
+            .unwrap();
+        let login_msg =
+            serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+        server
+            .ws_write
+            .send(Message::Text(login_msg.into()))
+            .await
+            .unwrap();
 
         let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
             .await
@@ -668,19 +688,25 @@ mod test {
             .unwrap();
 
             let token_signer = LocalTokenSigner::new(&server.certs.server_secret);
-            let second_token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
-                signer: token_signer,
-                claims: Claims {
-                    sub: "x-modama-agent://test_resource#test_agent_2".to_owned(),
-                    exp: (SystemTime::now() + Duration::from_secs(1000))
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                },
-            });
+            let second_token_provider: Arc<dyn TokenProvider + 'static> =
+                Arc::new(MockTokenProvider {
+                    signer: token_signer,
+                    claims: Claims {
+                        sub: "x-modama-agent://test_resource#test_agent_2".to_owned(),
+                        exp: (SystemTime::now() + Duration::from_secs(1000))
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    },
+                });
 
-            let token_2 = Arc::clone(&second_token_provider).fetch_token().await.unwrap();
-            let login_msg_2 = serde_json::to_string(&EventChannelInitialMessages::Login { token: token_2 }).unwrap();
+            let token_2 = Arc::clone(&second_token_provider)
+                .fetch_token()
+                .await
+                .unwrap();
+            let login_msg_2 =
+                serde_json::to_string(&EventChannelInitialMessages::Login { token: token_2 })
+                    .unwrap();
             conn.send(Message::Text(login_msg_2.into())).await.unwrap();
 
             // and we get an updated list of connected agents:
@@ -759,8 +785,13 @@ mod test {
         let mut server = make_test_event_server().await;
 
         let token = server.token_provider.fetch_token().await.unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
-        server.ws_write.send(Message::Text(login_msg.into())).await.unwrap();
+        let login_msg =
+            serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+        server
+            .ws_write
+            .send(Message::Text(login_msg.into()))
+            .await
+            .unwrap();
 
         let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
             .await
@@ -828,8 +859,13 @@ mod test {
         let mut server = make_test_event_server().await;
 
         let token = server.token_provider.fetch_token().await.unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
-        server.ws_write.send(Message::Text(login_msg.into())).await.unwrap();
+        let login_msg =
+            serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+        server
+            .ws_write
+            .send(Message::Text(login_msg.into()))
+            .await
+            .unwrap();
 
         let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
             .await

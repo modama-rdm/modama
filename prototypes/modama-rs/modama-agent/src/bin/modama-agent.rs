@@ -1,11 +1,11 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result as AnyResult};
-use clap::Parser;
+use clap::{Args, Parser};
 use log::info;
 use modama_agent::{
     agent_state::AgentState,
-    config::{AgentConfig, AgentLinuxConfig},
+    config::{AgentConfig, AgentLinuxConfig, Identity},
     local_http_service::serve_local_web_api,
     message_loop::message_loop,
     platform::CurrentPlatformMountBackend,
@@ -22,8 +22,17 @@ use tokio::{
 use tokio_rustls::rustls::ClientConfig;
 use url::Url;
 
+#[derive(Args, Debug)]
+struct ClientCertArgs {
+    #[arg(long, default_value = "chain.pem")]
+    chain: PathBuf,
+
+    #[arg(long, default_value = "priv.pem")]
+    key: PathBuf,
+}
+
 #[derive(Parser, Debug)]
-struct Args {
+struct CliArgs {
     #[arg(long, default_value = "wss://localhost:5052")]
     event_url: String,
 
@@ -48,14 +57,11 @@ struct Args {
     #[arg(long, default_value = "ca.cert.pem")]
     ca_cert: PathBuf,
 
-    #[arg(long, default_value = "chain.pem")]
-    chain: PathBuf,
-
-    #[arg(long, default_value = "priv.pem")]
-    key: PathBuf,
+    #[command(flatten)]
+    client_cert: Option<ClientCertArgs>,
 }
 
-fn get_tls_config(args: &Args) -> AnyResult<(Arc<ClientConfig>, AgentId)> {
+fn get_tls_config(args: &CliArgs) -> AnyResult<(Arc<ClientConfig>, Identity)> {
     let root_store = get_root_cert_store(&args.ca_cert)?;
     let client_chain = get_cert_chain(&args.chain)?;
     let agent_id = AgentId::from_cert(
@@ -78,8 +84,8 @@ fn get_tls_config(args: &Args) -> AnyResult<(Arc<ClientConfig>, AgentId)> {
 async fn main() -> AnyResult<()> {
     init_logging();
 
-    let args = Args::parse();
-    let (tls_config, agent_id) = get_tls_config(&args)?;
+    let args = CliArgs::parse();
+    let (tls_config, identity) = get_tls_config(&args)?;
 
     let config = &AgentConfig {
         api_url: Url::parse(&args.event_url)
@@ -89,8 +95,7 @@ async fn main() -> AnyResult<()> {
         smb_domain: args.smb_domain,
         smb_ip: OnceCell::new(),
         smb_port: args.smb_port,
-        agent_name: agent_id.agent.to_owned(),
-        resource_name: agent_id.resource.to_owned(),
+        identity,
         linux_config: Some(AgentLinuxConfig::default()),
     };
 

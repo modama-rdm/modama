@@ -11,6 +11,7 @@ use axum_extra::{
     TypedHeader,
 };
 use axum_macros::debug_handler;
+use jsonwebtoken::decode;
 use log::{error, warn};
 use minijinja::{context, Environment};
 use modama_common::{
@@ -176,20 +177,26 @@ async fn serve_index_page(
 
     let state = agent_state.state.lock().await;
 
-    let matching_agents = state
-        .connected_agents
-        .iter()
-        .filter(|a| a.resource == state.config.resource_name);
-
-    result += "Connected agents at this resource: ";
-    for a in matching_agents {
-        result += &(a.san_encoded.to_owned() + " ");
+    match &state.config.identity {
+        crate::config::Identity::Anonymous { hostname } => {
+            result += &format!("This agent: Anonymous running on {hostname}",);
+        }
+        crate::config::Identity::AgentId {
+            agent_name,
+            resource_name,
+        } => {
+            let matching_agents = state
+                .connected_agents
+                .iter()
+                .filter(|a| a.resource == *resource_name);
+            result += "Connected agents at this resource: ";
+            for a in matching_agents {
+                result += &(a.san_encoded.to_owned() + " ");
+            }
+            result += "\n";
+            result += &format!("This agent: {} at {}", &agent_name, &resource_name);
+        }
     }
-    result += "\n";
-    result += &format!(
-        "This agent: {} at {}",
-        &state.config.agent_name, &state.config.resource_name
-    );
 
     result += "\n";
 
@@ -256,7 +263,13 @@ async fn start_ingest_step2(
     let tpl = agent_state
         .jinja_env
         .get_template("start_ingest_step2.html")?;
-    let res_name = &agent_state.state.lock().await.config.resource_name;
+    let res_name = match &agent_state.state.lock().await.config.identity {
+        crate::config::Identity::Anonymous { hostname } => hostname.clone(),
+        crate::config::Identity::AgentId {
+            agent_name: _,
+            resource_name,
+        } => resource_name.clone(),
+    };
     Ok((
         [(header::CONTENT_TYPE, "text/html")],
         tpl.render(context! { resource => res_name, session => session_name })?,
@@ -285,6 +298,8 @@ async fn start_ingest_step3(
     }
 
     let agent_token = agent_state.token_provider.fetch_token().await?;
+
+    todo!("we also need to retrieve the resource name from the network (decode the claims in the token? can't do that without pk)");
 
     c.create_share(
         &project_name,
@@ -372,8 +387,10 @@ mod tests {
                 smb_ip: tokio::sync::OnceCell::new(),
                 smb_port: 445,
                 smb_domain: "WINDOWS_FOR_WORKGROUPS".to_string(),
-                agent_name: "agent-name".to_string(),
-                resource_name: "res".to_string(),
+                identity: crate::config::Identity::AgentId {
+                    agent_name: "agent-name".to_string(),
+                    resource_name: "res".to_string(),
+                },
                 linux_config: None,
             };
             let mut state_inner = crate::agent_state::AgentState::new(&cfg);

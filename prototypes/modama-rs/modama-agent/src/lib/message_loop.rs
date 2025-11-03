@@ -10,7 +10,7 @@ use futures_util::{future::join_all, SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use modama_common::{
     messages::{EventChannelInitialMessages, EventChannelMessage, Share},
-    tokens::{TokenError, TokenProvider},
+    tokens::TokenProvider,
 };
 use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
@@ -104,20 +104,11 @@ async fn handle_message(
     }
 }
 
-/// Acquire a token, either directly from the token server via the client cert,
-/// or if we don't have a client cert, we delegate to another agent in the local network
-pub async fn acquire_token(
-    state: &Arc<Mutex<AgentState>>,
-    token_provider: &Arc<dyn TokenProvider>,
-) -> Result<String, TokenError> {
-    (Arc::clone(token_provider)).fetch_token().await
-}
-
 pub async fn message_loop(
     backend: &impl MountBackend,
     state: Arc<Mutex<AgentState>>,
     tls_config: Arc<ClientConfig>,
-    local_net_token_provider: Arc<dyn TokenProvider>,
+    token_provider: Arc<dyn TokenProvider>,
 ) {
     let config = state.lock().await.config.clone();
 
@@ -146,7 +137,7 @@ pub async fn message_loop(
         state.lock().await.connection = ConnectionState::Authenticating;
         let (mut ws_write, mut ws_read) = conn.split();
 
-        let token = match acquire_token(&state, &local_net_token_provider).await {
+        let token = match Arc::clone(&token_provider).fetch_token().await {
             Ok(t) => t,
             Err(e) => {
                 error!("Could not acquire token (`{e}`), reconnecting...");
@@ -212,7 +203,7 @@ mod tests {
     use modama_common::logging::init_logging;
     use modama_common::messages;
     use modama_common::test_helpers::MockTokenProvider;
-    use modama_common::tokens::{BoxFutureToken, Claims, LocalTokenSigner};
+    use modama_common::tokens::{Claims, LocalTokenSigner};
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
@@ -327,8 +318,10 @@ mod tests {
                 smb_ip: tokio::sync::OnceCell::new(),
                 smb_port: 445,
                 smb_domain: "WORKGROUP".to_string(),
-                agent_name: "test-agent".to_string(),
-                resource_name: "test_resource".to_string(),
+                identity: crate::config::Identity::AgentId {
+                    agent_name: "test-agent".to_string(),
+                    resource_name: "test_resource".to_string(),
+                },
                 linux_config: None,
             };
 

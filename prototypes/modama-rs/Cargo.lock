@@ -1418,6 +1418,7 @@ dependencies = [
  "http-body-util",
  "hyper 0.14.32",
  "itertools",
+ "jsonwebtoken",
  "log",
  "minijinja",
  "mockito",
