@@ -25,6 +25,7 @@ path = "src/lib/lib.rs"
 anyhow = { workspace = true }
 axum = { workspace = true, features = ["json", "macros"] }
 hyper = { workspace = true }
+hyper-util = { workspace = true }
 axum-macros = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 env_logger = { workspace = true }
@@ -51,6 +52,7 @@ itertools = "0.14.0"
 jsonwebtoken = { workspace = true }
 hostname = "0.4.1"
 network-interface = "2.0.3"
+axum-server = { version = "0.7.2", freatures = ["tls-rustls-no-provider"]}
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.0", features = ["Win32_NetworkManagement_WNet", "Win32_NetworkManagement_NetManagement"] }

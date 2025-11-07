@@ -8,6 +8,8 @@ use std::{
 
 use axum::{extract::State, routing::put, Json, Router};
 use hyper::StatusCode;
+use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::ServerConfig;
 use log::{debug, error, info, warn};
 use modama_common::tokens::{TokenError, TokenFetcher, TokenSignResponse};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
@@ -18,7 +20,6 @@ use tokio::{
     task::JoinHandle,
     time::sleep,
 };
-use url::Url;
 
 use crate::local_net_common::{
     create_mcast_socket_for_sending, DiscoveryInner, DiscoveryMessage, NOTIFY_CURRENT_VERSION,
@@ -73,6 +74,7 @@ pub async fn local_token_server(
     addr: Ipv4Addr,
     token_fetcher: Arc<TokenFetcher>,
     state: Arc<Mutex<SharedState>>,
+    tls_config: Arc<ServerConfig>,
 ) -> JoinHandle<()> {
     let api_state = ProxyState { token_fetcher };
     let app: Router<ProxyState> = Router::<ProxyState>::new()
@@ -80,11 +82,11 @@ pub async fn local_token_server(
         .with_state(api_state);
 
     let listener = TcpListener::bind((addr, 0)).await.unwrap();
+    let acceptor = TlsAcceptor::from(Arc::clone(&tls_config));
 
-    // FIXME: use the agent's client cert for the tls listener
     let listen_port = listener.local_addr().unwrap().port();
     let server_handle = tokio::spawn(async move {
-        todo!();
+        axum_server::bind_rustls
     });
 
     state
@@ -170,7 +172,7 @@ pub async fn task_exists_and_running(
     }
 }
 
-pub async fn start_publisher_loop(token_fetcher: Arc<TokenFetcher>) {
+pub async fn start_publisher_loop(token_fetcher: Arc<TokenFetcher>, tls_config: Arc<ServerConfig>) {
     let mut advertisement_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
     let mut token_server_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
 
@@ -187,7 +189,13 @@ pub async fn start_publisher_loop(token_fetcher: Arc<TokenFetcher>) {
                 // tasks should just kill itself
                 for addr in addrs.iter() {
                     if !task_exists_and_running(&token_server_tasks, *addr).await {
-                        let handle = local_token_server(*addr, Arc::clone(&token_fetcher)).await;
+                        let handle = local_token_server(
+                            *addr,
+                            Arc::clone(&token_fetcher),
+                            Arc::clone(&shared_state),
+                            Arc::clone(&tls_config),
+                        )
+                        .await;
                         token_server_tasks.insert(*addr, handle);
                     }
                     if !task_exists_and_running(&advertisement_tasks, *addr).await {
