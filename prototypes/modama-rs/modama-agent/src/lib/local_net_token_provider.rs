@@ -353,4 +353,9 @@ mod tests {
 
         sender_task.abort();
     }
+
+    // TODO: more tests
+    // - [ ] integration test with a mock remote agent
+    // - [ ] invalid data tests (making sure the loops don't crash or at least recover)
+    // - [ ] check coverage for additional missing parts
 }

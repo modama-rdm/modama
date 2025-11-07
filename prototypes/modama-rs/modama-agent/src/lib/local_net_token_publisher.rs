@@ -6,9 +6,19 @@ use std::{
     time::Duration,
 };
 
+use axum::{extract::State, routing::put, Json, Router};
+use hyper::StatusCode;
 use log::{debug, error, info, warn};
+use modama_common::tokens::{TokenError, TokenFetcher, TokenSignResponse};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
-use tokio::{net::UdpSocket, spawn, sync::Mutex, task::JoinHandle, time::sleep};
+use tokio::{
+    net::{TcpListener, UdpSocket},
+    spawn,
+    sync::Mutex,
+    task::JoinHandle,
+    time::sleep,
+};
+use url::Url;
 
 use crate::local_net_common::{
     create_mcast_socket_for_sending, DiscoveryInner, DiscoveryMessage, NOTIFY_CURRENT_VERSION,
@@ -37,15 +47,57 @@ pub fn get_private_addresses() -> Result<Vec<Ipv4Addr>, network_interface::Error
     Ok(result)
 }
 
+#[derive(Clone)]
+struct ProxyState {
+    token_fetcher: Arc<TokenFetcher>,
+}
+
+pub async fn proxy_sign_request(
+    State(state): State<ProxyState>,
+) -> Result<Json<TokenSignResponse>, StatusCode> {
+    match state.token_fetcher.fetch_token().await {
+        Ok(resp) => Ok(Json(resp)),
+        Err(TokenError::ResponseCode(s)) => match StatusCode::from_u16(s.as_u16()) {
+            Ok(s) => Err(s),
+            Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        },
+        Err(err) => {
+            error!("error fetching token: {err}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 /// Local token server for other agents that do not have a client certificate
-pub async fn local_token_server() -> JoinHandle<()> {
-    spawn(async {
-        todo!("HTTP API here that delegates to the smbdrop token API");
-    })
+pub async fn local_token_server(
+    addr: Ipv4Addr,
+    token_fetcher: Arc<TokenFetcher>,
+    state: Arc<Mutex<SharedState>>,
+) -> JoinHandle<()> {
+    let api_state = ProxyState { token_fetcher };
+    let app: Router<ProxyState> = Router::<ProxyState>::new()
+        .route("/sign/", put(proxy_sign_request))
+        .with_state(api_state);
+
+    let listener = TcpListener::bind((addr, 0)).await.unwrap();
+
+    // FIXME: use the agent's client cert for the tls listener
+    let listen_port = listener.local_addr().unwrap().port();
+    let server_handle = tokio::spawn(async move {
+        todo!();
+    });
+
+    state
+        .lock()
+        .await
+        .api_urls
+        .insert(addr, format!("https://{addr}:{listen_port}"));
+
+    server_handle
 }
 
 /// State shared to inform the advertisement task about the URLs for the running
-/// services
+/// services on each interface
 pub struct SharedState {
     pub api_urls: HashMap<Ipv4Addr, String>,
 }
@@ -118,7 +170,7 @@ pub async fn task_exists_and_running(
     }
 }
 
-pub async fn start_publisher_loop() {
+pub async fn start_publisher_loop(token_fetcher: Arc<TokenFetcher>) {
     let mut advertisement_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
     let mut token_server_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
 
@@ -135,7 +187,7 @@ pub async fn start_publisher_loop() {
                 // tasks should just kill itself
                 for addr in addrs.iter() {
                     if !task_exists_and_running(&token_server_tasks, *addr).await {
-                        let handle = local_token_server().await;
+                        let handle = local_token_server(*addr, Arc::clone(&token_fetcher)).await;
                         token_server_tasks.insert(*addr, handle);
                     }
                     if !task_exists_and_running(&advertisement_tasks, *addr).await {
