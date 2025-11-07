@@ -91,7 +91,7 @@ pub async fn local_token_server(
         .lock()
         .await
         .api_urls
-        .insert(addr, format!("https://{addr}:{listen_port}"));
+        .insert(addr, format!("https://{addr}:{listen_port}/sign/"));
 
     Ok(server_handle)
 }
