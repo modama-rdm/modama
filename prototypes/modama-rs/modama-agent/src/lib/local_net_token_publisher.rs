@@ -7,19 +7,13 @@ use std::{
 };
 
 use axum::{extract::State, routing::put, Json, Router};
+use axum_server::tls_rustls::RustlsConfig;
 use hyper::StatusCode;
-use tokio_rustls::TlsAcceptor;
-use tokio_rustls::rustls::ServerConfig;
 use log::{debug, error, info, warn};
 use modama_common::tokens::{TokenError, TokenFetcher, TokenSignResponse};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
-use tokio::{
-    net::{TcpListener, UdpSocket},
-    spawn,
-    sync::Mutex,
-    task::JoinHandle,
-    time::sleep,
-};
+use tokio::{net::UdpSocket, spawn, sync::Mutex, task::JoinHandle, time::sleep};
+use tokio_rustls::rustls::ServerConfig;
 
 use crate::local_net_common::{
     create_mcast_socket_for_sending, DiscoveryInner, DiscoveryMessage, NOTIFY_CURRENT_VERSION,
@@ -53,7 +47,7 @@ struct ProxyState {
     token_fetcher: Arc<TokenFetcher>,
 }
 
-pub async fn proxy_sign_request(
+async fn proxy_sign_request(
     State(state): State<ProxyState>,
 ) -> Result<Json<TokenSignResponse>, StatusCode> {
     match state.token_fetcher.fetch_token().await {
@@ -75,18 +69,22 @@ pub async fn local_token_server(
     token_fetcher: Arc<TokenFetcher>,
     state: Arc<Mutex<SharedState>>,
     tls_config: Arc<ServerConfig>,
-) -> JoinHandle<()> {
+) -> Result<JoinHandle<()>, io::Error> {
     let api_state = ProxyState { token_fetcher };
-    let app: Router<ProxyState> = Router::<ProxyState>::new()
+    let app = Router::<ProxyState>::new()
         .route("/sign/", put(proxy_sign_request))
         .with_state(api_state);
 
-    let listener = TcpListener::bind((addr, 0)).await.unwrap();
-    let acceptor = TlsAcceptor::from(Arc::clone(&tls_config));
+    let listener = std::net::TcpListener::bind((addr, 0))?;
+    let rustls_config = RustlsConfig::from_config(tls_config);
+    let listen_port = listener.local_addr()?.port();
+    let server = axum_server::from_tcp_rustls(listener, rustls_config);
 
-    let listen_port = listener.local_addr().unwrap().port();
     let server_handle = tokio::spawn(async move {
-        axum_server::bind_rustls
+        if let Err(e) = server.serve(app.into_make_service()).await {
+            error!("failed to start local token server: {e}");
+            // just let the task expire, it will be restarted in the outside loop
+        }
     });
 
     state
@@ -95,7 +93,7 @@ pub async fn local_token_server(
         .api_urls
         .insert(addr, format!("https://{addr}:{listen_port}"));
 
-    server_handle
+    Ok(server_handle)
 }
 
 /// State shared to inform the advertisement task about the URLs for the running
@@ -189,14 +187,16 @@ pub async fn start_publisher_loop(token_fetcher: Arc<TokenFetcher>, tls_config: 
                 // tasks should just kill itself
                 for addr in addrs.iter() {
                     if !task_exists_and_running(&token_server_tasks, *addr).await {
-                        let handle = local_token_server(
+                        if let Ok(handle) = local_token_server(
                             *addr,
                             Arc::clone(&token_fetcher),
                             Arc::clone(&shared_state),
                             Arc::clone(&tls_config),
                         )
-                        .await;
-                        token_server_tasks.insert(*addr, handle);
+                        .await
+                        {
+                            token_server_tasks.insert(*addr, handle);
+                        }
                     }
                     if !task_exists_and_running(&advertisement_tasks, *addr).await {
                         let handle = advertisement_loop(*addr, Arc::clone(&shared_state)).await;
