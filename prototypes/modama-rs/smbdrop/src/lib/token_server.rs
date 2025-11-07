@@ -15,7 +15,7 @@ use jsonwebtoken::{decode, DecodingKey, Validation};
 use log::{error, warn};
 use modama_common::{
     agent::AgentId,
-    cert_helpers::get_private_key,
+    cert_helpers::{get_private_key, load_tls_server_config},
     tokens::{Claims, LocalTokenSigner, SignError, TokenSignResponse, TokenVerifyResponse},
 };
 use tokio::{net::TcpListener, task::JoinHandle};
@@ -23,7 +23,7 @@ use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
 use crate::{
-    cert_helpers::{agent_id_from_stream, load_tls_config},
+    cert_helpers::agent_id_from_stream,
     events::ServerStartError,
 };
 #[derive(Clone)]
@@ -134,7 +134,7 @@ impl TokenServer {
         chain: &Path,
         privkey: &Path,
     ) -> Result<Self, ServerStartError> {
-        let config = load_tls_config(ca_cert, chain, privkey, false)?;
+        let config = load_tls_server_config(ca_cert, chain, privkey, false)?;
         let pk = get_private_key(privkey)?;
         let secret = Vec::from(pk.secret_der());
 

@@ -8,19 +8,19 @@ use modama_agent::{
     config::{AgentConfig, AgentLinuxConfig, Identity},
     local_http_service::serve_local_web_api,
     local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider},
+    local_net_token_publisher::token_publisher_loop,
     message_loop::message_loop,
     platform::CurrentPlatformMountBackend,
 };
 use modama_common::{
-    agent::AgentId,
-    tokens::{TokenFetcher, TokenProvider},
+    agent::AgentId, cert_helpers::load_tls_server_config, tokens::{TokenFetcher, TokenProvider}
 };
 use modama_common::{
     cert_helpers::{get_cert_chain, get_private_key, get_root_cert_store},
     logging::init_logging,
 };
 use tokio::{
-    select,
+    select, spawn,
     sync::{Mutex, OnceCell},
 };
 use tokio_rustls::rustls::ClientConfig;
@@ -140,29 +140,40 @@ async fn main() -> AnyResult<()> {
             token_provider
         }
         None => {
-            let token_provider = LocalNetTokenProvider::new(
-                &args.ca_cert,
-                DiscoveryAddr::AnyPrivate,
-            )
-            .await?;
+            let token_provider =
+                LocalNetTokenProvider::new(&args.ca_cert, DiscoveryAddr::AnyPrivate).await?;
             let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(token_provider);
             token_provider
         }
     };
 
+    let another_token_provider = Arc::clone(&token_provider);
+    let _local_token_server_handle = match &args.client_cert {
+        Some(client_cert) => {
+            let tls_config = Arc::new(
+                load_tls_server_config(&args.ca_cert, &client_cert.chain, &client_cert.key, false)
+                    .context("tls config for local token provider API")?,
+            );
+            Some(spawn(async move {
+                token_publisher_loop(another_token_provider, tls_config).await;
+            }))
+        }
+        None => None,
+    };
+
     let state_for_api = Arc::clone(&state);
     let cloned_token_provider = Arc::clone(&token_provider);
-    let join_handle = tokio::spawn(async move {
+    let local_api_handle = tokio::spawn(async move {
         serve_local_web_api(state_for_api, &args.listen_local_api, cloned_token_provider).await
     });
 
-    let backend = CurrentPlatformMountBackend {};
+    let mount_backend = CurrentPlatformMountBackend {};
 
     select! {
-        _ = message_loop(&backend, Arc::clone(&state), Arc::clone(&tls_config), Arc::clone(&token_provider)) => {
+        _ = message_loop(&mount_backend, Arc::clone(&state), Arc::clone(&tls_config), Arc::clone(&token_provider)) => {
             Ok(())
         }
-        res = join_handle => {
+        res = local_api_handle => {
             res?
         }
     }?;

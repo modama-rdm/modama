@@ -9,11 +9,15 @@ use tokio_rustls::rustls::{
     pki_types::{CertificateDer, PrivateKeyDer},
     RootCertStore,
 };
+use rustls::{ServerConfig, server::{VerifierBuilderError, WebPkiClientVerifier}};
 
 #[derive(thiserror::Error, Debug)]
 pub enum CertHelperError {
     #[error("error reading `{path}`: {source}")]
     IoError { source: io::Error, path: PathBuf },
+
+    #[error("tls server config: {0}")]
+    TlsServerConfig(#[from] VerifierBuilderError),
 
     #[error("key or certificate not found in the PEM file `{0}`")]
     KeyNotFound(PathBuf),
@@ -68,4 +72,26 @@ pub fn get_private_key(privkey: &Path) -> Result<PrivateKeyDer<'static>, CertHel
         })?
         .ok_or_else(|| CertHelperError::KeyNotFound(privkey.to_owned()))?;
     Ok(pk)
+}
+
+pub fn load_tls_server_config(
+    ca_cert: &Path,
+    chain: &Path,
+    privkey: &Path,
+    require_client_cert: bool,
+) -> Result<ServerConfig, CertHelperError> {
+    let roots = get_root_cert_store(ca_cert)?;
+    let client_cert_verifier = if require_client_cert {
+        WebPkiClientVerifier::builder(roots.into()).build()?
+    } else {
+        WebPkiClientVerifier::builder(roots.into())
+            .allow_unauthenticated()
+            .build()?
+    };
+
+    let config = ServerConfig::builder()
+        .with_client_cert_verifier(client_cert_verifier)
+        .with_single_cert(get_cert_chain(chain)?, get_private_key(privkey)?)?;
+
+    Ok(config)
 }

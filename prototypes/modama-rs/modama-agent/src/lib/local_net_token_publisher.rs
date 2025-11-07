@@ -10,7 +10,7 @@ use axum::{extract::State, routing::put, Json, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use hyper::StatusCode;
 use log::{debug, error, info, warn};
-use modama_common::tokens::{TokenError, TokenFetcher, TokenSignResponse};
+use modama_common::tokens::{TokenError, TokenProvider, TokenSignResponse};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use tokio::{net::UdpSocket, spawn, sync::Mutex, task::JoinHandle, time::sleep};
 use tokio_rustls::rustls::ServerConfig;
@@ -44,13 +44,13 @@ pub fn get_private_addresses() -> Result<Vec<Ipv4Addr>, network_interface::Error
 
 #[derive(Clone)]
 struct ProxyState {
-    token_fetcher: Arc<TokenFetcher>,
+    token_provider: Arc<dyn TokenProvider + Sync + Send>,
 }
 
 async fn proxy_sign_request(
     State(state): State<ProxyState>,
 ) -> Result<Json<TokenSignResponse>, StatusCode> {
-    match state.token_fetcher.fetch_token().await {
+    match state.token_provider.fetch_token().await {
         Ok(resp) => Ok(Json(resp)),
         Err(TokenError::ResponseCode(s)) => match StatusCode::from_u16(s.as_u16()) {
             Ok(s) => Err(s),
@@ -66,11 +66,11 @@ async fn proxy_sign_request(
 /// Local token server for other agents that do not have a client certificate
 pub async fn local_token_server(
     addr: Ipv4Addr,
-    token_fetcher: Arc<TokenFetcher>,
+    token_provider: Arc<dyn TokenProvider + Sync + Send>,
     state: Arc<Mutex<SharedState>>,
     tls_config: Arc<ServerConfig>,
 ) -> Result<JoinHandle<()>, io::Error> {
-    let api_state = ProxyState { token_fetcher };
+    let api_state = ProxyState { token_provider };
     let app = Router::<ProxyState>::new()
         .route("/sign/", put(proxy_sign_request))
         .with_state(api_state);
@@ -170,7 +170,10 @@ pub async fn task_exists_and_running(
     }
 }
 
-pub async fn start_publisher_loop(token_fetcher: Arc<TokenFetcher>, tls_config: Arc<ServerConfig>) {
+pub async fn token_publisher_loop(
+    token_fetcher: Arc<dyn TokenProvider + Sync + Send>,
+    tls_config: Arc<ServerConfig>,
+) {
     let mut advertisement_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
     let mut token_server_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
 

@@ -3,9 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result as AnyResult};
 use clap::Parser;
 use log::info;
-use modama_common::{cert_helpers::get_private_key, logging::init_logging};
+use modama_common::{cert_helpers::{get_private_key, load_tls_server_config}, logging::init_logging};
 use smbdrop::{
-    cert_helpers::load_tls_config,
     events::start_event_server,
     server::{serve_smbdrop_api, ApiState},
     share_manager::{DefaultUserProvider, ShareManager},
@@ -59,7 +58,7 @@ async fn main() -> AnyResult<()> {
 
     info!("initial state: {initial_state:?}");
 
-    let tls_config = load_tls_config(&args.ca_cert, &args.chain, &args.privkey, true)?;
+    let tls_config = load_tls_server_config(&args.ca_cert, &args.chain, &args.privkey, true)?;
     let secret_key = get_private_key(&args.privkey)?;
 
     let (_event_server_task, state_updates_tx, _event_server_port) =

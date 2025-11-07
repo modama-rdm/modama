@@ -21,6 +21,7 @@ rustls-pemfile = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process", "fs", "signal"] }
 tokio-rustls = { workspace = true }
 url = { workspace = true }
 x509-parser = { workspace = true }

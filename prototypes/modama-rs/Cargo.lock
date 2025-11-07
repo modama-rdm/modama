@@ -1473,6 +1473,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "tokio-rustls",
  "url",
  "x509-parser",
