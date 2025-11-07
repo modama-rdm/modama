@@ -108,7 +108,7 @@ pub async fn message_loop(
     backend: &impl MountBackend,
     state: Arc<Mutex<AgentState>>,
     tls_config: Arc<ClientConfig>,
-    token_provider: Arc<dyn TokenProvider>,
+    token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) {
     let config = state.lock().await.config.clone();
 
@@ -145,7 +145,7 @@ pub async fn message_loop(
                 continue;
             }
         };
-        let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login { token }) {
+        let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login { token: token.token }) {
             Ok(msg) => msg,
             Err(e) => {
                 error!("Could not serialize authentication message, reconnecting...");
@@ -349,7 +349,7 @@ mod tests {
             ));
 
             let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
-            let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
+            let token_provider: Arc<dyn TokenProvider + 'static + Sync + Send> = Arc::new(MockTokenProvider {
                 signer: token_signer,
                 claims: Claims {
                     sub: "x-modama-agent://test_resource#test-agent".to_owned(),

@@ -6,13 +6,29 @@ use jsonwebtoken::{EncodingKey, Header, encode};
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::AgentId;
+use crate::agent::{AgentId, FromURIError};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub exp: u64,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TokenSignResponse {
+    /// jwt
+    pub token: String,
+
+    /// resource name
+    pub resource: String,
+
+    /// agent name
+    pub agent_name: String,
+    
+    /// san-encoded: x-modama-agent://resource_name#agent_name
+    pub agent_uri: String,
+}
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum TokenVerifyResponse {
@@ -36,6 +52,9 @@ pub enum TokenError {
 
     #[error("error response code: {0}")]
     ResponseCode(StatusCode),
+
+    #[error("serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
 
     #[error("I/O error: {0}")]
     IO(#[from] io::Error),
@@ -80,14 +99,15 @@ impl TokenFetcher {
         })
     }
 
-    pub async fn fetch_token(&self) -> Result<String, TokenError> {
+    pub async fn fetch_token(&self) -> Result<TokenSignResponse, TokenError> {
         let resp = self
             .client
             .put(&self.sign_service_url)
             .send()
             .await?;
         if resp.status() == StatusCode::OK {
-            Ok(resp.text().await?)
+            let text = resp.text().await?;
+            Ok(serde_json::from_str(&text)?)
         } else {
             Err(TokenError::ResponseCode(resp.status()))
         }
@@ -95,7 +115,7 @@ impl TokenFetcher {
 }
 
 // Trait to abstract token fetching so tests can provide a stub implementation.
-pub type BoxFutureToken = Pin<Box<dyn Future<Output = Result<String, TokenError>> + Send>>;
+pub type BoxFutureToken = Pin<Box<dyn Future<Output = Result<TokenSignResponse, TokenError>> + Send>>;
 
 pub trait TokenProvider: Send + Sync + Debug {
     fn fetch_token(self: Arc<Self>) -> BoxFutureToken;
@@ -145,6 +165,9 @@ pub enum SignError {
     #[error("authentication or client certificate failure")]
     Auth,
 
+    #[error("could not decode claim: {0}")]
+    ClaimDecode(#[from] FromURIError),
+
     #[error("JWT encoding error")]
     Encoding,
 }
@@ -168,13 +191,19 @@ impl LocalTokenSigner {
         }
     }
 
-    pub fn sign(&self, claims: &Claims) -> Result<String, SignError> {
+    pub fn sign(&self, claims: &Claims) -> Result<TokenSignResponse, SignError> {
         if let Ok(jwt) = encode(
             &Header::default(),
             &claims,
             &EncodingKey::from_secret(&self.secret),
         ) {
-            Ok(jwt)
+            let agent_id = AgentId::from_uri(&claims.sub)?;
+            Ok(TokenSignResponse {
+                token: jwt,
+                resource: agent_id.resource,
+                agent_name: agent_id.agent,
+                agent_uri: agent_id.san_encoded,
+            })
         } else {
             Err(SignError::Encoding)
         }

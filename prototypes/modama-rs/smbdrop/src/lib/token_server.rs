@@ -1,5 +1,7 @@
 use std::{
-    path::Path, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}
+    path::Path,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -11,7 +13,11 @@ use hyper::{body::Incoming, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use log::{error, warn};
-use modama_common::{agent::AgentId, cert_helpers::get_private_key, tokens::{Claims, LocalTokenSigner, SignError, TokenVerifyResponse}};
+use modama_common::{
+    agent::AgentId,
+    cert_helpers::get_private_key,
+    tokens::{Claims, LocalTokenSigner, SignError, TokenSignResponse, TokenVerifyResponse},
+};
 use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
@@ -20,7 +26,6 @@ use crate::{
     cert_helpers::{agent_id_from_stream, load_tls_config},
     events::ServerStartError,
 };
-
 #[derive(Clone)]
 struct ConnState {
     /// Agent ID - None if client authentication didn't succeed
@@ -35,7 +40,7 @@ struct ConnState {
 
 const EXPIRY_DURATION: u64 = 3600;
 
-async fn do_sign(state: &ConnState) -> Result<String, SignError> {
+async fn do_sign(state: &ConnState) -> Result<TokenSignResponse, SignError> {
     let agent_id = if let Some(agent_id) = &state.agent_id {
         agent_id.clone()
     } else {
@@ -52,14 +57,22 @@ async fn do_sign(state: &ConnState) -> Result<String, SignError> {
             .as_secs(),
     };
     let signer = LocalTokenSigner::new(&state.secret);
-    signer.sign(&claims)
+    let token = signer.sign(&claims)?;
+    Ok(token)
 }
 
-async fn sign_jwt(State(state): State<ConnState>) -> Result<String, StatusCode> {
-    do_sign(&state).await.map_err(|e| match e {
-        SignError::Auth => StatusCode::FORBIDDEN,
-        SignError::Encoding => StatusCode::BAD_REQUEST,
-    })
+async fn sign_jwt(State(state): State<ConnState>) -> Result<Json<TokenSignResponse>, StatusCode> {
+    do_sign(&state)
+        .await
+        .map_err(|e| match e {
+            SignError::Auth => StatusCode::FORBIDDEN,
+            SignError::Encoding => StatusCode::BAD_REQUEST,
+            SignError::ClaimDecode(e) => {
+                warn!("could not decode claim: {e}");
+                StatusCode::BAD_REQUEST
+            }
+        })
+        .map(Json)
 }
 
 async fn verify_jwt(
@@ -294,11 +307,11 @@ mod tests {
         .expect("make token fetcher");
 
         // perform the request and get jwt
-        let jwt = fetcher.fetch_token().await.expect("fetch token");
+        let sign_response = fetcher.fetch_token().await.expect("fetch token");
 
         let verifier =
             TokenVerifier::new(verify_url.as_str(), &test_server.ca_cert).expect("make verifier");
-        let resp = verifier.verify(&jwt).await.expect("verify");
+        let resp = verifier.verify(&sign_response.token).await.expect("verify");
         assert_eq!(
             resp.get_agent_id().unwrap(),
             AgentId::from_uri("x-modama-agent://test_resource#test_agent").unwrap()

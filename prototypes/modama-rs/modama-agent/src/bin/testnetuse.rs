@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use modama_agent::{config::AgentConfig, mount_backend::MountBackend, platform::CurrentPlatformMountBackend};
+use modama_agent::{
+    config::AgentConfig, mount_backend::MountBackend, platform::CurrentPlatformMountBackend,
+};
 use modama_common::{logging::init_logging, messages::Share};
 use tokio::sync::OnceCell;
 use url::Url;
@@ -27,8 +29,10 @@ async fn main() {
         smb_ip: OnceCell::new(),
         smb_port: 445,
         smb_domain: "ER-C-INGEST".to_owned(),
-        agent_name: "dld".to_owned(),
-        resource_name: "holo".to_owned(),
+        identity: modama_agent::config::Identity::AgentId {
+            agent_name: "dld".to_owned(),
+            resource_name: "holo".to_owned(),
+        },
         linux_config: None,
     };
     if let Err(e) = backend.ensure_mounted(&share, &config).await {

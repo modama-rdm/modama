@@ -19,7 +19,7 @@ async fn main() {
     )
     .unwrap();
 
-    let token = token_fetcher.fetch_token().await.unwrap();
-    eprintln!("{}", &token);
-    eprintln!("{:?}", token_verifier.verify(&token).await.unwrap());
+    let sign_response = token_fetcher.fetch_token().await.unwrap();
+    eprintln!("{:?}", &sign_response);
+    eprintln!("{:?}", token_verifier.verify(&sign_response.token).await.unwrap());
 }

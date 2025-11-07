@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 
 pub const NOTIFY_HEADER: &str = "MODAMA-AGENT-NOTIFY";
-pub const NOTIFY_PORT: u32 = 5055;
+pub const NOTIFY_CURRENT_VERSION: u32 = 1u32;
+pub const NOTIFY_PORT: u16 = 5055;
 pub const NOTIFY_MCAST_ADDR: Ipv4Addr = const { Ipv4Addr::new(239, 192, 0, 1) };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,12 +52,21 @@ impl DiscoveryMessage {
 }
 
 pub async fn create_mcast_socket(
-    port: u32,
+    port: u16,
     group: Ipv4Addr,
     local: Ipv4Addr,
 ) -> Result<UdpSocket, std::io::Error> {
     let group_w_port = format!("{group}:{port}", group = group, port = port);
     let socket = UdpSocket::bind(&group_w_port).await?;
+    socket.join_multicast_v4(group, local)?;
+    Ok(socket)
+}
+
+pub async fn create_mcast_socket_for_sending(
+    group: Ipv4Addr,
+    local: Ipv4Addr,
+) -> Result<UdpSocket, std::io::Error> {
+    let socket = UdpSocket::bind((local, 0)).await?;
     socket.join_multicast_v4(group, local)?;
     Ok(socket)
 }

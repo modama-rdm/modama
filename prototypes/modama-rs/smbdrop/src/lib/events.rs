@@ -4,7 +4,7 @@ use crate::{share_manager::SmbDropState, token_server::LocalTokenVerifier};
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
-    agent::{AgentId, ClientCertError},
+    agent::{AgentId, ClientCertError, FromURIError},
     cert_helpers::CertHelperError,
     messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share},
     tokens::Claims,
@@ -72,6 +72,9 @@ enum HandlerError {
 
     #[error("Validate agent ID: {0}")]
     ClientCert(#[from] ClientCertError),
+
+    #[error("Decode agent IRD: {0}")]
+    FromURI(#[from] FromURIError),
 
     #[error("channel disconnected")]
     Disconnected,
@@ -591,9 +594,9 @@ mod test {
     async fn test_websocket_api_initial_message() {
         let mut server = make_test_event_server().await;
 
-        let token = server.token_provider.fetch_token().await.unwrap();
+        let sign_response = server.token_provider.fetch_token().await.unwrap();
         let login_msg =
-            serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+            serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response.token }).unwrap();
         server
             .ws_write
             .send(Message::Text(login_msg.into()))
@@ -635,12 +638,12 @@ mod test {
     async fn test_websocket_api_second_agent() {
         let mut server = make_test_event_server().await;
 
-        let token = Arc::clone(&server.token_provider)
+        let sign_response = Arc::clone(&server.token_provider)
             .fetch_token()
             .await
             .unwrap();
         let login_msg =
-            serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+            serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response.token }).unwrap();
         server
             .ws_write
             .send(Message::Text(login_msg.into()))
@@ -700,12 +703,12 @@ mod test {
                     },
                 });
 
-            let token_2 = Arc::clone(&second_token_provider)
+            let sign_response_2 = Arc::clone(&second_token_provider)
                 .fetch_token()
                 .await
                 .unwrap();
             let login_msg_2 =
-                serde_json::to_string(&EventChannelInitialMessages::Login { token: token_2 })
+                serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response_2.token })
                     .unwrap();
             conn.send(Message::Text(login_msg_2.into())).await.unwrap();
 
@@ -784,9 +787,9 @@ mod test {
     async fn test_websocket_api_request_share_update() {
         let mut server = make_test_event_server().await;
 
-        let token = server.token_provider.fetch_token().await.unwrap();
+        let sign_response = server.token_provider.fetch_token().await.unwrap();
         let login_msg =
-            serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+            serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response.token }).unwrap();
         server
             .ws_write
             .send(Message::Text(login_msg.into()))
@@ -858,9 +861,9 @@ mod test {
     async fn test_websocket_api_share_added() {
         let mut server = make_test_event_server().await;
 
-        let token = server.token_provider.fetch_token().await.unwrap();
+        let sign_response = server.token_provider.fetch_token().await.unwrap();
         let login_msg =
-            serde_json::to_string(&EventChannelInitialMessages::Login { token }).unwrap();
+            serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response.token }).unwrap();
         server
             .ws_write
             .send(Message::Text(login_msg.into()))

@@ -11,13 +11,12 @@ use axum_extra::{
     TypedHeader,
 };
 use axum_macros::debug_handler;
-use jsonwebtoken::decode;
 use log::{error, warn};
 use minijinja::{context, Environment};
 use modama_common::{
     messages::CurrentForegroundShare,
     mgmt_client::{MgmtClient, MgmtError},
-    tokens::{TokenError, TokenFetcher, TokenProvider},
+    tokens::{TokenError, TokenProvider},
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -297,15 +296,12 @@ async fn start_ingest_step3(
         return Ok((StatusCode::NOT_FOUND).into_response());
     }
 
-    let agent_token = agent_state.token_provider.fetch_token().await?;
-
-    todo!("we also need to retrieve the resource name from the network (decode the claims in the token? can't do that without pk)");
-
+    let sign_response = agent_state.token_provider.fetch_token().await?;
     c.create_share(
         &project_name,
         &session_name,
-        &agent_state.state.lock().await.config.resource_name,
-        &agent_token,
+        &sign_response.resource,
+        &sign_response.token,
     )
     .await?;
 
@@ -317,10 +313,9 @@ async fn start_ingest_step3(
 pub async fn serve_local_web_api(
     state: Arc<Mutex<AgentState>>,
     listen_addr: &str,
-    token_fetcher: TokenFetcher,
+    token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) -> Result<(), LocalAPIError> {
-    let token_fetcher: Arc<dyn TokenProvider + Send + Sync> = Arc::new(token_fetcher);
-    let app = make_app(ApiState::new(&state, &token_fetcher));
+    let app = make_app(ApiState::new(&state, &token_provider));
     let listener = tokio::net::TcpListener::bind(listen_addr).await?;
 
     #[allow(clippy::unwrap_used)] // infallible
@@ -358,7 +353,7 @@ mod tests {
     use modama_common::mgmt_client::{
         AdhocProject, DataInProject, ListProjectsResponse, ProjectDetailsResponse,
     };
-    use modama_common::tokens::BoxFutureToken;
+    use modama_common::tokens::{BoxFutureToken, TokenSignResponse};
     use serde_json::Value;
     use std::path::PathBuf;
     use tower::ServiceExt;
@@ -369,7 +364,14 @@ mod tests {
 
     impl TokenProvider for DummyTokenProvider {
         fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
-            Box::pin(async move { Ok("dummy-token".to_string()) })
+            Box::pin(async move {
+                Ok(TokenSignResponse {
+                    token: "dummy-token".to_owned(),
+                    resource: "resource".to_owned(),
+                    agent_name: "agent_name".to_owned(),
+                    agent_uri: "x-modama-agent://resource#agent".to_owned(),
+                })
+            })
         }
     }
 

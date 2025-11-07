@@ -23,7 +23,7 @@ pub enum ClientCertError {
     X509Error(#[from] X509Error),
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum FromURIError {
     #[error("invalid URI in SAN field: {0}")]
     InvalidURI(String),
