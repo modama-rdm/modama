@@ -14,10 +14,11 @@ use modama_common::tokens::{TokenError, TokenProvider, TokenSignResponse};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use tokio::{net::UdpSocket, spawn, sync::Mutex, task::JoinHandle, time::sleep};
 use tokio_rustls::rustls::ServerConfig;
+use url::Url;
 
 use crate::local_net_common::{
-    create_mcast_socket_for_sending, DiscoveryInner, DiscoveryMessage, NOTIFY_CURRENT_VERSION,
-    NOTIFY_MCAST_ADDR, NOTIFY_PORT,
+    create_mcast_socket_for_sending, DiscoveryInnerValidated, DiscoveryMessage,
+    NOTIFY_CURRENT_VERSION, NOTIFY_MCAST_ADDR, NOTIFY_PORT,
 };
 
 pub fn get_private_addresses() -> Result<Vec<Ipv4Addr>, network_interface::Error> {
@@ -87,11 +88,11 @@ pub async fn local_token_server(
         }
     });
 
-    state
-        .lock()
-        .await
-        .api_urls
-        .insert(addr, format!("https://{addr}:{listen_port}/sign/"));
+    let url_str = format!("https://{addr}:{listen_port}/sign/");
+    let url = Url::parse(url_str.as_str())
+        .map_err(|parse_err| io::Error::other(format!("url parse failed: {parse_err}")))?;
+
+    state.lock().await.api_urls.insert(addr, url);
 
     Ok(server_handle)
 }
@@ -99,7 +100,7 @@ pub async fn local_token_server(
 /// State shared to inform the advertisement task about the URLs for the running
 /// services on each interface
 pub struct SharedState {
-    pub api_urls: HashMap<Ipv4Addr, String>,
+    pub api_urls: HashMap<Ipv4Addr, Url>,
 }
 
 pub async fn try_send_discovery_message(
@@ -138,7 +139,7 @@ pub async fn advertisement_loop(local: Ipv4Addr, state: Arc<Mutex<SharedState>>)
                     }
                 };
                 let msg = &DiscoveryMessage {
-                    inner: DiscoveryInner {
+                    inner: DiscoveryInnerValidated {
                         version: NOTIFY_CURRENT_VERSION,
                         api: this_api_url,
                     },

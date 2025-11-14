@@ -3,6 +3,7 @@ use std::net::Ipv4Addr;
 use modama_common::agent::{AgentId, FromURIError};
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
+use url::Url;
 
 pub const NOTIFY_HEADER: &str = "MODAMA-AGENT-NOTIFY";
 pub const NOTIFY_CURRENT_VERSION: u32 = 1u32;
@@ -15,21 +16,44 @@ pub struct DiscoveryInner {
     pub api: String,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct DiscoveryInnerValidated {
+    pub version: u32,
+    pub api: Url,
+}
+
+impl DiscoveryInner {
+    pub fn validate(self) -> Option<DiscoveryInnerValidated> {
+        let url = Url::try_from(self.api.as_str()).ok()?;
+        Some(DiscoveryInnerValidated { version: self.version, api: url })
+    }
+}
+
+impl DiscoveryInnerValidated {
+    pub fn serialize(&self) -> String {
+        let inner = DiscoveryInner {
+            version: self.version,
+            api: self.api.as_str().to_owned(),
+        };
+        #[allow(clippy::unwrap_used)] // infalliable
+        serde_json::to_string(&inner).unwrap()
+    }
+}
+
 // TODO: move to modama-common
 #[derive(Debug, PartialEq, Eq)]
 pub struct DiscoveryMessage {
-    pub inner: DiscoveryInner,
+    pub inner: DiscoveryInnerValidated,
 }
 
 impl DiscoveryMessage {
     /// Serialize the discovery message to a String.
     pub fn serialize(&self) -> String {
-        #[allow(clippy::unwrap_used)] // infalliable
-        let payload = serde_json::to_string(&self.inner).unwrap();
+        let payload = self.inner.serialize();
         format!("{NOTIFY_HEADER}\n{payload}",)
     }
 
-    pub fn api_url(&self) -> &str {
+    pub fn api_url(&self) -> &Url {
         &self.inner.api
     }
 
@@ -45,8 +69,9 @@ impl DiscoveryMessage {
             return None;
         }
         let payload = parts.next()?;
+        let inner: DiscoveryInner = serde_json::from_str(payload).ok()?;
         Some(Self {
-            inner: serde_json::from_str(payload).ok()?,
+            inner: inner.validate()?,
         })
     }
 }
@@ -78,7 +103,7 @@ pub struct LocalNetTokenResponse {
 }
 
 impl LocalNetTokenResponse {
-    pub fn agent_id(&self) -> Result<AgentId, FromURIError>{
+    pub fn agent_id(&self) -> Result<AgentId, FromURIError> {
         AgentId::from_uri(&self.agent_name_uri)
     }
 }

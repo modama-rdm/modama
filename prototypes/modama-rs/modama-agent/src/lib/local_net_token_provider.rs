@@ -50,6 +50,10 @@ impl RemoteAgents {
         map.insert(agent.clone(), Instant::now());
     }
 
+    pub async fn success(&self, _agent: &RemoteAgent) {
+        // TODO: store the success signal and use it for sorting agents
+    }
+
     /// Access agents for iteration
     pub async fn agents(&self) -> HashMap<RemoteAgent, Instant> {
         self.agents.lock().await.clone()
@@ -95,14 +99,7 @@ async fn try_recv_discovery_message(
 }
 
 async fn handle_discovery_msg(msg: &DiscoveryMessage, agents: &mut RemoteAgents) {
-    if let Ok(url) = Url::try_from(msg.api_url()) {
-        agents.seen(&RemoteAgent { url }).await;
-    } else {
-        warn!(
-            "handle_discovery_msg: invalid URL `{}` encountered",
-            msg.api_url()
-        )
-    }
+    agents.seen(&RemoteAgent { url: msg.api_url().to_owned() }).await;
 }
 
 /// Listen for multicast messages on "local interfaces".
@@ -225,6 +222,7 @@ impl LocalNetTokenProvider {
                         continue;
                     }
                 };
+                self.agents.success(agent).await;
                 return Ok(serde_json::from_str(&text)?);
             } else {
                 warn!(
@@ -255,7 +253,7 @@ mod tests {
     use url::Url;
 
     use crate::{
-        local_net_common::DiscoveryInner,
+        local_net_common::DiscoveryInnerValidated,
         local_net_token_provider::{DiscoveryAddr, DiscoveryMessage, LocalNetTokenProvider, RemoteAgent},
         local_net_token_publisher::{SharedState, advertisement_loop},
     };
@@ -294,19 +292,44 @@ mod tests {
     }
 
     #[test]
+    fn test_disco_parse_invalid_6() {
+        assert!(DiscoveryMessage::try_parse(
+            "stuff\n{\"version\": 1, \"api\": \"not a Url\"}"
+        )
+        .is_none())
+    }
+
+
+    #[test]
     fn test_disco_parse_valid() {
         assert_eq!(
             DiscoveryMessage::try_parse(
                 "MODAMA-AGENT-NOTIFY\n{\"version\": 1, \"api\": \"http://localhost:1234/api/\"}"
             ),
             Some(DiscoveryMessage {
-                inner: DiscoveryInner {
+                inner: DiscoveryInnerValidated {
                     version: 1,
-                    api: "http://localhost:1234/api/".to_owned()
+                    api: Url::parse("http://localhost:1234/api/").unwrap()
                 }
             })
         )
     }
+
+    #[test]
+    fn test_disco_parse_forward_compat() {
+        assert_eq!(
+            DiscoveryMessage::try_parse(
+                "MODAMA-AGENT-NOTIFY\n{\"version\": 2, \"api\": \"http://localhost:1234/api/\", \"extra\": \"field\"}"
+            ),
+            Some(DiscoveryMessage {
+                inner: DiscoveryInnerValidated {
+                    version: 2,
+                    api: Url::parse("http://localhost:1234/api/").unwrap()
+                }
+            })
+        )
+    }
+
 
     #[tokio::test]
     async fn test_simple_udp_discovery() {
@@ -328,7 +351,7 @@ mod tests {
             .lock()
             .await
             .api_urls
-            .insert(loopback, "https://localhost:1234".to_owned());
+            .insert(loopback, Url::parse("https://localhost:1234").unwrap());
         let sender_task = advertisement_loop(loopback, Arc::clone(&shared_state)).await;
 
         let deadline = Instant::now() + Duration::from_secs(1);
