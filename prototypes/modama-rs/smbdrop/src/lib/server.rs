@@ -206,8 +206,8 @@ mod tests {
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
-        let process_manager: MockProcessManager = MockProcessManager {  };
-        let share_manager = ShareManager::new(
+        let process_manager: MockProcessManager = MockProcessManager::new();
+        let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
@@ -216,6 +216,8 @@ mod tests {
             process_manager,
         )
         .await;
+
+        share_manager.start().await.unwrap();
 
         let api_state = ApiState::new(share_manager, events_tx);
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();

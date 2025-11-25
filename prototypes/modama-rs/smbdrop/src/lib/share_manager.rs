@@ -30,7 +30,7 @@ use tokio::{
 use crate::{
     mount::{BindMount, CompoundMountError, MountBackend, MountError},
     mount_manager::{MountManager, SetStateError},
-    process_manager::{ProcessManager, ProcessManagerCommand, SambaProcessManager},
+    process_manager::{ProcessManager, ProcessManagerCommand},
     samba_config::{SambaConfigManager, UpdateSharesError},
 };
 
@@ -247,7 +247,9 @@ impl SmbDropState {
                     &user.username
                 )));
             };
-            let pwd = user_provider.passwd_from_name(&c_username)?;
+            let pwd = user_provider.passwd_from_name(&c_username).map_err(|e| {
+                ShareError::IoError { source: e, msg: format!("look up username {}", &user.username) }
+            })?;
             if let Some(pwd) = pwd {
                 if pwd.uid != user.uid {
                     return Err(ShareError::Inconsistent(format!(
@@ -262,7 +264,9 @@ impl SmbDropState {
                 )));
             }
 
-            let pwd = user_provider.passwd_from_uid(user.uid)?;
+            let pwd = user_provider.passwd_from_uid(user.uid).map_err(|e| {
+                ShareError::IoError { source: e, msg: format!("look up uid {}", &user.uid) }
+            })?;
             if let Some(pwd) = pwd {
                 let pwd_name = pwd.name.to_string_lossy();
                 if pwd_name != user.username {
@@ -362,8 +366,8 @@ impl SmbDropState {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ShareError {
-    #[error("I/O error: {0}")]
-    IoError(#[from] io::Error),
+    #[error("I/O error: {source} ({msg})")]
+    IoError { source: io::Error, msg: String },
 
     #[error("serialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
@@ -421,7 +425,7 @@ impl From<CreateUserError> for ShareError {
             CreateUserError::Usermgmt { username, stderr } => {
                 Self::UsermgmtError { username, stderr }
             }
-            CreateUserError::IO(error) => Self::IoError(error),
+            CreateUserError::IO(error) => Self::IoError { source: error, msg: "create user".to_owned() },
             CreateUserError::SmbpasswdError => Self::SmbpasswdError,
         }
     }
@@ -493,10 +497,22 @@ impl<U: UserProvider> ShareConfigFile<U> {
         }
     }
 
+    async fn read_config_or_default(&self) -> Result<SmbDropState, ShareError> {
+        if !self.path.exists() {
+            Ok(SmbDropState::empty())
+        } else {
+            self.read_config().await
+        }
+    }
+
     async fn read_config(&self) -> Result<SmbDropState, ShareError> {
-        let mut f = File::open(&self.path).await?;
+        let mut f = File::open(&self.path).await.map_err(|e| {
+            ShareError::IoError { source: e, msg: format!("open config {:?} for reading", &self.path) }
+        })?;
         let mut contents = Vec::new();
-        f.read_to_end(&mut contents).await?;
+        f.read_to_end(&mut contents).await.map_err(|e| {
+            ShareError::IoError { source: e, msg: format!("read config {:?} read_to_end", &self.path) }
+        })?;
 
         let config = spawn_blocking(move || -> Result<_, serde_json::Error> {
             serde_json::from_slice(&contents)
@@ -519,14 +535,22 @@ impl<U: UserProvider> ShareConfigFile<U> {
         debug!("write_config: writing to {rand_name:?}");
         let mut opts = File::options();
         opts.mode(0o600).create_new(true).write(true);
-        let mut f = opts.open(&rand_name).await?;
+        let mut f = opts.open(&rand_name).await.map_err(|e| {
+            ShareError::IoError { source: e, msg: format!("open config {:?} for writing/creating", &rand_name) }
+        })?;
 
-        f.write_all(&serialized).await?;
+        f.write_all(&serialized).await.map_err(|e| {
+            ShareError::IoError { source: e, msg: format!("write to {:?}", &rand_name) }
+        })?;
         debug!("write_config: wrote all...");
-        f.sync_all().await?;
+        f.sync_all().await.map_err(|e| {
+            ShareError::IoError { source: e, msg: format!("sync {:?}", &rand_name) }
+        })?;
         debug!("write_config: synced");
 
-        rename(&rand_name, &self.path).await?;
+        rename(&rand_name, &self.path).await.map_err(|e| {
+            ShareError::IoError { source: e, msg: format!("rename {:?} to {:?}", &rand_name, &self.path) }
+        })?;
 
         debug!("write_config: renamed");
 
@@ -589,7 +613,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
     pub async fn start(&mut self) -> Result<(), ShareError> {
         // ensure mounts and samba config are up-to-date before starting samba:
         let config_file = self.config_file.lock().await;
-        let state = config_file.read_config().await?;
+        let state = config_file.read_config_or_default().await?;
 
         let failed_mounts: HashSet<BindMount> = match self.update_mounts(&state).await {
             Ok(_) => HashSet::default(),
@@ -604,7 +628,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         self.update_samba(&state, &failed_mounts).await?;
         self.ensure_users(&state).await?;
 
-        let pm_tx = SambaProcessManager::start_in_background(false).await;
+        let pm_tx = self.process_manager.start_in_background(false).await;
         self.pm_tx = Some(pm_tx);
 
         Ok(())
@@ -612,7 +636,9 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 
     pub async fn ensure_users(&self, config: &SmbDropState) -> Result<(), ShareError> {
         for user in config.users.values() {
-            let pwd = self.user_provider.passwd_from_uid(user.uid)?;
+            let pwd = self.user_provider.passwd_from_uid(user.uid).map_err(|e| {
+                ShareError::IoError { source: e, msg: format!("lookup uid {} in ensure_users", user.uid) }
+            })?;
             if pwd.is_none() {
                 self.add_system_user(user).await?;
             }
@@ -781,7 +807,9 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
     }
 
     async fn add_system_user(&self, user: &User) -> Result<(), ShareError> {
-        let pwd = self.user_provider.passwd_from_uid(user.uid)?;
+        let pwd = self.user_provider.passwd_from_uid(user.uid).map_err(|e| {
+            ShareError::IoError { source: e, msg: format!("look up uid {} in add_system_user", user.uid) }
+        })?;
         if pwd.is_some() {
             info!("system user {} already exists", &user.username);
             return Ok(());

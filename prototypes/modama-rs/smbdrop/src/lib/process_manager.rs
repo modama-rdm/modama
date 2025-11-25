@@ -12,13 +12,23 @@ use tokio::{
 };
 
 pub trait ProcessManager: Clone + Sync + Send {
-    async fn start_in_background(debug: bool) -> tokio::sync::mpsc::Sender<ProcessManagerCommand>;
+    async fn start_in_background(&self, debug: bool) -> tokio::sync::mpsc::Sender<ProcessManagerCommand>;
 }
 
 
 #[derive(Clone)]
-pub struct SambaProcessManager {
+pub struct SambaProcessManagerState {
     child: Arc<Mutex<Child>>,
+}
+
+#[derive(Clone)]
+pub struct SambaProcessManager {
+}
+
+impl SambaProcessManager {
+    pub fn new() -> Self {
+        Self { }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -43,9 +53,9 @@ pub enum PmCommandOutcome {
 }
 
 async fn handle_pm_command(
-    mut pm: SambaProcessManager,
+    mut pm: SambaProcessManagerState,
     cmd: &Option<ProcessManagerCommand>,
-) -> Result<SambaProcessManager, PmCommandOutcome> {
+) -> Result<SambaProcessManagerState, PmCommandOutcome> {
     match cmd {
         None => {
             info!("other end has closed the control channel, exiting");
@@ -67,11 +77,11 @@ async fn handle_pm_command(
 impl ProcessManager for SambaProcessManager {
     /// Start the samba process in the background and keep restarting.
     /// Reload or stop the process by sending commands to the channel that is returned.
-    async fn start_in_background(debug: bool) -> mpsc::Sender<ProcessManagerCommand> {
+    async fn start_in_background(&self, debug: bool) -> mpsc::Sender<ProcessManagerCommand> {
         let (tx, mut rx) = mpsc::channel::<ProcessManagerCommand>(16);
         tokio::spawn(async move {
             'outer: loop {
-                let mut pm = match Self::start(debug).await {
+                let mut pm = match SambaProcessManagerState::start(debug).await {
                     Ok(pm) => pm,
                     Err(e) => {
                         error!("failed to start subprocess ({e}), retrying...");
@@ -108,7 +118,7 @@ impl ProcessManager for SambaProcessManager {
 
 }
 
-impl SambaProcessManager {
+impl SambaProcessManagerState {
     pub async fn start(debug: bool) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let mut args = vec!["-F", "--debug-stdout", "--no-process-group"];
         if debug {

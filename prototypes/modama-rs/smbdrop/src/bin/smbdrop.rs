@@ -10,8 +10,8 @@ use modama_common::{
 use smbdrop::{
     events::start_event_server,
     mount_manager::LinuxMountBackend,
-    process_manager::SambaProcessManager,
-    server::{spawn_smbdrop_task, ApiState},
+    process_manager::{SambaProcessManager, SambaProcessManagerState},
+    server::{ApiState, spawn_smbdrop_task},
     share_manager::{DefaultUserProvider, ShareManager},
     token_server::TokenServer,
 };

@@ -9,9 +9,10 @@ use std::{
 
 use etc_passwd::Passwd;
 use log::warn;
+use tokio::sync::{Mutex, mpsc};
 
 use crate::{
-    mount::{BindMount, MountBackend}, process_manager::ProcessManager, share_manager::{CreateUserError, UserProvider}
+    mount::{BindMount, MountBackend}, process_manager::{ProcessManager, ProcessManagerCommand}, share_manager::{CreateUserError, UserProvider}
 };
 
 #[derive(Clone)]
@@ -156,12 +157,21 @@ impl MountBackend for MockMountBackend {
 
 #[derive(Clone)]
 pub struct MockProcessManager {
+    pub q: Arc<Mutex<Option<mpsc::Receiver<ProcessManagerCommand>>>>,
+}
 
+impl MockProcessManager {
+    pub fn new() -> Self { 
+        Self { q: Arc::new(Mutex::new(None)) }
+    }
 }
 
 impl ProcessManager for MockProcessManager {
-    async fn start_in_background(debug: bool) -> tokio::sync::mpsc::Sender<crate::process_manager::ProcessManagerCommand> {
+    async fn start_in_background(&self, debug: bool) -> mpsc::Sender<ProcessManagerCommand> {
         warn!("MockProcessManager::start_in_background debug={debug}");
-        todo!();
+        let (sender, receiver) = mpsc::channel::<ProcessManagerCommand>(1024);
+        self.q.lock().await.replace(receiver);
+
+        sender
     }
 }
