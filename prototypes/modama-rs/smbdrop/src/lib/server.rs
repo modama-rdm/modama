@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::broadcast, task::JoinHandle};
 
 use crate::{
-    mount::MountBackend, process_manager::ProcessManager, share_manager::{ShareError, ShareManager, SmbDropState, UserProvider}
+    mount::MountBackend,
+    process_manager::ProcessManager,
+    share_manager::{ShareError, ShareManager, SmbDropState, UserProvider},
 };
 
 #[derive(Clone)]
@@ -140,7 +142,11 @@ async fn delete_share<U: UserProvider, M: MountBackend, P: ProcessManager>(
         .into_response())
 }
 
-pub async fn serve_smbdrop_api<U: UserProvider, M: MountBackend + 'static + Clone, P: ProcessManager + 'static>(
+pub async fn serve_smbdrop_api<
+    U: UserProvider,
+    M: MountBackend + 'static + Clone,
+    P: ProcessManager + 'static,
+>(
     api_state: ApiState<U, M, P>,
     listener: TcpListener,
 ) -> AnyResult<()> {
@@ -154,7 +160,11 @@ pub async fn serve_smbdrop_api<U: UserProvider, M: MountBackend + 'static + Clon
     Ok(())
 }
 
-pub async fn spawn_smbdrop_task<U: UserProvider, M: MountBackend + Clone, P: ProcessManager + 'static>(
+pub async fn spawn_smbdrop_task<
+    U: UserProvider,
+    M: MountBackend + Clone,
+    P: ProcessManager + 'static,
+>(
     api_state: ApiState<U, M, P>,
     listen_addr: &str,
 ) -> AnyResult<(JoinHandle<AnyResult<()>>, u16)> {
@@ -168,10 +178,16 @@ pub async fn spawn_smbdrop_task<U: UserProvider, M: MountBackend + Clone, P: Pro
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::{ffi::{CStr, CString}, str::FromStr, sync::Arc, time::Duration};
+    use std::{
+        ffi::{CStr, CString},
+        str::FromStr,
+        sync::Arc,
+        time::Duration,
+    };
 
+    use log::error;
     use modama_common::{
-        logging::init_logging, requests::CreateShareRequest, test_helpers::TempDir,
+        logging::init_logging, messages::Share, requests::CreateShareRequest, test_helpers::TempDir,
     };
     use reqwest::ClientBuilder;
     use serde_json::Value;
@@ -179,7 +195,10 @@ mod tests {
     use url::Url;
 
     use crate::{
-        process_manager::ProcessManager, server::{ApiState, spawn_smbdrop_task}, share_manager::{ShareManager, SmbDropState, User, UserProvider}, test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider}
+        process_manager::ProcessManager,
+        server::{spawn_smbdrop_task, ApiState, CreateShareResponse},
+        share_manager::{ShareManager, SmbDropState, User, UserProvider},
+        test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
 
     #[tokio::test]
@@ -187,7 +206,14 @@ mod tests {
         // simple tests to make sure our mock works correctly
         let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
 
-        user_provider.add_system_user(&User { uid: 1001, username: "testuser".to_owned(), password: "testpw".to_owned() }).await.unwrap();
+        user_provider
+            .add_system_user(&User {
+                uid: 1001,
+                username: "testuser".to_owned(),
+                password: "testpw".to_owned(),
+            })
+            .await
+            .unwrap();
         assert!(user_provider.passwd_from_uid(1001).is_ok());
 
         let name: CString = CString::from_str("testuser").unwrap();
@@ -213,7 +239,7 @@ mod tests {
             configs_path.join("smb_dynamic.conf"),
             user_provider,
             mount_backend,
-            process_manager,
+            process_manager.clone(),
         )
         .await;
 
@@ -239,28 +265,43 @@ mod tests {
             .await
             .unwrap();
 
-        let resp: Value = resp.json().await.unwrap();
+        let pm_cmd = timeout(
+            Duration::from_millis(100),
+            process_manager
+                .q
+                .as_ref()
+                .lock()
+                .await
+                .as_mut()
+                .unwrap()
+                .recv(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            pm_cmd,
+            Some(crate::process_manager::ProcessManagerCommand::Reload)
+        );
 
-        panic!("response: {resp}");
+        // let resp_json: Value = resp.json().await.unwrap();
+        // error!("response: {resp_json}");
 
-        // let resp_obj: CreateShareResponse = resp.json().await.unwrap();
+        let resp_obj: CreateShareResponse = resp.json().await.unwrap();
 
-        // assert_eq!(
-        //     resp.json::<CreateShareResponse>().await.unwrap(),
-        //     CreateShareResponse::Ok {
-        //         share: Share {
-        //             resource: todo!(),
-        //             share_id: todo!(),
-        //             share_name: todo!(),
-        //             dest_path: todo!(),
-        //             created_timestamp: todo!(),
-        //             username: todo!(),
-        //             password: todo!(),
-        //             uid: todo!(),
-        //             gid: todo!()
-        //         }
-        //     }
-        // )
+        assert!(matches!(resp_obj, CreateShareResponse::Ok {
+            share: _,
+        }));
+
+        let resp_share = match resp_obj {
+            CreateShareResponse::Ok { share } => {
+                let share_clone = share.clone();
+                assert_eq!(share.uid, 1001);
+                assert_eq!(share.gid, 1001);
+                assert_eq!(share.resource.unwrap().as_str(), "holo");
+                assert_eq!(share.dest_path, dest_path.to_string_lossy());
+                share_clone
+            }
+        };
 
         let mut events: Vec<SmbDropState> = Vec::new();
 
@@ -268,7 +309,15 @@ mod tests {
             events.push(state.unwrap());
         }
 
-        assert_eq!(events, vec![],);
+        assert_eq!(events.len(), 1);
+
+        let e0 = events.first().unwrap();
+
+        let mut expected_event = SmbDropState::empty();
+        expected_event.add_share(resp_share.clone()).await.unwrap();
+        expected_event.get_or_create_user(1001, resp_share.share_id.clone()).await.unwrap();
+
+        assert_eq!(e0, &expected_event);
 
         handle.abort();
     }
