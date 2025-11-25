@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     fs::create_dir_all,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, sync::Arc,
 };
 
 use anyhow::Result;
@@ -132,14 +132,14 @@ pub enum SetStateError {
 #[derive(Debug)]
 pub struct MountManager {
     path_prefix: PathBuf,
-    backend: Box<dyn MountBackend>,
+    backend: Arc<dyn MountBackend>,
 }
 
 impl MountManager {
-    pub fn new<B: MountBackend + 'static>(path_prefix: &Path, backend: B) -> Self {
+    pub fn new<B: MountBackend + 'static>(path_prefix: &Path, backend: Arc<B>) -> Self {
         Self {
             path_prefix: path_prefix.to_owned(),
-            backend: Box::new(backend),
+            backend,
         }
     }
 
@@ -225,7 +225,7 @@ mod test {
     use std::{
         collections::HashSet,
         path::{Path, PathBuf},
-        str::FromStr,
+        str::FromStr, sync::Arc,
     };
 
     use crate::{
@@ -284,7 +284,7 @@ mod test {
 
     #[test]
     fn test_happy_case() {
-        let backend = MaybeFailMountBackend {};
+        let backend = Arc::new(MaybeFailMountBackend {});
         let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
         assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
 
@@ -308,7 +308,7 @@ mod test {
 
     #[test]
     fn test_noop_case() {
-        let backend = MaybeFailMountBackend {};
+        let backend = Arc::new(MaybeFailMountBackend {});
         let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
         assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
 
@@ -327,7 +327,7 @@ mod test {
 
     #[test]
     fn test_umount_success() {
-        let backend = MaybeFailMountBackend {};
+        let backend = Arc::new(MaybeFailMountBackend {});
         let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
         assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
 
@@ -343,7 +343,7 @@ mod test {
 
     #[test]
     fn test_mount_failed() {
-        let backend = MaybeFailMountBackend {};
+        let backend = Arc::new(MaybeFailMountBackend {});
         let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
         assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
 
@@ -363,7 +363,7 @@ mod test {
 
     #[test]
     fn test_umount_failed() {
-        let backend = MaybeFailMountBackend {};
+        let backend = Arc::new(MaybeFailMountBackend {});
         let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
         assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
 
@@ -409,7 +409,7 @@ mod test {
 
     #[test]
     fn test_preflight_failure() {
-        let backend = PreflightFailMountBackend {};
+        let backend = Arc::new(PreflightFailMountBackend {});
         let mm = MountManager::new(&PathBuf::from_str("/run/modama").unwrap(), backend);
         assert_eq!(mm.get_prefix(), &PathBuf::from_str("/run/modama").unwrap());
 

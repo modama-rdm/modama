@@ -1,4 +1,4 @@
-use std::{error::Error, process::Stdio, time::Duration};
+use std::{error::Error, process::Stdio, sync::Arc, time::Duration};
 
 use log::{error, info, warn};
 use nix::{
@@ -8,11 +8,17 @@ use nix::{
 use tokio::{
     process::{Child, Command},
     select,
-    sync::mpsc,
+    sync::{Mutex, mpsc},
 };
 
+pub trait ProcessManager: Clone + Sync + Send {
+    async fn start_in_background(debug: bool) -> tokio::sync::mpsc::Sender<ProcessManagerCommand>;
+}
+
+
+#[derive(Clone)]
 pub struct SambaProcessManager {
-    child: Child,
+    child: Arc<Mutex<Child>>,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -58,10 +64,10 @@ async fn handle_pm_command(
     }
 }
 
-impl SambaProcessManager {
+impl ProcessManager for SambaProcessManager {
     /// Start the samba process in the background and keep restarting.
     /// Reload or stop the process by sending commands to the channel that is returned.
-    pub async fn start_in_background(debug: bool) -> mpsc::Sender<ProcessManagerCommand> {
+    async fn start_in_background(debug: bool) -> mpsc::Sender<ProcessManagerCommand> {
         let (tx, mut rx) = mpsc::channel::<ProcessManagerCommand>(16);
         tokio::spawn(async move {
             'outer: loop {
@@ -100,6 +106,9 @@ impl SambaProcessManager {
         tx
     }
 
+}
+
+impl SambaProcessManager {
     pub async fn start(debug: bool) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let mut args = vec!["-F", "--debug-stdout", "--no-process-group"];
         if debug {
@@ -110,16 +119,16 @@ impl SambaProcessManager {
             .stdin(Stdio::null())
             .spawn()?;
 
-        Ok(Self { child })
+        Ok(Self { child: Arc::new(Mutex::new(child)) })
     }
 
-    pub async fn stop(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.child.kill().await?;
+    pub async fn stop(self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        self.child.lock().await.kill().await?;
         Ok(())
     }
 
     pub async fn reload(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        if let Some(pid) = self.child.id() {
+        if let Some(pid) = self.child.lock().await.id() {
             kill(Pid::from_raw(pid as i32), SIGHUP)?;
             Ok(())
         } else {
@@ -129,6 +138,6 @@ impl SambaProcessManager {
 
     pub async fn wait(&mut self) {
         // TODO: are there errors we can't ignore here?
-        let _ = self.child.wait().await;
+        let _ = self.child.lock().await.wait().await;
     }
 }

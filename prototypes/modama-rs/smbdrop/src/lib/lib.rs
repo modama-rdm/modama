@@ -8,3 +8,4 @@ pub mod server;
 pub mod share_manager;
 pub mod token_server;
 pub mod mount;
+pub(crate) mod test_helpers;

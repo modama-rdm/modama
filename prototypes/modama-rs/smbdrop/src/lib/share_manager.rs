@@ -8,6 +8,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::{CStr, CString},
     io,
+    marker::Send,
     option::Option,
     path::{Path, PathBuf},
     process::Stdio,
@@ -27,9 +28,9 @@ use tokio::{
 };
 
 use crate::{
-    mount::{BindMount, CompoundMountError, MountError},
-    mount_manager::{LinuxMountBackend, MountManager, SetStateError},
-    process_manager::{ProcessManagerCommand, SambaProcessManager},
+    mount::{BindMount, CompoundMountError, MountBackend, MountError},
+    mount_manager::{MountManager, SetStateError},
+    process_manager::{ProcessManager, ProcessManagerCommand, SambaProcessManager},
     samba_config::{SambaConfigManager, UpdateSharesError},
 };
 
@@ -50,11 +51,41 @@ impl std::fmt::Debug for User {
     }
 }
 
-pub trait UserProvider {
-    fn passwd_from_name(&self, name: impl AsRef<CStr>) -> io::Result<Option<etc_passwd::Passwd>>;
-    fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>>;
+#[derive(thiserror::Error, Debug)]
+pub enum CreateUserError {
+    #[error("failed to add {username}: {stderr}")]
+    Usermgmt { username: String, stderr: String },
+
+    #[error("failed to call smbpasswd")]
+    SmbpasswdError,
+
+    #[error("I/O error: {0}")]
+    IO(#[from] std::io::Error),
 }
 
+pub trait UserProvider: Clone + Sync + Send + 'static {
+    fn passwd_from_name(&self, name: impl AsRef<CStr>) -> io::Result<Option<etc_passwd::Passwd>>;
+    fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>>;
+    fn add_system_user(
+        &self,
+        user: &User,
+    ) -> impl std::future::Future<Output = Result<(), CreateUserError>> + Send;
+    fn add_samba_user(
+        &self,
+        user: &User,
+    ) -> impl std::future::Future<Output = Result<(), CreateUserError>> + Send;
+
+    fn remove_system_user(
+        &self,
+        username: &str,
+    ) -> impl std::future::Future<Output = Result<(), CreateUserError>> + Send;
+    fn remove_samba_user(
+        &self,
+        username: &str,
+    ) -> impl std::future::Future<Output = Result<(), CreateUserError>> + Send;
+}
+
+#[derive(Clone)]
 pub struct DefaultUserProvider {}
 
 impl DefaultUserProvider {
@@ -77,6 +108,107 @@ impl UserProvider for DefaultUserProvider {
     fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>> {
         etc_passwd::Passwd::from_uid(uid)
     }
+
+    async fn add_system_user(&self, user: &User) -> Result<(), CreateUserError> {
+        let useradd_res = Command::new("useradd")
+            .args([
+                "--no-create-home",
+                "--no-user-group",
+                &user.username,
+                "--badname", // ignore system settings, for example length limit
+                "--uid",
+                &user.uid.to_string(),
+                "--home-dir",
+                "/tmp",
+            ])
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await?;
+        if !useradd_res.status.success() {
+            let stderr = String::from_utf8_lossy(&useradd_res.stderr);
+            warn!("useradd failed; stderr:\n {}", &stderr);
+            let stdout = String::from_utf8_lossy(&useradd_res.stdout);
+            debug!("stdout from useradd:\n {}", &stdout);
+            return Err(CreateUserError::Usermgmt {
+                username: user.username.clone(),
+                stderr: stderr.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn add_samba_user(&self, user: &User) -> Result<(), CreateUserError> {
+        let mut smbpasswd = Command::new("smbpasswd")
+            .args(["-s", "-a", &user.username])
+            .stdin(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+        let mut stdin = smbpasswd
+            .stdin
+            .take()
+            .ok_or(CreateUserError::SmbpasswdError)?;
+        let smbpasswd_in: String = format!("{}\n{}\n", &user.password, &user.password);
+        stdin.write_all(smbpasswd_in.as_bytes()).await?;
+        let res = smbpasswd.wait_with_output().await?;
+        if !res.status.success() {
+            let stderr = String::from_utf8_lossy(&res.stderr);
+            warn!("smbpasswd failed; stderr:\n {}", &stderr);
+            let stdout = String::from_utf8_lossy(&res.stdout);
+            debug!("stdout from smbpasswd:\n {}", &stdout);
+            return Err(CreateUserError::Usermgmt {
+                username: user.username.clone(),
+                stderr: stderr.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn remove_system_user(&self, username: &str) -> Result<(), CreateUserError> {
+        let userdel_res = Command::new("userdel")
+            .args([
+                "-f", // force, even if there's a process from the user still running
+                username,
+            ])
+            .stdin(Stdio::null())
+            .output()
+            .await?;
+        if !userdel_res.status.success() {
+            let stderr = String::from_utf8_lossy(&userdel_res.stderr);
+            warn!("userdel failed; stderr:\n {}", &stderr);
+            let stdout = String::from_utf8_lossy(&userdel_res.stdout);
+            debug!("stdout from userdel:\n {}", &stdout);
+            return Err(CreateUserError::Usermgmt {
+                username: username.to_string(),
+                stderr: stderr.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn remove_samba_user(&self, username: &str) -> Result<(), CreateUserError> {
+        let smbpasswd_res = Command::new("smbpasswd")
+            .args(["-x", username])
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await?;
+        if !smbpasswd_res.status.success() {
+            let stderr = String::from_utf8_lossy(&smbpasswd_res.stderr);
+            warn!("smbpasswd failed; stderr:\n {}", &stderr);
+            let stdout = String::from_utf8_lossy(&smbpasswd_res.stdout);
+            debug!("stdout from smbpasswd:\n {}", &stdout);
+            return Err(CreateUserError::Usermgmt {
+                username: username.to_string(),
+                stderr: stderr.to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -86,6 +218,13 @@ pub struct SmbDropState {
 }
 
 impl SmbDropState {
+    pub fn empty() -> Self {
+        Self {
+            shares: Default::default(),
+            users: Default::default(),
+        }
+    }
+
     // FIXME: right now, we check for these consistency errors before writing
     // the state to JSON and abort - we might want to instead try to "heal" the
     // configuration and try to continue, such that an error in one share cannot
@@ -276,6 +415,18 @@ pub enum ShareError {
     ClockIssues,
 }
 
+impl From<CreateUserError> for ShareError {
+    fn from(value: CreateUserError) -> Self {
+        match value {
+            CreateUserError::Usermgmt { username, stderr } => {
+                Self::UsermgmtError { username, stderr }
+            }
+            CreateUserError::IO(error) => Self::IoError(error),
+            CreateUserError::SmbpasswdError => Self::SmbpasswdError,
+        }
+    }
+}
+
 #[derive(thiserror::Error, Clone, Debug)]
 pub enum TempConfigError {
     #[error("path must have a parent")]
@@ -395,23 +546,28 @@ async fn get_path_re() -> &'static Regex {
 }
 
 #[derive(Clone, Debug)]
-pub struct ShareManager<U: UserProvider> {
+pub struct ShareManager<U: UserProvider, M: MountBackend, P: ProcessManager> {
     config_file: Arc<Mutex<ShareConfigFile<U>>>,
     sm: SambaConfigManager,
     bind_mount_prefix: PathBuf,
     pm_tx: Option<Sender<ProcessManagerCommand>>,
+    mount_backend: Arc<M>,
+    user_provider: U,
+    process_manager: P,
 }
 
-impl<U: UserProvider> ShareManager<U> {
+impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager<U, M, P> {
     pub async fn new(
         bind_mount_prefix: PathBuf,
         shares_config: PathBuf,
         samba_config_path: PathBuf,
         user_provider: U,
+        mount_backend: Arc<M>,
+        process_manager: P,
     ) -> Self {
         let config_file = Arc::new(Mutex::new(ShareConfigFile::new(
             shares_config,
-            user_provider,
+            user_provider.clone(),
         )));
         let sm = SambaConfigManager::new(&samba_config_path, &bind_mount_prefix);
 
@@ -420,11 +576,14 @@ impl<U: UserProvider> ShareManager<U> {
             pm_tx: None,
             sm,
             bind_mount_prefix,
+            mount_backend,
+            user_provider,
+            process_manager,
         }
     }
 
     fn mm(&self) -> MountManager {
-        MountManager::new(&self.bind_mount_prefix, LinuxMountBackend::new())
+        MountManager::new(&self.bind_mount_prefix, Arc::clone(&self.mount_backend))
     }
 
     pub async fn start(&mut self) -> Result<(), ShareError> {
@@ -453,7 +612,7 @@ impl<U: UserProvider> ShareManager<U> {
 
     pub async fn ensure_users(&self, config: &SmbDropState) -> Result<(), ShareError> {
         for user in config.users.values() {
-            let pwd = etc_passwd::Passwd::from_uid(user.uid)?;
+            let pwd = self.user_provider.passwd_from_uid(user.uid)?;
             if pwd.is_none() {
                 self.add_system_user(user).await?;
             }
@@ -525,8 +684,12 @@ impl<U: UserProvider> ShareManager<U> {
 
         let config_file = self.config_file.lock().await;
 
-        let mut state = config_file.read_config().await?;
-
+        debug!("create_share: reading config...");
+        let mut state = if config_file.path.exists() {
+            config_file.read_config().await?
+        } else {
+            SmbDropState::empty()
+        };
         debug!("create_share: config read");
 
         let user = state.get_or_create_user(uid, share_id.clone()).await?;
@@ -551,6 +714,8 @@ impl<U: UserProvider> ShareManager<U> {
         // before writing the config, run the pre-flight checks (without immutability)
         // so we can be confident the mount will succeed later
         self.share_preflight_checks(&share).await?;
+
+        debug!("create_share: preflight successful, adding system user");
 
         self.add_system_user(&user).await?;
 
@@ -616,96 +781,22 @@ impl<U: UserProvider> ShareManager<U> {
     }
 
     async fn add_system_user(&self, user: &User) -> Result<(), ShareError> {
-        let pwd = etc_passwd::Passwd::from_uid(user.uid)?;
+        let pwd = self.user_provider.passwd_from_uid(user.uid)?;
         if pwd.is_some() {
             info!("system user {} already exists", &user.username);
             return Ok(());
         }
-        let useradd_res = Command::new("useradd")
-            .args([
-                "--no-create-home",
-                "--no-user-group",
-                &user.username,
-                "--badname", // ignore system settings, for example length limit
-                "--uid",
-                &user.uid.to_string(),
-                "--home-dir",
-                "/tmp",
-            ])
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output()
-            .await?;
-        if !useradd_res.status.success() {
-            let stderr = String::from_utf8_lossy(&useradd_res.stderr);
-            warn!("useradd failed; stderr:\n {}", &stderr);
-            let stdout = String::from_utf8_lossy(&useradd_res.stdout);
-            debug!("stdout from useradd:\n {}", &stdout);
-            return Err(ShareError::UsermgmtError {
-                username: user.username.clone(),
-                stderr: stderr.to_string(),
-            });
-        }
 
-        let mut smbpasswd = Command::new("smbpasswd")
-            .args(["-s", "-a", &user.username])
-            .stdin(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
-        let mut stdin = smbpasswd.stdin.take().ok_or(ShareError::SmbpasswdError)?;
-        let smbpasswd_in: String = format!("{}\n{}\n", &user.password, &user.password);
-        stdin.write_all(smbpasswd_in.as_bytes()).await?;
-        let res = smbpasswd.wait_with_output().await?;
-        if !res.status.success() {
-            let stderr = String::from_utf8_lossy(&res.stderr);
-            warn!("smbpasswd failed; stderr:\n {}", &stderr);
-            let stdout = String::from_utf8_lossy(&res.stdout);
-            debug!("stdout from smbpasswd:\n {}", &stdout);
-            return Err(ShareError::UsermgmtError {
-                username: user.username.clone(),
-                stderr: stderr.to_string(),
-            });
-        }
+        self.user_provider.add_system_user(user).await?;
+        self.user_provider.add_samba_user(user).await?;
 
         Ok(())
     }
 
     async fn remove_system_user(&self, username: &str) -> Result<(), ShareError> {
-        let smbpasswd_res = Command::new("smbpasswd")
-            .args(["-x", username])
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output()
-            .await?;
-        if !smbpasswd_res.status.success() {
-            let stderr = String::from_utf8_lossy(&smbpasswd_res.stderr);
-            warn!("smbpasswd failed; stderr:\n {}", &stderr);
-            let stdout = String::from_utf8_lossy(&smbpasswd_res.stdout);
-            debug!("stdout from smbpasswd:\n {}", &stdout);
-            return Err(ShareError::UsermgmtError {
-                username: username.to_string(),
-                stderr: stderr.to_string(),
-            });
-        }
+        self.user_provider.remove_samba_user(username).await?;
+        self.user_provider.remove_system_user(username).await?;
 
-        let userdel_res = Command::new("userdel")
-            .args([
-                "-f", // force, even if there's a process from the user still running
-                username,
-            ])
-            .stdin(Stdio::null())
-            .output()
-            .await?;
-        if !userdel_res.status.success() {
-            let stderr = String::from_utf8_lossy(&userdel_res.stderr);
-            warn!("userdel failed; stderr:\n {}", &stderr);
-            let stdout = String::from_utf8_lossy(&userdel_res.stdout);
-            debug!("stdout from userdel:\n {}", &stdout);
-            return Err(ShareError::UsermgmtError {
-                username: username.to_string(),
-                stderr: stderr.to_string(),
-            });
-        }
 
         Ok(())
     }
@@ -750,16 +841,14 @@ impl<U: UserProvider> ShareManager<U> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        ffi::{CStr, CString},
-        io,
-    };
+    use std::collections::HashMap;
 
-    use etc_passwd::Passwd;
     use modama_common::{messages::Share, test_helpers::TempDir};
 
-    use crate::share_manager::{ShareConfigFile, ShareError, SmbDropState, UserProvider};
+    use crate::{
+        share_manager::{ShareConfigFile, ShareError, SmbDropState},
+        test_helpers::MockUserProvider,
+    };
 
     #[tokio::test]
     async fn test_smbdrop_state_get_or_create_user() {
@@ -803,58 +892,6 @@ mod tests {
                 .await,
             Err(ShareError::InvalidShareId(_))
         ));
-    }
-
-    #[derive(Clone)]
-    struct MockUserProvider {
-        users: Vec<(String, u32)>,
-    }
-
-    impl MockUserProvider {
-        fn new(users: Vec<(String, u32)>) -> Self {
-            Self { users }
-        }
-    }
-
-    impl UserProvider for MockUserProvider {
-        fn passwd_from_name(
-            &self,
-            name: impl AsRef<CStr>,
-        ) -> io::Result<Option<etc_passwd::Passwd>> {
-            let name: &CStr = name.as_ref();
-
-            for entry in self.users.iter() {
-                if String::from_utf8(name.to_bytes().to_owned()).unwrap() == entry.0 {
-                    return Ok(Some(Passwd {
-                        name: CString::new(entry.0.as_bytes()).unwrap(),
-                        passwd: CString::new("x".as_bytes()).unwrap(),
-                        uid: entry.1,
-                        gid: entry.1,
-                        gecos: CString::new("".as_bytes()).unwrap(),
-                        dir: CString::new("".as_bytes()).unwrap(),
-                        shell: CString::new("".as_bytes()).unwrap(),
-                    }));
-                }
-            }
-            Ok(None)
-        }
-
-        fn passwd_from_uid(&self, uid: u32) -> io::Result<Option<etc_passwd::Passwd>> {
-            for entry in self.users.iter() {
-                if uid == entry.1 {
-                    return Ok(Some(Passwd {
-                        name: CString::new(entry.0.as_bytes()).unwrap(),
-                        passwd: CString::new("x".as_bytes()).unwrap(),
-                        uid: entry.1,
-                        gid: entry.1,
-                        gecos: CString::new("".as_bytes()).unwrap(),
-                        dir: CString::new("".as_bytes()).unwrap(),
-                        shell: CString::new("".as_bytes()).unwrap(),
-                    }));
-                }
-            }
-            Ok(None)
-        }
     }
 
     #[tokio::test]

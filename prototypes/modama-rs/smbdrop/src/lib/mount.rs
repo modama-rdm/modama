@@ -55,7 +55,7 @@ pub enum MountBackendError {
     Umount(Box<dyn std::error::Error + Send + Sync>),
 }
 
-pub trait MountBackend: std::fmt::Debug {
+pub trait MountBackend: std::fmt::Debug + Sync + Send {
     /// create a single bind mount
     fn mount(&self, mount: &BindMount) -> Result<(), MountBackendError>;
 
