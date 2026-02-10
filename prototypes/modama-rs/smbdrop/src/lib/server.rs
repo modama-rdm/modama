@@ -228,7 +228,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (events_tx, mut events_rx) = broadcast::channel(1024);
+        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -245,7 +245,7 @@ mod tests {
 
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::new(share_manager, events_tx);
+        let api_state = ApiState::new(share_manager, apistate_events_tx);
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
         let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
 
@@ -288,9 +288,7 @@ mod tests {
 
         let resp_obj: CreateShareResponse = resp.json().await.unwrap();
 
-        assert!(matches!(resp_obj, CreateShareResponse::Ok {
-            share: _,
-        }));
+        assert!(matches!(resp_obj, CreateShareResponse::Ok { share: _ }));
 
         let resp_share = match resp_obj {
             CreateShareResponse::Ok { share } => {
@@ -305,7 +303,7 @@ mod tests {
 
         let mut events: Vec<SmbDropState> = Vec::new();
 
-        while let Ok(state) = timeout(Duration::from_millis(100), events_rx.recv()).await {
+        while let Ok(state) = timeout(Duration::from_millis(100), apistate_events_rx.recv()).await {
             events.push(state.unwrap());
         }
 
@@ -315,7 +313,20 @@ mod tests {
 
         let mut expected_event = SmbDropState::empty();
         expected_event.add_share(resp_share.clone()).await.unwrap();
-        expected_event.get_or_create_user(1001, resp_share.share_id.clone()).await.unwrap();
+        expected_event
+            .get_or_create_user_with_password(1001, resp_share.share_id.clone(), Some(
+                &e0.users.get("1001").unwrap().password,
+            ))
+            .await
+            .unwrap();
+
+        println!("{e0:?}");
+        println!("{expected_event:?}");
+
+        assert_eq!(
+            e0.users.get("1001").unwrap().password,
+            expected_event.users.get("1001").unwrap().password
+        );
 
         assert_eq!(e0, &expected_event);
 

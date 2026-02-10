@@ -304,11 +304,24 @@ impl SmbDropState {
     }
 
     /// Get the User for the given uid, or create a new one with a random password.
-    /// Note that this will not create a system user, which is done separately.
+    /// Note that this will not create a system or samba user;
+    /// this is done by the `ShareManager::create_share`. 
     pub async fn get_or_create_user(
         &mut self,
         uid: u32,
         share_id: String,
+    ) -> Result<User, ShareError> {
+        self.get_or_create_user_with_password(uid, share_id, None).await
+    }
+
+    /// Same as `get_or_create_user`, but pre-define the password that is
+    /// used when creating (it's not used for updating the password in case
+    /// the user already exists!)
+    pub async fn get_or_create_user_with_password(
+        &mut self,
+        uid: u32,
+        share_id: String,
+        password: Option<&str>,
     ) -> Result<User, ShareError> {
         let key = uid.to_string();
         if let Some(user) = self.users.get(&key) {
@@ -321,7 +334,11 @@ impl SmbDropState {
             let mut username = format!("share{share_id}").replace('-', "");
             let _rest = username.split_off(31);
             debug!("get_or_create_user: adding user {username}");
-            let password = make_password();
+            let password = if let Some(password) = password { 
+                password.to_owned()
+            } else {
+                make_password()
+            };
             let user = User {
                 uid,
                 username,
@@ -686,6 +703,16 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         config_file.read_config().await
     }
 
+    /// Create a new share with the given parameters.
+    /// 
+    /// This is a high-level function that will take care of the whole process
+    /// of adding a new share:
+    /// 
+    /// - generate a share ID, username and password
+    /// - read/modify/write share configuration file
+    /// - manage system and samba users
+    /// - create bind mounts that ensure we are sharing by directory identity
+    ///   (inode), and not by path (which can be renamed over time)
     pub async fn create_share(
         &self,
         dest_path: &Path,
@@ -806,6 +833,8 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         Ok(())
     }
 
+    /// Persist `user` into the system user database, and create a matching
+    /// samba user.
     async fn add_system_user(&self, user: &User) -> Result<(), ShareError> {
         let pwd = self.user_provider.passwd_from_uid(user.uid).map_err(|e| {
             ShareError::IoError { source: e, msg: format!("look up uid {} in add_system_user", user.uid) }
@@ -821,14 +850,15 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         Ok(())
     }
 
+    /// Remove both system and samba user matching `username`.
     async fn remove_system_user(&self, username: &str) -> Result<(), ShareError> {
         self.user_provider.remove_samba_user(username).await?;
         self.user_provider.remove_system_user(username).await?;
 
-
         Ok(())
     }
 
+    /// Before trying to mount, run some preflight checks.
     async fn share_preflight_checks(&self, share: &Share) -> Result<(), ShareError> {
         let mount = BindMount::from_share(share, self.mm().get_prefix());
         self.mm().preflight(&mount)?;
