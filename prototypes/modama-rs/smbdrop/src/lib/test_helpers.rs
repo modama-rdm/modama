@@ -87,8 +87,9 @@ impl UserProvider for MockUserProvider {
         Ok(())
     }
 
-    async fn remove_samba_user(&self, _username: &str) -> Result<(), CreateUserError> {
-        todo!();
+    async fn remove_samba_user(&self, username: &str) -> Result<(), CreateUserError> {
+        warn!("mock: remove_samba_user {username}");
+        Ok(())
     }
 }
 

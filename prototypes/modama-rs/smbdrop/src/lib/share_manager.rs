@@ -695,12 +695,12 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
     /// Returns a map of share IDs to shares
     pub async fn list_shares(&self) -> Result<HashMap<String, Share>, ShareError> {
         let config_file = self.config_file.lock().await;
-        Ok(config_file.read_config().await?.shares)
+        Ok(config_file.read_config_or_default().await?.shares)
     }
 
     pub async fn get_state(&self) -> Result<SmbDropState, ShareError> {
         let config_file = self.config_file.lock().await;
-        config_file.read_config().await
+        config_file.read_config_or_default().await
     }
 
     /// Create a new share with the given parameters.
@@ -739,7 +739,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 
         debug!("create_share: reading config...");
         let mut state = if config_file.path.exists() {
-            config_file.read_config().await?
+            config_file.read_config_or_default().await?
         } else {
             SmbDropState::empty()
         };
@@ -805,7 +805,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 
     pub async fn delete_share(&self, share_id: &str) -> Result<(), ShareError> {
         let config_file = self.config_file.lock().await;
-        let mut state = config_file.read_config().await?;
+        let mut state = config_file.read_config_or_default().await?;
         let removed_share = state.remove_share(share_id).await?;
 
         self.update_samba(&state, &HashSet::default()).await?;

@@ -179,12 +179,14 @@ pub async fn spawn_smbdrop_task<
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::{
+        collections::HashMap,
         ffi::{CStr, CString},
         str::FromStr,
         sync::Arc,
         time::Duration,
     };
 
+    use itertools::Itertools;
     use log::error;
     use modama_common::{
         logging::init_logging, messages::Share, requests::CreateShareRequest, test_helpers::TempDir,
@@ -196,7 +198,7 @@ mod tests {
 
     use crate::{
         process_manager::ProcessManager,
-        server::{spawn_smbdrop_task, ApiState, CreateShareResponse},
+        server::{spawn_smbdrop_task, ApiState, CreateShareResponse, ShareAPIErrorResponse},
         share_manager::{ShareManager, SmbDropState, User, UserProvider},
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
@@ -314,9 +316,11 @@ mod tests {
         let mut expected_event = SmbDropState::empty();
         expected_event.add_share(resp_share.clone()).await.unwrap();
         expected_event
-            .get_or_create_user_with_password(1001, resp_share.share_id.clone(), Some(
-                &e0.users.get("1001").unwrap().password,
-            ))
+            .get_or_create_user_with_password(
+                1001,
+                resp_share.share_id.clone(),
+                Some(&e0.users.get("1001").unwrap().password),
+            )
             .await
             .unwrap();
 
@@ -329,6 +333,255 @@ mod tests {
         );
 
         assert_eq!(e0, &expected_event);
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_config_is_written() {
+        init_logging();
+
+        let configs_path = TempDir::new("share_manager_configs");
+        let dest_path = TempDir::new("dest_path_for_share");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+
+        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let user_provider = MockUserProvider::new(vec![]);
+        // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
+        let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
+        let process_manager: MockProcessManager = MockProcessManager::new();
+        let mut share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            configs_path.join("shares_config.json"),
+            configs_path.join("smb_dynamic.conf"),
+            user_provider,
+            mount_backend,
+            process_manager.clone(),
+        )
+        .await;
+
+        share_manager.start().await.unwrap();
+
+        let api_state = ApiState::new(share_manager, apistate_events_tx);
+        let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
+        let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
+
+        let client = ClientBuilder::new().build().unwrap();
+
+        let request = CreateShareRequest {
+            dest_path: dest_path.to_str().unwrap().to_owned(),
+            resource: Some("holo".to_owned()),
+            uid: 1001,
+            gid: 1001,
+        };
+
+        let mut url = api_base_url.clone();
+        url.set_path("/share/");
+        let resp = client
+            .execute(client.post(url).json(&request).build().unwrap())
+            .await
+            .unwrap();
+        let resp_obj: CreateShareResponse = resp.json().await.unwrap();
+        assert!(matches!(resp_obj, CreateShareResponse::Ok { share: _ }));
+
+        assert!(configs_path.join("shares_config.json").exists());
+        assert!(configs_path.join("smb_dynamic.conf").exists());
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_list_shares() {
+        init_logging();
+
+        let configs_path = TempDir::new("share_manager_configs");
+        let dest_path = TempDir::new("dest_path_for_share");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+
+        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let user_provider = MockUserProvider::new(vec![]);
+        // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
+        let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
+        let process_manager: MockProcessManager = MockProcessManager::new();
+        let mut share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            configs_path.join("shares_config.json"),
+            configs_path.join("smb_dynamic.conf"),
+            user_provider,
+            mount_backend,
+            process_manager.clone(),
+        )
+        .await;
+
+        share_manager.start().await.unwrap();
+
+        let api_state = ApiState::new(share_manager, apistate_events_tx);
+        let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
+        let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
+
+        let client = ClientBuilder::new().build().unwrap();
+
+        let request = CreateShareRequest {
+            dest_path: dest_path.to_str().unwrap().to_owned(),
+            resource: Some("holo".to_owned()),
+            uid: 1001,
+            gid: 1001,
+        };
+
+        let mut url = api_base_url.clone();
+        url.set_path("/share/");
+        let create_resp = client
+            .execute(client.post(url).json(&request).build().unwrap())
+            .await
+            .unwrap();
+        let create_resp_obj: CreateShareResponse = create_resp.json().await.unwrap();
+
+        assert!(matches!(
+            create_resp_obj,
+            CreateShareResponse::Ok { share: _ }
+        ));
+
+        let resp_share = match create_resp_obj {
+            CreateShareResponse::Ok { share } => {
+                let share_clone = share.clone();
+                assert_eq!(share.uid, 1001);
+                assert_eq!(share.gid, 1001);
+                assert_eq!(share.resource.unwrap().as_str(), "holo");
+                assert_eq!(share.dest_path, dest_path.to_string_lossy());
+                share_clone
+            }
+        };
+
+        let mut url = api_base_url.clone();
+        url.set_path("/share/");
+        let resp_list = client
+            .execute(client.get(url).build().unwrap())
+            .await
+            .unwrap();
+
+        let resp_list_obj: HashMap<String, Share> = resp_list.json().await.unwrap();
+
+        assert_eq!(
+            resp_list_obj.keys().map(|k| k.to_owned()).collect_vec(),
+            vec![resp_share.share_id.clone()],
+        );
+
+        assert_eq!(
+            resp_list_obj.get(&resp_share.share_id).unwrap().clone(),
+            resp_share,
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_delete_share_error() {
+        init_logging();
+
+        let configs_path = TempDir::new("share_manager_configs");
+        let dest_path = TempDir::new("dest_path_for_share");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+
+        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let user_provider = MockUserProvider::new(vec![]);
+        // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
+        let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
+        let process_manager: MockProcessManager = MockProcessManager::new();
+        let mut share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            configs_path.join("shares_config.json"),
+            configs_path.join("smb_dynamic.conf"),
+            user_provider,
+            mount_backend,
+            process_manager.clone(),
+        )
+        .await;
+
+        share_manager.start().await.unwrap();
+
+        let api_state = ApiState::new(share_manager, apistate_events_tx);
+        let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
+        let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
+
+        let client = ClientBuilder::new().build().unwrap();
+
+        // NOTE: there are no shares at all, and the share configuration file
+        // doesn't exist, which should still work (first launch scenario)
+
+        // try to delete a share with a nonexisting share id:
+        let mut url = api_base_url.clone();
+        url.set_path("/share/nonexisting/");
+        let resp_delete = client
+            .execute(client.delete(url).build().unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp_delete.status(), 404);
+
+        let err: ShareAPIErrorResponse = resp_delete.json().await.unwrap();
+        println!("{err:?}");
+
+        assert!(matches!(err, ShareAPIErrorResponse::Error { msg }));
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_delete_share_success() {
+        init_logging();
+
+        let configs_path = TempDir::new("share_manager_configs");
+        let dest_path = TempDir::new("dest_path_for_share");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+
+        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let user_provider = MockUserProvider::new(vec![]);
+        // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
+        let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
+        let process_manager: MockProcessManager = MockProcessManager::new();
+        let mut share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            configs_path.join("shares_config.json"),
+            configs_path.join("smb_dynamic.conf"),
+            user_provider,
+            mount_backend,
+            process_manager.clone(),
+        )
+        .await;
+
+        share_manager.start().await.unwrap();
+
+        let api_state = ApiState::new(share_manager, apistate_events_tx);
+        let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
+        let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
+
+        let client = ClientBuilder::new().build().unwrap();
+        let request = CreateShareRequest {
+            dest_path: dest_path.to_str().unwrap().to_owned(),
+            resource: Some("holo".to_owned()),
+            uid: 1001,
+            gid: 1001,
+        };
+        let mut url = api_base_url.clone();
+        url.set_path("/share/");
+        let create_resp = client
+            .execute(client.post(url).json(&request).build().unwrap())
+            .await
+            .unwrap();
+        let create_resp_obj: CreateShareResponse = create_resp.json().await.unwrap();
+
+        match create_resp_obj {
+            CreateShareResponse::Ok { share } => {
+                // try to delete the share we just created:
+                let mut url = api_base_url.clone();
+                url.set_path(&format!("/share/{}/", &share.share_id));
+                let resp_delete = client
+                    .execute(client.delete(url).build().unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(resp_delete.status(), 200);
+            }
+        }
 
         handle.abort();
     }
