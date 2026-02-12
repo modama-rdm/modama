@@ -367,6 +367,10 @@ pub struct CurrentPlatformMountBackend {
 }
 
 impl MountBackend for CurrentPlatformMountBackend {
+    async fn initialize(&self, config: &AgentConfig) {
+        // nothing to do yet
+    }
+
     async fn cleanup_mount_points(&self, config: &AgentConfig) {
         cleanup_mount_points(config)
     }

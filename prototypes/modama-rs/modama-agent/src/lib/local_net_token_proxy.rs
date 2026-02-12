@@ -151,7 +151,7 @@ pub async fn advertisement_loop(local: Ipv4Addr, state: Arc<Mutex<SharedState>>)
                 };
                 match try_send_discovery_message(&socket, local, msg).await {
                     Ok(_) => {
-                        info!("discovery message sent, sleeping...");
+                        debug!("discovery message sent, sleeping...");
                         sleep(Duration::from_secs(5)).await;
                         continue 'inner;
                     }

@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use modama_common::messages::Share;
 use rand::{distr::Alphanumeric, Rng};
 use regex::Regex;

@@ -17,12 +17,13 @@ RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && a
 # the main samba config
 COPY ./smbdrop/smb.conf /etc/samba/smb.conf
 
-RUN mkdir -p /data/adhoc/proj1/session1
-RUN chown 1000:1000 -R /data/adhoc/proj1/
-
+# Samba:
 EXPOSE 445/tcp
+# HTTP(s) API:
 EXPOSE 5051/tcp
+# WS API:
 EXPOSE 5052/tcp
+# Token API:
 EXPOSE 5053/tcp
 
 COPY --from=builder /usr/bin/smbdrop /usr/bin/smbdrop

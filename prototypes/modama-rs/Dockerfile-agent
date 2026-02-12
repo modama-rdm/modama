@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.4
+
+FROM rust:slim-trixie AS builder
+
+WORKDIR /usr/src/modama-rs/
+
+RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install clang lld
+
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo build --release --bin modama-agent && cp target/release/modama-agent /usr/bin/modama-agent
+
+FROM debian:trixie-slim
+
+RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind strace
+
+COPY --from=builder /usr/bin/modama-agent /usr/bin/modama-agent
+
+CMD [ "/usr/bin/modama-agent", \
+    "--event-url=wss://smbdrop:5052", \
+    "--token-service=https://smbdrop:5053", \
+    "--mgmt-api-url=http://mgmtinterface", \
+    "--listen-local-api=localhost:3003", \
+    "--smb-hostname=smbdrop", \
+    "--smb-port=445", \
+    "--smb-domain=ER-C-Ingest", \
+    "--ca-cert=/certs/ca/ca.cert.pem", \
+    "--chain=/certs/clients/agent.chain.pem", \
+    "--key=/certs/clients/agent.priv.pem", \
+]
+

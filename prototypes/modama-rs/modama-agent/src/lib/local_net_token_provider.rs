@@ -143,9 +143,9 @@ async fn discovery_loop_starter(bg_agents: RemoteAgents) {
                 // when new interfaces appear, start discovery loop on them;
                 // when interfaces disappear, the tasks should just kill itself
                 for addr in addrs.iter() {
-                    info!("starting discovery task on {addr}");
                     let addr = *addr;
                     if !task_exists_and_running(&discovery_tasks, addr).await {
+                        info!("starting discovery task on {addr}");
                         let agents = bg_agents.clone();
                         let handle = spawn(async move { discovery_loop(addr, agents).await });
                         discovery_tasks.insert(addr, handle);
@@ -438,8 +438,8 @@ mod tests {
 
     struct TestTokenProxy {
         ca: Ca,
-        ca_cert: PathBuf,
-        tmpdir: TempDir,
+        _ca_cert: PathBuf,
+        _tmpdir: TempDir,
         token_proxy: JoinHandle<()>,
     }
 
@@ -492,8 +492,8 @@ mod tests {
 
         TestTokenProxy {
             ca,
-            ca_cert,
-            tmpdir,
+            _ca_cert: ca_cert,
+            _tmpdir: tmpdir,
             token_proxy,
         }
     }

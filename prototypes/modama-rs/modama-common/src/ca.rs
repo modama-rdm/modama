@@ -187,10 +187,9 @@ impl Ca {
             .push(DnType::CommonName, full_name);
         params.is_ca = IsCa::NoCa;
         // FIXME: constrain key usage?
-        params.extended_key_usages = Vec::new();
-        params
-            .extended_key_usages
-            .push(ExtendedKeyUsagePurpose::ClientAuth);
+        params.extended_key_usages = vec![
+            ExtendedKeyUsagePurpose::ClientAuth,
+        ];
         params
             .subject_alt_names
             .push(rcgen::SanType::URI(Ia5String::from_str(&format!(
@@ -238,10 +237,9 @@ impl Ca {
             .distinguished_name
             .push(DnType::CommonName, first_name);
         params.is_ca = IsCa::NoCa;
-        params.extended_key_usages = Vec::new();
-        params
-            .extended_key_usages
-            .push(ExtendedKeyUsagePurpose::ServerAuth);
+        params.extended_key_usages = vec![
+            ExtendedKeyUsagePurpose::ServerAuth,
+        ];
         let server_cert: Certificate = params.signed_by(&key_pair, &self.issuer())?;
 
         Ok(KeyPairAndCert {

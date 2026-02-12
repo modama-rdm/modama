@@ -180,24 +180,21 @@ pub async fn spawn_smbdrop_task<
 mod tests {
     use std::{
         collections::HashMap,
-        ffi::{CStr, CString},
+        ffi::CString,
         str::FromStr,
         sync::Arc,
         time::Duration,
     };
 
     use itertools::Itertools;
-    use log::error;
     use modama_common::{
         logging::init_logging, messages::Share, requests::CreateShareRequest, test_helpers::TempDir,
     };
     use reqwest::ClientBuilder;
-    use serde_json::Value;
     use tokio::{sync::broadcast, time::timeout};
     use url::Url;
 
     use crate::{
-        process_manager::ProcessManager,
         server::{spawn_smbdrop_task, ApiState, CreateShareResponse, ShareAPIErrorResponse},
         share_manager::{ShareManager, SmbDropState, User, UserProvider},
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
@@ -345,7 +342,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -398,7 +395,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -479,10 +476,10 @@ mod tests {
         init_logging();
 
         let configs_path = TempDir::new("share_manager_configs");
-        let dest_path = TempDir::new("dest_path_for_share");
+        let _dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -521,7 +518,7 @@ mod tests {
         let err: ShareAPIErrorResponse = resp_delete.json().await.unwrap();
         println!("{err:?}");
 
-        assert!(matches!(err, ShareAPIErrorResponse::Error { msg }));
+        assert!(matches!(err, ShareAPIErrorResponse::Error { msg: _ }));
 
         handle.abort();
     }
@@ -534,7 +531,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());

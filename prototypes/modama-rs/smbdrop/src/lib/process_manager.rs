@@ -1,4 +1,4 @@
-use std::{error::Error, process::Stdio, sync::Arc, time::Duration};
+use std::{error::Error, future::Future, process::Stdio, sync::Arc, time::Duration};
 
 use log::{error, info, warn};
 use nix::{
@@ -8,11 +8,11 @@ use nix::{
 use tokio::{
     process::{Child, Command},
     select,
-    sync::{Mutex, mpsc},
+    sync::{Mutex, mpsc::{self, Sender}},
 };
 
 pub trait ProcessManager: Clone + Sync + Send {
-    async fn start_in_background(&self, debug: bool) -> tokio::sync::mpsc::Sender<ProcessManagerCommand>;
+    fn start_in_background(&self, debug: bool) -> impl Future<Output = Sender<ProcessManagerCommand>> + Send;
 }
 
 
@@ -28,6 +28,12 @@ pub struct SambaProcessManager {
 impl SambaProcessManager {
     pub fn new() -> Self {
         Self { }
+    }
+}
+
+impl Default for SambaProcessManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

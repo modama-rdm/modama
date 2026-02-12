@@ -256,6 +256,13 @@ mod tests {
                 .await
                 .unwrap()
         }
+        
+        async fn initialize(
+            &self,
+            _config: &AgentConfig,
+        ) {
+            warn!("nothing to do here");
+        }
     }
 
     struct MessageLoopTestSetup {

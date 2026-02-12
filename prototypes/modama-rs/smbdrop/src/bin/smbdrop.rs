@@ -10,7 +10,7 @@ use modama_common::{
 use smbdrop::{
     events::start_event_server,
     mount_manager::LinuxMountBackend,
-    process_manager::{SambaProcessManager, SambaProcessManagerState},
+    process_manager::SambaProcessManager,
     server::{ApiState, spawn_smbdrop_task},
     share_manager::{DefaultUserProvider, ShareManager},
     token_server::TokenServer,
@@ -67,7 +67,7 @@ async fn main() -> AnyResult<()> {
 
     info!("initial state: {initial_state:?}");
 
-    let tls_config = load_tls_server_config(&args.ca_cert, &args.chain, &args.privkey, true)?;
+    let tls_config = load_tls_server_config(&args.ca_cert, &args.chain, &args.privkey, false)?;
     let secret_key = get_private_key(&args.privkey)?;
 
     let (_event_server_task, state_updates_tx, _event_server_port) = start_event_server(

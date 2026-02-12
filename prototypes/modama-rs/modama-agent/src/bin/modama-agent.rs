@@ -4,13 +4,7 @@ use anyhow::{Context, Result as AnyResult};
 use clap::{Args, Parser};
 use log::info;
 use modama_agent::{
-    agent_state::AgentState,
-    config::{AgentConfig, AgentLinuxConfig, Identity},
-    local_http_service::serve_local_web_api,
-    local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider},
-    local_net_token_proxy::token_publisher_loop,
-    message_loop::message_loop,
-    platform::CurrentPlatformMountBackend,
+    agent_state::AgentState, config::{AgentConfig, AgentLinuxConfig, Identity}, local_http_service::serve_local_web_api, local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider}, local_net_token_proxy::token_publisher_loop, message_loop::message_loop, mount_backend::MountBackend, platform::CurrentPlatformMountBackend
 };
 use modama_common::{
     agent::AgentId, cert_helpers::load_tls_server_config, tokens::{TokenFetcher, TokenProvider}
@@ -168,6 +162,7 @@ async fn main() -> AnyResult<()> {
     });
 
     let mount_backend = CurrentPlatformMountBackend {};
+    mount_backend.initialize(config).await;
 
     select! {
         _ = message_loop(&mount_backend, Arc::clone(&state), Arc::clone(&tls_config), Arc::clone(&token_provider)) => {

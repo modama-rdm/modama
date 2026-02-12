@@ -1,0 +1,107 @@
+services:
+  smbdrop:
+    build:
+      context: ..
+      dockerfile: Dockerfile-smbdrop
+    container_name: smbdrop
+    ports:
+      - "445:445"
+    volumes:
+      - smbdrop_data:/data
+      - ./certs:/certs:ro
+    networks:
+      - modama-network
+
+  modama-agent-1:
+    build:
+      context: ..
+      dockerfile: Dockerfile-agent
+    container_name: modama-agent-1
+    depends_on:
+      - smbdrop
+    networks:
+      - modama-network
+    volumes:
+      - ./certs:/certs:ro
+    command:
+      - /usr/bin/modama-agent
+      - "--event-url=wss://smbdrop:5052"
+      - "--token-service=https://smbdrop:5053"
+      - "--mgmt-api-url=http://mgmtinterface"
+      - "--listen-local-api=localhost:3003"
+      - "--smb-hostname=smbdrop"
+      - "--smb-port=445"
+      - "--smb-domain=ER-C-Ingest"
+      - "--ca-cert=/certs/ca/ca.cert.pem"
+      - "--chain=/certs/clients/testresource/agent1.chain.pem"
+      - "--key=/certs/clients/testresource/agent1.priv.pem"
+
+  modama-agent-2:
+    build:
+      context: ..
+      dockerfile: Dockerfile-agent
+    container_name: modama-agent-2
+    depends_on:
+      - smbdrop
+    networks:
+      - modama-network
+    volumes:
+      - ./certs:/certs:ro
+    command:
+      - /usr/bin/modama-agent
+      - "--event-url=wss://smbdrop:5052"
+      - "--token-service=https://smbdrop:5053"
+      - "--mgmt-api-url=http://mgmtinterface"
+      - "--listen-local-api=localhost:3003"
+      - "--smb-hostname=smbdrop"
+      - "--smb-port=445"
+      - "--smb-domain=ER-C-Ingest"
+      - "--ca-cert=/certs/ca/ca.cert.pem"
+      - "--chain=/certs/clients/testresource/agent2.chain.pem"
+      - "--key=/certs/clients/testresource/agent2.priv.pem"
+
+  modama-agent-untrusted:
+    build:
+      context: ..
+      dockerfile: Dockerfile-agent
+    container_name: modama-agent-untrusted
+    depends_on:
+      - smbdrop
+    networks:
+      - modama-network
+    volumes:
+      - ./certs:/certs:ro
+    command:
+      - /usr/bin/modama-agent
+      - "--event-url=wss://smbdrop:5052"
+      - "--token-service=https://smbdrop:5053"
+      - "--mgmt-api-url=http://mgmtinterface"
+      - "--listen-local-api=localhost:3003"
+      - "--smb-hostname=smbdrop"
+      - "--smb-port=445"
+      - "--smb-domain=ER-C-Ingest"
+      - "--ca-cert=/certs/ca/ca.cert.pem"
+
+  mgmtinterface:
+    hostname: mgmtinterface
+    restart: always
+    # build:
+    #   context: ../../../
+    #   dockerfile: er-c-data/mgmtinterface/Dockerfile
+    image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface:latest
+    environment:
+      - MGMTINTERFACE_SECRET=/mgmt_secret.py
+    volumes:
+      - type: bind
+        source: "./mgmt_secret.py"
+        target: "/mgmt_secret.py"
+    depends_on:
+      - "smbdrop"
+
+
+volumes:
+  smbdrop_data:
+
+networks:
+  modama-network:
+    driver: bridge

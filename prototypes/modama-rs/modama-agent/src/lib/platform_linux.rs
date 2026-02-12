@@ -11,8 +11,23 @@ use procfs::{process::Process, ProcError};
 use thiserror::Error;
 
 use crate::{
-    config::{AgentConfig, AgentLinuxConfig}, mount_backend::MountBackend, platform_common::EnsureMountedError, share::MountedShare
+    config::{AgentConfig, AgentLinuxConfig},
+    mount_backend::MountBackend,
+    platform_common::EnsureMountedError,
+    share::MountedShare,
 };
+
+async fn prepare_mountpoint_directory(
+    config: &AgentConfig,
+) {
+    let prefix = config.get_linux_config().mount_point_prefix;
+
+    if !prefix.exists() {
+        if let Err(e) = tokio::fs::create_dir_all(prefix).await {
+            log::error!("could not create mount point directory: {e}");
+        }
+    }
+}
 
 /// Ensure that `share` is mounted, and return a `MountedShare` if the mount succeeded.
 async fn ensure_mounted(
@@ -35,9 +50,7 @@ async fn ensure_mounted(
     let source = format!("//{}/{}", &config.smb_hostname, share.share_name);
     let target = target_for_share(share, config);
 
-    if is_mounted(share, config).map_err(|e| {
-        EnsureMountedError::PlatformError(e.into())
-    })? {
+    if is_mounted(share, config).map_err(|e| EnsureMountedError::PlatformError(e.into()))? {
         return Ok(MountedShare {
             share: share.clone(),
             mount_path: target,
@@ -71,11 +84,9 @@ async fn ensure_mounted(
     .map(|_| MountedShare {
         share: share.clone(),
         mount_path: target,
-    }).map_err(|e| {
-        EnsureMountedError::PlatformError(e.into())
     })
+    .map_err(|e| EnsureMountedError::PlatformError(e.into()))
 }
-
 
 #[derive(Error, Debug)]
 pub enum MountListError {
@@ -115,9 +126,7 @@ async fn ensure_umounted(
 ) -> Result<(), EnsureMountedError> {
     {
         info!("Umounting {}", &mount_point.to_string_lossy());
-        nix::mount::umount(mount_point).map_err(|e| {
-            EnsureMountedError::PlatformError(e.into())
-        })?;
+        nix::mount::umount(mount_point).map_err(|e| EnsureMountedError::PlatformError(e.into()))?;
         std::fs::remove_dir(mount_point)?;
         Ok(())
     }
@@ -174,7 +183,7 @@ fn cleanup_mount_points(config: &AgentConfig) {
     let dir_contents = match std::fs::read_dir(config.get_linux_config().mount_point_prefix) {
         Ok(d) => d,
         Err(e) => {
-            warn!("in cleanup: could not read mount point prefix dircetory: {e}");
+            warn!("in cleanup: could not read mount point prefix directory: {e}");
             return;
         }
     };
@@ -235,15 +244,22 @@ async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
     });
 }
 
-pub struct CurrentPlatformMountBackend {
-}
+pub struct CurrentPlatformMountBackend {}
 
 impl MountBackend for CurrentPlatformMountBackend {
+    async fn initialize(&self, config: &AgentConfig) {
+        prepare_mountpoint_directory(config).await;
+    }
+
     async fn cleanup_mount_points(&self, config: &AgentConfig) {
         cleanup_mount_points(config)
     }
 
-    async fn ensure_mounted(&self, share: &Share, config: &AgentConfig) -> Result<MountedShare, EnsureMountedError> {
+    async fn ensure_mounted(
+        &self,
+        share: &Share,
+        config: &AgentConfig,
+    ) -> Result<MountedShare, EnsureMountedError> {
         ensure_mounted(share, config).await
     }
 
