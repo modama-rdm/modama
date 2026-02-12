@@ -14,7 +14,7 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo llvm-cov show-env --sh
 # RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ bash -c "source <(cargo llvm-cov show-env --sh) && env && exit 1"
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ bash -c "source <(cargo llvm-cov show-env --sh) && cargo llvm-cov clean --workspace && cargo build --release --bin smbdrop && cp target/release/smbdrop /usr/bin/smbdrop"
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ bash -c "source <(cargo llvm-cov show-env --sh) && cargo llvm-cov clean --workspace && cargo build --bin smbdrop && cp target/debug/smbdrop /usr/bin/smbdrop"
 
 FROM debian:trixie-slim
 

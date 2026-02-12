@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,targ
 
 COPY . .
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ bash -c "source <(cargo llvm-cov show-env --sh) && cargo llvm-cov clean --workspace && cargo build --release --bin modama-agent && cp target/release/modama-agent /usr/bin/modama-agent"
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ bash -c "source <(cargo llvm-cov show-env --sh) && cargo llvm-cov clean --workspace && cargo build --bin modama-agent && cp target/debug/modama-agent /usr/bin/modama-agent"
 
 FROM debian:trixie-slim
 
@@ -20,7 +20,7 @@ COPY --from=builder /usr/bin/modama-agent /usr/bin/modama-agent
 
 RUN mkdir -p /usr/src/modama-rs/target/
 
-ENV LLVM_PROFILE_FILE='/usr/src/modama-rs/target/modama-rs-%p-%48m.profraw'
+ENV LLVM_PROFILE_FILE='/usr/src/modama-rs/target/modama-rs-%p-%48m-%h.profraw'
 
 CMD [ "/usr/bin/modama-agent", \
     "--event-url=wss://smbdrop:5052", \
