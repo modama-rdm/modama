@@ -81,8 +81,6 @@ impl SambaConfigManager {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-#[allow(clippy::expect_used)]
 mod tests {
     use std::{path::PathBuf, str::FromStr};
 

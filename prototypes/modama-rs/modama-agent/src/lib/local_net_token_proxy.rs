@@ -51,6 +51,7 @@ struct ProxyState {
 async fn proxy_sign_request(
     State(state): State<ProxyState>,
 ) -> Result<Json<TokenSignResponse>, StatusCode> {
+    debug!("proxy_sign_request");
     match state.token_provider.fetch_token().await {
         Ok(resp) => Ok(Json(resp)),
         Err(TokenError::ResponseCode(s)) => match StatusCode::from_u16(s.as_u16()) {
@@ -64,8 +65,10 @@ async fn proxy_sign_request(
     }
 }
 
-/// Local token server for other agents that do not have a client certificate
-pub async fn local_token_server(
+/// Local token server for other agents that do not have a client certificate; listens
+/// on the given address on a random port. The URL will be inserted into the `SharedState`.
+/// The token requests will be forwarded to the given `TokenProvider`.
+pub async fn local_token_proxy(
     addr: Ipv4Addr,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
     state: Arc<Mutex<SharedState>>,
@@ -82,6 +85,7 @@ pub async fn local_token_server(
     let server = axum_server::from_tcp_rustls(listener, rustls_config);
 
     let server_handle = tokio::spawn(async move {
+        info!("spawning task for token proxy at https://{addr}:{listen_port}");
         if let Err(e) = server.serve(app.into_make_service()).await {
             error!("failed to start local token server: {e}");
             // just let the task expire, it will be restarted in the outside loop
@@ -117,7 +121,8 @@ pub async fn try_send_discovery_message(
     Ok(())
 }
 
-/// Advertise token API on a single interface (`local`)
+/// Advertise token API on a single interface (`local`) via multicast UDP
+/// packets
 pub async fn advertisement_loop(local: Ipv4Addr, state: Arc<Mutex<SharedState>>) -> JoinHandle<()> {
     spawn(async move {
         'outer: loop {
@@ -191,7 +196,7 @@ pub async fn token_publisher_loop(
                 // tasks should just kill itself
                 for addr in addrs.iter() {
                     if !task_exists_and_running(&token_server_tasks, *addr).await {
-                        if let Ok(handle) = local_token_server(
+                        if let Ok(handle) = local_token_proxy(
                             *addr,
                             Arc::clone(&token_fetcher),
                             Arc::clone(&shared_state),

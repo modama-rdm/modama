@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    error::Error,
     fs::File,
     io::{self, Read},
     net::{Ipv4Addr, SocketAddr},
@@ -9,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use modama_common::tokens::{BoxFutureToken, TokenError, TokenProvider, TokenSignResponse};
 use reqwest::{Certificate, Client, StatusCode};
 use tokio::{
@@ -23,7 +24,7 @@ use url::Url;
 
 use crate::{
     local_net_common::{create_mcast_socket, DiscoveryMessage, NOTIFY_MCAST_ADDR, NOTIFY_PORT},
-    local_net_token_publisher::{get_private_addresses, task_exists_and_running},
+    local_net_token_proxy::{get_private_addresses, task_exists_and_running},
 };
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -73,8 +74,9 @@ impl RemoteAgents {
 
 #[derive(Debug)]
 pub struct LocalNetTokenProvider {
-    client: Client,
+    http_client: Client,
     agents: RemoteAgents,
+    discovery_loop_handle: JoinHandle<()>,
 }
 
 impl TokenProvider for LocalNetTokenProvider {
@@ -99,7 +101,12 @@ async fn try_recv_discovery_message(
 }
 
 async fn handle_discovery_msg(msg: &DiscoveryMessage, agents: &mut RemoteAgents) {
-    agents.seen(&RemoteAgent { url: msg.api_url().to_owned() }).await;
+    debug!("got a discovery msg: {msg:?}");
+    agents
+        .seen(&RemoteAgent {
+            url: msg.api_url().to_owned(),
+        })
+        .await;
 }
 
 /// Listen for multicast messages on "local interfaces".
@@ -164,23 +171,27 @@ pub enum DiscoveryAddr {
 impl LocalNetTokenProvider {
     pub async fn new_with_pem(pem: &[u8], local_addr: DiscoveryAddr) -> Result<Self, TokenError> {
         let root_cert = Certificate::from_pem(pem)?;
-        let client = reqwest::ClientBuilder::new()
+        let http_client = reqwest::ClientBuilder::new()
             .add_root_certificate(root_cert)
             .build()?;
 
         let agents = RemoteAgents::new().await;
         let bg_agents = agents.clone();
 
-        match local_addr {
+        let handle = match local_addr {
             DiscoveryAddr::AnyPrivate => {
-                let _handle = spawn(async move { discovery_loop_starter(bg_agents).await });
+                spawn(async move { discovery_loop_starter(bg_agents).await })
             }
             DiscoveryAddr::V4(ipv4_addr) => {
-                let _handle = spawn(async move { discovery_loop(ipv4_addr, bg_agents).await });
+                spawn(async move { discovery_loop(ipv4_addr, bg_agents).await })
             }
-        }
+        };
 
-        Ok(Self { client, agents })
+        Ok(Self {
+            http_client,
+            agents,
+            discovery_loop_handle: handle,
+        })
     }
 
     pub async fn new(ca_cert_file: &Path, local_addr: DiscoveryAddr) -> Result<Self, TokenError> {
@@ -188,6 +199,10 @@ impl LocalNetTokenProvider {
         let mut ca_pem: Vec<u8> = Vec::new();
         ca_certs.read_to_end(&mut ca_pem)?;
         Self::new_with_pem(&ca_pem, local_addr).await
+    }
+
+    pub async fn abort(&self) {
+        self.discovery_loop_handle.abort();
     }
 
     pub async fn agents(&self) -> HashMap<RemoteAgent, Instant> {
@@ -202,10 +217,14 @@ impl LocalNetTokenProvider {
 
         // latest first:
         for agent in agents.iter().rev().map(|t| &t.0) {
-            let resp = match self.client.put(agent.url.clone()).send().await {
+            let resp = match self.http_client.put(agent.url.clone()).send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    warn!("error from discovered agent {}: {e}", agent.url);
+                    warn!(
+                        "error requesting token from agent at {}: {e} (source: {:?})",
+                        agent.url,
+                        e.source()
+                    );
                     sleep(Duration::from_millis(200)).await;
                     continue;
                 }
@@ -242,20 +261,35 @@ impl LocalNetTokenProvider {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::{net::Ipv4Addr, sync::Arc, time::Duration};
+    use std::{
+        net::Ipv4Addr,
+        path::PathBuf,
+        sync::Arc,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
 
     use itertools::Itertools;
-    use modama_common::{ca::Ca, logging::init_logging};
+    use modama_common::{
+        ca::Ca,
+        cert_helpers::load_tls_server_config,
+        logging::init_logging,
+        test_helpers::{MockTokenProvider, TempDir},
+        tokens::{Claims, LocalTokenSigner, TokenError, TokenProvider},
+    };
+    use rustls::pki_types::PrivateKeyDer;
     use tokio::{
         sync::Mutex,
+        task::JoinHandle,
         time::{sleep, Instant},
     };
     use url::Url;
 
     use crate::{
         local_net_common::DiscoveryInnerValidated,
-        local_net_token_provider::{DiscoveryAddr, DiscoveryMessage, LocalNetTokenProvider, RemoteAgent},
-        local_net_token_publisher::{SharedState, advertisement_loop},
+        local_net_token_provider::{
+            DiscoveryAddr, DiscoveryMessage, LocalNetTokenProvider, RemoteAgent,
+        },
+        local_net_token_proxy::{advertisement_loop, local_token_proxy, SharedState},
     };
 
     #[test]
@@ -293,12 +327,11 @@ mod tests {
 
     #[test]
     fn test_disco_parse_invalid_6() {
-        assert!(DiscoveryMessage::try_parse(
-            "stuff\n{\"version\": 1, \"api\": \"not a Url\"}"
+        assert!(
+            DiscoveryMessage::try_parse("stuff\n{\"version\": 1, \"api\": \"not a Url\"}")
+                .is_none()
         )
-        .is_none())
     }
-
 
     #[test]
     fn test_disco_parse_valid() {
@@ -330,6 +363,31 @@ mod tests {
         )
     }
 
+    #[tokio::test]
+    async fn test_local_net_token_provider_new() {
+        // create a temporary dir for certs (use local TempDir helper)
+        let tmpdir = TempDir::new("test-token-proxy");
+
+        // create CA and serialize
+        let ca = Ca::new(Some(tmpdir.to_owned())).expect("create ca");
+        ca.serialize_ca_to_files().expect("serialize ca");
+
+        // create server cert
+        let server_names = vec!["127.0.0.1".to_string()];
+        let server_kc = ca.server_cert(&server_names).expect("server cert");
+        ca.save_server_cert(&server_names, &server_kc)
+            .expect("save server cert");
+
+        // paths to server files
+        let ca_cert = tmpdir.join("ca").join("ca.cert.pem");
+
+        let tp =
+            LocalNetTokenProvider::new(&ca_cert, DiscoveryAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))
+                .await
+                .unwrap();
+
+        tp.abort().await;
+    }
 
     #[tokio::test]
     async fn test_simple_udp_discovery() {
@@ -375,10 +433,169 @@ mod tests {
         assert_eq!(agents, vec![&agent] as Vec<&RemoteAgent>,);
 
         sender_task.abort();
+        receiver.abort().await;
+    }
+
+    struct TestTokenProxy {
+        ca: Ca,
+        ca_cert: PathBuf,
+        tmpdir: TempDir,
+        token_proxy: JoinHandle<()>,
+    }
+
+    /// Run a test token proxy on loopback, which we use to test local network
+    /// service discovery. Tokens are signed with its own private key.
+    async fn run_test_token_proxy(state: Arc<Mutex<SharedState>>) -> TestTokenProxy {
+        // create a temporary dir for certs (use local TempDir helper)
+        let tmpdir = TempDir::new("test-token-proxy");
+
+        // create CA and serialize
+        let ca = Ca::new(Some(tmpdir.to_owned())).expect("create ca");
+        ca.serialize_ca_to_files().expect("serialize ca");
+
+        // create server cert
+        let server_names = vec!["127.0.0.1".to_string()];
+        let server_kc = ca.server_cert(&server_names).expect("server cert");
+        ca.save_server_cert(&server_names, &server_kc)
+            .expect("save server cert");
+
+        // paths to server files
+        let ca_cert = tmpdir.join("ca").join("ca.cert.pem");
+        let server_chain = tmpdir.join("servers").join("127.0.0.1.chain.pem");
+        let server_priv = tmpdir.join("servers").join("127.0.0.1.priv.pem");
+
+        let addr = Ipv4Addr::new(127, 0, 0, 1);
+
+        let tls_config = Arc::new(
+            load_tls_server_config(&ca_cert, &server_chain, &server_priv, false)
+                .expect("tls config for local token provider API"),
+        );
+
+        let server_pk_der = PrivateKeyDer::Pkcs8(server_kc.key_pair.serialize_der().into());
+
+        let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
+        let token_provider: Arc<dyn TokenProvider + 'static + Sync + Send> =
+            Arc::new(MockTokenProvider {
+                signer: token_signer,
+                claims: Claims {
+                    sub: "x-modama-agent://test_resource#test-agent".to_owned(),
+                    exp: (SystemTime::now() + Duration::from_secs(1000))
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                },
+            });
+
+        let token_proxy = local_token_proxy(addr, token_provider, state, tls_config)
+            .await
+            .unwrap();
+
+        TestTokenProxy {
+            ca,
+            ca_cert,
+            tmpdir,
+            token_proxy,
+        }
+    }
+
+    #[tokio::test]
+    /// integration test with a mock token proxy, testing the whole advertisement procedure
+    async fn test_remote_token() {
+        init_logging();
+
+        let loopback_addr = Ipv4Addr::new(127, 0, 0, 1);
+        let shared_state = Arc::new(Mutex::new(SharedState {
+            api_urls: Default::default(),
+        }));
+
+        let proxy = run_test_token_proxy(Arc::clone(&shared_state)).await;
+
+        let ca_cert = proxy.ca.get_ca_cert_pem();
+
+        // the proxy should have inserted itself into the list of URLs by now:
+        assert!(shared_state
+            .lock()
+            .await
+            .api_urls
+            .contains_key(&loopback_addr));
+
+        let receiver = LocalNetTokenProvider::new_with_pem(
+            ca_cert.as_bytes(),
+            DiscoveryAddr::V4(loopback_addr),
+        )
+        .await
+        .unwrap();
+        // this sends out a token on multicast ASAP (loopback in this case), and then again after 5 seconds
+        let sender_task = advertisement_loop(loopback_addr, Arc::clone(&shared_state)).await;
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+
+        loop {
+            if !receiver.agents().await.is_empty() {
+                break;
+            } else {
+                sleep(Duration::from_millis(1)).await;
+            }
+            if Instant::now() > deadline {
+                panic!("timeout, no advertisement received")
+            }
+        }
+
+        let agents = receiver.agents().await;
+        let agents = agents.keys().collect_vec();
+        let expected_agent = RemoteAgent {
+            url: shared_state
+                .lock()
+                .await
+                .api_urls
+                .get(&loopback_addr)
+                .unwrap()
+                .clone(),
+        };
+        assert_eq!(agents, vec![&expected_agent] as Vec<&RemoteAgent>,);
+
+        let token = receiver.token_from_local_net().await.unwrap();
+
+        assert_eq!(token.resource, "test_resource");
+        assert_eq!(token.agent_name, "test-agent");
+        assert_eq!(token.agent_uri, "x-modama-agent://test_resource#test-agent");
+
+        proxy.token_proxy.abort();
+        sender_task.abort();
+        receiver.abort().await;
+    }
+
+    #[tokio::test]
+    async fn test_no_source_trivial_case() {
+        init_logging();
+
+        let loopback_addr = Ipv4Addr::new(127, 0, 0, 1);
+        let shared_state = Arc::new(Mutex::new(SharedState {
+            api_urls: Default::default(),
+        }));
+
+        let proxy = run_test_token_proxy(Arc::clone(&shared_state)).await;
+
+        let ca_cert = proxy.ca.get_ca_cert_pem();
+
+        // the proxy should have inserted itself into the list of URLs by now:
+        assert!(shared_state
+            .lock()
+            .await
+            .api_urls
+            .contains_key(&loopback_addr));
+
+        let receiver = LocalNetTokenProvider::new_with_pem(
+            ca_cert.as_bytes(),
+            DiscoveryAddr::V4(loopback_addr),
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(receiver.token_from_local_net().await, Err(TokenError::NoSource)));
     }
 
     // TODO: more tests
-    // - [ ] integration test with a mock remote agent
     // - [ ] invalid data tests (making sure the loops don't crash or at least recover)
     // - [ ] check coverage for additional missing parts
 }

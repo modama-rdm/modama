@@ -11,5 +11,5 @@ pub mod message_loop;
 pub mod platform_common;
 pub mod mount_backend;
 pub mod local_net_token_provider;
-pub mod local_net_token_publisher;
+pub mod local_net_token_proxy;
 pub mod local_net_common;
