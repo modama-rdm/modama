@@ -4,10 +4,18 @@ use anyhow::{Context, Result as AnyResult};
 use clap::{Args, Parser};
 use log::info;
 use modama_agent::{
-    agent_state::AgentState, config::{AgentConfig, AgentLinuxConfig, Identity}, local_http_service::serve_local_web_api, local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider}, local_net_token_proxy::token_publisher_loop, message_loop::message_loop, mount_backend::MountBackend, platform::CurrentPlatformMountBackend
+    agent_state::AgentState,
+    config::{AgentConfig, AgentLinuxConfig, Identity},
+    local_http_service::serve_local_web_api,
+    local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider},
+    local_net_token_proxy::token_publisher_loop,
+    message_loop::message_loop,
+    mount_backend::MountBackend,
+    platform::CurrentPlatformMountBackend,
 };
 use modama_common::{
-    agent::AgentId, cert_helpers::load_tls_server_config, tokens::{TokenFetcher, TokenProvider}
+    agent::AgentId,
+    tokens::{TokenFetcher, TokenProvider},
 };
 use modama_common::{
     cert_helpers::{get_cert_chain, get_private_key, get_root_cert_store},
@@ -142,18 +150,11 @@ async fn main() -> AnyResult<()> {
     };
 
     let another_token_provider = Arc::clone(&token_provider);
-    let _local_token_server_handle = match &args.client_cert {
-        Some(client_cert) => {
-            let tls_config = Arc::new(
-                load_tls_server_config(&args.ca_cert, &client_cert.chain, &client_cert.key, false)
-                    .context("tls config for local token provider API")?,
-            );
-            Some(spawn(async move {
-                token_publisher_loop(another_token_provider, tls_config).await;
-            }))
-        }
-        None => None,
-    };
+    let _local_token_server_handle = args.client_cert.as_ref().map(|_client_cert| {
+        spawn(async move {
+            token_publisher_loop(another_token_provider).await;
+        })
+    });
 
     let state_for_api = Arc::clone(&state);
     let cloned_token_provider = Arc::clone(&token_provider);

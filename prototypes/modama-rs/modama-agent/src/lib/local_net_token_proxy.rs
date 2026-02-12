@@ -7,13 +7,11 @@ use std::{
 };
 
 use axum::{extract::State, routing::put, Json, Router};
-use axum_server::tls_rustls::RustlsConfig;
 use hyper::StatusCode;
 use log::{debug, error, info, warn};
 use modama_common::tokens::{TokenError, TokenProvider, TokenSignResponse};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use tokio::{net::UdpSocket, spawn, sync::Mutex, task::JoinHandle, time::sleep};
-use tokio_rustls::rustls::ServerConfig;
 use url::Url;
 
 use crate::local_net_common::{
@@ -72,7 +70,6 @@ pub async fn local_token_proxy(
     addr: Ipv4Addr,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
     state: Arc<Mutex<SharedState>>,
-    tls_config: Arc<ServerConfig>,
 ) -> Result<JoinHandle<()>, io::Error> {
     let api_state = ProxyState { token_provider };
     let app = Router::<ProxyState>::new()
@@ -80,19 +77,18 @@ pub async fn local_token_proxy(
         .with_state(api_state);
 
     let listener = std::net::TcpListener::bind((addr, 0))?;
-    let rustls_config = RustlsConfig::from_config(tls_config);
     let listen_port = listener.local_addr()?.port();
-    let server = axum_server::from_tcp_rustls(listener, rustls_config);
+    let server = axum_server::from_tcp(listener);
 
     let server_handle = tokio::spawn(async move {
-        info!("spawning task for token proxy at https://{addr}:{listen_port}");
+        info!("spawning task for token proxy at http://{addr}:{listen_port}");
         if let Err(e) = server.serve(app.into_make_service()).await {
             error!("failed to start local token server: {e}");
             // just let the task expire, it will be restarted in the outside loop
         }
     });
 
-    let url_str = format!("https://{addr}:{listen_port}/sign/");
+    let url_str = format!("http://{addr}:{listen_port}/sign/");
     let url = Url::parse(url_str.as_str())
         .map_err(|parse_err| io::Error::other(format!("url parse failed: {parse_err}")))?;
 
@@ -178,7 +174,6 @@ pub async fn task_exists_and_running(
 
 pub async fn token_publisher_loop(
     token_fetcher: Arc<dyn TokenProvider + Sync + Send>,
-    tls_config: Arc<ServerConfig>,
 ) {
     let mut advertisement_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
     let mut token_server_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
@@ -200,7 +195,6 @@ pub async fn token_publisher_loop(
                             *addr,
                             Arc::clone(&token_fetcher),
                             Arc::clone(&shared_state),
-                            Arc::clone(&tls_config),
                         )
                         .await
                         {

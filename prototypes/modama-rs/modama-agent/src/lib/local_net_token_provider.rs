@@ -262,16 +262,12 @@ impl LocalNetTokenProvider {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::{
-        net::Ipv4Addr,
-        path::PathBuf,
-        sync::Arc,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        net::Ipv4Addr, path::PathBuf, sync::{Arc, LazyLock}, time::{Duration, SystemTime, UNIX_EPOCH}
     };
 
     use itertools::Itertools;
     use modama_common::{
         ca::Ca,
-        cert_helpers::load_tls_server_config,
         logging::init_logging,
         test_helpers::{MockTokenProvider, TempDir},
         tokens::{Claims, LocalTokenSigner, TokenError, TokenProvider},
@@ -291,6 +287,10 @@ mod tests {
         },
         local_net_token_proxy::{advertisement_loop, local_token_proxy, SharedState},
     };
+
+    static DISCOVERY_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| {
+        Mutex::new(())
+    });
 
     #[test]
     fn test_disco_parse_invalid_1() {
@@ -391,6 +391,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_udp_discovery() {
+        let _handle = DISCOVERY_MUTEX.lock().await;
         init_logging();
         let ca = Ca::new::<String>(None).unwrap();
         let ca_cert = ca.get_ca_cert_pem();
@@ -409,7 +410,7 @@ mod tests {
             .lock()
             .await
             .api_urls
-            .insert(loopback, Url::parse("https://localhost:1234").unwrap());
+            .insert(loopback, Url::parse("http://localhost:1234").unwrap());
         let sender_task = advertisement_loop(loopback, Arc::clone(&shared_state)).await;
 
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -428,7 +429,7 @@ mod tests {
         let agents = receiver.agents().await;
         let agents = agents.keys().collect_vec();
         let agent = RemoteAgent {
-            url: Url::parse("https://localhost:1234").unwrap(),
+            url: Url::parse("http://localhost:1234").unwrap(),
         };
         assert_eq!(agents, vec![&agent] as Vec<&RemoteAgent>,);
 
@@ -461,15 +462,8 @@ mod tests {
 
         // paths to server files
         let ca_cert = tmpdir.join("ca").join("ca.cert.pem");
-        let server_chain = tmpdir.join("servers").join("127.0.0.1.chain.pem");
-        let server_priv = tmpdir.join("servers").join("127.0.0.1.priv.pem");
 
         let addr = Ipv4Addr::new(127, 0, 0, 1);
-
-        let tls_config = Arc::new(
-            load_tls_server_config(&ca_cert, &server_chain, &server_priv, false)
-                .expect("tls config for local token provider API"),
-        );
 
         let server_pk_der = PrivateKeyDer::Pkcs8(server_kc.key_pair.serialize_der().into());
 
@@ -486,7 +480,7 @@ mod tests {
                 },
             });
 
-        let token_proxy = local_token_proxy(addr, token_provider, state, tls_config)
+        let token_proxy = local_token_proxy(addr, token_provider, state)
             .await
             .unwrap();
 
@@ -501,6 +495,7 @@ mod tests {
     #[tokio::test]
     /// integration test with a mock token proxy, testing the whole advertisement procedure
     async fn test_remote_token() {
+        let _handle = DISCOVERY_MUTEX.lock().await;
         init_logging();
 
         let loopback_addr = Ipv4Addr::new(127, 0, 0, 1);
@@ -567,6 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_source_trivial_case() {
+        let _handle = DISCOVERY_MUTEX.lock().await;
         init_logging();
 
         let loopback_addr = Ipv4Addr::new(127, 0, 0, 1);
