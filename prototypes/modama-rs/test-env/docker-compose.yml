@@ -2,20 +2,21 @@ services:
   smbdrop:
     build:
       context: ..
-      dockerfile: Dockerfile-smbdrop
+      dockerfile: test-env/Dockerfile-smbdrop
     container_name: smbdrop
     ports:
       - "445:445"
     volumes:
       - smbdrop_data:/data
       - ./certs:/certs:ro
+      - ./coverage-target:/usr/src/modama-rs/target
     networks:
       - modama-network
 
   modama-agent-1:
     build:
       context: ..
-      dockerfile: Dockerfile-agent
+      dockerfile: test-env/Dockerfile-agent
     container_name: modama-agent-1
     depends_on:
       - smbdrop
@@ -23,6 +24,7 @@ services:
       - modama-network
     volumes:
       - ./certs:/certs:ro
+      - ./coverage-target:/usr/src/modama-rs/target
     command:
       - /usr/bin/modama-agent
       - "--event-url=wss://smbdrop:5052"
@@ -39,7 +41,7 @@ services:
   modama-agent-2:
     build:
       context: ..
-      dockerfile: Dockerfile-agent
+      dockerfile: test-env/Dockerfile-agent
     container_name: modama-agent-2
     depends_on:
       - smbdrop
@@ -47,6 +49,7 @@ services:
       - modama-network
     volumes:
       - ./certs:/certs:ro
+      - ./coverage-target:/usr/src/modama-rs/target
     command:
       - /usr/bin/modama-agent
       - "--event-url=wss://smbdrop:5052"
@@ -63,7 +66,7 @@ services:
   modama-agent-untrusted:
     build:
       context: ..
-      dockerfile: Dockerfile-agent
+      dockerfile: test-env/Dockerfile-agent
     container_name: modama-agent-untrusted
     depends_on:
       - smbdrop
@@ -71,6 +74,7 @@ services:
       - modama-network
     volumes:
       - ./certs:/certs:ro
+      - ./coverage-target:/usr/src/modama-rs/target
     command:
       - /usr/bin/modama-agent
       - "--event-url=wss://smbdrop:5052"
@@ -97,7 +101,6 @@ services:
         target: "/mgmt_secret.py"
     depends_on:
       - "smbdrop"
-
 
 volumes:
   smbdrop_data:

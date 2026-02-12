@@ -22,8 +22,7 @@ use modama_common::{
     logging::init_logging,
 };
 use tokio::{
-    select, spawn,
-    sync::{Mutex, OnceCell},
+    select, signal::unix::SignalKind, spawn, sync::{Mutex, OnceCell}
 };
 use tokio_rustls::rustls::ClientConfig;
 use url::Url;
@@ -165,7 +164,18 @@ async fn main() -> AnyResult<()> {
     let mount_backend = CurrentPlatformMountBackend {};
     mount_backend.initialize(config).await;
 
+    #[cfg(unix)]
+    let mut term_stream = tokio::signal::unix::signal(SignalKind::terminate())?;
+
     select! {
+        _ = tokio::signal::ctrl_c() => {
+            eprintln!("SIGINT received, exiting");
+            Ok(())
+        },
+        _ = term_stream.recv() => {
+            eprintln!("SIGTERM received, exiting");
+            Ok(())
+        }
         _ = message_loop(&mount_backend, Arc::clone(&state), Arc::clone(&tls_config), Arc::clone(&token_provider)) => {
             Ok(())
         }

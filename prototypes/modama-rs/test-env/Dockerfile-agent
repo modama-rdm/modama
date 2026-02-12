@@ -6,15 +6,21 @@ WORKDIR /usr/src/modama-rs/
 
 RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install clang lld
 
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo +stable install cargo-llvm-cov --locked && rustup component add llvm-tools-preview
+
 COPY . .
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo build --release --bin modama-agent && cp target/release/modama-agent /usr/bin/modama-agent
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ bash -c "source <(cargo llvm-cov show-env --sh) && cargo llvm-cov clean --workspace && cargo build --release --bin modama-agent && cp target/release/modama-agent /usr/bin/modama-agent"
 
 FROM debian:trixie-slim
 
 RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind strace
 
 COPY --from=builder /usr/bin/modama-agent /usr/bin/modama-agent
+
+RUN mkdir -p /usr/src/modama-rs/target/
+
+ENV LLVM_PROFILE_FILE='/usr/src/modama-rs/target/modama-rs-%p-%48m.profraw'
 
 CMD [ "/usr/bin/modama-agent", \
     "--event-url=wss://smbdrop:5052", \

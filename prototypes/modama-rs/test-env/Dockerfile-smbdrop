@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1.4
+
+FROM rust:slim-trixie AS builder
+
+WORKDIR /usr/src/modama-rs/
+
+RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install clang lld
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo +stable install cargo-llvm-cov --locked && rustup component add llvm-tools-preview
+
+COPY . .
+
+# for debugging purposes:
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo llvm-cov show-env --sh
+# RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ bash -c "source <(cargo llvm-cov show-env --sh) && env && exit 1"
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ bash -c "source <(cargo llvm-cov show-env --sh) && cargo llvm-cov clean --workspace && cargo build --release --bin smbdrop && cp target/release/smbdrop /usr/bin/smbdrop"
+
+FROM debian:trixie-slim
+
+RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install samba samba-client winbind strace
+
+# the main samba config
+COPY ./smbdrop/smb.conf /etc/samba/smb.conf
+
+# Samba:
+EXPOSE 445/tcp
+# HTTP(s) API:
+EXPOSE 5051/tcp
+# WS API:
+EXPOSE 5052/tcp
+# Token API:
+EXPOSE 5053/tcp
+
+COPY --from=builder /usr/bin/smbdrop /usr/bin/smbdrop
+
+RUN mkdir -p /usr/src/modama-rs/target/
+
+ENV LLVM_PROFILE_FILE='/usr/src/modama-rs/target/modama-rs-%p-%48m.profraw'
+
+CMD [ "/usr/bin/smbdrop", \
+    "--ca-cert=/certs/ca/ca.cert.pem", \
+    "--chain=/certs/servers/smbdrop.chain.pem", \
+    "--privkey=/certs/servers/smbdrop.priv.pem", \
+    "--api-listen=0.0.0.0:5051", \
+    "--ws-listen=0.0.0.0:5052", \
+    "--token-api-listen=0.0.0.0:5053" ]
+
