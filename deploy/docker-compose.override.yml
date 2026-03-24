@@ -32,27 +32,9 @@ services:
       - "./testfolder/data/:/data/"
     ports:
       - "127.0.0.1:8081:8080"
-  sampledb:
-    hostname: sampledb
-    image: sciapp/sampledb:develop
-    depends_on:
-      - db
-    environment:
-      SAMPLEDB_CONTACT_EMAIL: d.weber@fz-juelich.de
-      SAMPLEDB_MAIL_SERVER: mail.fz-juelich.de
-      SAMPLEDB_MAIL_SENDER: d.weber@fz-juelich.de
-      # TODO put in secrets file
-      SAMPLEDB_ADMIN_PASSWORD: "abcd1234"
-      SAMPLEDB_SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://postgres:password@db:5432/sampledb
-    restart: always
-    volumes:
-      - './testfolder/sampledb:/home/sampledb/files:rw'
-    ports:
-      - "127.0.0.1:8023:8000"
   cloudproxy:
     volumes:
       - './testconf/cloudproxy-servername.nginx.conf.snippet:/etc/nginx/conf.d/servername.conf.snippet'
-      - './testconf/cloudproxy-sampledb.nginx.conf.snippet:/etc/nginx/conf.d/sampledb.conf.snippet'
     ports:
       - "127.0.0.1:1890:80"
   permissions:
