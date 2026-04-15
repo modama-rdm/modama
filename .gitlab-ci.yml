@@ -42,32 +42,32 @@ container-image-build:
     entrypoint: [""]
   parallel:
     matrix:
-      - DOCKERFILE: er-c-data/gateway/Dockerfile
-        CONTEXT: "${CI_PROJECT_DIR}/er-c-data/gateway"
+      - DOCKERFILE: deploy/gateway/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}/deploy/gateway"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/gateway
-      - DOCKERFILE: er-c-data/nextcloud/Dockerfile
-        CONTEXT: "${CI_PROJECT_DIR}/er-c-data/nextcloud"
+      - DOCKERFILE: deploy/nextcloud/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}/deploy/nextcloud"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/nextcloud
-      - DOCKERFILE: er-c-data/permissions/Dockerfile
+      - DOCKERFILE: deploy/permissions/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/permissions
-      - DOCKERFILE: er-c-data/sssd/Dockerfile
+      - DOCKERFILE: deploy/sssd/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/sssd
-      - DOCKERFILE: er-c-data/watchdog/Dockerfile
+      - DOCKERFILE: deploy/watchdog/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/watchdog
-      - DOCKERFILE: er-c-data/smbdrop/Dockerfile
+      - DOCKERFILE: deploy/smbdrop/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/smbdrop
-      - DOCKERFILE: er-c-data/mgmtinterface/Dockerfile
+      - DOCKERFILE: deploy/mgmtinterface/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface
-      - DOCKERFILE: er-c-data/wsgidav/Dockerfile
-        CONTEXT: "${CI_PROJECT_DIR}/er-c-data/wsgidav/"
+      - DOCKERFILE: deploy/wsgidav/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}/deploy/wsgidav/"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/wsgidav
-      - DOCKERFILE: er-c-data/tsm-client/Dockerfile
-        CONTEXT: "${CI_PROJECT_DIR}/er-c-data/tsm-client/"
+      - DOCKERFILE: deploy/tsm-client/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}/deploy/tsm-client/"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/tsm-client
 
   script:
