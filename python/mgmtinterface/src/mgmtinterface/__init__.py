@@ -394,8 +394,8 @@ def add_share_info(datasets, project, uid, shares):
         ds['shared'] = False
         for key, value in shares.items():
             path_match = os.path.normpath(value['dest_path']) == dest_path
-            ds['shared'] = ds['shared'] or path_match
             if path_match and value['uid'] == uid:
+                ds['shared'] = True
                 ds['shareinfo'] = value
                 ds['shareinfo']['smb_host'] = "moellenstedt.iff.kfa-juelich.de"
                 ds['shareinfo']['workgroup'] = "ER-C-INGEST"
@@ -622,6 +622,7 @@ def share_dataset(name: str, dataset: str):
                         uid=user_info['id']['uid'],
                         gid=pr_info['project']['gid'],
                     )
+                    result = result['share']
                 except RuntimeError as e:
                     flask.flash(f"Error: {e}.")
                     return flask.redirect(flask.url_for('share_dataset', name=name, dataset=dataset))
@@ -843,13 +844,13 @@ def api_create_share() -> Dict:
             f"API user {apiauth.current_user()} "
             f"not in project members {pr_info['project']['members']} and is not the owner."
         )
-    share = smbclient.create(
+    resp = smbclient.create(
         dest_path=smbpath(pr_info['project'], ds['name']),
         uid=user_info['id']['uid'],
         gid=pr_info['project']['gid'],
         resource=resource,
     )
-    return dict(share)
+    return dict(resp['share'])
 
 
 @app.route("/api/share/<share_id>/", methods=["DELETE"])
