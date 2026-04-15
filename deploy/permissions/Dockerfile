@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.cache /venv/bin/python3 -m pip install -e /
 
 WORKDIR /code/permissions/
 
-COPY ./er-c-data/permissions/config.py /config.py
+COPY ./deploy/permissions/config.py /config.py
 
 ENV PERMISSIONS_CONFIG /config.py
 

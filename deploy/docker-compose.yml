@@ -115,7 +115,7 @@ services:
     restart: always
     build:
       context: ..
-      dockerfile: er-c-data/permissions/Dockerfile
+      dockerfile: deploy/permissions/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/permissions:latest
 
     volumes:
@@ -145,7 +145,7 @@ services:
     restart: always
     build:
       context: ..
-      dockerfile: er-c-data/watchdog/Dockerfile
+      dockerfile: deploy/watchdog/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/watchdog:latest
 
   smbdrop:
@@ -166,7 +166,7 @@ services:
     restart: always
     build:
       context: ..
-      dockerfile: er-c-data/mgmtinterface/Dockerfile
+      dockerfile: deploy/mgmtinterface/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface:latest
     environment:
       - MGMTINTERFACE_SECRET=/mgmt_secret.py

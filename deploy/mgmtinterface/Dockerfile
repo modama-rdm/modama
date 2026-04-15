@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.cache python3 -m pip install -e /code/mgmti
 
 WORKDIR /code/mgmtinterface/src/mgmtinterface
 
-COPY ./er-c-data/mgmtinterface/config.py /config.py
+COPY ./deploy/mgmtinterface/config.py /config.py
 
 ENV MGMTINTERFACE_CONFIG /config.py
 
