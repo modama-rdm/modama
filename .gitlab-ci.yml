@@ -33,7 +33,7 @@ rust-tests:
   script:
     - apt-get -y update && apt-get -y install lld build-essential
     - rustup component add clippy
-    - cd prototypes/modama-rs/ && cargo check && cargo clippy && cargo test
+    - cd modama-rs/ && cargo check && cargo clippy && cargo test
 
 container-image-build:
   stage: build

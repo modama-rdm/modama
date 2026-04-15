@@ -86,7 +86,7 @@ services:
         source: "./testfolder/etc/smbdrop"
         target: "/etc/smbdrop"
       - type: bind
-        source: "../prototypes/modama-rs/dev-env/certs/"
+        source: "../modama-rs/dev-env/certs/"
         target: "/certs/"
     ports:
       - "127.0.0.1:1446:445"
@@ -105,7 +105,7 @@ services:
         target: "/config.py"
         read_only: true
       - type: bind
-        source: "../prototypes/modama-rs/dev-env/certs/"
+        source: "../modama-rs/dev-env/certs/"
         target: "/certs/"
         read_only: true
     environment:
