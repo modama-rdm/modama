@@ -96,6 +96,14 @@ The externally supplied file `externalstorage_pw` contains the preshared passwor
 SECRET_KEY = 'I am so super secret'
 ```
 
+## mTLS CA setup
+
+`/var/local/data-mgmt/ca/`
+
+TODO: ask alex!
+
+Basically, need to `cargo run --bin ca -- --help`
+
 ## sssd.conf
 
 sssd.conf is private and placed in `/var/local/data-mgmt/` since it contains
