@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1.4
+
+FROM rust:slim-trixie AS builder
+
+WORKDIR /usr/src/modama-rs/
+
+RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install clang lld
+
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo build --release --bin ca && cp target/release/ca /usr/bin/ca
+
+FROM debian:trixie-slim
+
+COPY --from=builder /usr/bin/ca /usr/bin/ca
+
+CMD [ "/usr/bin/ca" ]

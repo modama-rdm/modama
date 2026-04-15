@@ -57,9 +57,12 @@ container-image-build:
       - DOCKERFILE: deploy/watchdog/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/watchdog
-      - DOCKERFILE: deploy/smbdrop/Dockerfile
+      - DOCKERFILE: modama-rs/Dockerfile-smbdrop
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/smbdrop
+      - DOCKERFILE: modama-rs/Dockerfile-ca-cli
+        CONTEXT: "${CI_PROJECT_DIR}"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/ca
       - DOCKERFILE: deploy/mgmtinterface/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface
