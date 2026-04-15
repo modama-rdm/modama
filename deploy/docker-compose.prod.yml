@@ -56,8 +56,16 @@ services:
       - type: bind
         source: "/var/local/data-mgmt/smbdrop"
         target: "/etc/smbdrop"
+      - type: bind
+        source: "/var/local/data-mgmt/ca/certs/"
+        target: "/certs/"
     ports:
       - "127.0.0.1:1445:445"
+  mgmtinterface:
+    volumes:
+      - type: bind
+        source: "/var/local/data-mgmt/ca/certs/"
+        target: "/certs/"
 
   mgmtinterface-proxy:  # another nginx to terminate TLS for the internal mgmt interface
     volumes:
