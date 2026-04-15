@@ -2,21 +2,35 @@ services:
   smbdrop:
     build:
       context: ..
-      dockerfile: test-env/Dockerfile-smbdrop
+      dockerfile: test-env/Dockerfile-tests
     container_name: smbdrop
     ports:
       - "445:445"
     volumes:
       - smbdrop_data:/data
       - ./certs:/certs:ro
-      - ./coverage-target:/usr/src/modama-rs/target
+      - ./target:/usr/src/modama-rs/target/
     networks:
       - modama-network
+    command:
+      - "cargo"
+      - "llvm-cov"
+      - "run"
+      - "--no-clean"
+      - "--bin"
+      - "smbdrop"
+      - "--"
+      - "--ca-cert=/certs/ca/ca.cert.pem"
+      - "--chain=/certs/servers/smbdrop.chain.pem"
+      - "--privkey=/certs/servers/smbdrop.priv.pem"
+      - "--api-listen=0.0.0.0:5051"
+      - "--ws-listen=0.0.0.0:5052"
+      - "--token-api-listen=0.0.0.0:5053"
 
   modama-agent-1:
     build:
       context: ..
-      dockerfile: test-env/Dockerfile-agent
+      dockerfile: test-env/Dockerfile-tests
     container_name: modama-agent-1
     depends_on:
       - smbdrop
@@ -24,9 +38,15 @@ services:
       - modama-network
     volumes:
       - ./certs:/certs:ro
-      - ./coverage-target:/usr/src/modama-rs/target
+      - ./target:/usr/src/modama-rs/target/
     command:
-      - /usr/bin/modama-agent
+      - "cargo"
+      - "llvm-cov"
+      - "run"
+      - "--no-clean"
+      - "--bin"
+      - "modama-agent"
+      - "--"
       - "--event-url=wss://smbdrop:5052"
       - "--token-service=https://smbdrop:5053"
       - "--mgmt-api-url=http://mgmtinterface"
@@ -41,7 +61,7 @@ services:
   modama-agent-2:
     build:
       context: ..
-      dockerfile: test-env/Dockerfile-agent
+      dockerfile: test-env/Dockerfile-tests
     container_name: modama-agent-2
     depends_on:
       - smbdrop
@@ -49,9 +69,15 @@ services:
       - modama-network
     volumes:
       - ./certs:/certs:ro
-      - ./coverage-target:/usr/src/modama-rs/target
+      - ./target:/usr/src/modama-rs/target/
     command:
-      - /usr/bin/modama-agent
+      - "cargo"
+      - "llvm-cov"
+      - "run"
+      - "--no-clean"
+      - "--bin"
+      - "modama-agent"
+      - "--"
       - "--event-url=wss://smbdrop:5052"
       - "--token-service=https://smbdrop:5053"
       - "--mgmt-api-url=http://mgmtinterface"
@@ -66,7 +92,7 @@ services:
   modama-agent-untrusted:
     build:
       context: ..
-      dockerfile: test-env/Dockerfile-agent
+      dockerfile: test-env/Dockerfile-tests
     container_name: modama-agent-untrusted
     depends_on:
       - smbdrop
@@ -74,9 +100,15 @@ services:
       - modama-network
     volumes:
       - ./certs:/certs:ro
-      - ./coverage-target:/usr/src/modama-rs/target
+      - ./target:/usr/src/modama-rs/target/
     command:
-      - /usr/bin/modama-agent
+      - "cargo"
+      - "llvm-cov"
+      - "run"
+      - "--no-clean"
+      - "--bin"
+      - "modama-agent"
+      - "--"
       - "--event-url=wss://smbdrop:5052"
       - "--token-service=https://smbdrop:5053"
       - "--mgmt-api-url=http://mgmtinterface"
@@ -85,6 +117,33 @@ services:
       - "--smb-port=445"
       - "--smb-domain=ER-C-Ingest"
       - "--ca-cert=/certs/ca/ca.cert.pem"
+
+  tests:
+    build:
+      context: ..
+      dockerfile: test-env/Dockerfile-tests
+    container_name: modama-tests
+    volumes:
+      - ./target:/usr/src/modama-rs/target/
+    profiles: ["tests"]  # don't run with default "docker compose up" command
+    command:
+      - /bin/bash
+      - "-c"
+      - "cargo llvm-cov --no-report"
+
+  only-report:
+    build:
+      context: ..
+      dockerfile: test-env/Dockerfile-tests
+    container_name: modama-tests
+    volumes:
+      - ./target:/usr/src/modama-rs/target/
+      - ./report-target:/usr/src/modama-rs/target/llvm-cov/
+    profiles: ["tests"]  # don't run with default "docker compose up" command
+    command:
+      - /bin/bash
+      - "-c"
+      - "cargo llvm-cov report --html"
 
   mgmtinterface:
     hostname: mgmtinterface
