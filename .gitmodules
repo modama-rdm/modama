@@ -1,9 +1,3 @@
-[submodule "tsm-client"]
-	path = cloud-erc/tsm-client
-	url = https://jugit.fz-juelich.de/d.weber/tsm-client.git
-[submodule "wsgidav"]
-	path = cloud-erc/wsgidav
-	url = https://iffgit.fz-juelich.de/clausen/wsgidav.git
 [submodule "wsgidav-updated"]
 	path = er-c-data/wsgidav
 	url = https://iffgit.fz-juelich.de/clausen/wsgidav.git
