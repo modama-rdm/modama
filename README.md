@@ -12,6 +12,13 @@ Or, after cloning, initialize and clone the submodules:
 git submodule init && git submodule update
 ```
 
+## Repository overview
+
+- `branding/` - logo and icons
+- `deploy/` - configuration for docker, docker-compose, nginx, ... for prod and dev
+- `modama-rs/` - components that are implemented in rust (`modama-agent`, `smbdrop` mainly)
+- `python/` - all the other services and clients, and common data structures
+
 # Installing requirements
 
 The system requires docker, see https://docs.docker.com/engine/install/
