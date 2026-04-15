@@ -1,13 +1,13 @@
 [submodule "wsgidav-updated"]
-	path = er-c-data/wsgidav
+	path = deploy/wsgidav
 	url = https://iffgit.fz-juelich.de/clausen/wsgidav.git
 	branch = suid
 [submodule "er-c-data/tsm-client"]
-	path = er-c-data/tsm-client
+	path = deploy/tsm-client
 	url = https://jugit.fz-juelich.de/d.weber/tsm-client.git
 [submodule "python/PyInotify"]
 	path = python/PyInotify
 	url = https://github.com/uellue/PyInotify
 [submodule "er-c-data/gateway/acme.sh"]
-	path = er-c-data/gateway/acme.sh
+	path = deploy/gateway/acme.sh
 	url = https://github.com/acmesh-official/acme.sh.git
