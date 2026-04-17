@@ -2,13 +2,14 @@ from typing import List
 from typing_extensions import TypedDict
 
 
-ADHOC = 'adhoc'
+ADHOC = "adhoc"
 
 
 class InvalidAPIUsage(Exception):
     """
     Exception type for conveying the right status code to return
     """
+
     status_code = 400
 
     def __init__(self, message, status_code=None, payload=None):
@@ -20,8 +21,8 @@ class InvalidAPIUsage(Exception):
 
     def to_dict(self):
         rv = dict(self.payload or ())
-        rv['message'] = self.message
-        rv['errno'] = 1
+        rv["message"] = self.message
+        rv["errno"] = 1
         return rv
 
 
