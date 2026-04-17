@@ -1,5 +1,9 @@
-from typing import Dict, Optional
 import requests
+from smbdrop_client.schema import (
+    DeleteShareResponse,
+    ListSharesResponse,
+    SerializedShare,
+)
 
 
 def _make_url(base_url: str, path: str) -> str:
@@ -16,8 +20,8 @@ class ShareClient:
         return None
 
     def create(
-        self, dest_path: str, uid: int, gid: int, resource: Optional[str] = None
-    ) -> Dict:
+        self, dest_path: str, uid: int, gid: int, resource: str | None = None
+    ) -> SerializedShare:
         """ """
         url = _make_url(self._base_url, "/share/")
         payload = {"dest_path": dest_path, "uid": uid, "gid": gid, "resource": resource}
@@ -27,20 +31,20 @@ class ShareClient:
                 f"something went wrong when creating the share for {dest_path},"
                 " please check the logs!"
             )
-        resp_data: Dict = resp.json()
+        resp_data: SerializedShare = resp.json()
         return resp_data
 
-    def list(self) -> Dict:
+    def list(self) -> ListSharesResponse:
         url = _make_url(self._base_url, "/share/")
         resp = requests.get(url, auth=self.auth)
         if not resp.ok:
             raise RuntimeError(
                 "something went wrong when listing shares, please check the logs!"
             )
-        resp_data: Dict = resp.json()
+        resp_data: ListSharesResponse = resp.json()
         return resp_data
 
-    def delete(self, share_id: str) -> None:
+    def delete(self, share_id: str) -> DeleteShareResponse:
         url = _make_url(self._base_url, f"/share/{share_id}/")
         resp = requests.delete(url, auth=self.auth)
         if not resp.ok:

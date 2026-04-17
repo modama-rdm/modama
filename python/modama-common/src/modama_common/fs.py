@@ -10,7 +10,7 @@ FS_IMMUTABLE_FL = 0x010
 
 
 # Based on https://www.geeklab.info/2021/04/chattr-and-lsattr-in-python/
-def is_immutable(file_path: str):
+def is_immutable(file_path: str) -> bool:
     """
     Raises :class:`OSError` or subclasses thereof
     if :func:`os.open` or :func:`fcntl.ioctl` fail, for whatever reason.
@@ -29,7 +29,7 @@ def is_immutable(file_path: str):
 
 
 # Based on https://www.geeklab.info/2021/04/chattr-and-lsattr-in-python/
-def set_immutable(file_path: str, immutable: bool):
+def set_immutable(file_path: str, immutable: bool) -> None:
     """
     Raises :class:`OSError` or subclasses thereof
     if :func:`os.open` or :func:`fcntl.ioctl` fail, for whatever reason.

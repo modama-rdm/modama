@@ -1,11 +1,16 @@
 import os
 from datetime import datetime
-from typing import Dict
 import shlex
+from typing import NotRequired, TypedDict, final
 
 import jsonschema
 import humanize
 from flask import Flask, render_template, request
+from smbdrop_client.schema import (
+    DeleteShareResponse,
+    ListSharesResponse,
+    SerializedShare,
+)
 from werkzeug.middleware.proxy_fix import ProxyFix
 import flask
 from flask_login import (
@@ -56,14 +61,14 @@ token_client = TokenClient(
 )
 
 
-def is_safe_url(target):
+def is_safe_url(target: str) -> bool:
     ref_url = urlparse(request.host_url)
     test_url = urlparse(urljoin(request.host_url, target))
     return test_url.scheme in ("http", "https") and ref_url.netloc == test_url.netloc
 
 
 @apiauth.verify_password
-def verify_password(username, password):
+def verify_password(username: str, password: str):
     if not username or not password:
         return None
     auth_result = client.authenticate(username, password)
@@ -71,8 +76,9 @@ def verify_password(username, password):
         return username
 
 
+@final
 class User:
-    def __init__(self, user_id):
+    def __init__(self, user_id: str):
         self.user_id = user_id
 
     @property
@@ -91,6 +97,7 @@ class User:
         return self.user_id
 
 
+@final
 class LoginForm(FlaskForm):
     username = StringField(
         "Username", validators=[DataRequired()], render_kw={"autofocus": True}
@@ -98,6 +105,7 @@ class LoginForm(FlaskForm):
     password = PasswordField("Password", validators=[DataRequired()])
 
 
+@final
 class AddProjectForm(FlaskForm):
     name = StringField(
         "name", validators=[DataRequired()], render_kw={"autofocus": True}
@@ -105,6 +113,7 @@ class AddProjectForm(FlaskForm):
     members = SelectMultipleField("members", validators=[])
 
 
+@final
 class ChangeProjectMembersForm(FlaskForm):
     members = SelectMultipleField("members", validators=[])
 
@@ -114,38 +123,41 @@ def default_dataset_name():
     return now.strftime("%Y-%m-%d-")
 
 
+@final
 class CreateDatasetForm(FlaskForm):
     name = StringField(
         "name", validators=[DataRequired()], render_kw={"autofocus": True}
     )
 
 
+@final
 class SealDatasetForm(FlaskForm):
     pass
 
 
+@final
 class ShareDatasetForm(FlaskForm):
     op = HiddenField("op", validators=[DataRequired()])
 
 
 @app.template_filter()
-def format_filesize(value):
+def format_filesize(value: int):
     return humanize.naturalsize(value, binary=True)
 
 
 @app.template_filter()
-def format_unixtime(value):
+def format_unixtime(value: float):
     d = datetime.fromtimestamp(value)
     return d.strftime("%Y-%m-%d %H:%M")
 
 
 @app.template_filter()
-def shellescape(filename):
+def shellescape(filename: str):
     return shlex.quote(filename)
 
 
 @login_manager.user_loader
-def load_user(user_id):
+def load_user(user_id: str):
     return User(user_id=user_id)
 
 
@@ -192,10 +204,10 @@ def project():
             result=projects,
         )
     plist = sorted(projects["projects"], key=lambda p: p["mtime"], reverse=True)
-    ownprojects = []
-    memberprojects = []
-    otherprojects = []
-    uid = current_user.user_id
+    ownprojects: list[proxy.SerializedProject] = []
+    memberprojects: list[proxy.SerializedProject] = []
+    otherprojects: list[proxy.SerializedProject] = []
+    uid: str = current_user.user_id
     user_info = client.id_user(uid)
     for p in plist:
         if p["owner"] == uid:
@@ -265,31 +277,31 @@ def add_project():
 
 
 @app.template_filter()
-def nextcloudlink(path, isdir=False):
+def nextcloudlink(path: str, isdir: bool = False) -> str:
     if not isdir:
         path = os.path.dirname(path)
     return app.config["NEXTCLOUD_BASE"] + quote_plus(path)
 
 
 @app.template_filter()
-def jupyterlink(path, isdir=False):
+def jupyterlink(path: str, isdir: bool = False) -> str:
     if not isdir:
         path = os.path.dirname(path)
     return app.config["JUPYTER_BASE"] + quote(path)
 
 
 @app.template_filter()
-def libertemlink(path):
+def libertemlink(path: str) -> str:
     return app.config["LIBERTEM_BASE"] + quote_plus(path)
 
 
 @app.template_filter()
-def imageviewerlink(path):
+def imageviewerlink(path: str) -> str:
     return app.config["IMAGE_VIEWER_BASE"] + quote_plus(path)
 
 
 @app.template_filter()
-def rsync(path, isdir=False):
+def rsync(path: str, isdir: bool = False) -> str:
     target = app.config["MOELLENSTEDT_BASE"] + path
     if isdir:
         target += "/"
@@ -303,14 +315,14 @@ def rsync(path, isdir=False):
 
 
 @app.template_filter()
-def sftp(path, isdir=False):
+def sftp(path: str, isdir: bool = False) -> str:
     if not isdir:
         path = os.path.dirname(path)
     target = app.config["MOELLENSTEDT_BASE"] + path
     return f"sftp -c aes128-ctr -o Compression=no {shellescape(current_user.user_id + '@' + target)}"
 
 
-def quote_path(path):
+def quote_path(path: str):
     """
     Consistently quote the path such that it can appear in the
     query part of a URL, as close to the standard as possible
@@ -320,7 +332,7 @@ def quote_path(path):
 
 
 @app.template_filter()
-def sampledbsearch(path):
+def sampledbsearch(path: str):
     base = app.config["SAMPLEDB_BASE"] + "objects/"
     urlpart = quote_path(path)
     search = f'"{urlpart}" in file_name'
@@ -328,7 +340,7 @@ def sampledbsearch(path):
 
 
 @app.template_filter()
-def add_path_to_query(url, path):
+def add_path_to_query(url: str, path: str) -> str:
     """
     Add a query string part to the `url` containing the `path`.
     Assumes that the URL doesn't contain a query path yet
@@ -342,22 +354,22 @@ def add_path_to_query(url, path):
 
 
 @app.template_filter()
-def main_smbpath(path):
+def main_smbpath(path: str) -> str:
     win_path = path.replace("/", "\\")
     base = app.config["MAIN_SMB_BASE"]
     return base + win_path
 
 
 @app.template_filter()
-def smblink(path):
+def smblink(path: str) -> str:
     return app.config["SMB_URL_BASE"] + quote(path)
 
 
-def smbpath(project, dsname):
+def smbpath(project: proxy.SerializedProject, dsname: str) -> str:
     return os.path.join(app.config["SMB_BASE"], project["relpath"], dsname)
 
 
-def split_smbpath(dest_path):
+def split_smbpath(dest_path: str) -> tuple[str, str]:
     head, dsname = os.path.split(dest_path)
     _, project = os.path.split(head)
     return (project, dsname)
@@ -371,19 +383,57 @@ def canonical_path(project, dsname=None):
         return os.path.join("/", project["relpath"], dsname)
 
 
-def add_share_info(datasets, project, uid, shares):
-    for ds in datasets:
+class ShareInfo(TypedDict):
+    resource: str | None
+
+    share_id: str
+    share_name: str
+    dest_path: str
+    created_timestamp: int
+
+    # temporary credentials:
+    username: str
+    password: str
+
+    # mapped to this unix user:
+    uid: int
+    gid: int
+
+    smb_host: NotRequired[str]
+    workgroup: NotRequired[str]
+
+
+class DatasetWithShareInfo(TypedDict):
+    name: str
+    immutable: bool
+    ctime: float
+    mtime: float
+    shared: bool
+    shareinfo: ShareInfo | None
+
+
+def add_share_info(
+    datasets: list[proxy.SerializedDataset],
+    project: proxy.SerializedProject,
+    uid: int,
+    shares: ListSharesResponse,
+) -> list[DatasetWithShareInfo]:
+    result: list[DatasetWithShareInfo] = []
+    for ds_orig in datasets:
+        ds: DatasetWithShareInfo = ds_orig  # pyright:ignore[reportAssignmentType]
         dest_path = os.path.normpath(smbpath(project, ds["name"]))
         ds["shareinfo"] = None
         ds["shared"] = False
-        for key, value in shares.items():
-            path_match = os.path.normpath(value["dest_path"]) == dest_path
-            if path_match and value["uid"] == uid:
+        for value in shares.values():
+            share_info: ShareInfo = value  # pyright:ignore[reportAssignmentType]
+            path_match = os.path.normpath(share_info["dest_path"]) == dest_path
+            if path_match and share_info["uid"] == uid:
                 ds["shared"] = True
-                ds["shareinfo"] = value
-                ds["shareinfo"]["smb_host"] = "moellenstedt.iff.kfa-juelich.de"
-                ds["shareinfo"]["workgroup"] = "ER-C-INGEST"
-    return datasets
+                share_info["smb_host"] = "moellenstedt.iff.kfa-juelich.de"
+                share_info["workgroup"] = "ER-C-INGEST"
+                ds["shareinfo"] = share_info
+        result.append(ds)
+    return result
 
 
 @app.route("/project/<name>/details/", methods=["GET"])
@@ -649,8 +699,8 @@ def logout():
 
 
 @app.route("/api/users/auth/", methods=["POST"])
-def api_authenticate_user() -> dict:
-    request_data: proxy.AuthenticateUserRequest = request.json  # type:ignore
+def api_authenticate_user() -> proxy.AuthenticateResponse:
+    request_data: proxy.AuthenticateUserRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(
             schema=proxy.AUTHENTICATE_USER_REQUEST_SCHEMA, instance=request_data
@@ -662,20 +712,20 @@ def api_authenticate_user() -> dict:
 
 @app.route("/api/users/id/<name>/", methods=["GET"])
 @apiauth.login_required
-def api_id_user(name) -> Dict:
+def api_id_user(name) -> proxy.IdUserResponse:
     return client.id_user(name)
 
 
 @app.route("/api/users/list/", methods=["GET"])
 @apiauth.login_required
-def api_get_user_list() -> Dict:
+def api_get_user_list() -> proxy.GetUserListResponse:
     return client.list_users()
 
 
 @app.route("/api/project/", methods=["POST"])
 @apiauth.login_required
-def api_create_project() -> Dict:
-    request_data: proxy.CreateProjectRequest = request.json  # type:ignore
+def api_create_project() -> proxy.CreateProjectResponse | proxy.GenericErrorResponse:
+    request_data: proxy.CreateProjectRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(
             schema=proxy.CREATE_PROJECT_REQUEST_SCHEMA, instance=request_data
@@ -696,20 +746,24 @@ def api_create_project() -> Dict:
 
 @app.route("/api/project/", methods=["GET"])
 @apiauth.login_required
-def api_list_projects() -> Dict:
+def api_list_projects() -> proxy.ListProjectsResponse:
     return client.list_projects()
 
 
 @app.route("/api/project/<project_name>/", methods=["GET"])
 @apiauth.login_required
-def api_project_details(project_name) -> Dict:
+def api_project_details(
+    project_name: str,
+) -> proxy.ProjectDetailsResponse | proxy.GenericErrorResponse:
     return client.projectdetails(project_name)
 
 
 @app.route("/api/project/<project_name>/dataset/", methods=["POST"])
 @apiauth.login_required
-def api_create_dataset(project_name) -> Dict:
-    request_data: proxy.CreateDatasetRequest = request.json  # type:ignore
+def api_create_dataset(
+    project_name: str,
+) -> proxy.CreateDatasetResponse | proxy.GenericErrorResponse:
+    request_data: proxy.CreateDatasetRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(
             schema=proxy.CREATE_DATASET_REQUEST_SCHEMA, instance=request_data
@@ -730,8 +784,8 @@ def api_create_dataset(project_name) -> Dict:
 
 @app.route("/api/project/<project_name>/dataset/seal/", methods=["POST"])
 @apiauth.login_required
-def api_seal_dataset(project_name):
-    request_data: proxy.CreateDatasetRequest = request.json  # type:ignore
+def api_seal_dataset(project_name: str):
+    request_data: proxy.SealDatasetRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(
             schema=proxy.SEAL_DATASET_REQUEST_SCHEMA, instance=request_data
@@ -752,8 +806,10 @@ def api_seal_dataset(project_name):
 
 @app.route("/api/project/<project_name>/members/", methods=["PATCH"])
 @apiauth.login_required
-def api_change_project_members(project_name):
-    request_data: proxy.ChangeMembersRequest = request.json  # type:ignore
+def api_change_project_members(
+    project_name: str,
+) -> proxy.ChangeProjectMembersResponse | proxy.GenericErrorResponse:
+    request_data: proxy.ChangeMembersRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(
             schema=proxy.CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA, instance=request_data
@@ -763,6 +819,8 @@ def api_change_project_members(project_name):
                 f"API user {request_data['user']} "
                 f"must equal authenticated user {apiauth.current_user()}."
             )
+        if request_data["op"] not in ("add", "remove"):
+            raise proxy.InvalidAPIUsage("op must be add or remove")
         return client.change_project_members(
             projectname=project_name,
             op=request_data["op"],
@@ -775,8 +833,8 @@ def api_change_project_members(project_name):
 
 @app.route("/api/share/", methods=["POST"])
 @apiauth.login_required
-def api_create_share() -> Dict:
-    request_data: CreateShareRequest = request.json  # type:ignore
+def api_create_share() -> SerializedShare:
+    request_data: CreateShareRequest = request.json  # pyright: ignore[reportAssignmentType]
     jsonschema.validate(schema=CREATE_SHARE_REQUEST_SCHEMA, instance=request_data)
 
     pr_info = client.projectdetails(request_data["project"])
@@ -819,7 +877,7 @@ def api_create_share() -> Dict:
 
 @app.route("/api/share/<share_id>/", methods=["DELETE"])
 @apiauth.login_required
-def api_delete_share(share_id: str) -> Dict:
+def api_delete_share(share_id: str) -> DeleteShareResponse:
     shares = smbclient.list()
     share = shares.get(share_id, None)
     if share is None:
@@ -837,8 +895,8 @@ def api_delete_share(share_id: str) -> Dict:
 
 @app.route("/api/share/", methods=["GET"])
 @apiauth.login_required
-def api_list_shares() -> Dict:
-    result = {}
+def api_list_shares() -> ListSharesResponse:
+    result: ListSharesResponse = {}
     shares = smbclient.list()
     user_info = client.id_user(apiauth.current_user())
     if user_info["errno"] != 0:
@@ -849,7 +907,7 @@ def api_list_shares() -> Dict:
     return result
 
 
-def get_path_pyramid(path):
+def get_path_pyramid(path: str) -> list[str]:
     path_pyramid = []
     # this strips trailing slashes, among other things
     head = os.path.normpath(path)
@@ -866,7 +924,7 @@ def get_path_pyramid(path):
     return path_pyramid
 
 
-def get_first_existing(cl: WebDAVClient, path_pyramid):
+def get_first_existing(cl: WebDAVClient, path_pyramid: list[str]):
     parent = "/"
     for parent, _ in reversed(path_pyramid):
         try:

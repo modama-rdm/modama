@@ -1,12 +1,19 @@
 from subprocess import CalledProcessError
-from typing import Dict
 
 from flask import Flask, request, jsonify
 import jsonschema
+import jsonschema.exceptions
 import pamela
 
 from permissions.api import AdhocProject, ValidationError, authenticate, list_users, uid
 from permissions_client.schema import (
+    AuthenticateResponse,
+    ChangeProjectMembersResponse,
+    CreateDatasetResponse,
+    CreateProjectResponse,
+    GenericErrorResponse,
+    GetUserListResponse,
+    IdUserResponse,
     InvalidAPIUsage,
     AUTHENTICATE_USER_REQUEST_SCHEMA,
     AuthenticateUserRequest,
@@ -15,9 +22,12 @@ from permissions_client.schema import (
     CREATE_DATASET_REQUEST_SCHEMA,
     CreateDatasetRequest,
     SEAL_DATASET_REQUEST_SCHEMA,
+    ListProjectsResponse,
+    ProjectDetailsResponse,
     SealDatasetRequest,
     CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA,
     ChangeMembersRequest,
+    SealDatasetResponse,
 )
 
 app = Flask(__name__)
@@ -32,8 +42,8 @@ def invalid_api_usage(e):
 
 
 @app.route("/users/auth/", methods=["POST"])
-def authenticate_user() -> dict:
-    request_data: AuthenticateUserRequest = request.json  # type:ignore
+def authenticate_user() -> AuthenticateResponse:
+    request_data: AuthenticateUserRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(
             schema=AUTHENTICATE_USER_REQUEST_SCHEMA, instance=request_data
@@ -53,7 +63,7 @@ def authenticate_user() -> dict:
 
 
 @app.route("/users/id/<name>/", methods=["GET"])
-def id_user(name) -> dict:
+def id_user(name: str) -> IdUserResponse:
     return {
         "errno": 0,
         "id": uid(name),
@@ -61,7 +71,7 @@ def id_user(name) -> dict:
 
 
 @app.route("/users/list/", methods=["GET"])
-def get_user_list() -> Dict:
+def get_user_list() -> GetUserListResponse:
     return {
         "errno": 0,
         "users": list_users(app.config["ADHOC_GROUP"]),
@@ -69,8 +79,8 @@ def get_user_list() -> Dict:
 
 
 @app.route("/project/", methods=["POST"])
-def create_project() -> Dict:
-    request_data: CreateProjectRequest = request.json  # type:ignore
+def create_project() -> CreateProjectResponse | GenericErrorResponse:
+    request_data: CreateProjectRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(schema=CREATE_PROJECT_REQUEST_SCHEMA, instance=request_data)
         project = AdhocProject.create(
@@ -90,7 +100,7 @@ def create_project() -> Dict:
 
 
 @app.route("/project/", methods=["GET"])
-def list_projects() -> Dict:
+def list_projects() -> ListProjectsResponse:
     # TODO: catch exceptions? OSError?
     project_names = AdhocProject.list_all()
     return {
@@ -105,7 +115,7 @@ def list_projects() -> Dict:
 
 
 @app.route("/project/<project_name>/", methods=["GET"])
-def project_details(project_name) -> Dict:
+def project_details(project_name: str) -> ProjectDetailsResponse | GenericErrorResponse:
     fast = request.args.get("fast", default=False, type=bool)
     try:
         p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
@@ -129,8 +139,8 @@ def project_details(project_name) -> Dict:
 
 
 @app.route("/project/<project_name>/dataset/", methods=["POST"])
-def create_dataset(project_name) -> Dict:
-    request_data: CreateDatasetRequest = request.json  # type:ignore
+def create_dataset(project_name: str) -> CreateDatasetResponse | GenericErrorResponse:
+    request_data: CreateDatasetRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(schema=CREATE_DATASET_REQUEST_SCHEMA, instance=request_data)
         p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
@@ -148,8 +158,8 @@ def create_dataset(project_name) -> Dict:
 # we are using a json payload for this request, which may seem a bit like
 # overkill....
 @app.route("/project/<project_name>/dataset/seal/", methods=["POST"])
-def seal_dataset(project_name):
-    request_data: SealDatasetRequest = request.json  # type:ignore
+def seal_dataset(project_name: str) -> SealDatasetResponse | GenericErrorResponse:
+    request_data: SealDatasetRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
         jsonschema.validate(schema=SEAL_DATASET_REQUEST_SCHEMA, instance=request_data)
         # TODO: catch exceptions?
@@ -165,8 +175,10 @@ def seal_dataset(project_name):
 
 
 @app.route("/project/<project_name>/members/", methods=["PATCH"])
-def change_project_members(project_name):
-    request_data: ChangeMembersRequest = request.json  # type:ignore
+def change_project_members(
+    project_name: str,
+) -> ChangeProjectMembersResponse | GenericErrorResponse:
+    request_data: ChangeMembersRequest = request.json  # pyright: ignore[reportAssignmentType]
     # TODO: catch exceptions from `add_members` and `remove_members`
     try:
         jsonschema.validate(

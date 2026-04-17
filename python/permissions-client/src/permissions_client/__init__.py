@@ -1,8 +1,23 @@
-from typing import Iterable, Optional
 import urllib.parse
+from collections.abc import Iterable
+from typing import Literal
 
 import requests
 import requests.auth
+
+from permissions_client.schema import (
+    AuthenticateResponse,
+    ChangeProjectMembersResponse,
+    CreateDatasetResponse,
+    CreateProjectResponse,
+    GenericErrorResponse,
+    GetUserListResponse,
+    IdUidInner,
+    IdUserResponse,
+    ListProjectsResponse,
+    ProjectDetailsResponse,
+    SealDatasetResponse,
+)
 
 
 def quote(s: str):
@@ -14,19 +29,19 @@ class PermissionsClient:
         self,
         base_url: str,
         use_auth: bool = False,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
     ):
-        self.base_url = base_url
-        self.username = username
-        self.password = password
-        self.id = None
+        self.base_url: str = base_url
+        self.username: str | None = username
+        self.password: str | None = password
+        self.id: None | IdUidInner = None
 
     @property
     def auth(self):
         return None
 
-    def authenticate(self, username: str, password: str):
+    def authenticate(self, username: str, password: str) -> AuthenticateResponse:
         r = requests.post(
             f"{self.base_url}/users/auth/",
             json={
@@ -34,31 +49,35 @@ class PermissionsClient:
                 "password": str(password),
             },
         )
-        result = r.json()
+        result: AuthenticateResponse = r.json()  # pyright: ignore[reportAny]
         if result["errno"] == 0:
             self.username = username
             self.password = password
             self.id = result["id"]
         return result
 
-    def id_user(self, name):
+    def id_user(self, name: str) -> IdUserResponse:
         return requests.get(
             f"{self.base_url}/users/id/{quote(name)}/", auth=self.auth
         ).json()
 
-    def list_users(self):
+    def list_users(self) -> GetUserListResponse:
         return requests.get(f"{self.base_url}/users/list/", auth=self.auth).json()
 
-    def list_projects(self):
+    def list_projects(self) -> ListProjectsResponse:
         return requests.get(f"{self.base_url}/project/", auth=self.auth).json()
 
-    def projectdetails(self, projectname, fast: bool = False):
+    def projectdetails(
+        self, projectname: str, fast: bool = False
+    ) -> ProjectDetailsResponse | GenericErrorResponse:
         fast_qs = "?fast=1" if fast else ""
         return requests.get(
             f"{self.base_url}/project/{quote(projectname)}/{fast_qs}", auth=self.auth
         ).json()
 
-    def create_project(self, name: str, owner: str, members: Iterable):
+    def create_project(
+        self, name: str, owner: str, members: Iterable
+    ) -> CreateProjectResponse | GenericErrorResponse:
         return requests.post(
             f"{self.base_url}/project/",
             json={"name": name, "owner": owner, "members": list(members)},
@@ -66,8 +85,12 @@ class PermissionsClient:
         ).json()
 
     def change_project_members(
-        self, projectname: str, op, members: Iterable, user: str
-    ):
+        self,
+        projectname: str,
+        op: Literal["add"] | Literal["remove"],
+        members: Iterable[str],
+        user: str,
+    ) -> ChangeProjectMembersResponse | GenericErrorResponse:
         assert op in ("add", "remove")
         return requests.patch(
             f"{self.base_url}/project/{quote(projectname)}/members/",
@@ -75,7 +98,9 @@ class PermissionsClient:
             auth=self.auth,
         ).json()
 
-    def create_dataset(self, projectname: str, name: str, user: str):
+    def create_dataset(
+        self, projectname: str, name: str, user: str
+    ) -> CreateDatasetResponse | GenericErrorResponse:
         result = requests.post(
             f"{self.base_url}/project/{quote(projectname)}/dataset/",
             json={
@@ -88,7 +113,9 @@ class PermissionsClient:
         result.raise_for_status()
         return result.json()
 
-    def seal_dataset(self, projectname: str, name: str, user: str):
+    def seal_dataset(
+        self, projectname: str, name: str, user: str
+    ) -> SealDatasetResponse | GenericErrorResponse:
         return requests.post(
             f"{self.base_url}/project/{quote(projectname)}/dataset/seal/",
             json={

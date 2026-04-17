@@ -1,4 +1,4 @@
-from typing import List
+from typing import Literal
 from typing_extensions import TypedDict
 
 
@@ -83,7 +83,7 @@ CREATE_PROJECT_REQUEST_SCHEMA = {
 class CreateProjectRequest(TypedDict):
     name: str
     owner: str
-    members: List[str]
+    members: list[str]
 
 
 CREATE_DATASET_REQUEST_SCHEMA = {
@@ -168,5 +168,76 @@ CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA = {
 
 class ChangeMembersRequest(TypedDict):
     op: str
-    members: List[str]
+    members: list[str]
     user: str
+
+
+class GetUserListResponse(TypedDict):
+    errno: Literal[0]
+    users: list[str]
+
+
+class GenericErrorResponse(TypedDict):
+    errno: int
+    message: str
+
+
+class SerializedProject(TypedDict):
+    relpath: str
+    name: str
+    owner: str
+    members: list[str]
+    ctime: float
+    mtime: float
+    gid: int
+    usage_bytes: int
+
+
+class CreateProjectResponse(TypedDict):
+    errno: Literal[0]
+    project: SerializedProject
+
+
+class IdUidInner(TypedDict):
+    uid: int
+
+
+class IdUserResponse(TypedDict):
+    errno: Literal[0]
+    id: IdUidInner
+
+
+class ChangeProjectMembersResponse(TypedDict):
+    errno: Literal[0]
+    project: SerializedProject
+
+
+class SealDatasetResponse(TypedDict):
+    errno: Literal[0]
+
+
+class CreateDatasetResponse(TypedDict):
+    errno: Literal[0]
+
+
+class SerializedDataset(TypedDict):
+    name: str
+    immutable: bool
+    ctime: float
+    mtime: float
+
+
+class ProjectDetailsResponse(TypedDict):
+    errno: Literal[0]
+    project: SerializedProject
+    datasets: list[SerializedDataset]
+
+
+class ListProjectsResponse(TypedDict):
+    errno: Literal[0]
+    projects: list[SerializedProject]
+
+
+class AuthenticateResponse(TypedDict):
+    errno: Literal[0]
+    id: IdUidInner

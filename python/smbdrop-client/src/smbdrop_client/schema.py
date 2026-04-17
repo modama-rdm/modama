@@ -1,4 +1,4 @@
-from typing_extensions import TypedDict, Optional
+from typing import Literal, TypedDict
 
 
 CREATE_SHARE_REQUEST_SCHEMA = {
@@ -34,4 +34,28 @@ class CreateShareRequest(TypedDict):
     dest_path: str
     uid: int
     gid: int
-    resource: Optional[str]
+    resource: str | None
+
+
+class SerializedShare(TypedDict):
+    resource: str | None
+
+    share_id: str
+    share_name: str
+    dest_path: str
+    created_timestamp: int
+
+    # temporary credentials:
+    username: str
+    password: str
+
+    # mapped to this unix user:
+    uid: int
+    gid: int
+
+
+class DeleteShareResponse(TypedDict):
+    status: Literal["ok"]
+
+
+ListSharesResponse = dict[str, SerializedShare]

@@ -1,19 +1,17 @@
+import grp
 import os
 import pwd
-import grp
 import re
-import subprocess
-import stat
 import shutil
-from typing import NamedTuple, List
+import stat
+import subprocess
 from collections.abc import Collection
+from typing import NamedTuple, final, TypedDict
 
 import pamela
 import posix1e  # pylibacl, needs libacl1-dev, https://pylibacl.k1024.org/
-
 from modama_common.fs import is_immutable, set_immutable
-from permissions_client.schema import ADHOC
-
+from permissions_client.schema import ADHOC, SerializedProject
 
 BASE_PATH = "/data/"
 
@@ -123,7 +121,7 @@ def check_valid_dataset(name: str):
         )
 
 
-def check_project_name_taken(name):
+def check_project_name_taken(name: str):
     if os.path.exists(os.path.join(BASE_PATH, name)):
         raise ValidationError("File or folder exists in base folder.")
     if os.path.exists(os.path.join(ADHOC_PATH, name)):
@@ -132,19 +130,23 @@ def check_project_name_taken(name):
         raise ValidationError("File or exists in sharing folder.")
 
 
-def is_group(name):
+def is_group(name: str):
     try:
-        grp.getgrnam(name)
+        _ = grp.getgrnam(name)
         return True
     except KeyError:
         return False
 
 
-def authenticate(username, password):
+def authenticate(username: str, password: str) -> pamela.PamHandle | None:
     return pamela.authenticate(username, password)
 
 
-def uid(username):
+class _UidType(TypedDict):
+    uid: int
+
+
+def uid(username: str) -> _UidType:
     return {"uid": pwd.getpwnam(username).pw_uid}
 
 
@@ -155,14 +157,14 @@ def uid_to_username(uid: int) -> str:
         return str(uid)
 
 
-def list_users(adhoc_group):
+def list_users(adhoc_group: str) -> list[str]:
     # FIXME this only works if adhoc_group is not
     # a user's primary group. Workaround on systems managed
     # with IPA (LDAP, SSSD etc) TBD.
     return grp.getgrnam(adhoc_group).gr_mem
 
 
-def check_can_create(name, adhoc_group):
+def check_can_create(name: str, adhoc_group: str):
     """
     Check if the user is permitted to create ad-hoc projects
     """
@@ -183,8 +185,9 @@ class Dataset(NamedTuple):
     mtime: float
 
 
+@final
 class AdhocProject:
-    def __init__(self, name, adhoc_group):
+    def __init__(self, name: str, adhoc_group: str | None):
         if adhoc_group is None:
             adhoc_group = ADHOC_GROUP
         self.adhoc_group = adhoc_group
@@ -217,7 +220,9 @@ class AdhocProject:
         return os.path.getctime(self.path)
 
     @classmethod
-    def create(cls, name: str, owner: str, members: List[str], adhoc_group):
+    def create(
+        cls, name: str, owner: str, members: list[str], adhoc_group: str | None = None
+    ):
         """
         Create a new ad-hoc project folder
 
@@ -266,7 +271,7 @@ class AdhocProject:
 
             # Initialize ACL since it is difficult and brittle to do that
             # with pylibacl
-            subprocess.run(
+            _ = subprocess.run(
                 ["setfacl", "-m", "o:rX,d:o:rX", folder],
                 capture_output=True,
                 check=True,
@@ -278,13 +283,13 @@ class AdhocProject:
             raise e
         return project
 
-    def check_can_modify(self, username):
+    def check_can_modify(self, username: str):
         if self.owner != username:
             raise ValidationError(
                 f'User "{username}" cannot modify project {self.name}: Not an owner.'
             )
 
-    def check_can_seal(self, dataset, username):
+    def check_can_seal(self, dataset: str, username: str):
         if self.owner == username:
             return
         # FIXME or check write permission to dataset path?
@@ -295,8 +300,8 @@ class AdhocProject:
         )
 
     @staticmethod
-    def list_all():
-        result = []
+    def list_all() -> list[str]:
+        result: list[str] = []
         files = os.listdir(ADHOC_PATH)
         for f in files:
             if os.path.isdir(os.path.join(ADHOC_PATH, f)):
@@ -317,7 +322,7 @@ class AdhocProject:
         return uid_to_username(uid)
 
     @property
-    def members(self) -> List[str]:
+    def members(self) -> list[str]:
         members = []
         # Members have a default ACL for the ad-hoc project's folder
         acl = posix1e.ACL(filedef=self.path)
@@ -350,8 +355,10 @@ class AdhocProject:
                 )
         return acl
 
-    def add_members(self, usernames: List[str], user) -> None:
-        """
+    def add_members(self, usernames: list[str], user: str) -> None:
+        """Add users listed in `usernames` to this project.
+
+
         Exceptions can come from posix1e, os.walk,
         :func:`get_immutable`and :func:`set_immutable`. Most will be added
         to a collection and raised as :class:`AccumulatedMemberError` in the end.
@@ -364,10 +371,19 @@ class AdhocProject:
         manipulated!
 
         TOCTOU vulnerabilities are probably still present.
+
+        Parameters
+        ----------
+        usernames
+            The users to add to this project
+
+        user
+            The user who wants to perform the action
+
         """
 
         def add(
-            entries: List[posix1e.Entry], new_uids: Collection[int], filename: str
+            entries: list[posix1e.Entry], new_uids: Collection[int], filename: str
         ) -> None:
             acl = self.get_initial_acl(filename, default=False)
             # Delete any existing entries for the new user
@@ -441,7 +457,7 @@ class AdhocProject:
         if errors:
             raise AccumulatedMemberError("Encountered errors when walking path", errors)
 
-    def remove_members(self, usernames, user):
+    def remove_members(self, usernames: list[str], user: str) -> None:
         """
         See :meth:`add_members()` for safety considerations!
         """
@@ -507,8 +523,8 @@ class AdhocProject:
             raise AccumulatedMemberError("Encountered errors when walking path", errors)
 
     @property
-    def datasets(self):
-        result = []
+    def datasets(self) -> list[Dataset]:
+        result: list[Dataset] = []
         for filename in os.listdir(self.path):
             root = os.path.join(self.path, filename)
             raw = os.path.join(root, "raw")
@@ -523,7 +539,7 @@ class AdhocProject:
                 )
         return result
 
-    def add_dataset(self, name, user):
+    def add_dataset(self, name: str, user: str):
         """
         Permissions, ACLs etc will be set by default ACLs and the watchdog.
         """
@@ -535,14 +551,14 @@ class AdhocProject:
         # file system permissions are enforced
         # Don't use mkdir -p so that an error is triggered if directory exists
 
-        subprocess.run(
+        _ = subprocess.run(
             ["sudo", "-u", user, "mkdir", target_base_path, target_raw_path],
             capture_output=True,
             check=True,
             text=True,
         )
 
-    def seal_dataset(self, name, user):
+    def seal_dataset(self, name: str, user: str):
         """
         Recursively set the :code:`raw` subfolder of a dataset and its contents immutable
 
@@ -590,7 +606,7 @@ class AdhocProject:
                     set_immutable(target, True)
 
     @property
-    def diskusage(self):
+    def diskusage(self) -> int:
         result = subprocess.run(
             ["du", "--total", "--summarize", "--bytes", self.path],
             capture_output=True,
@@ -602,7 +618,7 @@ class AdhocProject:
         size = last_line.split("\t")[0]
         return int(size)
 
-    def serialize(self, fast: bool = False):
+    def serialize(self, fast: bool = False) -> SerializedProject:
         """
         Parameters
         ----------
@@ -610,6 +626,9 @@ class AdhocProject:
             Don't perform potentially expensive operations, like ones that
             stat all files in the project
         """
+        usage = None
+        if not fast:
+            usage = self.diskusage
         serialized = {
             "relpath": self.relpath,
             "name": self.name,
@@ -618,9 +637,8 @@ class AdhocProject:
             "ctime": self.ctime,
             "mtime": self.mtime,
             "gid": self.gid,
+            "usage_bytes": usage,
         }
-        if not fast:
-            serialized["usage_bytes"] = self.diskusage
         return serialized
 
 

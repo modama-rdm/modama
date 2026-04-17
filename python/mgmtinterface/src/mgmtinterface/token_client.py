@@ -1,6 +1,7 @@
-from typing import Dict, Literal, Union
+from typing import Any, Literal, final
 from urllib.parse import urlparse, ParseResult
 import requests
+from typing_extensions import override
 
 
 def _make_url(base_url: str, path: str) -> str:
@@ -13,6 +14,7 @@ class VerifyFailed(Exception):
     pass
 
 
+@final
 class Agent:
     def __init__(self, url: str):
         self._url = url
@@ -26,10 +28,12 @@ class Agent:
     def _parse_url(self) -> ParseResult:
         return urlparse(self._url)
 
+    @override
     def __repr__(self):
         return f"<Agent {self._url}>"
 
 
+@final
 class TokenClient:
     def __init__(self, base_url: str, ca_cert: str):
         self._base_url = base_url
@@ -44,7 +48,7 @@ class TokenClient:
         resp = requests.put(url, data=token.encode("utf8"), verify=self._ca_cert)
         if not resp.ok:
             raise VerifyFailed("non-200 response when verifying token")
-        resp_data: Union[Dict, Literal["Invalid"]] = resp.json()
+        resp_data: dict[Any, Any] | Literal["Invalid"] = resp.json()
         if resp_data == "Invalid":
             raise VerifyFailed("Invalid token")
         if "VerifiedAgent" not in resp_data:
