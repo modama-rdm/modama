@@ -19,12 +19,12 @@ CREATE_SHARE_REQUEST_SCHEMA = {
         "gid": {
             "type": "number",
             "description": "The numerical Unix GID of the primary group "
-                           "for the user that we should impersonate",
+            "for the user that we should impersonate",
         },
         "resource": {
             "type": "string",
             "description": "The name of the resource this share belongs to",
-        }
+        },
     },
     "required": ["dest_path"],
 }

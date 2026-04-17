@@ -3,7 +3,7 @@ import requests
 
 
 def _make_url(base_url: str, path: str) -> str:
-    assert base_url[-1] != '/'
+    assert base_url[-1] != "/"
     return base_url + path
 
 
@@ -15,9 +15,10 @@ class ShareClient:
     def auth(self):
         return None
 
-    def create(self, dest_path: str, uid: int, gid: int, resource: Optional[str] = None) -> Dict:
-        """
-        """
+    def create(
+        self, dest_path: str, uid: int, gid: int, resource: Optional[str] = None
+    ) -> Dict:
+        """ """
         url = _make_url(self._base_url, "/share/")
         payload = {"dest_path": dest_path, "uid": uid, "gid": gid, "resource": resource}
         resp = requests.post(url, json=payload, auth=self.auth)
@@ -34,8 +35,7 @@ class ShareClient:
         resp = requests.get(url, auth=self.auth)
         if not resp.ok:
             raise RuntimeError(
-                "something went wrong when listing shares,"
-                " please check the logs!"
+                "something went wrong when listing shares, please check the logs!"
             )
         resp_data: Dict = resp.json()
         return resp_data
