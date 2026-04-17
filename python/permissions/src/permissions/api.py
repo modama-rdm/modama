@@ -187,7 +187,7 @@ class Dataset(NamedTuple):
 
 @final
 class AdhocProject:
-    def __init__(self, name: str, adhoc_group: str | None):
+    def __init__(self, name: str, adhoc_group: str | None = None):
         if adhoc_group is None:
             adhoc_group = ADHOC_GROUP
         self.adhoc_group = adhoc_group
@@ -629,7 +629,7 @@ class AdhocProject:
         usage = None
         if not fast:
             usage = self.diskusage
-        serialized = {
+        serialized: SerializedProject = {
             "relpath": self.relpath,
             "name": self.name,
             "owner": self.owner,

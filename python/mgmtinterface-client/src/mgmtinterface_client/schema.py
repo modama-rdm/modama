@@ -29,3 +29,4 @@ CREATE_SHARE_REQUEST_SCHEMA = {
 class CreateShareRequest(TypedDict):
     project: str
     dataset: str
+    resource: str | None

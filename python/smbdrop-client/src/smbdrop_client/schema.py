@@ -59,3 +59,7 @@ class DeleteShareResponse(TypedDict):
 
 
 ListSharesResponse = dict[str, SerializedShare]
+
+
+class CreateShareResponse(TypedDict):
+    share: SerializedShare

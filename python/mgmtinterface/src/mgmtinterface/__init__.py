@@ -377,7 +377,7 @@ def split_smbpath(dest_path: str) -> tuple[str, str]:
 
 
 @app.template_filter()
-def canonical_path(project, dsname=None):
+def canonical_path(project: proxy.SerializedProject, dsname: str | None = None):
     if dsname is None:
         return os.path.join("/", project["relpath"])
     else:
@@ -873,7 +873,7 @@ def api_create_share() -> SerializedShare:
         gid=pr_info["project"]["gid"],
         resource=resource,
     )
-    return dict(resp["share"])
+    return resp["share"]
 
 
 @app.route("/api/share/<share_id>/", methods=["DELETE"])

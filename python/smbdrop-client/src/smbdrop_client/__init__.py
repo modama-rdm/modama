@@ -1,8 +1,8 @@
 import requests
 from smbdrop_client.schema import (
+    CreateShareResponse,
     DeleteShareResponse,
     ListSharesResponse,
-    SerializedShare,
 )
 
 
@@ -21,7 +21,7 @@ class ShareClient:
 
     def create(
         self, dest_path: str, uid: int, gid: int, resource: str | None = None
-    ) -> SerializedShare:
+    ) -> CreateShareResponse:
         """ """
         url = _make_url(self._base_url, "/share/")
         payload = {"dest_path": dest_path, "uid": uid, "gid": gid, "resource": resource}
@@ -31,7 +31,7 @@ class ShareClient:
                 f"something went wrong when creating the share for {dest_path},"
                 " please check the logs!"
             )
-        resp_data: SerializedShare = resp.json()
+        resp_data: CreateShareResponse = resp.json()
         return resp_data
 
     def list(self) -> ListSharesResponse:

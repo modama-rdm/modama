@@ -190,7 +190,7 @@ class SerializedProject(TypedDict):
     ctime: float
     mtime: float
     gid: int
-    usage_bytes: int
+    usage_bytes: int | None
 
 
 class CreateProjectResponse(TypedDict):

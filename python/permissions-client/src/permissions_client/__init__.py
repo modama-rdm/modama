@@ -76,7 +76,10 @@ class PermissionsClient:
         ).json()
 
     def create_project(
-        self, name: str, owner: str, members: Iterable
+        self,
+        name: str,
+        owner: str,
+        members: Iterable[str],
     ) -> CreateProjectResponse | GenericErrorResponse:
         return requests.post(
             f"{self.base_url}/project/",
