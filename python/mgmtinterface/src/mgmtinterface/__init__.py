@@ -1,7 +1,8 @@
 import os
 from datetime import datetime
 import shlex
-from typing import NotRequired, TypedDict, final
+from typing import TypedDict, final
+from typing_extensions import NotRequired
 
 import jsonschema
 import humanize
