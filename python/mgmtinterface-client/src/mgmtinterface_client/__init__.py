@@ -23,35 +23,32 @@ class MgmtClient(PermissionsClient):
     def auth(self):
         return requests.auth.HTTPBasicAuth(self.username, self.password)
 
-    def create_share(self, project: str, dataset: str, resource: Optional[str] = None) -> Dict:
-        """
-        """
+    def create_share(
+        self, project: str, dataset: str, resource: Optional[str] = None
+    ) -> Dict:
+        """ """
         resp = requests.post(
             f"{self.base_url}/share/",
             json={
-                'project': project,
-                'dataset': dataset,
-                'resource': resource,
+                "project": project,
+                "dataset": dataset,
+                "resource": resource,
             },
-            auth=self.auth
+            auth=self.auth,
         )
         resp.raise_for_status()
         resp_data: Dict = resp.json()
         return resp_data
 
     def list_shares(self) -> Dict:
-        resp = requests.get(
-            f"{self.base_url}/share/",
-            auth=self.auth
-        )
+        resp = requests.get(f"{self.base_url}/share/", auth=self.auth)
         resp.raise_for_status()
         resp_data: Dict = resp.json()
         return resp_data
 
     def delete_share(self, share_id: int) -> Dict:
         resp = requests.delete(
-            f"{self.base_url}/share/{quote(share_id)}/",
-            auth=self.auth
+            f"{self.base_url}/share/{quote(share_id)}/", auth=self.auth
         )
         resp.raise_for_status()
         resp_data: Dict = resp.json()
