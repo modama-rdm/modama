@@ -5,9 +5,7 @@ from flask import Flask, request
 import jsonschema
 
 from smbdrop_client.schema import CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
-from smbdrop.share_manager import (
-    SambaProcessManager, SambaConfigManager, ShareManager
-)
+from smbdrop.share_manager import SambaProcessManager, SambaConfigManager, ShareManager
 from smbdrop.mount_manager import MountManager
 
 app = Flask(__name__)

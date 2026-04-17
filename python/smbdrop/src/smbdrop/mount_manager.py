@@ -20,7 +20,7 @@ def unescape_octal(line: str):
     while True:
         try:
             char = next(char_iter)
-            if char == '\\':
+            if char == "\\":
                 # start of an octal sequence, read the next three characters:
                 num_as_str = next(char_iter) + next(char_iter) + next(char_iter)
                 result.append(chr(int(num_as_str, 8)))
@@ -60,7 +60,7 @@ class MountManager:
 
     def __init__(
         self,
-        bind_mount_prefix: str = '/run/smbdrop/shares/',
+        bind_mount_prefix: str = "/run/smbdrop/shares/",
     ):
         self._bind_mount_prefix = bind_mount_prefix
         if not os.path.exists(bind_mount_prefix):
@@ -83,7 +83,9 @@ class MountManager:
 
         log.debug(
             "current_mounts=%d, to_umount=%s, to_mount=%s",
-            current_mounts, to_umount, to_mount
+            current_mounts,
+            to_umount,
+            to_mount,
         )
 
         # first umount, then mount:
@@ -118,14 +120,16 @@ class MountManager:
         #    stays this way. We do this here by setting the immutable flag, and
         #    keeping it until after the mount finished successfully:
         src_path = os.path.normpath(m.src)
-        if src_path.endswith('/'):
+        if src_path.endswith("/"):
             # if we do `chattr +i /some/symlink/`,  we actually _follow_ the symlink,
             # and set the link target immutable. Can't have that...
             raise MountError("Trailing slashes should be stripped out")
         set_immutable(src_path, True)
         try:
             if os.path.islink(src_path) or not os.path.isdir(src_path):
-                raise MountError(f"{src_path} is a symlink or not a directory, aborting")
+                raise MountError(
+                    f"{src_path} is a symlink or not a directory, aborting"
+                )
             # 1) Create mountpoint, if it doesn't exist:
             if not os.path.exists(m.dest):
                 os.mkdir(m.dest)
@@ -157,7 +161,7 @@ class MountManager:
 
         for line in lines:
             # limit here, as we don't need to parse most of the fields
-            parts = line.split(' ', 5)
+            parts = line.split(" ", 5)
             root = unescape_octal(parts[3])
             mount_point = unescape_octal(parts[4])
             if mount_point.startswith(self._bind_mount_prefix):
@@ -172,4 +176,4 @@ if __name__ == "__main__":
     assert unescape_octal(r"as\040df") == "as df"
     assert unescape_octal(r"as\043df") == "as#df"
 
-    print(MountManager(bind_mount_prefix='/mnt/smbdrop/').get_current_mounts())
+    print(MountManager(bind_mount_prefix="/mnt/smbdrop/").get_current_mounts())
