@@ -35,6 +35,13 @@ rust-tests:
     - rustup component add clippy
     - cd modama-rs/ && cargo check && cargo clippy && cargo test
 
+lint-and-format:
+  stage: test
+  image: ghcr.io/astral-sh/uv:debian
+  script:
+    - uvx ruff format --check --diff
+    - uvx ruff check
+
 container-image-build:
   stage: build
   image:
