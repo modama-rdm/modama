@@ -12,8 +12,15 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtCore import (
-    Qt, QObject, Signal, Slot, Property, QRunnable, QThreadPool,
-    QAbstractListModel, QTimer,
+    Qt,
+    QObject,
+    Signal,
+    Slot,
+    Property,
+    QRunnable,
+    QThreadPool,
+    QAbstractListModel,
+    QTimer,
 )
 
 from smbdrop_gui.mount import get_mm_class, MountManager
@@ -55,11 +62,13 @@ class DoListProjects(QRunnable):
     def run(self) -> None:
         resp = self.login_model.mgmt_client.list_projects()
         print(f"got list of projects: {resp['projects']}")
-        self.model._set_projects([
-            project["name"]
-            for project in resp["projects"]
-            if self.login_model.username in project["members"]
-        ])
+        self.model._set_projects(
+            [
+                project["name"]
+                for project in resp["projects"]
+                if self.login_model.username in project["members"]
+            ]
+        )
 
 
 class DoListSessions(QRunnable):
@@ -81,7 +90,13 @@ class DoListSessions(QRunnable):
 
 
 class DoCreateSession(QRunnable):
-    def __init__(self, model: "SessionModel", login_model: "LoginModel", project_name: str, session_name: str) -> None:
+    def __init__(
+        self,
+        model: "SessionModel",
+        login_model: "LoginModel",
+        project_name: str,
+        session_name: str,
+    ) -> None:
         super().__init__()
         self.model = model
         self.login_model = login_model
@@ -100,7 +115,7 @@ class DoCreateSession(QRunnable):
             resp = self.login_model.mgmt_client.create_dataset(
                 projectname=project_name,
                 name=session_name,
-                user=self.login_model.username
+                user=self.login_model.username,
             )
             if "message" in resp:
                 print(resp["message"])
@@ -117,7 +132,13 @@ class DoCreateSession(QRunnable):
 
 
 class DoCloseSession(QRunnable):
-    def __init__(self, model: "SessionModel", login_model: "LoginModel", share_id: str, mm: MountManager) -> None:
+    def __init__(
+        self,
+        model: "SessionModel",
+        login_model: "LoginModel",
+        share_id: str,
+        mm: MountManager,
+    ) -> None:
         super().__init__()
         self.model = model
         self.login_model = login_model
@@ -329,10 +350,12 @@ class ProjectListModel(QAbstractListModel):
         return self._projects[0]
 
     def data(self, index, role):
-        if (role == Qt.DisplayRole
-                and index.row() >= 0
-                and index.row() < len(self._projects)
-                and index.column() == 0):
+        if (
+            role == Qt.DisplayRole
+            and index.row() >= 0
+            and index.row() < len(self._projects)
+            and index.column() == 0
+        ):
             return self._projects[index.row()]
         else:
             return None
@@ -374,7 +397,9 @@ class ListOfDictModel(QAbstractListModel):
                 self._items = new_items
                 # make sure, if we removed items, that we notify for the full range,
                 # not only the new (possibly smaller) index range:
-                self.dataChanged.emit(self.index(0, 0), self.index(len(new_items) - 1, 0))
+                self.dataChanged.emit(
+                    self.index(0, 0), self.index(len(new_items) - 1, 0)
+                )
 
     def rowCount(self, __parent) -> int:
         return len(self._items)
@@ -382,9 +407,7 @@ class ListOfDictModel(QAbstractListModel):
     def roleNames(self) -> Dict[int, str]:
         # NOTE: Qt really doesn't like `str`-keyed dicts for `roleNames` for
         # some reason...
-        roles = dict(enumerate(
-            [s.encode("utf8") for s in self._schema]
-        ))
+        roles = dict(enumerate([s.encode("utf8") for s in self._schema]))
         return roles
 
 
@@ -444,19 +467,18 @@ class SessionModel(QObject):
 
     def _set_shares(self, shares: List[Dict]) -> None:
         # pre-process and set shares:
-        new_shares = [
-            self._preprocess_share(s)
-            for s in shares
-        ]
+        new_shares = [self._preprocess_share(s) for s in shares]
         self._shares.replace_data(new_shares)
 
     def _update_bg(self) -> None:
         if not self._busy and self._login_model.loggedIn:
             # print("updating...")
-            self.threadpool.start(DoUpdateSharesList(
-                model=self,
-                login_model=self._login_model,
-            ))
+            self.threadpool.start(
+                DoUpdateSharesList(
+                    model=self,
+                    login_model=self._login_model,
+                )
+            )
 
     # FIXME: probably needs a result='' Qt-specific type annotation here!
     # like this, it just doesn't work...
@@ -481,7 +503,9 @@ class SessionModel(QObject):
             self._session_name = session_name
             self.sessionNameChanged.emit(session_name)
 
-    sessionName = Property(str, get_session_name, set_session_name, notify=sessionNameChanged)
+    sessionName = Property(
+        str, get_session_name, set_session_name, notify=sessionNameChanged
+    )
 
     projectNameChanged = Signal(str)
 
@@ -493,7 +517,9 @@ class SessionModel(QObject):
             self._project_name = project_name
             self.projectNameChanged.emit(project_name)
 
-    projectName = Property(str, get_project_name, set_project_name, notify=projectNameChanged)
+    projectName = Property(
+        str, get_project_name, set_project_name, notify=projectNameChanged
+    )
 
     sessionStart = Signal()
     sessionStop = Signal()
@@ -502,12 +528,14 @@ class SessionModel(QObject):
     def startSession(self) -> None:
         print(f"starting session {self._session_name}")
         self._set_busy(True)
-        self.threadpool.start(DoCreateSession(
-            self,
-            self._login_model,
-            project_name=self.projectName,
-            session_name=self.sessionName,
-        ))
+        self.threadpool.start(
+            DoCreateSession(
+                self,
+                self._login_model,
+                project_name=self.projectName,
+                session_name=self.sessionName,
+            )
+        )
 
     @Slot(str)
     def closeSession(self, sessionId: str) -> None:
@@ -522,16 +550,14 @@ class SessionModel(QObject):
         # "primary key" concept, by which we can then index stuff
         # (in addition to just listing...)
         for share in self._shares.get_all():
-            if share['share_id'] == share_id:
+            if share["share_id"] == share_id:
                 return share
         raise RuntimeError(f"invalid share id: {share_id}")
 
     @Slot(str)
     def mapSessionDrive(self, sessionId: str) -> None:
         print(f"mapping network drive for session id {sessionId}")
-        self.threadpool.start(
-            DoMapDrive(self, sessionId, self._mm)
-        )
+        self.threadpool.start(DoMapDrive(self, sessionId, self._mm))
 
     busyChanged = Signal(bool)
 
@@ -556,19 +582,29 @@ def main():
     engine = QQmlApplicationEngine()
 
     MountManagerClass = get_mm_class()
-    mm = MountManagerClass(smb_host="moellenstedt.iff.kfa-juelich.de", workgroup="ER-C-INGEST")
+    mm = MountManagerClass(
+        smb_host="moellenstedt.iff.kfa-juelich.de", workgroup="ER-C-INGEST"
+    )
 
     # instantiate and register global objects:
     login_model = LoginModel()
     pagestate_model = PageStateModel(login_model)
     projects_model = ProjectListModel(login_model)
-    shares_model = ListOfDictModel([
-        "created_timestamp", "dest_path", "gid", "password",
-        "share_id", "share_name", "uid", "username",
-
-        # derived data:
-        "title", "created_datetime",
-    ])
+    shares_model = ListOfDictModel(
+        [
+            "created_timestamp",
+            "dest_path",
+            "gid",
+            "password",
+            "share_id",
+            "share_name",
+            "uid",
+            "username",
+            # derived data:
+            "title",
+            "created_datetime",
+        ]
+    )
     session_model = SessionModel(
         login_model, projects_model, pagestate_model, shares_model, mm
     )

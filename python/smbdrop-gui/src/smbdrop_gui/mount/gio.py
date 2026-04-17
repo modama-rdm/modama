@@ -75,8 +75,7 @@ def mount_from_line(line: str) -> Optional[Mount]:
 
 if __name__ == "__main__":
     # sample output of `gio mount -li`:
-    test_input = \
-"""
+    test_input = """
 Drive(0): Samsung SSD 860 EVO 1TB
   Type: GProxyDrive (GProxyVolumeMonitorUDisks2)
   ids:
