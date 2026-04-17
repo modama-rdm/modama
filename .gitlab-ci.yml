@@ -20,12 +20,12 @@ unit-tests:
   image: debian:13-slim
   script:
     - apt-get -y update && apt-get -y upgrade && apt-get -y install python3-full
-    - python3 -m venv ./venv/
-    - ./venv/bin/pip install pytest
-    - ./venv/bin/pip install ./python/smbdrop-client
-    - ./venv/bin/pip install ./python/permissions-client
-    - ./venv/bin/pip install ./python/mgmtinterface-client
-    - ./venv/bin/pip install -e ./python/mgmtinterface
+    - python3 -m venv /venv/
+    - /venv/bin/pip install pytest
+    - /venv/bin/pip install ./python/smbdrop-client
+    - /venv/bin/pip install ./python/permissions-client
+    - /venv/bin/pip install ./python/mgmtinterface-client
+    - /venv/bin/pip install -e ./python/mgmtinterface
     - cd python/mgmtinterface/ && /venv/bin/pytest tests
 
 rust-tests:
