@@ -1,5 +1,5 @@
 import os
-from urllib.parse import quote_plus, urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs
 
 BASE_DIR = os.path.join(
     os.path.normpath(os.path.dirname(__file__)),

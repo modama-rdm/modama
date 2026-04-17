@@ -1,4 +1,4 @@
-from typing import TypedDict, Dict, Literal, Union
+from typing import Dict, Literal, Union
 from urllib.parse import urlparse, ParseResult
 import requests
 
