@@ -5,22 +5,25 @@ from flask import Flask, request, jsonify
 import jsonschema
 import pamela
 
-from permissions.api import (
-    AdhocProject, ValidationError, authenticate, list_users, uid
-)
+from permissions.api import AdhocProject, ValidationError, authenticate, list_users, uid
 from permissions_client.schema import (
     InvalidAPIUsage,
-    AUTHENTICATE_USER_REQUEST_SCHEMA, AuthenticateUserRequest,
-    CREATE_PROJECT_REQUEST_SCHEMA, CreateProjectRequest,
-    CREATE_DATASET_REQUEST_SCHEMA, CreateDatasetRequest,
-    SEAL_DATASET_REQUEST_SCHEMA, SealDatasetRequest,
-    CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA, ChangeMembersRequest,
+    AUTHENTICATE_USER_REQUEST_SCHEMA,
+    AuthenticateUserRequest,
+    CREATE_PROJECT_REQUEST_SCHEMA,
+    CreateProjectRequest,
+    CREATE_DATASET_REQUEST_SCHEMA,
+    CreateDatasetRequest,
+    SEAL_DATASET_REQUEST_SCHEMA,
+    SealDatasetRequest,
+    CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA,
+    ChangeMembersRequest,
 )
 
 app = Flask(__name__)
 
-app.config.from_object('permissions.default_config')
-app.config.from_envvar('PERMISSIONS_CONFIG')
+app.config.from_object("permissions.default_config")
+app.config.from_envvar("PERMISSIONS_CONFIG")
 
 
 @app.errorhandler(InvalidAPIUsage)
@@ -36,16 +39,13 @@ def authenticate_user() -> dict:
             schema=AUTHENTICATE_USER_REQUEST_SCHEMA, instance=request_data
         )
         try:
-            authenticate(request_data['username'], request_data['password'])
+            authenticate(request_data["username"], request_data["password"])
             return {
-                'errno': 0,
-                'id': uid(request_data['username']),
+                "errno": 0,
+                "id": uid(request_data["username"]),
             }
         except pamela.PAMError as e:
-            return {
-                'errno': e.errno,
-                'message': e.message
-            }
+            return {"errno": e.errno, "message": e.message}
     except ValidationError as e:
         raise InvalidAPIUsage(str(e))
     except jsonschema.exceptions.ValidationError as e:
@@ -55,16 +55,16 @@ def authenticate_user() -> dict:
 @app.route("/users/id/<name>/", methods=["GET"])
 def id_user(name) -> dict:
     return {
-        'errno': 0,
-        'id': uid(name),
+        "errno": 0,
+        "id": uid(name),
     }
 
 
 @app.route("/users/list/", methods=["GET"])
 def get_user_list() -> Dict:
     return {
-        'errno': 0,
-        "users": list_users(app.config['ADHOC_GROUP']),
+        "errno": 0,
+        "users": list_users(app.config["ADHOC_GROUP"]),
     }
 
 
@@ -72,24 +72,19 @@ def get_user_list() -> Dict:
 def create_project() -> Dict:
     request_data: CreateProjectRequest = request.json  # type:ignore
     try:
-        jsonschema.validate(
-            schema=CREATE_PROJECT_REQUEST_SCHEMA, instance=request_data
-        )
+        jsonschema.validate(schema=CREATE_PROJECT_REQUEST_SCHEMA, instance=request_data)
         project = AdhocProject.create(
-            name=request_data['name'],
-            owner=request_data['owner'],
-            members=request_data['members'],
-            adhoc_group=app.config['ADHOC_GROUP']
+            name=request_data["name"],
+            owner=request_data["owner"],
+            members=request_data["members"],
+            adhoc_group=app.config["ADHOC_GROUP"],
         )
         return {
-            'errno': 0,
-            'project': project.serialize(),
+            "errno": 0,
+            "project": project.serialize(),
         }
     except (ValidationError, KeyError) as e:
-        return {
-            'errno': 1,
-            'message': str(e)
-        }
+        return {"errno": 1, "message": str(e)}
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
 
@@ -99,34 +94,27 @@ def list_projects() -> Dict:
     # TODO: catch exceptions? OSError?
     project_names = AdhocProject.list_all()
     return {
-        'errno': 0,
-        'projects': [
-            AdhocProject(
-                project_name,
-                adhoc_group=app.config['ADHOC_GROUP']
-            ).serialize(fast=True)
+        "errno": 0,
+        "projects": [
+            AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"]).serialize(
+                fast=True
+            )
             for project_name in project_names
-        ]
+        ],
     }
 
 
 @app.route("/project/<project_name>/", methods=["GET"])
 def project_details(project_name) -> Dict:
-    fast = request.args.get('fast', default=False, type=bool)
+    fast = request.args.get("fast", default=False, type=bool)
     try:
-        p = AdhocProject(
-            project_name,
-            adhoc_group=app.config['ADHOC_GROUP']
-        )
+        p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
     except ValidationError as e:
-        return {
-            'errno': 1,
-            'message': str(e)
-        }
+        return {"errno": 1, "message": str(e)}
 
     # TODO: catch exceptions? `p.datasets` can raise multiple...
     return {
-        'errno': 0,
+        "errno": 0,
         "project": p.serialize(fast=fast),
         "datasets": [
             {
@@ -136,7 +124,7 @@ def project_details(project_name) -> Dict:
                 "mtime": ds.mtime,
             }
             for ds in p.datasets
-        ]
+        ],
     }
 
 
@@ -144,30 +132,14 @@ def project_details(project_name) -> Dict:
 def create_dataset(project_name) -> Dict:
     request_data: CreateDatasetRequest = request.json  # type:ignore
     try:
-        jsonschema.validate(
-            schema=CREATE_DATASET_REQUEST_SCHEMA, instance=request_data
-        )
-        p = AdhocProject(
-            project_name,
-            adhoc_group=app.config['ADHOC_GROUP']
-        )
-        p.add_dataset(
-            name=request_data["name"],
-            user=request_data["owner"]
-        )
-        return {
-            "errno": 0
-        }  # what should be returned here?
+        jsonschema.validate(schema=CREATE_DATASET_REQUEST_SCHEMA, instance=request_data)
+        p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
+        p.add_dataset(name=request_data["name"], user=request_data["owner"])
+        return {"errno": 0}  # what should be returned here?
     except CalledProcessError as e:
-        return {
-            'errno': e.returncode,
-            'message': e.stderr
-        }
+        return {"errno": e.returncode, "message": e.stderr}
     except ValidationError as e:
-        return {
-            'errno': 1,
-            'message': str(e)
-        }
+        return {"errno": 1, "message": str(e)}
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
 
@@ -179,24 +151,16 @@ def create_dataset(project_name) -> Dict:
 def seal_dataset(project_name):
     request_data: SealDatasetRequest = request.json  # type:ignore
     try:
-        jsonschema.validate(
-            schema=SEAL_DATASET_REQUEST_SCHEMA, instance=request_data
-        )
+        jsonschema.validate(schema=SEAL_DATASET_REQUEST_SCHEMA, instance=request_data)
         # TODO: catch exceptions?
-        p = AdhocProject(
-            project_name,
-            adhoc_group=app.config['ADHOC_GROUP']
-        )
+        p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
         p.seal_dataset(request_data["name"], request_data["user"])
     except ValidationError as e:
-        return {
-            'errno': 1,
-            'message': str(e)
-        }
+        return {"errno": 1, "message": str(e)}
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
     return {
-        'errno': 0,
+        "errno": 0,
     }  # what should be returned here?
 
 
@@ -208,25 +172,16 @@ def change_project_members(project_name):
         jsonschema.validate(
             schema=CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA, instance=request_data
         )
-        p = AdhocProject(
-            project_name,
-            adhoc_group=app.config['ADHOC_GROUP']
-        )
+        p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
         op = request_data["op"]
         if op == "add":
-            p.add_members(request_data["members"], request_data['user'])
+            p.add_members(request_data["members"], request_data["user"])
         elif op == "remove":
-            p.remove_members(request_data["members"], request_data['user'])
+            p.remove_members(request_data["members"], request_data["user"])
         else:
             raise InvalidAPIUsage(f"Unknown op: {op}")
     except (ValidationError, KeyError) as e:
-        return {
-            'errno': 1,
-            'message': str(e)
-        }
+        return {"errno": 1, "message": str(e)}
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
-    return {
-        'errno': 0,
-        "project": p.serialize()
-    }
+    return {"errno": 0, "project": p.serialize()}

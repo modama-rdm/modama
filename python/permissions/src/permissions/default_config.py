@@ -1,1 +1,1 @@
-ADHOC_GROUP = 'testerc'
+ADHOC_GROUP = "testerc"

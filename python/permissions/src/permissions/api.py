@@ -15,32 +15,34 @@ from modama_common.fs import is_immutable, set_immutable
 from permissions_client.schema import ADHOC
 
 
-BASE_PATH = '/data/'
+BASE_PATH = "/data/"
 
 ADHOC_PATH = os.path.join(BASE_PATH, ADHOC)
-SHARING_PATH = os.path.join(BASE_PATH, 'sharing')
+SHARING_PATH = os.path.join(BASE_PATH, "sharing")
 
-ADHOC_GROUP = 'testerc'
+ADHOC_GROUP = "testerc"
 
-with open('/etc/group', 'r') as groupfile:
-    system_groups = set(line.split(':')[0] for line in groupfile)
+with open("/etc/group", "r") as groupfile:
+    system_groups = set(line.split(":")[0] for line in groupfile)
 
 
 class ValidationError(ValueError):
-    '''
+    """
     Something ist wrong with the user input or files related to the request.
 
     Details provided in error message.
-    '''
+    """
+
     pass
 
 
 class ACLError(IOError):
-    '''
+    """
     Checking an ACL failed for some reason
 
     See https://pylibacl.k1024.org/module.html#posix1e.ACL.check
-    '''
+    """
+
     pass
 
 
@@ -48,7 +50,7 @@ FS_ERRORS = (ACLError, PermissionError, FileNotFoundError, OSError)
 
 
 class AccumulatedMemberError(RuntimeError):
-    '''
+    """
     Accumulated errors belonging to classes in FS_ERRORS from
     traversing a project's directory tree when adding or removing members.
 
@@ -57,7 +59,8 @@ class AccumulatedMemberError(RuntimeError):
     we try to change members as much as possible instead of bailing out early.
 
     With this exception we can raise a collection with all errors that occurred.
-    '''
+    """
+
     pass
 
 
@@ -65,7 +68,7 @@ class AccumulatedMemberError(RuntimeError):
 # See https://github.com/shadow-maint/shadow/blob/master/libmisc/chkname.c
 # Go with most conservative approach
 def check_valid_group(groupname: str):
-    '''
+    """
     Check if :code:`groupname` can become a new Unix group
 
     The concept for projects includes "proper" projects that have their own Unix
@@ -86,28 +89,38 @@ def check_valid_group(groupname: str):
     that as a list later?
     * Length and characters compatible with most Unix systems
     * Not too short to have some kind of meaning
-    '''
+    """
     if groupname in system_groups:
         raise ValidationError("Is a system group.")
     if len(groupname) > 32:
-        raise ValidationError(f"Too long: Maximum length is 32, actual length is {len(groupname)}.")
+        raise ValidationError(
+            f"Too long: Maximum length is 32, actual length is {len(groupname)}."
+        )
     if len(groupname) < 3:
-        raise ValidationError(f"Too short: Minimum length is 3, actual length is {len(groupname)}.")
-    if not re.fullmatch('[a-z]', groupname[0]):
+        raise ValidationError(
+            f"Too short: Minimum length is 3, actual length is {len(groupname)}."
+        )
+    if not re.fullmatch("[a-z]", groupname[0]):
         raise ValidationError(f"First character must be in a-z, is {groupname[0]}.")
-    if not re.fullmatch('[-a-z_0-9]*', groupname):
+    if not re.fullmatch("[-a-z_0-9]*", groupname):
         raise ValidationError("Can only use characters a-z, 0-9, '_' and '-'.")
 
 
 def check_valid_dataset(name: str):
     # Restriction on some file systems, avoid "funny business" from user input
     if len(name) > 255:
-        raise ValidationError(f"Too long: Maximum length is 255, actual length is {len(name)}.")
+        raise ValidationError(
+            f"Too long: Maximum length is 255, actual length is {len(name)}."
+        )
     if len(name) < 1:
-        raise ValidationError(f"Too short: Minimum length is 1, actual length is {len(name)}.")
+        raise ValidationError(
+            f"Too short: Minimum length is 1, actual length is {len(name)}."
+        )
     # Restrictive positive list to avoid "funny business" from user input
-    if not re.fullmatch('[-a-zA-Z0-9_. ]*', name):
-        raise ValidationError("Dataset name can only contain characters a-z, A-Z, 0-9, '_', '-', ' ' and '.'.")
+    if not re.fullmatch("[-a-zA-Z0-9_. ]*", name):
+        raise ValidationError(
+            "Dataset name can only contain characters a-z, A-Z, 0-9, '_', '-', ' ' and '.'."
+        )
 
 
 def check_project_name_taken(name):
@@ -132,9 +145,7 @@ def authenticate(username, password):
 
 
 def uid(username):
-    return {
-        'uid': pwd.getpwnam(username).pw_uid
-    }
+    return {"uid": pwd.getpwnam(username).pw_uid}
 
 
 def uid_to_username(uid: int) -> str:
@@ -152,9 +163,9 @@ def list_users(adhoc_group):
 
 
 def check_can_create(name, adhoc_group):
-    '''
+    """
     Check if the user is permitted to create ad-hoc projects
-    '''
+    """
     usersgroup = grp.getgrnam(adhoc_group)
     try:
         info = pwd.getpwnam(name)
@@ -207,7 +218,7 @@ class AdhocProject:
 
     @classmethod
     def create(cls, name: str, owner: str, members: List[str], adhoc_group):
-        '''
+        """
         Create a new ad-hoc project folder
 
         This creates an empty folder in the
@@ -226,7 +237,7 @@ class AdhocProject:
         Possible exceptions: Boundary conditions not met -> ValidationError
         Permission issues -> OSError and the like
         Subprocess call failed -> subprocess.CalledProcessError
-        '''
+        """
         if adhoc_group is None:
             adhoc_group = ADHOC_GROUP
         check_can_create(owner, adhoc_group)
@@ -243,10 +254,12 @@ class AdhocProject:
         try:
             shutil.chown(folder, owner, adhoc_group)
 
-            mode  = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR  # u+rwx
-            mode |= stat.S_IRGRP | stat.S_IXGRP               # g+rx  -> explicitly state the should-state, don't rely on the umask
-            mode |= stat.S_IROTH | stat.S_IXOTH               # o+rx
-            mode |= stat.S_ISVTX                              # sticky / "restricted deletion" bit
+            mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR  # u+rwx
+            mode |= (
+                stat.S_IRGRP | stat.S_IXGRP
+            )  # g+rx  -> explicitly state the should-state, don't rely on the umask
+            mode |= stat.S_IROTH | stat.S_IXOTH  # o+rx
+            mode |= stat.S_ISVTX  # sticky / "restricted deletion" bit
             mode |= stat.S_ISGID
 
             os.chmod(folder, mode)
@@ -254,8 +267,9 @@ class AdhocProject:
             # Initialize ACL since it is difficult and brittle to do that
             # with pylibacl
             subprocess.run(
-                ['setfacl', '-m', 'o:rX,d:o:rX', folder],
-                capture_output=True, check=True
+                ["setfacl", "-m", "o:rX,d:o:rX", folder],
+                capture_output=True,
+                check=True,
             )
             project = cls(name, adhoc_group=adhoc_group)
             project.add_members(members + [owner], owner)
@@ -266,7 +280,9 @@ class AdhocProject:
 
     def check_can_modify(self, username):
         if self.owner != username:
-            raise ValidationError(f'User "{username}" cannot modify project {self.name}: Not an owner.')
+            raise ValidationError(
+                f'User "{username}" cannot modify project {self.name}: Not an owner.'
+            )
 
     def check_can_seal(self, dataset, username):
         if self.owner == username:
@@ -274,7 +290,9 @@ class AdhocProject:
         # FIXME or check write permission to dataset path?
         if username in self.members:
             return
-        raise ValidationError(f'User "{username}" cannot seal dataset {dataset} in project {self.name}: Not an owner or member.')
+        raise ValidationError(
+            f'User "{username}" cannot seal dataset {dataset} in project {self.name}: Not an owner or member.'
+        )
 
     @staticmethod
     def list_all():
@@ -305,9 +323,7 @@ class AdhocProject:
         acl = posix1e.ACL(filedef=self.path)
         for a in acl:
             if a.tag_type is posix1e.ACL_USER:
-                members.append(
-                    uid_to_username(a.qualifier)
-                )
+                members.append(uid_to_username(a.qualifier))
         return list(set(members))
 
     @staticmethod
@@ -325,7 +341,9 @@ class AdhocProject:
                 st = os.stat(filename)
                 acl = posix1e.ACL(mode=st.st_mode)
                 if acl.check() is not False:
-                    raise ACLError(f'Attempt to generate initial ACL {str(acl)} failed for {filename}.')
+                    raise ACLError(
+                        f"Attempt to generate initial ACL {str(acl)} failed for {filename}."
+                    )
             else:
                 raise ACLError(
                     f"Invalid pre-existing ACL encountered: ACL {acl} error {str(initial_res)} for {filename}"
@@ -333,7 +351,7 @@ class AdhocProject:
         return acl
 
     def add_members(self, usernames: List[str], user) -> None:
-        '''
+        """
         Exceptions can come from posix1e, os.walk,
         :func:`get_immutable`and :func:`set_immutable`. Most will be added
         to a collection and raised as :class:`AccumulatedMemberError` in the end.
@@ -346,8 +364,11 @@ class AdhocProject:
         manipulated!
 
         TOCTOU vulnerabilities are probably still present.
-        '''
-        def add(entries: List[posix1e.Entry], new_uids: Collection[int], filename: str) -> None:
+        """
+
+        def add(
+            entries: List[posix1e.Entry], new_uids: Collection[int], filename: str
+        ) -> None:
             acl = self.get_initial_acl(filename, default=False)
             # Delete any existing entries for the new user
             for entry in acl:
@@ -358,7 +379,9 @@ class AdhocProject:
             acl.calc_mask()
             check_res = acl.check()
             if check_res is not False:
-                raise ACLError(f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}")
+                raise ACLError(
+                    f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}"
+                )
             acl.applyto(filename)
 
             defacl = self.get_initial_acl(filename, default=True)
@@ -371,7 +394,9 @@ class AdhocProject:
             defacl.calc_mask()
             defcheck_res = defacl.check()
             if defcheck_res is not False:
-                raise ACLError(f"Invalid ACL encountered: ACL {defacl} error {str(defcheck_res)} for {filename}")
+                raise ACLError(
+                    f"Invalid ACL encountered: ACL {defacl} error {str(defcheck_res)} for {filename}"
+                )
             defacl.applyto(filename, posix1e.ACL_TYPE_DEFAULT)
 
         self.check_can_modify(user)
@@ -417,9 +442,10 @@ class AdhocProject:
             raise AccumulatedMemberError("Encountered errors when walking path", errors)
 
     def remove_members(self, usernames, user):
-        '''
+        """
         See :meth:`add_members()` for safety considerations!
-        '''
+        """
+
         def remove(uids: Collection[int], filename):
             acl = self.get_initial_acl(filename, default=False)
             for entry in acl:
@@ -427,7 +453,9 @@ class AdhocProject:
                     acl.delete_entry(entry)
             check_res = acl.check()
             if check_res is not False:
-                raise ACLError(f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}")
+                raise ACLError(
+                    f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}"
+                )
             acl.applyto(filename)
             defacl = self.get_initial_acl(filename, default=True)
             for entry in defacl:
@@ -435,7 +463,9 @@ class AdhocProject:
                     defacl.delete_entry(entry)
             defcheck_res = defacl.check()
             if defcheck_res is not False:
-                raise ACLError(f"Invalid ACL encountered: ACL {defacl} error {str(defcheck_res)} for {filename}")
+                raise ACLError(
+                    f"Invalid ACL encountered: ACL {defacl} error {str(defcheck_res)} for {filename}"
+                )
             defacl.applyto(filename, posix1e.ACL_TYPE_DEFAULT)
 
         self.check_can_modify(user)
@@ -481,7 +511,7 @@ class AdhocProject:
         result = []
         for filename in os.listdir(self.path):
             root = os.path.join(self.path, filename)
-            raw = os.path.join(root, 'raw')
+            raw = os.path.join(root, "raw")
             if os.path.isdir(raw):
                 result.append(
                     Dataset(
@@ -494,24 +524,26 @@ class AdhocProject:
         return result
 
     def add_dataset(self, name, user):
-        '''
+        """
         Permissions, ACLs etc will be set by default ACLs and the watchdog.
-        '''
+        """
         check_valid_dataset(name)
         check_can_create(user, self.adhoc_group)
         target_base_path = os.path.join(self.path, name)
-        target_raw_path = os.path.join(target_base_path, 'raw')
+        target_raw_path = os.path.join(target_base_path, "raw")
         # Run as the specified user to make sure
         # file system permissions are enforced
         # Don't use mkdir -p so that an error is triggered if directory exists
 
         subprocess.run(
-            ['sudo', '-u', user, 'mkdir', target_base_path, target_raw_path],
-            capture_output=True, check=True, text=True
+            ["sudo", "-u", user, "mkdir", target_base_path, target_raw_path],
+            capture_output=True,
+            check=True,
+            text=True,
         )
 
     def seal_dataset(self, name, user):
-        '''
+        """
         Recursively set the :code:`raw` subfolder of a dataset and its contents immutable
 
         FIXME: Sensitive to TOCTOU, seee https://iffgit.fz-juelich.de/weber/data-management-system/-/merge_requests/1#note_27618
@@ -520,10 +552,10 @@ class AdhocProject:
         Symlinks are ignored.
 
         This is intended to be called after an ingest session ends.
-        '''
+        """
         self.check_can_seal(name, user)
         target_base_path = os.path.join(self.path, name)
-        target_raw_path = os.path.join(target_base_path, 'raw')
+        target_raw_path = os.path.join(target_base_path, "raw")
         # The check for realpath is important to prevent mocking a dataset
         # using symbolic links that points to files beyond file system
         # boundaries. Otherwise this could lock them!
@@ -560,12 +592,14 @@ class AdhocProject:
     @property
     def diskusage(self):
         result = subprocess.run(
-            ['du', '--total', '--summarize', '--bytes', self.path],
-            capture_output=True, check=True, text=True
+            ["du", "--total", "--summarize", "--bytes", self.path],
+            capture_output=True,
+            check=True,
+            text=True,
         )
-        lines = result.stdout.split('\n')
+        lines = result.stdout.split("\n")
         last_line = lines[-2]  # Last one is empty string
-        size = last_line.split('\t')[0]
+        size = last_line.split("\t")[0]
         return int(size)
 
     def serialize(self, fast: bool = False):
@@ -590,32 +624,44 @@ class AdhocProject:
         return serialized
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # info = pwd.getpwnam('weber')
     # groups = os.getgrouplist('weber', info.pw_gid)
     # print("native", groups)
     # print("pysss", pysss.getgrouplist('weber'))
 
-    otherproj = AdhocProject('kidney')
+    otherproj = AdhocProject("kidney")
     print(otherproj.diskusage)
     print(otherproj.members)
-    otherproj.add_members(['testjanghyun', 'testalex'])
+    otherproj.add_members(["testjanghyun", "testalex"])
     print(otherproj.owner)
 
-    myproj = AdhocProject.create('pythoncreated', 'testdieter', ['testalex', 'testpenghan'])
-    assert set(myproj.members) == set(('testdieter', 'testalex', 'testpenghan'))
-    myproj.add_members(['testjanghyun', 'testthibaud'])
-    myproj.add_members(['testjanghyun', 'testthibaud'])
-    assert set(myproj.members) == set(('testdieter', 'testalex', 'testpenghan', 'testjanghyun', 'testthibaud'))
-    myproj.remove_members(['testpenghan', 'testalex'])
-    assert set(myproj.members) == set(('testdieter', 'testjanghyun', 'testthibaud'))
-    myproj.add_dataset('helloworld', 'testjanghyun')
+    myproj = AdhocProject.create(
+        "pythoncreated", "testdieter", ["testalex", "testpenghan"]
+    )
+    assert set(myproj.members) == set(("testdieter", "testalex", "testpenghan"))
+    myproj.add_members(["testjanghyun", "testthibaud"])
+    myproj.add_members(["testjanghyun", "testthibaud"])
+    assert set(myproj.members) == set(
+        ("testdieter", "testalex", "testpenghan", "testjanghyun", "testthibaud")
+    )
+    myproj.remove_members(["testpenghan", "testalex"])
+    assert set(myproj.members) == set(("testdieter", "testjanghyun", "testthibaud"))
+    myproj.add_dataset("helloworld", "testjanghyun")
 
     print(AdhocProject.list_all())
     subprocess.run(
-        ['sudo', '-u', 'testdieter', 'touch', '/data/adhoc/pythoncreated/helloworld/raw/image1.dm4'],
-        capture_output=True, check=True, text=True
+        [
+            "sudo",
+            "-u",
+            "testdieter",
+            "touch",
+            "/data/adhoc/pythoncreated/helloworld/raw/image1.dm4",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
     )
     print(myproj.datasets)
-    myproj.seal_dataset('helloworld')
-    assert is_immutable('/data/adhoc/pythoncreated/helloworld/raw/image1.dm4')
+    myproj.seal_dataset("helloworld")
+    assert is_immutable("/data/adhoc/pythoncreated/helloworld/raw/image1.dm4")
