@@ -4,7 +4,7 @@ import requests
 
 
 def _make_url(base_url: str, path: str) -> str:
-    assert base_url[-1] != '/'
+    assert base_url[-1] != "/"
     return base_url + path
 
 
@@ -41,22 +41,12 @@ class TokenClient:
         or raise a VerifyFailed exception.
         """
         url = _make_url(self._base_url, "/verify/")
-        resp = requests.put(
-            url,
-            data=token.encode("utf8"),
-            verify=self._ca_cert
-        )
+        resp = requests.put(url, data=token.encode("utf8"), verify=self._ca_cert)
         if not resp.ok:
-            raise VerifyFailed(
-                "non-200 response when verifying token"
-            )
-        resp_data: Union[Dict, Literal['Invalid']] = resp.json()
-        if resp_data == 'Invalid':
-            raise VerifyFailed(
-                "Invalid token"
-            )
+            raise VerifyFailed("non-200 response when verifying token")
+        resp_data: Union[Dict, Literal["Invalid"]] = resp.json()
+        if resp_data == "Invalid":
+            raise VerifyFailed("Invalid token")
         if "VerifiedAgent" not in resp_data:
-            raise VerifyFailed(
-                "Invalid token"
-            )
-        return Agent(resp_data['VerifiedAgent']['agent_id'])
+            raise VerifyFailed("Invalid token")
+        return Agent(resp_data["VerifiedAgent"]["agent_id"])
