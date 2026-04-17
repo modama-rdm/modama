@@ -1,6 +1,8 @@
 import os
 from urllib.parse import urlparse, parse_qs
 
+import pytest
+
 BASE_DIR = os.path.join(
     os.path.normpath(os.path.dirname(__file__)),
     "..",
@@ -9,8 +11,7 @@ BASE_DIR = os.path.join(
 os.environ["MGMTINTERFACE_CONFIG"] = "default_config.py"
 os.environ["MGMTINTERFACE_SECRET"] = os.path.join(BASE_DIR, "tests/secrets_for_test.py")
 
-from mgmtinterface import sampledbsearch, quote_path, add_path_to_query
-import pytest
+from mgmtinterface import sampledbsearch, quote_path, add_path_to_query  # noqa: E402
 
 
 @pytest.mark.parametrize(

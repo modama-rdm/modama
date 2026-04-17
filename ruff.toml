@@ -1,0 +1,4 @@
+exclude = [
+    "python/wsgidav",
+    "python/PyInotify",
+]

@@ -41,14 +41,14 @@ if __name__ == "__main__":
         # the app in question
         try:
             occ("app:disable", app)
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             pass
         occ("app:enable", app)
 
     for app in ("weather_status", "user_status", "survey_client", "firstrunwizard"):
         try:
             occ("app:disable", app)
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             pass
 
     # Disable skeleton and template: Only external storage in user folder
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     # Properly initialize LDAP config
     try:
         occ("ldap:delete", "s01")
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         pass
     occ("ldap:create-empty-config")
 
