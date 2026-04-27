@@ -11,7 +11,7 @@ services:
         source: "/var/local/data-mgmt/nextcloud-html"
         target: "/var/www/html"
       - type: bind
-        source: "/var/local/data-mgmt/nextcloud-data"
+        source: "/data/holo/weber/er-c-data-nextcloud-data"
         target: "/var/local/nextclouddata"
       - type: bind
         source: "./prodconf/nextcloud-site-config.json"
@@ -108,6 +108,9 @@ services:
       - type: bind
         source: "/var/local/data-mgmt"
         target: "/mnt/data/data-mgmt"
+      - type: bind
+        source: "/data/holo/weber/er-c-data-nextcloud-data"
+        target: "/mnt/data/er-c-data-nextcloud-data"
     image: iffregistry.fz-juelich.de/weber/data-management-system/tsm-client:latest
 
 volumes:
