@@ -98,11 +98,11 @@ SECRET_KEY = 'I am so super secret'
 
 ## mTLS CA setup
 
-`/var/local/data-mgmt/ca/`
-
-TODO: ask alex!
-
-Basically, need to `cargo run --bin ca -- --help`
+Certificates and key material is stored in `/var/local/data-mgmt/CA/`, which has to be created on deployment.
+There is a command-line tool to manage the certificates, which can be run via `deploy/ca.sh`.
+On initial deployment, run `deploy/ca.sh initialize-ca` to generate a key pair and the CA certificate.
+Using `deploy/ca.sh enroll-server` and `deploy/ca.sh enroll-agent`, additional servers and agents
+can be enrolled. This will create keypairs and client- or server-certificates in the aforementioned path.
 
 ## sssd.conf
 
