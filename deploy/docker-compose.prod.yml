@@ -57,8 +57,11 @@ services:
         source: "/var/local/data-mgmt/smbdrop"
         target: "/etc/smbdrop"
       - type: bind
-        source: "/var/local/data-mgmt/ca/certs/"
-        target: "/certs/"
+        source: "/var/local/data-mgmt/CA/ca/pub/"
+        target: "/certs/ca/"
+      - type: bind
+        source: "/var/local/data-mgmt/CA/servers/"
+        target: "/certs/servers/"
     ports:
       - "127.0.0.1:1445:445"
   mgmtinterface:

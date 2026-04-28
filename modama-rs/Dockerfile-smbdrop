@@ -29,9 +29,9 @@ EXPOSE 5053/tcp
 COPY --from=builder /usr/bin/smbdrop /usr/bin/smbdrop
 
 CMD [ "/usr/bin/smbdrop", \
-    "--ca-cert=/certs/ca/ca.cert.pem", \
-    "--chain=/certs/servers/smbdrop.chain.pem", \
-    "--privkey=/certs/servers/smbdrop.priv.pem", \
+    "--ca-cert=/certs/ca/pub/ca.cert.pem", \
+    "--chain=/certs/servers/smbdrop/smbdrop.chain.pem", \
+    "--privkey=/certs/servers/smbdrop/smbdrop.priv.pem", \
     "--api-listen=0.0.0.0:5051", \
     "--ws-listen=0.0.0.0:5052", \
     "--token-api-listen=0.0.0.0:5053" ]
