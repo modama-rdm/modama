@@ -379,7 +379,7 @@ mod tests {
             .expect("save server cert");
 
         // paths to server files
-        let ca_cert = tmpdir.join("ca").join("ca.cert.pem");
+        let ca_cert = tmpdir.join("ca").join("pub").join("ca.cert.pem");
 
         let tp =
             LocalNetTokenProvider::new(&ca_cert, DiscoveryAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))

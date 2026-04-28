@@ -104,15 +104,19 @@ impl Ca {
     }
 
     fn get_ca_path(prefix: &Path) -> PathBuf {
-        PathBuf::from(prefix).join("ca")
+        PathBuf::from(prefix).join("ca").join("pub")
+    }
+
+    fn get_ca_priv_path(prefix: &Path) -> PathBuf {
+        PathBuf::from(prefix).join("ca").join("priv")
     }
 
     fn get_client_certs_path(prefix: &Path) -> PathBuf {
         PathBuf::from(prefix).join("clients")
     }
 
-    fn get_server_certs_path(prefix: &Path) -> PathBuf {
-        PathBuf::from(prefix).join("servers")
+    fn get_server_certs_path(prefix: &Path, hostname: &str) -> PathBuf {
+        PathBuf::from(prefix).join("servers").join(hostname)
     }
 
     fn get_pubkey_path(prefix: &Path) -> PathBuf {
@@ -120,7 +124,7 @@ impl Ca {
     }
 
     fn get_privkey_path(prefix: &Path) -> PathBuf {
-        Self::get_ca_path(prefix).join("ca.priv.pem")
+        Self::get_ca_priv_path(prefix).join("ca.priv.pem")
     }
     fn get_cert_path(prefix: &Path) -> PathBuf {
         Self::get_ca_path(prefix).join("ca.cert.pem")
@@ -257,7 +261,7 @@ impl Ca {
             CAError::InvalidParam("must have at least one server name".to_owned())
         })?;
 
-        let server_certs_path = Self::get_server_certs_path(&self.get_path_prefix()?);
+        let server_certs_path = Self::get_server_certs_path(&self.get_path_prefix()?, first_name);
         self.write_signed_cert_files(
             &server_certs_path,
             first_name,
@@ -301,7 +305,9 @@ impl Ca {
         let prefix = &self.get_path_prefix()?;
 
         let ca_dir = Self::get_ca_path(prefix);
+        let ca_dir_priv = Self::get_ca_priv_path(prefix);
         create_dir_all(ca_dir)?;
+        create_dir_all(ca_dir_priv)?;
 
         let mut opts = File::options();
         opts.write(true).create_new(true).mode(0o600);
@@ -330,14 +336,22 @@ mod tests {
         let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
         ca.serialize_ca_to_files().unwrap();
 
-        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca")).unwrap();
+        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca").join("pub")).unwrap();
         let mut ca_files = ca_dir
             .into_iter()
             .map(Result::unwrap)
             .map(|e| e.file_name().into_string().unwrap())
             .collect::<Vec<_>>();
         ca_files.sort();
-        assert_eq!(ca_files, &["ca.cert.pem", "ca.priv.pem", "ca.pub.pem"]);
+        assert_eq!(ca_files, &["ca.cert.pem", "ca.pub.pem"]);
+        let ca_dir_priv = std::fs::read_dir(&*tmpdir.join("ca").join("priv")).unwrap();
+        let mut ca_files_priv = ca_dir_priv
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        ca_files_priv.sort();
+        assert_eq!(ca_files_priv, &["ca.priv.pem"]);
     }
 
     #[test]
@@ -357,16 +371,25 @@ mod tests {
 
         ca.serialize_ca_to_files().unwrap();
 
-        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca")).unwrap();
+        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca").join("pub")).unwrap();
         let mut ca_files = ca_dir
             .into_iter()
             .map(Result::unwrap)
             .map(|e| e.file_name().into_string().unwrap())
             .collect::<Vec<_>>();
         ca_files.sort();
-        assert_eq!(ca_files, &["ca.cert.pem", "ca.priv.pem", "ca.pub.pem"]);
+        assert_eq!(ca_files, &["ca.cert.pem", "ca.pub.pem"]);
 
-        let servers_dir = std::fs::read_dir(&*tmpdir.join("servers")).unwrap();
+        let ca_dir_priv = std::fs::read_dir(&*tmpdir.join("ca").join("priv")).unwrap();
+        let mut ca_files_priv = ca_dir_priv
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        ca_files_priv.sort();
+        assert_eq!(ca_files_priv, &["ca.priv.pem"]);
+
+        let servers_dir = std::fs::read_dir(&*tmpdir.join("servers").join("localhost")).unwrap();
         let mut servers_files = servers_dir
             .into_iter()
             .map(Result::unwrap)
@@ -422,16 +445,16 @@ mod tests {
         ca.save_client_cert(agent_name, resource_name, &key_and_cert)
             .unwrap();
 
-        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca")).unwrap();
+        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca").join("pub")).unwrap();
         let mut ca_files = ca_dir
             .into_iter()
             .map(Result::unwrap)
             .map(|e| e.file_name().into_string().unwrap())
             .collect::<Vec<_>>();
         ca_files.sort();
-        assert_eq!(ca_files, &["ca.cert.pem", "ca.priv.pem", "ca.pub.pem"]);
+        assert_eq!(ca_files, &["ca.cert.pem", "ca.pub.pem"]);
 
-        let servers_dir = std::fs::read_dir(&*tmpdir.join("servers")).unwrap();
+        let servers_dir = std::fs::read_dir(&*tmpdir.join("servers").join("localhost")).unwrap();
         let mut servers_files = servers_dir
             .into_iter()
             .map(Result::unwrap)

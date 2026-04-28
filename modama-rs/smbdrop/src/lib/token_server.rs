@@ -243,9 +243,9 @@ mod tests {
             .expect("save server cert");
 
         // paths to server files
-        let ca_cert = tmpdir.join("ca").join("ca.cert.pem");
-        let server_chain = tmpdir.join("servers").join("localhost.chain.pem");
-        let server_priv = tmpdir.join("servers").join("localhost.priv.pem");
+        let ca_cert = tmpdir.join("ca").join("pub").join("ca.cert.pem");
+        let server_chain = tmpdir.join("servers").join("localhost").join("localhost.chain.pem");
+        let server_priv = tmpdir.join("servers").join("localhost").join("localhost.priv.pem");
 
         let token_server = TokenServer::start("127.0.0.1:0", &ca_cert, &server_chain, &server_priv)
             .await
