@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use modama_common::{ca::Ca, logging::init_logging};
@@ -18,21 +20,22 @@ enum Commands {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    #[arg(short, long, default_value = "/certs/")]
+    ca_path: PathBuf,
 }
 
-const CERT_PATH: &str = "./certs/";
-
 /// Generate a new keypair and a CA root certificate using the private key.
-fn initialize_ca(_args: &Cli) -> Result<()> {
-    let ca = Ca::new(Some(CERT_PATH))?;
+fn initialize_ca(args: &Cli) -> Result<()> {
+    let ca = Ca::new(Some(&args.ca_path))?;
     ca.serialize_ca_to_files()?;
 
     Ok(())
 }
 
 /// Enroll the given agent for the given resource by creating a client certificate.
-fn enroll_agent(_args: &Cli, agent_name: &str, resource_name: &str) -> Result<()> {
-    let ca = Ca::load(CERT_PATH)?;
+fn enroll_agent(args: &Cli, agent_name: &str, resource_name: &str) -> Result<()> {
+    let ca = Ca::load(&args.ca_path)?;
     let key_and_cert = ca.client_cert(agent_name, resource_name)?;
     ca.save_client_cert(agent_name, resource_name, &key_and_cert)?;
 
@@ -40,8 +43,8 @@ fn enroll_agent(_args: &Cli, agent_name: &str, resource_name: &str) -> Result<()
 }
 
 /// Enroll a server by creating a certificate.
-fn enroll_server(_args: &Cli, server_names: &[String]) -> Result<()> {
-    let ca = Ca::load(CERT_PATH)?;
+fn enroll_server(args: &Cli, server_names: &[String]) -> Result<()> {
+    let ca = Ca::load(&args.ca_path)?;
     let key_and_cert = ca.server_cert(server_names)?;
     ca.save_server_cert(server_names, &key_and_cert)?;
 
