@@ -67,9 +67,6 @@ services:
       - type: bind
         source: "./testfolder/etc/smbdrop"
         target: "/etc/smbdrop"
-      - type: bind
-        source: "../modama-rs/dev-env/certs/"
-        target: "/certs/"
     ports:
       - "127.0.0.1:1446:445"
       # - "127.0.0.1:445:445"
@@ -94,7 +91,7 @@ services:
       - FLASK_APP=mgmtinterface:app
     working_dir: /
     # command: gunicorn --bind 0.0.0.0:5000 mgmtinterface:app --log-level=debug
-    command: flask run --debug --port 5000 --host 0.0.0.0
+    command: /venv/bin/flask run --debug --port 5000 --host 0.0.0.0
   mgmtinterface-proxy:
     volumes:
       - type: bind

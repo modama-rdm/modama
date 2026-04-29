@@ -160,6 +160,13 @@ services:
     # security_opt:
     #   - seccomp:unconfined
     privileged: true  # MEH! would rather only allow mount/umount
+    volumes:
+      - type: bind
+        source: "/var/local/data-mgmt/CA/ca/pub/"
+        target: "/certs/ca/pub/"
+      - type: bind
+        source: "/var/local/data-mgmt/CA/servers/"
+        target: "/certs/servers/"
 
   mgmtinterface:
     hostname: mgmtinterface
