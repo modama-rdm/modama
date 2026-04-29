@@ -98,11 +98,25 @@ SECRET_KEY = 'I am so super secret'
 
 ## mTLS CA setup
 
-Certificates and key material is stored in `/var/local/data-mgmt/CA/`, which has to be created on deployment.
-There is a command-line tool to manage the certificates, which can be run via `deploy/ca.sh`.
-On initial deployment, run `deploy/ca.sh initialize-ca` to generate a key pair and the CA certificate.
-Using `deploy/ca.sh enroll-server` and `deploy/ca.sh enroll-agent`, additional servers and agents
-can be enrolled. This will create keypairs and client- or server-certificates in the aforementioned path.
+Certificates and key material is stored in `/var/local/data-mgmt/CA/` for both
+production and testing setups, which has to be created on deployment. There is a
+command-line tool to manage the certificates, which can be run via
+`deploy/ca.sh`. On initial deployment, run `deploy/ca.sh initialize-ca` to
+generate a key pair and the CA certificate. Using `deploy/ca.sh enroll-server`
+and `deploy/ca.sh enroll-agent`, additional servers and agents can be enrolled.
+This will create keypairs and client- or server-certificates in the
+aforementioned path.
+
+The `smbdrop` service will expect a server with name `smbdrop` to be enrolled.
+
+Since `/deploy/ca.sh` will run the `ca:latest` tag from
+`iffregistry.fz-juelich.de/weber/data-management-system/`, one can build and tag
+it locally for development work on this container or to work independent of the
+container registry:
+
+```
+docker build -f modama-rs/Dockerfile-ca-cli modama-rs/ -t iffregistry.fz-juelich.de/weber/data-management-system/ca:latest
+```
 
 ## sssd.conf
 
