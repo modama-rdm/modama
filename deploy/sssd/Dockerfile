@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:13-slim
 LABEL Dieter Weber <d.weber@fz-juelich.de>
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

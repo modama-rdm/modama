@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM debian:12-slim
+FROM debian:13-slim
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
