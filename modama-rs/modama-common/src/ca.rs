@@ -1,5 +1,5 @@
 use std::{
-    fs::{create_dir_all, File},
+    fs::{File, Permissions, create_dir_all},
     io::{Read, Write},
     path::{Path, PathBuf},
     str::FromStr,
@@ -7,13 +7,25 @@ use std::{
 };
 
 #[cfg(target_os = "linux")]
-use std::os::unix::fs::OpenOptionsExt;
+use std::{fs::set_permissions, os::unix::fs::{OpenOptionsExt, PermissionsExt}};
 
 #[cfg(target_os = "windows")]
 impl NoopMode for OpenOptions {
     fn mode(&mut self, _mode: u32) -> &mut OpenOptions {
         self
     }
+}
+
+#[cfg(target_os = "linux")]
+fn set_perms_priv(path: &Path) -> Result<(), CAError> {
+    let perms = Permissions::from_mode(0o700);
+    set_permissions(path, perms)?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn set_perms_priv(path: &Path) -> Result<(), CAError> {
+    Ok(())
 }
 
 use rcgen::{
@@ -143,7 +155,7 @@ impl Ca {
     ) -> Result<(), CAError> {
         let cert_signed_pem = cert.pem();
         let mut opts = File::options();
-        opts.write(true).create_new(true).mode(0o600);
+        opts.write(true).create_new(true);
         create_dir_all(dir)?;
 
         let cert_path = dir.join(format!("{name_prefix}.cert.pem"));
@@ -157,11 +169,12 @@ impl Ca {
             .write_all(key_pair.public_key_pem().as_bytes())?;
 
         let privkey_path = dir.join(format!("{name_prefix}.priv.pem"));
-        opts.open(privkey_path)?
+        opts.mode(0o600)
+            .open(privkey_path)?
             .write_all(key_pair.serialize_pem().as_bytes())?;
 
         let chain_path = dir.join(format!("{name_prefix}.chain.pem"));
-        let mut chain = opts.open(chain_path)?;
+        let mut chain = opts.mode(0o644).open(chain_path)?;
         chain.write_all(cert_signed_pem.as_bytes())?;
         chain.write_all(self.ca_cert_pem.as_bytes())?;
 
@@ -191,9 +204,7 @@ impl Ca {
             .push(DnType::CommonName, full_name);
         params.is_ca = IsCa::NoCa;
         // FIXME: constrain key usage?
-        params.extended_key_usages = vec![
-            ExtendedKeyUsagePurpose::ClientAuth,
-        ];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
         params
             .subject_alt_names
             .push(rcgen::SanType::URI(Ia5String::from_str(&format!(
@@ -241,9 +252,7 @@ impl Ca {
             .distinguished_name
             .push(DnType::CommonName, first_name);
         params.is_ca = IsCa::NoCa;
-        params.extended_key_usages = vec![
-            ExtendedKeyUsagePurpose::ServerAuth,
-        ];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
         let server_cert: Certificate = params.signed_by(&key_pair, &self.issuer())?;
 
         Ok(KeyPairAndCert {
@@ -306,16 +315,18 @@ impl Ca {
 
         let ca_dir = Self::get_ca_path(prefix);
         let ca_dir_priv = Self::get_ca_priv_path(prefix);
-        create_dir_all(ca_dir)?;
-        create_dir_all(ca_dir_priv)?;
+        create_dir_all(&ca_dir)?;
+        create_dir_all(&ca_dir_priv)?;
+        set_perms_priv(&ca_dir_priv)?;
 
         let mut opts = File::options();
-        opts.write(true).create_new(true).mode(0o600);
+        opts.write(true).create_new(true);
 
         opts.mode(0o644)
             .open(Self::get_pubkey_path(prefix))?
             .write_all(pubkey_serialized.as_bytes())?;
-        opts.open(Self::get_privkey_path(prefix))?
+        opts.mode(0o600)
+            .open(Self::get_privkey_path(prefix))?
             .write_all(privkey_serialized.as_bytes())?;
         opts.mode(0o644)
             .open(Self::get_cert_path(prefix))?
@@ -328,7 +339,12 @@ impl Ca {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use crate::{ca::{CAError, Ca}, test_helpers::TempDir};
+    use std::os::unix::fs::MetadataExt;
+
+    use crate::{
+        ca::{CAError, Ca},
+        test_helpers::TempDir,
+    };
 
     #[test]
     fn test_new_ca() {
@@ -352,6 +368,14 @@ mod tests {
             .collect::<Vec<_>>();
         ca_files_priv.sort();
         assert_eq!(ca_files_priv, &["ca.priv.pem"]);
+
+        let d = &*tmpdir.join("ca").join("priv");
+        let mode = d.metadata().unwrap().mode();
+        assert_eq!(mode & 0o777, 0o700);
+
+        let d = &*tmpdir.join("ca").join("priv").join("ca.priv.pem");
+        let mode = d.metadata().unwrap().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
@@ -406,6 +430,10 @@ mod tests {
             ]
         );
 
+        let d = &*tmpdir.join("servers").join("localhost").join("localhost.priv.pem");
+        let mode = d.metadata().unwrap().mode();
+        assert_eq!(mode & 0o777, 0o600);
+
         let clients_dir =
             std::fs::read_dir(&*tmpdir.join("clients").join("test_resource")).unwrap();
         let mut clients_files = clients_dir
@@ -423,6 +451,10 @@ mod tests {
                 "test_agent.pub.pem"
             ]
         );
+
+        let d = &*tmpdir.join("clients").join("test_resource").join("test_agent.priv.pem");
+        let mode = d.metadata().unwrap().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
@@ -497,14 +529,17 @@ mod tests {
 
         // both when making a cert..
         let server_names_empty = &[];
-        assert!(matches!(ca.server_cert(server_names_empty), Err(CAError::InvalidParam(_))));
+        assert!(matches!(
+            ca.server_cert(server_names_empty),
+            Err(CAError::InvalidParam(_))
+        ));
 
         // ... and when saving it, an empty server name list is an error:
         let server_names = &["localhost".to_owned(), "smbdrop".to_owned()];
         let key_and_cert = ca.server_cert(server_names).unwrap();
         assert!(matches!(
             ca.save_server_cert(server_names_empty, &key_and_cert),
-            Err(CAError::InvalidParam(_)
-        )));
+            Err(CAError::InvalidParam(_))
+        ));
     }
 }
