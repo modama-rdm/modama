@@ -55,6 +55,16 @@ container. When this is done, re-generate the configuration using
 `docker compose exec nextcloud python3 /applyconfig.py`. This will also disable
 the `root` user again. Then, login via LDAP should work.
 
+## Documentation
+
+This documentation is written using [mdBook](https://rust-lang.github.io/mdBook/index.html).
+
+In short:
+
+- `cargo install mdbook`
+- `cd docs/guide`
+- `mdbook serve --port 9991` (or similar)
+
 ## TODO
 
 - [ ] document dev env for `modama-agent` and `smbdrop`

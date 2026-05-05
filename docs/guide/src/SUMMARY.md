@@ -7,4 +7,4 @@
     - [Upgrading](./upgrade.md)
     - [Services overview](./services.md)
     - [`modama-agent`](./agent.md) 
-- [Development setup](./development.md)
+- [Development](./development.md)
