@@ -32,7 +32,7 @@ rust-tests:
   stage: test
   image: rust:1-slim-trixie
   script:
-    - apt-get -y update && apt-get -y install lld build-essential
+    - apt-get -y update && apt-get -y install lld build-essential git
     - rustup component add clippy
     - cd modama-rs/ && cargo check && cargo clippy && cargo test
 
