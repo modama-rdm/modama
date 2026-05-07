@@ -1,5 +1,5 @@
 use std::{
-    fs::{File, Permissions, create_dir_all},
+    fs::{create_dir_all, File, Permissions},
     io::{Read, Write},
     path::{Path, PathBuf},
     str::FromStr,
@@ -7,7 +7,10 @@ use std::{
 };
 
 #[cfg(target_os = "linux")]
-use std::{fs::set_permissions, os::unix::fs::{OpenOptionsExt, PermissionsExt}};
+use std::{
+    fs::set_permissions,
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+};
 
 #[cfg(target_os = "windows")]
 impl NoopMode for OpenOptions {
@@ -46,6 +49,9 @@ pub enum CAError {
 
     #[error("invalid parameter: {0}")]
     InvalidParam(String),
+
+    #[error("permission error: {0}")]
+    InvalidPermissions(String),
 
     #[error("no save path configured")]
     NoSavePath,
@@ -86,6 +92,18 @@ impl Ca {
         &self.ca_cert_pem
     }
 
+    fn check_priv_perms(path_prefix: &Path) -> Result<(), CAError> {
+        let priv_path = Self::get_ca_priv_path(path_prefix);
+        let mode = std::fs::metadata(&priv_path)?.mode();
+        if mode & 0o77 != 0 {
+            return Err(CAError::InvalidPermissions(format!(
+                "group and other must not have access to private path {priv_path:?}; permission mask is 0o{:o}",
+                mode & 0o777
+            )));
+        }
+        Ok(())
+    }
+
     pub fn load<P>(path_prefix: P) -> Result<Self, CAError>
     where
         P: Into<PathBuf>,
@@ -93,6 +111,7 @@ impl Ca {
         let mut opts = File::options();
         opts.read(true);
         let prefix: PathBuf = path_prefix.into();
+        Self::check_priv_perms(&prefix)?;
         let mut privkey = Vec::new();
         opts.open(Self::get_privkey_path(&prefix))?
             .read_to_end(&mut privkey)?;
@@ -430,7 +449,10 @@ mod tests {
             ]
         );
 
-        let d = &*tmpdir.join("servers").join("localhost").join("localhost.priv.pem");
+        let d = &*tmpdir
+            .join("servers")
+            .join("localhost")
+            .join("localhost.priv.pem");
         let mode = d.metadata().unwrap().mode();
         assert_eq!(mode & 0o777, 0o600);
 
@@ -452,7 +474,10 @@ mod tests {
             ]
         );
 
-        let d = &*tmpdir.join("clients").join("test_resource").join("test_agent.priv.pem");
+        let d = &*tmpdir
+            .join("clients")
+            .join("test_resource")
+            .join("test_agent.priv.pem");
         let mode = d.metadata().unwrap().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
