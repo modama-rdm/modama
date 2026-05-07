@@ -100,5 +100,5 @@ pub enum EventChannelRequests {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum EventChannelInitialMessages {
-    Login { token: String },
+    Login { token: String, version: String },
 }

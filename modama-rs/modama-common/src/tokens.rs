@@ -1,12 +1,21 @@
 use std::{
-    fmt::Debug, fs::File, future::Future, io::{self, Read}, path::Path, pin::Pin, sync::Arc
+    fmt::Debug,
+    fs::File,
+    future::Future,
+    io::{self, Read},
+    path::Path,
+    pin::Pin,
+    sync::Arc,
 };
 
-use jsonwebtoken::{EncodingKey, Header, encode};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{AgentId, FromURIError};
+use crate::{
+    agent::{AgentId, FromURIError},
+    version::modama_git_version,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -24,11 +33,10 @@ pub struct TokenSignResponse {
 
     /// agent name
     pub agent_name: String,
-    
+
     /// san-encoded: x-modama-agent://resource_name#agent_name
     pub agent_uri: String,
 }
-
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum TokenVerifyResponse {
@@ -90,6 +98,7 @@ impl TokenFetcher {
         let identity = Identity::from_pem(&id_pem)?;
         let client = reqwest::ClientBuilder::new()
             .identity(identity)
+            .user_agent(format!("modama-agent/{}", modama_git_version()))
             .add_root_certificate(root_cert)
             .build()?;
 
@@ -100,11 +109,7 @@ impl TokenFetcher {
     }
 
     pub async fn fetch_token(&self) -> Result<TokenSignResponse, TokenError> {
-        let resp = self
-            .client
-            .put(&self.sign_service_url)
-            .send()
-            .await?;
+        let resp = self.client.put(&self.sign_service_url).send().await?;
         if resp.status() == StatusCode::OK {
             let text = resp.text().await?;
             Ok(serde_json::from_str(&text)?)
@@ -115,7 +120,8 @@ impl TokenFetcher {
 }
 
 // Trait to abstract token fetching so tests can provide a stub implementation.
-pub type BoxFutureToken = Pin<Box<dyn Future<Output = Result<TokenSignResponse, TokenError>> + Send>>;
+pub type BoxFutureToken =
+    Pin<Box<dyn Future<Output = Result<TokenSignResponse, TokenError>> + Send>>;
 
 pub trait TokenProvider: Send + Sync + Debug {
     fn fetch_token(self: Arc<Self>) -> BoxFutureToken;
@@ -126,7 +132,6 @@ impl TokenProvider for TokenFetcher {
         Box::pin(async move { TokenFetcher::fetch_token(&self).await })
     }
 }
-
 
 pub struct TokenVerifier {
     client: Client,
@@ -143,6 +148,7 @@ impl TokenVerifier {
         Ok(Self {
             client: reqwest::ClientBuilder::new()
                 .add_root_certificate(root_cert)
+                .user_agent(format!("modama-agent/{}", modama_git_version()))
                 .build()?,
             verify_service_url: verify_service_url.to_owned(),
         })
@@ -172,7 +178,6 @@ pub enum SignError {
     Encoding,
 }
 
-
 #[derive(Clone)]
 pub struct LocalTokenSigner {
     secret: Vec<u8>,
@@ -180,7 +185,9 @@ pub struct LocalTokenSigner {
 
 impl Debug for LocalTokenSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalTokenSigner").field("secret", &"[redacted]".to_owned()).finish()
+        f.debug_struct("LocalTokenSigner")
+            .field("secret", &"[redacted]".to_owned())
+            .finish()
     }
 }
 

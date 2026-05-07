@@ -2,7 +2,7 @@ use reqwest::{Client, ClientBuilder, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::messages::Share;
+use crate::{messages::Share, version::modama_git_version};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MgmtError {
@@ -79,7 +79,9 @@ fn maybe_status_to_err(resp: &Response) -> Result<(), MgmtError> {
 
 impl MgmtClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Result<Self, MgmtError> {
-        let client = ClientBuilder::new().build()?;
+        let client = ClientBuilder::new()
+            .user_agent(format!("modama-agent/{}", modama_git_version()))
+            .build()?;
         Ok(Self {
             client,
             base_url: Url::parse(base_url)?,

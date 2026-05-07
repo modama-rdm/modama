@@ -2,7 +2,7 @@ use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use crate::{share_manager::SmbDropState, token_server::LocalTokenVerifier};
 use futures_util::{SinkExt, StreamExt};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use modama_common::{
     agent::{AgentId, ClientCertError, FromURIError},
     cert_helpers::CertHelperError,
@@ -209,6 +209,7 @@ enum AcceptError {
 
 async fn handle_authenticated_connection(
     peer: SocketAddr,
+    version: &str,
     mut ws_stream: WebSocketStream<TlsStream<TcpStream>>,
     claims: Claims,
     last_state: Arc<Mutex<EventSystemState>>,
@@ -216,7 +217,7 @@ async fn handle_authenticated_connection(
     state_updates_tx: broadcast::Sender<SmbDropState>,
 ) -> Result<(), HandlerError> {
     info!(
-        "connection {peer} authenticated with token from {}",
+        "connection {peer} authenticated with token from {} version {version}",
         claims.sub
     );
 
@@ -283,10 +284,12 @@ async fn authenticate_agent_connection(
                     serde_json::from_str(&msg).map_err(|e| HandlerError::Auth(e.to_string()))?;
 
                 match msg {
-                    EventChannelInitialMessages::Login { token } => {
+                    EventChannelInitialMessages::Login { token, version } => {
+                        debug!("connection attempt; client version {version}");
                         if let Some(claims) = token_verifier.verify(&token) {
                             handle_authenticated_connection(
                                 peer,
+                                &version,
                                 ws_stream,
                                 claims,
                                 last_state,
@@ -434,6 +437,7 @@ mod test {
         messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share},
         test_helpers::MockTokenProvider,
         tokens::{Claims, LocalTokenSigner, TokenProvider},
+        version::modama_git_version,
     };
     use rustls::{
         pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
@@ -595,8 +599,11 @@ mod test {
         let mut server = make_test_event_server().await;
 
         let sign_response = server.token_provider.fetch_token().await.unwrap();
-        let login_msg =
-            serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response.token }).unwrap();
+        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
+            token: sign_response.token,
+            version: modama_git_version().to_owned(),
+        })
+        .unwrap();
         server
             .ws_write
             .send(Message::Text(login_msg.into()))
@@ -642,8 +649,11 @@ mod test {
             .fetch_token()
             .await
             .unwrap();
-        let login_msg =
-            serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response.token }).unwrap();
+        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
+            token: sign_response.token,
+            version: modama_git_version().to_owned(),
+        })
+        .unwrap();
         server
             .ws_write
             .send(Message::Text(login_msg.into()))
@@ -707,9 +717,11 @@ mod test {
                 .fetch_token()
                 .await
                 .unwrap();
-            let login_msg_2 =
-                serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response_2.token })
-                    .unwrap();
+            let login_msg_2 = serde_json::to_string(&EventChannelInitialMessages::Login {
+                token: sign_response_2.token,
+                version: modama_git_version().to_owned(),
+            })
+            .unwrap();
             conn.send(Message::Text(login_msg_2.into())).await.unwrap();
 
             // and we get an updated list of connected agents:
@@ -788,8 +800,11 @@ mod test {
         let mut server = make_test_event_server().await;
 
         let sign_response = server.token_provider.fetch_token().await.unwrap();
-        let login_msg =
-            serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response.token }).unwrap();
+        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
+            token: sign_response.token,
+            version: modama_git_version().to_owned(),
+        })
+        .unwrap();
         server
             .ws_write
             .send(Message::Text(login_msg.into()))
@@ -862,8 +877,11 @@ mod test {
         let mut server = make_test_event_server().await;
 
         let sign_response = server.token_provider.fetch_token().await.unwrap();
-        let login_msg =
-            serde_json::to_string(&EventChannelInitialMessages::Login { token: sign_response.token }).unwrap();
+        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
+            token: sign_response.token,
+            version: modama_git_version().to_owned(),
+        })
+        .unwrap();
         server
             .ws_write
             .send(Message::Text(login_msg.into()))

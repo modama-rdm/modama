@@ -7,3 +7,4 @@ pub mod requests;
 pub mod tokens;
 pub mod ca;
 pub mod test_helpers;
+pub mod version;

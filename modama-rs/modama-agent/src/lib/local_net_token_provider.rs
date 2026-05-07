@@ -11,7 +11,7 @@ use std::{
 };
 
 use log::{debug, error, info, warn};
-use modama_common::tokens::{BoxFutureToken, TokenError, TokenProvider, TokenSignResponse};
+use modama_common::{tokens::{BoxFutureToken, TokenError, TokenProvider, TokenSignResponse}, version::modama_git_version};
 use reqwest::{Certificate, Client, StatusCode};
 use tokio::{
     net::UdpSocket,
@@ -173,6 +173,7 @@ impl LocalNetTokenProvider {
         let root_cert = Certificate::from_pem(pem)?;
         let http_client = reqwest::ClientBuilder::new()
             .add_root_certificate(root_cert)
+            .user_agent(format!("modama-agent/{}", modama_git_version()))
             .build()?;
 
         let agents = RemoteAgents::new().await;

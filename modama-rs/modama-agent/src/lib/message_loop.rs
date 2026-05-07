@@ -10,7 +10,7 @@ use futures_util::{future::join_all, SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use modama_common::{
     messages::{EventChannelInitialMessages, EventChannelMessage, Share},
-    tokens::TokenProvider,
+    tokens::TokenProvider, version::modama_git_version,
 };
 use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
@@ -145,7 +145,7 @@ pub async fn message_loop(
                 continue;
             }
         };
-        let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login { token: token.token }) {
+        let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login { token: token.token, version: modama_git_version().to_owned() }) {
             Ok(msg) => msg,
             Err(e) => {
                 error!("Could not serialize authentication message, reconnecting...");
