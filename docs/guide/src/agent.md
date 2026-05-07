@@ -61,6 +61,13 @@ The key material and certificates are stored under `/var/local/data-mgmt/CA/`. A
 /var/local/data-mgmt/CA/ca/pub/ca.cert.pem
 ```
 
+The individual files are used for the following:
+
+* `CA/ca/priv/` - private part of the CA, this is _only_ used to sign other certificates, both agents and services. They are not used to provide a TLS service directly
+* `CA/ca/pub/` - public part of the CA, which is used to verify both server and client certificates
+* `CA/servers/*` - certificates in here are used to provide TLS-encrypted services. That's currently two services, both part of `smbdrop`: the token service (HTTPS w/ mTLS) and the websocket event stream API (WSS) that uses tokens for authentication.
+* `CA/clients/*` - client certificates. `modama-agent` uses these to authenticate against the token service
+
 Note that the directory structure allows to limit bind mounts of key material to only the required parts, i.e. it's easily possible to only allow access to the public part of the CA to any services that need it. Each server also has it's own directory.
 
 ## Security considerations
