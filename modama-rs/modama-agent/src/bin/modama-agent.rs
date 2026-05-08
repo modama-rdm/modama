@@ -5,7 +5,7 @@ use clap::{Args, Parser};
 use log::info;
 use modama_agent::{
     agent_state::AgentState,
-    config::{AgentConfig, AgentLinuxConfig, Identity},
+    config::{AgentConfig, AgentLinuxConfig, CliArgs, Identity},
     local_http_service::serve_local_web_api,
     local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider},
     local_net_token_proxy::token_publisher_loop,
@@ -14,11 +14,10 @@ use modama_agent::{
     platform::CurrentPlatformMountBackend,
 };
 use modama_common::{
-    agent::AgentId,
-    tokens::{TokenFetcher, TokenProvider},
+    agent::AgentId, cert_helpers::get_root_cert_store_from_file, tokens::{TokenFetcher, TokenProvider}
 };
 use modama_common::{
-    cert_helpers::{get_cert_chain, get_private_key, get_root_cert_store},
+    cert_helpers::{get_cert_chain, get_private_key},
     logging::init_logging,
 };
 use tokio::{
@@ -27,47 +26,8 @@ use tokio::{
 use tokio_rustls::rustls::ClientConfig;
 use url::Url;
 
-#[derive(Args, Debug)]
-struct ClientCertArgs {
-    #[arg(long, default_value = "chain.pem")]
-    chain: PathBuf,
-
-    #[arg(long, default_value = "priv.pem")]
-    key: PathBuf,
-}
-
-#[derive(Parser, Debug)]
-struct CliArgs {
-    #[arg(long, default_value = "wss://localhost:5052")]
-    event_url: String,
-
-    #[arg(long, default_value = "https://localhost:5053")]
-    token_service: String,
-
-    #[arg(long, default_value = "http://localhost:5001")]
-    mgmt_api_url: String,
-
-    #[arg(long, default_value = "localhost:3003")]
-    listen_local_api: String,
-
-    #[arg(long, default_value = "moellenstedt.iff.kfa-juelich.de")]
-    smb_hostname: String,
-
-    #[arg(long, default_value = "445")]
-    smb_port: u32,
-
-    #[arg(long, default_value = "ER-C-INGEST")]
-    smb_domain: String,
-
-    #[arg(long, default_value = "ca.cert.pem")]
-    ca_cert: PathBuf,
-
-    #[command(flatten)]
-    client_cert: Option<ClientCertArgs>,
-}
-
 fn get_tls_config(args: &CliArgs) -> AnyResult<(Arc<ClientConfig>, Identity)> {
-    let root_store = get_root_cert_store(&args.ca_cert)?;
+    let root_store = get_root_cert_store_from_file(&args.ca_cert)?;
 
     let (client_config, identity) = match &args.client_cert {
         Some(client_cert) => {

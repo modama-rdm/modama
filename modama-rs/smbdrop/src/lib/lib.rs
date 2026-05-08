@@ -1,4 +1,3 @@
-pub mod cert_helpers;
 pub mod events;
 pub mod helpers;
 pub mod mount_manager;

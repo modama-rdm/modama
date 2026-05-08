@@ -18,14 +18,11 @@ use modama_common::{
     cert_helpers::{get_private_key, load_tls_server_config},
     tokens::{Claims, LocalTokenSigner, SignError, TokenSignResponse, TokenVerifyResponse},
 };
-use tokio::{net::TcpListener, task::JoinHandle};
-use tokio_rustls::TlsAcceptor;
+use tokio::{net::TcpListener, net::TcpStream, task::JoinHandle};
+use tokio_rustls::{server::TlsStream, TlsAcceptor};
 use tower_service::Service;
 
-use crate::{
-    cert_helpers::agent_id_from_stream,
-    events::ServerStartError,
-};
+use crate::events::ServerStartError;
 #[derive(Clone)]
 struct ConnState {
     /// Agent ID - None if client authentication didn't succeed
@@ -160,6 +157,13 @@ impl TokenServer {
     }
 }
 
+fn agent_id_from_stream(stream: &TlsStream<TcpStream>) -> Option<AgentId> {
+    let (_, server_connection) = stream.get_ref();
+    let peer_certs = server_connection.peer_certificates()?;
+    let peer_cert = peer_certs.first()?;
+    AgentId::from_cert(peer_cert).ok()
+}
+
 /// Serve requests using an already-bound TcpListener
 async fn serve_token_server_with_listener(
     listener: TcpListener,
@@ -244,8 +248,14 @@ mod tests {
 
         // paths to server files
         let ca_cert = tmpdir.join("ca").join("pub").join("ca.cert.pem");
-        let server_chain = tmpdir.join("servers").join("localhost").join("localhost.chain.pem");
-        let server_priv = tmpdir.join("servers").join("localhost").join("localhost.priv.pem");
+        let server_chain = tmpdir
+            .join("servers")
+            .join("localhost")
+            .join("localhost.chain.pem");
+        let server_priv = tmpdir
+            .join("servers")
+            .join("localhost")
+            .join("localhost.priv.pem");
 
         let token_server = TokenServer::start("127.0.0.1:0", &ca_cert, &server_chain, &server_priv)
             .await
