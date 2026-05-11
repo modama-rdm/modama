@@ -57,9 +57,9 @@ services:
         source: "/var/local/data-mgmt/smbdrop"
         target: "/etc/smbdrop"
     ports:
-      - "127.0.0.1:1445:445"
-      - "5053:5053"  # token API (https)
+      - "127.0.0.1:1445:445"  # smb
       - "5052:5052"  # events API (ws)
+      - "5053:5053"  # token API (https)
   mgmtinterface:
     volumes:
       - type: bind

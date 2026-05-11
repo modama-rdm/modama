@@ -68,11 +68,11 @@ services:
         source: "./testfolder/etc/smbdrop"
         target: "/etc/smbdrop"
     ports:
-      - "127.0.0.1:1446:445"
+      - "127.0.0.1:1446:445"   # smb
       # - "127.0.0.1:445:445"
-      - "127.0.0.1:5051:5051"
-      - "127.0.0.1:5052:5052"
-      - "127.0.0.1:5053:5053"
+      - "127.0.0.1:5051:5051"  # unauthenticated smbdrop API (http)
+      - "127.0.0.1:5052:5052"  # events API (ws)
+      - "127.0.0.1:5053:5053"  # token API (https)
   mgmtinterface:
     volumes:
       - type: bind
