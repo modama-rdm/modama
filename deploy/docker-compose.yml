@@ -181,9 +181,11 @@ services:
       - type: bind
         source: "/var/local/data-mgmt/mgmt_secret.py"
         target: "/mgmt_secret.py"
+        read_only: true
       - type: bind
         source: "/var/local/data-mgmt/CA/ca/pub/"
         target: "/certs/ca/pub/"
+        read_only: true
     depends_on:
       - "permissions"
       - "smbdrop"
