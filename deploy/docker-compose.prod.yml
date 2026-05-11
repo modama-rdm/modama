@@ -58,6 +58,8 @@ services:
         target: "/etc/smbdrop"
     ports:
       - "127.0.0.1:1445:445"
+      - "5053:5053"  # token API (https)
+      - "5052:5052"  # events API (ws)
   mgmtinterface:
     volumes:
       - type: bind
