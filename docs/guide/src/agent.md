@@ -78,6 +78,9 @@ If a user obtains the key material, they might be able to "participate" in curre
 
 Agents can also participate without having a private key, by talking over the local lab network to reach at least one privileged `modama-agent`. That means `modama` assumes the local lab network is a "security domain", meaning if a user can access it, they can participate in the experiment. Non-TLS encrypted HTTP is used locally, also to enable communication without having to manage DNS names of agents or fixed IP mappings.
 
+The CA private key is encrypted with a user-provided password and
+needs to be decrypted when enrolling a new agent or service.
+
 ### Network connections and protocols
 
 `modama-agent` needs multiple network connections to provide its services.

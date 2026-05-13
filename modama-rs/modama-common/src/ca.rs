@@ -31,6 +31,7 @@ fn set_perms_priv(path: &Path) -> Result<(), CAError> {
     Ok(())
 }
 
+use pkcs8::{DecodePrivateKey, LineEnding, PrivateKeyInfoOwned, der::EncodePem};
 use rcgen::{
     string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
     ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, PKCS_ED25519,
@@ -50,6 +51,15 @@ pub enum CAError {
     #[error("invalid parameter: {0}")]
     InvalidParam(String),
 
+    #[error("invalid password")]
+    InvalidPassword,
+
+    #[error("conversion failed: {0}")]
+    Conversion(#[from] pkcs8::Error),
+
+    #[error("encryption failed: {0}")]
+    Encryption(#[from] pkcs8::der::Error),
+
     #[error("permission error: {0}")]
     InvalidPermissions(String),
 
@@ -59,6 +69,7 @@ pub enum CAError {
 
 pub struct Ca {
     path_prefix: Option<PathBuf>,
+    password: String,
     key_pair: KeyPair,
     ca_cert_pem: String,
     ca_params: CertificateParams,
@@ -70,7 +81,7 @@ pub struct KeyPairAndCert {
 }
 
 impl Ca {
-    pub fn new<P>(path_prefix: Option<P>) -> Result<Self, CAError>
+    pub fn new<P>(path_prefix: Option<P>, password: &str) -> Result<Self, CAError>
     where
         P: Into<PathBuf>,
     {
@@ -81,6 +92,7 @@ impl Ca {
             key_pair,
             ca_cert_pem: cert.pem(),
             ca_params: Self::ca_params()?,
+            password: password.to_owned(),
         })
     }
 
@@ -104,7 +116,7 @@ impl Ca {
         Ok(())
     }
 
-    pub fn load<P>(path_prefix: P) -> Result<Self, CAError>
+    pub fn load<P>(path_prefix: P, password: &str) -> Result<Self, CAError>
     where
         P: Into<PathBuf>,
     {
@@ -112,14 +124,25 @@ impl Ca {
         opts.read(true);
         let prefix: PathBuf = path_prefix.into();
         Self::check_priv_perms(&prefix)?;
-        let mut privkey = Vec::new();
+        let mut privkey_enc = Vec::new();
         opts.open(Self::get_privkey_path(&prefix))?
-            .read_to_end(&mut privkey)?;
+            .read_to_end(&mut privkey_enc)?;
+
+        let privkey_enc = String::from_utf8(privkey_enc)?;
+
+        let privkey = PrivateKeyInfoOwned::from_pkcs8_encrypted_pem(&privkey_enc, password)
+            .map_err(|e| match e {
+                pkcs8::Error::EncryptedPrivateKey(pkcs8::pkcs5::Error::DecryptFailed) => {
+                    CAError::InvalidPassword
+                }
+                e => e.into(),
+            })?;
+
         let mut pubkey = Vec::new();
         opts.open(Self::get_pubkey_path(&prefix))?
             .read_to_end(&mut pubkey)?;
         let mut key_pair_pem = Vec::new();
-        key_pair_pem.extend(privkey);
+        key_pair_pem.extend(privkey.to_pem(LineEnding::LF)?.into_bytes());
         key_pair_pem.extend(pubkey);
         let key_pair = KeyPair::from_pem(&String::from_utf8(key_pair_pem)?)?;
         let mut cert_pem = Vec::new();
@@ -131,6 +154,7 @@ impl Ca {
             key_pair,
             ca_cert_pem: String::from_utf8(cert_pem)?,
             ca_params: Self::ca_params()?,
+            password: password.to_owned(),
         })
     }
 
@@ -322,13 +346,17 @@ impl Ca {
         Ok(params)
     }
 
-    fn issuer<'a>(&'a self) -> Issuer<'a, KeyPair> {
+    fn issuer<'a>(&'a self) -> Issuer<'a, &'a KeyPair> {
         Issuer::from_params(&self.ca_params, &self.key_pair)
     }
 
     pub fn serialize_ca_to_files(&self) -> Result<(), CAError> {
         let pubkey_serialized = self.key_pair.public_key_pem();
         let privkey_serialized = self.key_pair.serialize_pem();
+
+        let pk_info = PrivateKeyInfoOwned::from_pkcs8_pem(&privkey_serialized)?;
+        let pk_encrypted = pk_info.encrypt(&self.password)?;
+        let privkey_encrypted = pk_encrypted.to_pem("ENCRYPTED PRIVATE KEY", LineEnding::LF)?;
 
         let prefix = &self.get_path_prefix()?;
 
@@ -346,7 +374,7 @@ impl Ca {
             .write_all(pubkey_serialized.as_bytes())?;
         opts.mode(0o600)
             .open(Self::get_privkey_path(prefix))?
-            .write_all(privkey_serialized.as_bytes())?;
+            .write_all(privkey_encrypted.as_bytes())?;
         opts.mode(0o644)
             .open(Self::get_cert_path(prefix))?
             .write_all(self.ca_cert_pem.as_bytes())?;
@@ -365,10 +393,12 @@ mod tests {
         test_helpers::TempDir,
     };
 
+    const TEST_PASSWORD: &str = "the-password";
+
     #[test]
     fn test_new_ca() {
         let tmpdir = TempDir::new("test-ca");
-        let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
+        let ca = Ca::new(Some(tmpdir.to_owned()), TEST_PASSWORD).unwrap();
         ca.serialize_ca_to_files().unwrap();
 
         let ca_dir = std::fs::read_dir(&*tmpdir.join("ca").join("pub")).unwrap();
@@ -398,9 +428,21 @@ mod tests {
     }
 
     #[test]
+    fn test_ca_wrong_password() {
+        let tmpdir = TempDir::new("test-ca");
+        let ca = Ca::new(Some(tmpdir.to_owned()), "password-1").unwrap();
+        ca.serialize_ca_to_files().unwrap();
+        let err = Ca::load(tmpdir.to_owned(), "password-2");
+        if let Err(e) = &err {
+            println!("{e:?}");
+        }
+        assert!(matches!(err, Err(CAError::InvalidPassword)));
+    }
+
+    #[test]
     fn test_ca_make_client_and_server_certs() {
         let tmpdir = TempDir::new("test-ca");
-        let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
+        let ca = Ca::new(Some(tmpdir.to_owned()), TEST_PASSWORD).unwrap();
 
         let server_names = &["localhost".to_owned(), "smbdrop".to_owned()];
         let key_and_cert = ca.server_cert(server_names).unwrap();
@@ -486,11 +528,11 @@ mod tests {
     fn test_ca_load_and_make_certs() {
         let tmpdir = TempDir::new("test-ca");
         {
-            let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
+            let ca = Ca::new(Some(tmpdir.to_owned()), TEST_PASSWORD).unwrap();
             ca.serialize_ca_to_files().unwrap();
         }
 
-        let ca = Ca::load(tmpdir.to_owned()).unwrap();
+        let ca = Ca::load(tmpdir.to_owned(), TEST_PASSWORD).unwrap();
 
         let server_names = &["localhost".to_owned(), "smbdrop".to_owned()];
         let key_and_cert = ca.server_cert(server_names).unwrap();
@@ -550,7 +592,7 @@ mod tests {
     #[test]
     fn test_ca_must_have_one_server_name() {
         let tmpdir = TempDir::new("test-ca");
-        let ca = Ca::new(Some(tmpdir.to_owned())).unwrap();
+        let ca = Ca::new(Some(tmpdir.to_owned()), TEST_PASSWORD).unwrap();
 
         // both when making a cert..
         let server_names_empty = &[];
