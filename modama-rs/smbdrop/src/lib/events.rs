@@ -461,7 +461,7 @@ mod test {
 
     impl CertsForTesting {
         fn generate() -> Self {
-            let ca = Ca::new::<String>(None).unwrap();
+            let ca = Ca::new::<String>(None, "hunter42").unwrap();
             let server_cert = ca.server_cert(&["localhost".to_string()]).unwrap();
 
             let mut roots = RootCertStore::empty();

@@ -370,7 +370,7 @@ mod tests {
         let tmpdir = TempDir::new("test-token-proxy");
 
         // create CA and serialize
-        let ca = Ca::new(Some(tmpdir.to_owned())).expect("create ca");
+        let ca = Ca::new(Some(tmpdir.to_owned()), "hunter42").expect("create ca");
         ca.serialize_ca_to_files().expect("serialize ca");
 
         // create server cert
@@ -394,7 +394,7 @@ mod tests {
     async fn test_simple_udp_discovery() {
         let _handle = DISCOVERY_MUTEX.lock().await;
         init_logging();
-        let ca = Ca::new::<String>(None).unwrap();
+        let ca = Ca::new::<String>(None, "hunter42").unwrap();
         let ca_cert = ca.get_ca_cert_pem();
 
         let receiver = LocalNetTokenProvider::new_with_pem(
@@ -452,7 +452,7 @@ mod tests {
         let tmpdir = TempDir::new("test-token-proxy");
 
         // create CA and serialize
-        let ca = Ca::new(Some(tmpdir.to_owned())).expect("create ca");
+        let ca = Ca::new(Some(tmpdir.to_owned()), "hunter42").expect("create ca");
         ca.serialize_ca_to_files().expect("serialize ca");
 
         // create server cert

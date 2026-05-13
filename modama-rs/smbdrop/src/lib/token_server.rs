@@ -233,7 +233,7 @@ mod tests {
         let tmpdir = TempDir::new("test-token-server");
 
         // create CA and serialize
-        let ca = Ca::new(Some(tmpdir.to_owned())).expect("create ca");
+        let ca = Ca::new(Some(tmpdir.to_owned()), "hunter42").expect("create ca");
         ca.serialize_ca_to_files().expect("serialize ca");
 
         // create server cert

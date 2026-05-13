@@ -279,7 +279,7 @@ mod tests {
         async fn start() -> Self {
             init_logging();
 
-            let ca = Ca::new::<String>(None).unwrap();
+            let ca = Ca::new::<String>(None, "hunter42").unwrap();
             let server_cert = ca.server_cert(&["localhost".to_string()]).unwrap();
             let mut roots = RootCertStore::empty();
             let ca_cert = ca.get_ca_cert_pem();
