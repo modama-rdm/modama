@@ -16,9 +16,7 @@ use crate::local_http_service::{get_auth, ApiState, LocalAPIError};
 
 use modama_common::{
     local_api_messages::{
-        APICreateSessionRequest, APICreateSessionResponse, APICreateShareResponse,
-        APICurrentForegroundShare, APIListProjectsResponse, APIListSessionsResponse,
-        APILoginResponse,
+        APICreateSessionRequest, APICreateSessionResponse, APICreateShareResponse, APICurrentForegroundShare, APIHealthCheckResponse, APIListProjectsResponse, APIListSessionsResponse, APILoginResponse
     },
     mgmt_client::MgmtClient,
 };
@@ -159,10 +157,18 @@ async fn api_create_session_in_project(
     .into_response())
 }
 
+async fn api_health(
+    State(_api_state): State<ApiState>,
+) -> Json<APIHealthCheckResponse> {
+    Json(APIHealthCheckResponse::Ok)
+}
+
+
 pub fn add_api_routes(router: Router<ApiState>) -> Router<ApiState> {
     // FIXME: make the URLs beautiful
     router
         .route("/api/shares/foreground/", get(api_shares_foreground))
+        .route("/api/health/", get(api_health))
         .route("/api/login/", post(api_login))
         .route("/api/projects/", get(api_list_projects))
         .route(

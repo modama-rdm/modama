@@ -58,3 +58,10 @@ pub struct APICreateSessionResponse {
 pub struct APILoginResponse {
     pub username: String,
 }
+
+/// Health check API endpoint response
+#[derive(Serialize, Clone)]
+#[serde(tag = "type")]
+pub enum APIHealthCheckResponse {
+    Ok
+}

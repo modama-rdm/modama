@@ -1654,6 +1654,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "modama-agent-gui"
+version = "0.1.0"
+
+[[package]]
 name = "modama-common"
 version = "0.1.0"
 dependencies = [

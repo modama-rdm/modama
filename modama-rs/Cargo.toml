@@ -2,7 +2,7 @@
 members = [
     "smbdrop",
     "modama-agent",
-    "modama-common",
+    "modama-common", "modama-agent-gui",
 ]
 package.edition = "2021"
 resolver = "2"
