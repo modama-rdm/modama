@@ -1,47 +1,28 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use clap::{Args, Parser};
+use clap::Parser;
+use modama_common::{
+    agent::{AgentId, ClientCertError},
+    cert_helpers::{
+        cert_chain_from_reader, get_root_cert_store, private_key_from_reader, CertHelperError,
+    },
+    tokens::{TokenError, TokenFetcher, TokenProvider},
+};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::OnceCell;
+use tokio::{io::AsyncReadExt, sync::OnceCell};
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use url::Url;
 
-#[derive(Args, Debug)]
-pub struct ClientCertArgs {
-    #[arg(long, default_value = "chain.pem")]
-    chain: PathBuf,
-
-    #[arg(long, default_value = "priv.pem")]
-    key: PathBuf,
-}
+use crate::local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider};
 
 #[derive(Parser, Debug)]
 pub struct CliArgs {
-    #[arg(long, default_value = "wss://localhost:5052")]
-    event_url: String,
-
-    #[arg(long, default_value = "https://localhost:5053")]
-    token_service: String,
-
-    #[arg(long, default_value = "http://localhost:5001")]
-    mgmt_api_url: String,
-
-    #[arg(long, default_value = "localhost:3003")]
-    listen_local_api: String,
-
-    #[arg(long, default_value = "moellenstedt.iff.kfa-juelich.de")]
-    smb_hostname: String,
-
-    #[arg(long, default_value = "445")]
-    smb_port: u32,
-
-    #[arg(long, default_value = "ER-C-INGEST")]
-    smb_domain: String,
-
-    #[arg(long, default_value = "ca.cert.pem")]
-    ca_cert: PathBuf,
-
-    #[command(flatten)]
-    client_cert: Option<ClientCertArgs>,
+    #[arg(long)]
+    config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +46,7 @@ impl Default for AgentLinuxConfig {
 }
 
 #[derive(Debug, Clone)]
-pub enum Identity {
+pub enum MTLSIdentity {
     Anonymous {
         hostname: String,
     },
@@ -79,31 +60,63 @@ pub enum Identity {
 }
 
 #[derive(Debug, Clone)]
+pub struct ClientCertConfig {
+    chain: String,
+    private_key: String,
+}
+
+impl From<AgentConfigFileClientCert> for ClientCertConfig {
+    fn from(value: AgentConfigFileClientCert) -> Self {
+        Self {
+            chain: value.chain,
+            private_key: value.private_key,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct AgentConfig {
-    /// The base URL for the websocket API (ws:// or wss://)
-    pub api_url: Url,
+    /// Host:port where the local API should listen
+    pub listen_local_api: String,
 
-    /// The base URL of the management API
-    pub mgmt_api_url: String, // FIXME: make this a `Url`?
+    /// Base URL for the websocket API (ws:// or wss://)
+    pub events_api_url: Url,
 
-    /// The hostname of the ingest Samba server
+    /// Base URL of the management API
+    pub mgmt_api_url: Url,
+
+    /// Base URL of the token service API
+    pub token_service_url: Url,
+
+    /// Hostname of the ingest Samba server
     pub smb_hostname: String,
 
-    /// The resolved IP address of the Samba server (lazily looked up on first mount)
+    /// Resolved IP address of the Samba server (lazily looked up on first mount)
     pub smb_ip: OnceCell<String>,
 
-    /// The SMB port to connect to
+    /// SMB port to connect to
     pub smb_port: u32,
 
-    /// The Samba domain to use for mounting
+    /// Samba domain to use for mounting
     pub smb_domain: String,
-
-    /// The identity (agent and resource, or anonymous)
-    pub identity: Identity,
 
     // FIXME: find a better way?
     pub linux_config: Option<AgentLinuxConfig>,
-    // TODO: add mTLS certs/keys etc. for resource identification and auth
+
+    /// CA certificate
+    pub ca_root_store: RootCertStore,
+
+    /// CA root certificate as string
+    pub ca_root_cert: String,
+
+    /// TLS client config
+    pub client_config: Arc<ClientConfig>,
+
+    /// TLS identity
+    pub identity: MTLSIdentity,
+
+    /// Client certificate if available
+    pub client_cert: Option<ClientCertConfig>,
 }
 
 #[derive(Error, Debug)]
@@ -111,7 +124,7 @@ pub enum DNSLookupFailure {
     #[error("no address found for `{hostname}`")]
     NoAddressFound { hostname: String },
 
-    #[error("DNS lookup failure")]
+    #[error("DNS lookup failure: {0}")]
     IOError(#[from] std::io::Error),
 }
 
@@ -122,6 +135,34 @@ pub enum ConfigError {
         url: String,
         source: url::ParseError,
     },
+
+    #[error("i/o error: {0}")]
+    IO(#[from] std::io::Error),
+
+    #[error("config parse error: {0}")]
+    Parse(#[from] toml::de::Error),
+
+    #[error("certificate error: {0}")]
+    CertError(#[from] CertHelperError),
+
+    #[error("certificate error: {0}")]
+    ClientCertError(#[from] ClientCertError),
+
+    #[error("rustls error: {0}")]
+    TLSError(#[from] tokio_rustls::rustls::Error),
+
+    #[error("configuration error: {msg}")]
+    Config { msg: String },
+
+    #[error("token provider: {0}")]
+    TokenProvider(#[from] TokenError),
+}
+
+fn parse_url(url_str: &str) -> Result<Url, ConfigError> {
+    Url::parse(url_str).map_err(|e| ConfigError::InvalidUrl {
+        url: url_str.to_owned(),
+        source: e,
+    })
 }
 
 impl AgentConfig {
@@ -144,27 +185,177 @@ impl AgentConfig {
         c.clone().unwrap_or_default()
     }
 
-    pub fn from_file(path: &Path) -> Result<Self, ()> {
-        todo!();
-    }
+    pub async fn from_file(path: &impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let mut cfg_str: String = String::new();
+        tokio::fs::File::open(path)
+            .await?
+            .read_to_string(&mut cfg_str)
+            .await?;
+        let config_file: AgentConfigFile = toml::from_str(&cfg_str)?;
+        let mut reader = config_file.ca.ca_cert.as_bytes();
 
-    pub fn from_args(args: &CliArgs) -> Result<Self, ConfigError> {
+        let ca_root_store: RootCertStore = get_root_cert_store(&mut reader, path.as_ref())?;
+
+        let token_service_url = parse_url(&config_file.services.token_service_url)?;
+
+        let client_cert: Option<ClientCertConfig> = config_file.client_cert.map(|c| c.into());
+
+        let client_config = match &client_cert {
+            Some(client_cert) => {
+                let mut chain_bytes = client_cert.chain.as_bytes();
+                let client_chain = cert_chain_from_reader(&mut chain_bytes)?;
+
+                let mut pk_bytes = client_cert.private_key.as_bytes();
+                let private_key = private_key_from_reader(&mut pk_bytes)?;
+                ClientConfig::builder()
+                    .with_root_certificates(ca_root_store.clone())
+                    .with_client_auth_cert(client_chain, private_key)?
+            }
+            None => ClientConfig::builder()
+                .with_root_certificates(ca_root_store.clone())
+                .with_no_client_auth(),
+        };
+
+        let identity = match &client_cert {
+            Some(client_cert) => {
+                let mut chain_bytes = client_cert.chain.as_bytes();
+                let client_chain = cert_chain_from_reader(&mut chain_bytes)?;
+                let agent_cert = client_chain.first().ok_or(ConfigError::Config {
+                    msg: "must have at least one certificate in the chain".to_owned(),
+                })?;
+                let agent_id = AgentId::from_cert(agent_cert)?;
+                MTLSIdentity::AgentId {
+                    agent_name: agent_id.agent,
+                    resource_name: agent_id.resource,
+                }
+            }
+            None => MTLSIdentity::Anonymous {
+                hostname: hostname::get()?.to_string_lossy().to_string(),
+            },
+        };
+
         Ok(Self {
-            api_url: Url::parse(&args.event_url).map_err(|e| ConfigError::InvalidUrl {
-                url: args.event_url.to_owned(),
-                source: e,
-            })?,
-            mgmt_api_url: args.mgmt_api_url,
-            smb_hostname: args.smb_hostname,
-            smb_domain: args.smb_domain,
+            events_api_url: parse_url(&config_file.services.event_url)?,
+            mgmt_api_url: parse_url(&config_file.services.mgmt_api_url)?,
+            smb_hostname: config_file.services.smb_hostname.clone(),
             smb_ip: OnceCell::new(),
-            smb_port: args.smb_port,
-            identity,
+            smb_port: config_file.services.smb_port,
+            smb_domain: config_file.services.smb_domain.clone(),
             linux_config: Some(AgentLinuxConfig::default()),
+            ca_root_store,
+            listen_local_api: config_file.listen_local_api.clone(),
+            token_service_url,
+            client_cert,
+            ca_root_cert: config_file.ca.ca_cert.clone(),
+            client_config: Arc::new(client_config),
+            identity,
         })
     }
 
-    pub fn update_from_args(&mut self, args: &CliArgs) {
-        todo!();
+    pub async fn make_token_provider(
+        &self,
+    ) -> Result<Arc<dyn TokenProvider + Sync + Send>, ConfigError> {
+        let sign_url =
+            self.token_service_url
+                .join("/sign/")
+                .map_err(|e| ConfigError::InvalidUrl {
+                    url: self.token_service_url.to_string(),
+                    source: e,
+                })?;
+
+        Ok(match &self.client_cert {
+            Some(client_cert) => {
+                let mut chain_reader = client_cert.chain.as_bytes();
+                let mut key_reader = client_cert.private_key.as_bytes();
+                let mut ca_cert_reader = self.ca_root_cert.as_bytes();
+                let token_fetcher = TokenFetcher::new(
+                    sign_url.as_str(),
+                    &mut key_reader,
+                    &mut chain_reader,
+                    &mut ca_cert_reader,
+                )?;
+                let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(token_fetcher);
+                token_provider
+            }
+            None => {
+                let mut ca_cert_reader = self.ca_root_cert.as_bytes();
+                let token_provider =
+                    LocalNetTokenProvider::new(&mut ca_cert_reader, DiscoveryAddr::AnyPrivate)
+                        .await?;
+                let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(token_provider);
+                token_provider
+            }
+        })
     }
+}
+
+fn default_event_url() -> String {
+    "wss://localhost:5052".to_owned()
+}
+
+fn default_token_service_url() -> String {
+    "https://localhost:5053".to_owned()
+}
+
+fn default_mgmt_api_url() -> String {
+    "http://localhost:5001".to_owned()
+}
+
+fn default_smb_host() -> String {
+    "moellenstedt.iff.kfa-juelich.de".to_owned()
+}
+
+fn default_smb_port() -> u32 {
+    445
+}
+
+fn default_smb_domain() -> String {
+    "ER-C-INGEST".to_owned()
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentConfigFileServices {
+    #[serde(default = "default_event_url")]
+    event_url: String,
+
+    #[serde(default = "default_token_service_url")]
+    token_service_url: String,
+
+    #[serde(default = "default_mgmt_api_url")]
+    mgmt_api_url: String,
+
+    #[serde(default = "default_smb_host")]
+    smb_hostname: String,
+
+    #[serde(default = "default_smb_port")]
+    smb_port: u32,
+
+    #[serde(default = "default_smb_domain")]
+    smb_domain: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentConfigFileCa {
+    ca_cert: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentConfigFileClientCert {
+    chain: String,
+    private_key: String,
+}
+
+fn default_listen_local_api() -> String {
+    "localhost:3003".to_owned()
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentConfigFile {
+    services: AgentConfigFileServices,
+
+    #[serde(default = "default_listen_local_api")]
+    listen_local_api: String,
+
+    ca: AgentConfigFileCa,
+    client_cert: Option<AgentConfigFileClientCert>,
 }

@@ -2,7 +2,7 @@ use std::{
     fmt::Debug,
     fs::File,
     future::Future,
-    io::{self, Read},
+    io::{self, BufRead, BufReader, Read},
     path::Path,
     pin::Pin,
     sync::Arc,
@@ -80,19 +80,15 @@ pub struct TokenFetcher {
 impl TokenFetcher {
     pub fn new(
         sign_service_url: &str,
-        key_file: &Path,
-        chain_file: &Path,
-        ca_cert_file: &Path,
+        key_reader: &mut impl BufRead,
+        chain_reader: &mut impl BufRead,
+        ca_cert_reader: &mut impl BufRead,
     ) -> Result<Self, TokenError> {
         let mut id_pem: Vec<u8> = Vec::new();
-        let mut key_file = File::open(key_file)?;
-        key_file.read_to_end(&mut id_pem)?;
-        let mut cert_file = File::open(chain_file)?;
-        cert_file.read_to_end(&mut id_pem)?;
-
-        let mut ca_certs = File::open(ca_cert_file)?;
+        key_reader.read_to_end(&mut id_pem)?;
+        chain_reader.read_to_end(&mut id_pem)?;
         let mut ca_pem: Vec<u8> = Vec::new();
-        ca_certs.read_to_end(&mut ca_pem)?;
+        ca_cert_reader.read_to_end(&mut ca_pem)?;
         let root_cert = Certificate::from_pem(&ca_pem)?;
 
         let identity = Identity::from_pem(&id_pem)?;
@@ -106,6 +102,23 @@ impl TokenFetcher {
             client,
             sign_service_url: sign_service_url.to_owned(),
         })
+    }
+
+    pub fn from_files(
+        sign_service_url: &str,
+        key_file: &impl AsRef<Path>,
+        chain_file: &impl AsRef<Path>,
+        ca_cert_file: &impl AsRef<Path>,
+    ) -> Result<Self, TokenError> {
+        let mut key_reader = BufReader::new(File::open(key_file)?);
+        let mut chain_reader = BufReader::new(File::open(chain_file)?);
+        let mut ca_cert_reader = BufReader::new(File::open(ca_cert_file)?);
+        Self::new(
+            sign_service_url,
+            &mut key_reader,
+            &mut chain_reader,
+            &mut ca_cert_reader,
+        )
     }
 
     pub async fn fetch_token(&self) -> Result<TokenSignResponse, TokenError> {

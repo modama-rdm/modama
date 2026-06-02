@@ -23,17 +23,20 @@ async fn main() {
         gid: 1000,
     };
     let config = AgentConfig {
-        api_url: Url::parse("wss://localhost:5052").unwrap(),
-        mgmt_api_url: "http://localhost:5001".to_owned(),
+        events_api_url: Url::parse("wss://localhost:5052").unwrap(),
+        mgmt_api_url: Url::parse("http://localhost:5001").unwrap(),
         smb_hostname: "moellenstedt.iff.kfa-juelich.de".to_owned(),
         smb_ip: OnceCell::new(),
         smb_port: 445,
         smb_domain: "ER-C-INGEST".to_owned(),
-        identity: modama_agent::config::Identity::AgentId {
-            agent_name: "dld".to_owned(),
-            resource_name: "holo".to_owned(),
-        },
         linux_config: None,
+        listen_local_api: todo!(),
+        token_service_url: todo!(),
+        ca_root_store: todo!(),
+        ca_root_cert: todo!(),
+        client_config: todo!(),
+        identity: todo!(),
+        client_cert: todo!(),
     };
     if let Err(e) = backend.ensure_mounted(&share, &config).await {
         panic!("ensure_mounted: {e}");

@@ -21,7 +21,7 @@ use modama_common::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::agent_state::AgentState;
+use crate::{agent_state::AgentState, config::ConfigError};
 
 fn create_env() -> Environment<'static> {
     let mut env = Environment::new();
@@ -73,6 +73,9 @@ pub enum LocalAPIError {
 
     #[error("bind error: {0}")]
     Listen(#[from] std::io::Error),
+
+    #[error("configuration: {0}")]
+    Config(#[from] ConfigError),
 }
 
 impl IntoResponse for LocalAPIError {
@@ -128,6 +131,12 @@ impl IntoResponse for LocalAPIError {
                 "internal server error",
             )
                 .into_response(),
+            LocalAPIError::Config(_config_error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::CONTENT_TYPE, "text/plain")],
+                "internal server error: bad configuration",
+            )
+                .into_response(),
         }
     }
 }
@@ -177,10 +186,10 @@ async fn serve_index_page(
     let state = agent_state.state.lock().await;
 
     match &state.config.identity {
-        crate::config::Identity::Anonymous { hostname } => {
+        crate::config::MTLSIdentity::Anonymous { hostname } => {
             result += &format!("This agent: Anonymous running on {hostname}",);
         }
-        crate::config::Identity::AgentId {
+        crate::config::MTLSIdentity::AgentId {
             agent_name,
             resource_name,
         } => {
@@ -263,8 +272,8 @@ async fn start_ingest_step2(
         .jinja_env
         .get_template("start_ingest_step2.html")?;
     let res_name = match &agent_state.state.lock().await.config.identity {
-        crate::config::Identity::Anonymous { hostname } => hostname.clone(),
-        crate::config::Identity::AgentId {
+        crate::config::MTLSIdentity::Anonymous { hostname } => hostname.clone(),
+        crate::config::MTLSIdentity::AgentId {
             agent_name: _,
             resource_name,
         } => resource_name.clone(),
@@ -352,9 +361,12 @@ mod tests {
         AdhocProject, DataInProject, ListProjectsResponse, ProjectDetailsResponse,
     };
     use modama_common::tokens::{BoxFutureToken, TokenSignResponse};
+    use rustls::ClientConfig;
     use serde_json::Value;
     use std::path::PathBuf;
+    use tokio_rustls::rustls::RootCertStore;
     use tower::ServiceExt;
+    use url::Url;
 
     // Dummy token provider that returns a fixed token
     #[derive(Debug)]
@@ -380,18 +392,30 @@ mod tests {
 
     impl TestSetup {
         pub async fn start() -> Self {
+            let root = RootCertStore::empty();
+
             let cfg = crate::config::AgentConfig {
-                api_url: url::Url::parse("http://localhost/").unwrap(),
-                mgmt_api_url: "http://localhost/".to_string(),
+                events_api_url: Url::parse("http://localhost/").unwrap(),
+                mgmt_api_url: Url::parse("http://localhost/").unwrap(),
                 smb_hostname: "host".to_string(),
                 smb_ip: tokio::sync::OnceCell::new(),
                 smb_port: 445,
                 smb_domain: "WINDOWS_FOR_WORKGROUPS".to_string(),
-                identity: crate::config::Identity::AgentId {
+                identity: crate::config::MTLSIdentity::AgentId {
                     agent_name: "agent-name".to_string(),
                     resource_name: "res".to_string(),
                 },
                 linux_config: None,
+                listen_local_api: "localhost:3001".to_owned(),
+                token_service_url: Url::parse("http://localhost/").unwrap(),
+                ca_root_store: root.clone(),
+                ca_root_cert: "".to_owned(),
+                client_config: Arc::new(
+                    ClientConfig::builder()
+                        .with_root_certificates(root.clone())
+                        .with_no_client_auth(),
+                ),
+                client_cert: None,
             };
             let mut state_inner = crate::agent_state::AgentState::new(&cfg);
 
@@ -499,7 +523,8 @@ mod tests {
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
 
         // Build request to index with Basic auth for user 'testuser'
         // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
@@ -568,7 +593,8 @@ mod tests {
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
 
         // Build request to index with Basic auth for user 'testuser'
         // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
@@ -636,7 +662,8 @@ mod tests {
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
 
         // Build request to index with Basic auth for user 'testuser'
         // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
@@ -699,7 +726,8 @@ mod tests {
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
 
         // Build request to index with Basic auth for user 'testuser'
         // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
@@ -733,7 +761,8 @@ mod tests {
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
 
         // Build request to index with Basic auth for user 'testuser'
         // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
@@ -804,7 +833,8 @@ mod tests {
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
 
         // Build request to index with Basic auth for user 'testuser'
         // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
@@ -881,7 +911,8 @@ mod tests {
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url = server.url();
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
 
         // Build request to index with Basic auth for user 'testuser'
         // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==

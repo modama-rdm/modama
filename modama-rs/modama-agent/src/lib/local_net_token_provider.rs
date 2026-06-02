@@ -1,11 +1,9 @@
 use std::{
     collections::HashMap,
     error::Error,
-    fs::File,
-    io::{self, Read},
+    io::{self, BufRead},
     net::{Ipv4Addr, SocketAddr},
     ops::DerefMut,
-    path::Path,
     sync::Arc,
     time::Duration,
 };
@@ -195,10 +193,9 @@ impl LocalNetTokenProvider {
         })
     }
 
-    pub async fn new(ca_cert_file: &Path, local_addr: DiscoveryAddr) -> Result<Self, TokenError> {
-        let mut ca_certs = File::open(ca_cert_file)?;
+    pub async fn new(ca_cert_reader: &mut impl BufRead, local_addr: DiscoveryAddr) -> Result<Self, TokenError> {
         let mut ca_pem: Vec<u8> = Vec::new();
-        ca_certs.read_to_end(&mut ca_pem)?;
+        ca_cert_reader.read_to_end(&mut ca_pem)?;
         Self::new_with_pem(&ca_pem, local_addr).await
     }
 
@@ -263,7 +260,7 @@ impl LocalNetTokenProvider {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::{
-        net::Ipv4Addr, path::PathBuf, sync::{Arc, LazyLock}, time::{Duration, SystemTime, UNIX_EPOCH}
+        io::BufReader, net::Ipv4Addr, path::PathBuf, sync::{Arc, LazyLock}, time::{Duration, SystemTime, UNIX_EPOCH}
     };
 
     use itertools::Itertools;
@@ -382,8 +379,10 @@ mod tests {
         // paths to server files
         let ca_cert = tmpdir.join("ca").join("pub").join("ca.cert.pem");
 
+        let mut reader = BufReader::new(std::fs::File::open(&ca_cert).unwrap());
+
         let tp =
-            LocalNetTokenProvider::new(&ca_cert, DiscoveryAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))
+            LocalNetTokenProvider::new(&mut reader, DiscoveryAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))
                 .await
                 .unwrap();
 

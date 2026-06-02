@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{self, BufReader},
+    io::{self, BufRead, BufReader},
     path::{Path, PathBuf},
 };
 
@@ -17,20 +17,23 @@ use tokio_rustls::rustls::{
 #[derive(thiserror::Error, Debug)]
 pub enum CertHelperError {
     #[error("error reading `{path}`: {source}")]
-    IoError { source: io::Error, path: PathBuf },
+    IoWithPath { source: io::Error, path: PathBuf },
+
+    #[error("i/o error: {0}")]
+    Io(#[from] io::Error),
 
     #[error("tls server config: {0}")]
     TlsServerConfig(#[from] VerifierBuilderError),
 
-    #[error("key or certificate not found in the PEM file `{0}`")]
-    KeyNotFound(PathBuf),
+    #[error("key or certificate not found in the configuration file")]
+    KeyNotFound,
 
     #[error("TLS error")]
     TlsError(#[from] rustls::Error),
 }
 
 pub fn get_root_cert_store_from_file(path: &Path) -> Result<RootCertStore, CertHelperError> {
-    let certs_file = File::open(path).map_err(|e| CertHelperError::IoError {
+    let certs_file = File::open(path).map_err(|e| CertHelperError::IoWithPath {
         source: e,
         path: path.to_owned(),
     })?;
@@ -45,7 +48,7 @@ pub fn get_root_cert_store(
     let mut root_cert_store = RootCertStore::empty();
 
     for cert in certs(&mut reader) {
-        root_cert_store.add(cert.map_err(|e| CertHelperError::IoError {
+        root_cert_store.add(cert.map_err(|e| CertHelperError::IoWithPath {
             source: e,
             path: source_path.to_owned(),
         })?)?;
@@ -55,33 +58,38 @@ pub fn get_root_cert_store(
 }
 
 pub fn get_cert_chain(chain: &Path) -> Result<Vec<CertificateDer<'static>>, CertHelperError> {
-    let cert_file = File::open(chain).map_err(|e| CertHelperError::IoError {
+    let cert_file = File::open(chain).map_err(|e| CertHelperError::IoWithPath {
         source: e,
         path: chain.to_owned(),
     })?;
 
+    cert_chain_from_reader(&mut BufReader::new(cert_file))
+}
+
+pub fn cert_chain_from_reader(
+    reader: &mut impl BufRead,
+) -> Result<Vec<CertificateDer<'static>>, CertHelperError> {
     let mut chain_certs = Vec::new();
-    for cert in certs(&mut BufReader::new(cert_file)) {
-        chain_certs.push(cert.map_err(|e| CertHelperError::IoError {
-            source: e,
-            path: chain.to_owned(),
-        })?);
+    for cert in certs(reader) {
+        chain_certs.push(cert?);
     }
 
     Ok(chain_certs)
 }
 
 pub fn get_private_key(privkey: &Path) -> Result<PrivateKeyDer<'static>, CertHelperError> {
-    let key_file = File::open(privkey).map_err(|e| CertHelperError::IoError {
+    let key_file = File::open(privkey).map_err(|e| CertHelperError::IoWithPath {
         source: e,
         path: privkey.to_owned(),
     })?;
-    let pk = private_key(&mut BufReader::new(key_file))
-        .map_err(|e| CertHelperError::IoError {
-            source: e,
-            path: privkey.to_owned(),
-        })?
-        .ok_or_else(|| CertHelperError::KeyNotFound(privkey.to_owned()))?;
+    private_key_from_reader(&mut BufReader::new(key_file))
+}
+
+pub fn private_key_from_reader(
+    reader: &mut impl BufRead,
+) -> Result<PrivateKeyDer<'static>, CertHelperError> {
+    let pk = private_key(reader)?
+        .ok_or_else(|| CertHelperError::KeyNotFound)?;
     Ok(pk)
 }
 

@@ -306,7 +306,7 @@ mod tests {
             test_server.token_server.port()
         );
 
-        let fetcher = TokenFetcher::new(
+        let fetcher = TokenFetcher::from_files(
             sign_url.as_str(),
             &client_key_path,
             &client_chain_path,

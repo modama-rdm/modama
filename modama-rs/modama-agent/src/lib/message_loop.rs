@@ -115,7 +115,7 @@ pub async fn message_loop(
     loop {
         state.lock().await.connection = ConnectionState::Connecting;
         let (conn, _response) = match connect_async_tls_with_config(
-            &config.api_url.to_string(),
+            &config.events_api_url.to_string(),
             None,
             false,
             Some(tokio_tungstenite::Connector::Rustls(Arc::clone(
@@ -126,7 +126,7 @@ pub async fn message_loop(
         {
             Ok(s) => s,
             Err(e) => {
-                let url = &config.api_url;
+                let url = &config.events_api_url;
                 error!("Could not connect to {url} ({e}) reconnecting...");
                 error!("{}", e);
                 tokio::time::sleep(Duration::from_secs(5)).await;
@@ -159,7 +159,7 @@ pub async fn message_loop(
             .send(tungstenite::Message::Text(login_msg.into()))
             .await
         {
-            let url = &config.api_url;
+            let url = &config.events_api_url;
             error!("Error while authenticating to {url}, reconnecting...");
             error!("{}", e);
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -316,18 +316,25 @@ mod tests {
 
             // build AgentConfig pointing at our server
             let api_url = Url::parse(&format!("wss://localhost:{port}")).expect("url");
+            let root = RootCertStore::empty();
             let config = AgentConfig {
-                api_url,
-                mgmt_api_url: "http://localhost".to_string(),
+                events_api_url: api_url,
+                mgmt_api_url: Url::parse("http://localhost").unwrap(),
                 smb_hostname: "example.local".to_string(),
                 smb_ip: tokio::sync::OnceCell::new(),
                 smb_port: 445,
                 smb_domain: "WORKGROUP".to_string(),
-                identity: crate::config::Identity::AgentId {
+                identity: crate::config::MTLSIdentity::AgentId {
                     agent_name: "test-agent".to_string(),
                     resource_name: "test_resource".to_string(),
                 },
                 linux_config: None,
+                listen_local_api: "localhost:3001".to_owned(),
+                token_service_url: Url::parse("http://localhost").unwrap(),
+                ca_root_store: root.clone(),
+                ca_root_cert: "".to_owned(),
+                client_config: Arc::new(ClientConfig::builder().with_root_certificates(root).with_no_client_auth()),
+                client_cert: None,
             };
 
             let state = Arc::new(Mutex::new(AgentState::new(&config)));

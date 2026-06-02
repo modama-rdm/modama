@@ -5,7 +5,7 @@ use modama_common::tokens::{TokenFetcher, TokenVerifier};
 #[allow(clippy::unwrap_used)]  // don't care in this test tool
 #[tokio::main]
 async fn main() {
-    let token_fetcher = TokenFetcher::new(
+    let token_fetcher = TokenFetcher::from_files(
         "https://localhost:5053/sign/",
         &PathBuf::from("./certs/clients/holo/dld.priv.pem"),
         &PathBuf::from("./certs/clients/holo/dld.chain.pem"),
