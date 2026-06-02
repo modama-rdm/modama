@@ -1,32 +1,42 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{Result as AnyResult};
+use anyhow::{Result as AnyResult, anyhow};
+use clap::Parser;
 use log::info;
 use modama_agent::{
     agent_state::AgentState,
-    config::AgentConfig,
+    config::{AgentConfig, CliArgs},
     local_http_service::serve_local_web_api,
     local_net_token_proxy::token_publisher_loop,
     message_loop::message_loop,
     mount_backend::MountBackend,
     platform::CurrentPlatformMountBackend,
 };
-use modama_common::
-    logging::init_logging
-;
-use tokio::{
-    select, signal::unix::SignalKind, spawn, sync::Mutex
-};
+use modama_common::logging::init_logging;
+use tokio::{select, signal::unix::SignalKind, spawn, sync::Mutex};
+
+fn config_path(args: &CliArgs) -> AnyResult<PathBuf> {
+    Ok(match &args.config_path {
+        Some(path) => path.clone(),
+        None => {
+            // FIXME: add more paths where we search for config? /etc/modama-agent.toml?
+            let user_local_config =
+                directories::ProjectDirs::from("de", "fz-juelich", "modama-agent")
+                    .map(|p| p.config_dir().join("modama-agent.toml"))
+                    .ok_or(anyhow!("could not find project directories for configuration"))?;
+            user_local_config
+        }
+    })
+}
 
 #[tokio::main]
 async fn main() -> AnyResult<()> {
     init_logging();
 
-    // TODO: decide what cli args we still need
-    //let args = CliArgs::parse();
-
-    // TODO: path to the toml configuration, maybe try multiple, depending on platform etc.?
-    let config = AgentConfig::from_file(&"modama-agent.toml").await?;
+    let args = CliArgs::parse();
+    let path = config_path(&args)?;
+    info!("looking for config at {path:?}");
+    let config = AgentConfig::from_file(&path).await?;
 
     info!("This is modama-agent `{:?}`", &config.identity);
 

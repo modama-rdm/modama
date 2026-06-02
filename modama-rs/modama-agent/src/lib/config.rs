@@ -22,7 +22,7 @@ use crate::local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider};
 #[derive(Parser, Debug)]
 pub struct CliArgs {
     #[arg(long)]
-    config_path: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
