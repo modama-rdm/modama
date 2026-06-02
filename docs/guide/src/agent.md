@@ -126,3 +126,24 @@ This service is advertised via UDP multicast on local interfaces.
 - Install the agent binary on the system
     - Linux
     - Windows
+
+`modama-agent` is configured via a single TOML file. The minimal configuration
+would look like this:
+
+```toml
+[services]
+
+[ca]
+ca_cert = """-----BEGIN CERTIFICATE-----
+MII....==
+-----END CERTIFICATE-----"""
+```
+
+The configuration is read from the following locations:
+
+- Linux: `~/.config/modama-agent/modama-agent.toml`
+
+TODO: add a documentation example that includes all options, once it's clear
+what these options are.
+
+TODO: add system-wide locations, and other platforms
