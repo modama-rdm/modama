@@ -1,11 +1,19 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>ER-C Data Management</title>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
-    <link href="/mui-0.10.3/css/mui.min.css" rel="stylesheet" type="text/css" />
-    <link href="/styles.css" rel="stylesheet" type="text/css" />
+    <link href="/mui-0.10.3/css/mui.min.css" rel="stylesheet" type="text/css" >
+    <link href="/styles.css" rel="stylesheet" type="text/css" >
+    <!-- Lifted from https://github.com/LiberTEM/libertem.github.io/blob/master/README.md?plain=1 -->
+    <style>
+        .libertem-ack-item { display: flex; }
+        .libertem-ack-item img { display: block; }
+        .libertem-ack-item > a { flex-shrink: 0; display: block; padding-right: 20px; }
+        .fullwidth-image { width: 100%; height: auto; display: block; }
+        .nowrap { white-space: nowrap; }
+    </style>
 </head>
 <body>
 <div class="mui-container">
@@ -15,7 +23,7 @@
                 width="300"
                 src="/fzj_logo.jpg"
                 alt="Forschungszentrum Jülich"
-            /></a>
+            ></a>
             ER-C Data Management
         </h1>
     </div>
@@ -137,7 +145,7 @@
                     </a>
                 </p>
             </div>
-            <!-- <div class="mui-panel cta__item cta__item--placeholder"></div> --> <!-- placeholder for layout purposes -->
+            <!-- <div class="mui-panel cta__item cta__item-\-placeholder"></div> --> <!-- placeholder for layout purposes -->
         </div>
 
         <h2>Using the data management system</h2>
@@ -170,7 +178,7 @@
         🛡️ <code>\\er-c-data-smb.fz-juelich.de\er-c-data\</code> (Windows) or 🛡️ <a
         href="smb://er-c-data-smb.fz-juelich.de/er-c-data/">smb://er-c-data-smb.fz-juelich.de/er-c-data/</a>
         (Linux, Mac OS X, other operating systems). FZ Jülich intranet/VPN only. When Windows prompts for credentials,
-        first select "More choices...", then "Use a different account", and enter <nobr><code>IFFW2K\&lt;your username&gt;</code></nobr>
+        first select "More choices...", then "Use a different account", and enter <span class="nowrap"><code>IFFW2K\&lt;your username&gt;</code></span>
         and your IFF password. You can let Windows save these credentials if you
         are logged into your own Windows session with your account. The
         credentials should not be saved on shared accounts.
@@ -179,20 +187,20 @@
             <div class="mui-row">
                 <div class="mui-col-md-6"><div class="">
                     <figure>
-                    <p><img width="100%" src="credentials-1.png" alt="Select 'More options'"/></p>
-                    <figurecaption>
+                    <p><img class="fullwidth-image" src="credentials-1.png" alt="Select 'More options'"></p>
+                    <figcaption>
                         First, select "More choices" to enter the credentials for
                         <code>\\er-c-data-smb.fz-juelich.de\er-c-data</code>
-                    </figurecaption>
+                    </figcaption>
                     </figure>
                 </div></div>
                 <div class="mui-col-md-6">
                     <figure>
-                    <p><img width="100%" src="credentials-2.png" alt="Select 'Use a different account', use IFFW2K\&lt;your username&gt; and our IFF password"/></p>
-                    <figurecaption>
+                    <p><img class="fullwidth-image" src="credentials-2.png" alt="Select 'Use a different account', use IFFW2K\&lt;your username&gt; and our IFF password"></p>
+                    <figcaption>
                         Next, select "Use a different account" and enter your IFF credentials, specifying the <code>IFFW2K</code>
                         Windows domain with your IFF user name. Optionally, you can save the credentials.
-                    </figurecaption>
+                    </figcaption>
                     </figure>
                 </div>
             </div>
@@ -427,6 +435,81 @@
         planning. Policies for this are under development. Valuable data that is
         elemental for publications should be published on Zenodo. This is often a
         requirement from scientific journals or funding bodies.</p>
+
+        <h2>Acknowledgments</h2>
+        <!-- HTML lifted from https://github.com/LiberTEM/libertem.github.io/blob/master/README.md?plain=1 -->
+        <p>We acknowledge funding from the following sources:</p>
+
+        <h3 id="esteem3">ESTEEM3</h3>
+
+        <div class="libertem-ack-item">
+
+        <a href="https://www.esteem3.eu/">
+            <img alt="European Union flag" width="100" src="/EU.jpg" >
+        </a>
+
+        <p>
+        This project has received funding from the European Union's Horizon 2020
+        research and innovation programme under <a href="https://www.esteem3.eu/">grant agreement No 823717</a>.
+        </p>
+        </div>
+
+        <h3 id="aidas">AIDAS</h3>
+
+        <div class="libertem-ack-item">
+
+        <a href="https://aidas-lab.eu/">
+        <img alt="AIDAS" width="100" src="/AIDAS-logo.png" >
+        </a>
+
+        <p>
+        Modama development is supported by <a href="https://aidas-lab.eu/">AIDAS</a>
+        </p>
+        </div>
+
+        <h3 id="eoscdatacommons">EOSC Data Commons</h3>
+
+        <div class="libertem-ack-item">
+
+        <a href="https://www.esteem3.eu/">
+            <img alt="European Union flag" width="100" src="/EU.jpg" >
+        </a>
+
+        <p>
+        This project is funded by the European Union <a href="https://www.eosc-data-commons.eu/">Grant Agreement Number 101188179</a>.
+        </p>
+        </div>
+
+        <h3 id="fzj">Forschungszentrum Jülich</h3>
+
+        <div class="libertem-ack-item">
+
+        <a href="https://www.fz-juelich.de">
+            <img alt="Forschungszentrum Jülich logo" width="100" src="/fzj_logo.jpg" >
+        </a>
+
+        <p>
+        We gratefully acknowledge support by <a href="https://www.fz-juelich.de/">Forschungszentrum Jülich</a>
+        for funding this project through <a
+        href="https://www.fz-juelich.de/en/ias/ias-9/news-and-events/news/rdm-challenges-fzj-call-for-proposals">Research
+        Data Management Challenges</a> and by providing hardware, personnel and
+        other resources.
+        </p>
+        </div>
+
+        <h3 id="jsccloud">JSC Cloud</h3>
+
+        <div class="libertem-ack-item">
+
+        <a href="https://www.fz-juelich.de/en/jsc/systems/scientific-clouds/jsc-cloud">
+            <img alt="Forschungszentrum Jülich logo" width="100" src="/fzj_logo.jpg" >
+        </a>
+
+        <p>
+        We gratefully acknowledge the <a href="https://www.fz-juelich.de/jsc">Jülich Supercomputing Centre</a>
+        for funding this project by providing resources of the JSC cloud for operation.
+        </p>
+        </div>
     </div>
     <div class="mui-panel">
         <a href="https://er-c.org/index.php/imprint/" target="_blank">Imprint</a> | 
