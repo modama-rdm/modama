@@ -143,7 +143,27 @@ The configuration is read from the following locations:
 
 - Linux: `~/.config/modama-agent/modama-agent.toml`
 
-TODO: add a documentation example that includes all options, once it's clear
-what these options are.
+A more complete configuration would look like this (TODO: sensible service URLs):
+
+```toml
+listen_local_api = "localhost:3003"
+
+[services]
+event_url = "wss://localhost:5052"
+token_service_url = "https://localhost:5053"
+mgmt_api_url = "http://localhost:5001"
+smb_hostname = "moellenstedt.iff.kfa-juelich.de"
+smb_port = 445
+smb_domain = "ER-C-INGEST"
+
+[ca]
+ca_cert = """-----BEGIN CERTIFICATE-----
+MII....==
+-----END CERTIFICATE-----"""
+
+[client_cert]
+chain = """..."""
+private_key = """..."""
+```
 
 TODO: add system-wide locations, and other platforms
