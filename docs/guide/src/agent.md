@@ -72,9 +72,9 @@ Note that the directory structure allows to limit bind mounts of key material to
 
 ## Security considerations
 
-In the common case `modama-agent` should run privileged, such that users don't have access to key material. Preventing access might not always be possible, for example if the user interface is running as an administrator user.
+In the common case `modama-agent` should run privileged, such that users don't have access to key material. Preventing access might not always be possible, for example if the machine's user interface is running as an administrator user.
 
-If a user obtains the key material, they might be able to "participate" in current and future session, and access ingest shares.
+If a user obtains the key material, they might be able to "participate" in current and future session, and access ingest shares, so care should be taken to protect the files with the correct permissions.
 
 Agents can also participate without having a private key, by talking over the local lab network to reach at least one privileged `modama-agent`. That means `modama` assumes the local lab network is a "security domain", meaning if a user can access it, they can participate in the experiment. Non-TLS encrypted HTTP is used locally, also to enable communication without having to manage DNS names of agents or fixed IP mappings.
 
@@ -139,10 +139,6 @@ MII....==
 -----END CERTIFICATE-----"""
 ```
 
-The configuration is read from the following locations:
-
-- Linux: `~/.config/modama-agent/modama-agent.toml`
-
 A more complete configuration would look like this (TODO: sensible service URLs):
 
 ```toml
@@ -165,5 +161,9 @@ MII....==
 chain = """..."""
 private_key = """..."""
 ```
+
+The configuration is read from the following locations:
+
+- Linux: `~/.config/modama-agent/modama-agent.toml`
 
 TODO: add system-wide locations, and other platforms
