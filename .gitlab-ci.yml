@@ -106,6 +106,7 @@ container-image-retag:
       - IMAGE_NAME: sssd
       - IMAGE_NAME: watchdog
       - IMAGE_NAME: smbdrop
+      - IMAGE_NAME: ca
       - IMAGE_NAME: mgmtinterface
       - IMAGE_NAME: wsgidav
       - IMAGE_NAME: tsm-client
