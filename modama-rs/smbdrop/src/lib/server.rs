@@ -178,13 +178,7 @@ pub async fn spawn_smbdrop_task<
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        ffi::CString,
-        str::FromStr,
-        sync::Arc,
-        time::Duration,
-    };
+    use std::{collections::HashMap, ffi::CString, str::FromStr, sync::Arc, time::Duration};
 
     use itertools::Itertools;
     use modama_common::{
@@ -578,6 +572,213 @@ mod tests {
                     .unwrap();
                 assert_eq!(resp_delete.status(), 200);
             }
+        }
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_delete_share_heal_inconsistent_state() {
+        init_logging();
+
+        let configs_path = TempDir::new("share_manager_configs");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+
+        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
+        let user_provider = MockUserProvider::new(vec![]);
+        // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
+        let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
+        let process_manager: MockProcessManager = MockProcessManager::new();
+        let mut share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            configs_path.join("shares_config.json"),
+            configs_path.join("smb_dynamic.conf"),
+            user_provider,
+            mount_backend,
+            process_manager.clone(),
+        )
+        .await;
+
+        // create a deliberately inconsistent state:
+        let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let username = "shareb4fdcdf6e8704ac5994278463f";
+
+        let share_id_2 = String::from("Y4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let mut state = share_manager.get_state().await.unwrap();
+        let share = Share {
+            resource: Some("res".to_owned()),
+            share_id: share_id.clone(),
+            share_name: share_id.clone(),
+            dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            created_timestamp: 0,
+            username: username.to_owned(),
+            password: "share-pass".to_owned(),
+            // this uid exists, but there's an additional one in the users key of the config:
+            uid: 1001,
+            gid: 1001,
+        };
+        state.add_share(share.clone()).await.unwrap();
+        state
+            .get_or_create_user(1001, share_id.clone())
+            .await
+            .unwrap();
+        // XXX one additional user here:
+        state
+            .get_or_create_user(1002, share_id_2.clone())
+            .await
+            .unwrap();
+
+        share_manager
+            .with_locked_config(async |config_file| {
+                config_file.write_config_no_check(&state).await.unwrap();
+            })
+            .await
+            .unwrap();
+
+        share_manager.start().await.unwrap();
+
+        let api_state = ApiState::new(share_manager, apistate_events_tx);
+        let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0").await.unwrap();
+        let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
+
+        let client = ClientBuilder::new().build().unwrap();
+
+        // check that the API can access the share without issues:
+        let mut url = api_base_url.clone();
+        url.set_path("/share/");
+        let resp = client
+            .execute(client.get(url).build().unwrap())
+            .await
+            .unwrap();
+        let resp_shares: HashMap<String, Share> = resp.json().await.unwrap();
+
+        assert_eq!(resp_shares.len(), 1);
+        let resp_share = resp_shares.values().next().unwrap();
+        assert_eq!(resp_share, &share);
+
+        {
+            let new_state = api_state.share_manager.get_state().await.unwrap();
+            // two users, but one is not used by any share:
+            assert_eq!(new_state.users.len(), 2);
+        }
+
+        // try to delete the share we just created:
+        let mut url = api_base_url.clone();
+        url.set_path(&format!("/share/{}/", &share.share_id));
+        let resp_delete = client
+            .execute(client.delete(url).build().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp_delete.status(), 200);
+
+        {
+            let new_state = api_state.share_manager.get_state().await.unwrap();
+            assert_eq!(new_state.users, HashMap::default());
+        }
+
+        // check that the API no longer returns that share:
+        let mut url = api_base_url.clone();
+        url.set_path("/share/");
+        let resp = client
+            .execute(client.get(url).build().unwrap())
+            .await
+            .unwrap();
+        let resp_shares: HashMap<String, Share> = resp.json().await.unwrap();
+        assert_eq!(resp_shares.len(), 0);
+
+        // after all this, there should be no users in the state:
+        {
+            let new_state = api_state.share_manager.get_state().await.unwrap();
+            assert_eq!(new_state.users, HashMap::default());
+        }
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_create_share_heal_inconsistent_state() {
+        init_logging();
+
+        let configs_path = TempDir::new("share_manager_configs");
+        let dest_path = TempDir::new("dest_path_for_share");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+
+        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
+        let user_provider = MockUserProvider::new(vec![]);
+        // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
+        let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
+        let process_manager: MockProcessManager = MockProcessManager::new();
+        let mut share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            configs_path.join("shares_config.json"),
+            configs_path.join("smb_dynamic.conf"),
+            user_provider,
+            mount_backend,
+            process_manager.clone(),
+        )
+        .await;
+
+        // create a deliberately inconsistent state: add an unused user
+        let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let mut state = share_manager.get_state().await.unwrap();
+        state
+            .get_or_create_user(1002, share_id.clone())
+            .await
+            .unwrap();
+        share_manager
+            .with_locked_config(async |config_file| {
+                config_file.write_config_no_check(&state).await.unwrap();
+            })
+            .await
+            .unwrap();
+
+        {
+            let new_state = share_manager.get_state().await.unwrap();
+            // one superfluous user:
+            assert_eq!(new_state.users.len(), 1);
+            assert_eq!(new_state.shares.len(), 0);
+        }
+
+        share_manager.start().await.unwrap();
+
+        let api_state = ApiState::new(share_manager, apistate_events_tx);
+        let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0").await.unwrap();
+        let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
+
+        let client = ClientBuilder::new().build().unwrap();
+
+        let request = CreateShareRequest {
+            dest_path: dest_path.to_str().unwrap().to_owned(),
+            resource: Some("holo".to_owned()),
+            uid: 1001,
+            gid: 1001,
+        };
+
+        let mut url = api_base_url.clone();
+        url.set_path("/share/");
+        let resp = client
+            .execute(client.post(url).json(&request).build().unwrap())
+            .await
+            .unwrap();
+
+        let resp_obj: CreateShareResponse = resp.json().await.unwrap();
+
+        let _resp_share = match resp_obj {
+            CreateShareResponse::Ok { share } => {
+                let share_clone = share.clone();
+                assert_eq!(share.uid, 1001);
+                assert_eq!(share.gid, 1001);
+                assert_eq!(share.resource.unwrap().as_str(), "holo");
+                assert_eq!(share.dest_path, dest_path.to_string_lossy());
+                share_clone
+            }
+        };
+
+        {
+            let new_state = api_state.share_manager.get_state().await.unwrap();
+            // no superfluous user anymore:
+            assert_eq!(new_state.users.len(), 1);
+            assert_eq!(new_state.shares.len(), 1);
         }
 
         handle.abort();

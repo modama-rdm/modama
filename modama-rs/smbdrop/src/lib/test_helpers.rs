@@ -17,7 +17,7 @@ use crate::{
 
 #[derive(Clone)]
 pub struct MockUserProvider {
-    users: Arc<std::sync::Mutex<Vec<(String, u32)>>>,
+    pub users: Arc<std::sync::Mutex<Vec<(String, u32)>>>,
 }
 
 impl MockUserProvider {
@@ -83,12 +83,12 @@ impl UserProvider for MockUserProvider {
 
     async fn remove_system_user(&self, username: &str) -> Result<(), CreateUserError> {
         self.users.lock().unwrap().retain(|f| f.0 != username);
-        warn!("mock: remove_samba_user {username:?}");
+        warn!("mock: remove_system_user {username:?}");
         Ok(())
     }
 
     async fn remove_samba_user(&self, username: &str) -> Result<(), CreateUserError> {
-        warn!("mock: remove_samba_user {username}");
+        warn!("mock: remove_samba_user {username:?}");
         Ok(())
     }
 }

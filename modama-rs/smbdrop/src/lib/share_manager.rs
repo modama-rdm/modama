@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use modama_common::messages::Share;
 use rand::{distr::Alphanumeric, Rng};
 use regex::Regex;
@@ -225,14 +225,18 @@ impl SmbDropState {
         }
     }
 
-    // FIXME: right now, we check for these consistency errors before writing
-    // the state to JSON and abort - we might want to instead try to "heal" the
-    // configuration and try to continue, such that an error in one share cannot
-    // influence other shares being created or removed.
+    /// Do a consistency check for the config and the user provider state.
+    ///
+    /// Right now, this should not be used as a hard failure, as we might not
+    /// always be able to guarantee consistency. On a higher level,
+    /// `ShareManager::try_heal` should eventually make sure the state converges on
+    /// something consistent.
     pub fn check_consistent(&self, user_provider: &impl UserProvider) -> Result<(), ShareError> {
         let share_uids: HashSet<u32> = self.shares.values().map(|s| s.uid).collect();
         let user_uids: HashSet<u32> = self.users.values().map(|u| u.uid).collect();
         if share_uids != user_uids {
+            let share_uids: Vec<u32> = share_uids.iter().sorted().cloned().collect();
+            let user_uids: Vec<u32> = user_uids.iter().sorted().cloned().collect();
             return Err(ShareError::Inconsistent(format!(
                 "mismatch in UIDs of shares ({share_uids:?}) and users ({user_uids:?})"
             )));
@@ -247,9 +251,13 @@ impl SmbDropState {
                     &user.username
                 )));
             };
-            let pwd = user_provider.passwd_from_name(&c_username).map_err(|e| {
-                ShareError::IoError { source: e, msg: format!("look up username {}", &user.username) }
-            })?;
+            let pwd =
+                user_provider
+                    .passwd_from_name(&c_username)
+                    .map_err(|e| ShareError::IoError {
+                        source: e,
+                        msg: format!("look up username {}", &user.username),
+                    })?;
             if let Some(pwd) = pwd {
                 if pwd.uid != user.uid {
                     return Err(ShareError::Inconsistent(format!(
@@ -264,9 +272,12 @@ impl SmbDropState {
                 )));
             }
 
-            let pwd = user_provider.passwd_from_uid(user.uid).map_err(|e| {
-                ShareError::IoError { source: e, msg: format!("look up uid {}", &user.uid) }
-            })?;
+            let pwd = user_provider
+                .passwd_from_uid(user.uid)
+                .map_err(|e| ShareError::IoError {
+                    source: e,
+                    msg: format!("look up uid {}", &user.uid),
+                })?;
             if let Some(pwd) = pwd {
                 let pwd_name = pwd.name.to_string_lossy();
                 if pwd_name != user.username {
@@ -305,13 +316,14 @@ impl SmbDropState {
 
     /// Get the User for the given uid, or create a new one with a random password.
     /// Note that this will not create a system or samba user;
-    /// this is done by the `ShareManager::create_share`. 
+    /// this is done by the `ShareManager::create_share`.
     pub async fn get_or_create_user(
         &mut self,
         uid: u32,
         share_id: String,
     ) -> Result<User, ShareError> {
-        self.get_or_create_user_with_password(uid, share_id, None).await
+        self.get_or_create_user_with_password(uid, share_id, None)
+            .await
     }
 
     /// Same as `get_or_create_user`, but pre-define the password that is
@@ -334,7 +346,7 @@ impl SmbDropState {
             let mut username = format!("share{share_id}").replace('-', "");
             let _rest = username.split_off(31);
             debug!("get_or_create_user: adding user {username}");
-            let password = if let Some(password) = password { 
+            let password = if let Some(password) = password {
                 password.to_owned()
             } else {
                 make_password()
@@ -442,7 +454,10 @@ impl From<CreateUserError> for ShareError {
             CreateUserError::Usermgmt { username, stderr } => {
                 Self::UsermgmtError { username, stderr }
             }
-            CreateUserError::IO(error) => Self::IoError { source: error, msg: "create user".to_owned() },
+            CreateUserError::IO(error) => Self::IoError {
+                source: error,
+                msg: "create user".to_owned(),
+            },
             CreateUserError::SmbpasswdError => Self::SmbpasswdError,
         }
     }
@@ -501,7 +516,7 @@ fn make_password() -> String {
 /// Utility to manipulate on-disk configuration for smbdrop. Read-modify-write
 /// cycles should be guarded by an external mutex.
 #[derive(Clone, Debug)]
-struct ShareConfigFile<U: UserProvider> {
+pub struct ShareConfigFile<U: UserProvider> {
     path: PathBuf,
     user_provider: U,
 }
@@ -523,13 +538,19 @@ impl<U: UserProvider> ShareConfigFile<U> {
     }
 
     async fn read_config(&self) -> Result<SmbDropState, ShareError> {
-        let mut f = File::open(&self.path).await.map_err(|e| {
-            ShareError::IoError { source: e, msg: format!("open config {:?} for reading", &self.path) }
-        })?;
+        let mut f = File::open(&self.path)
+            .await
+            .map_err(|e| ShareError::IoError {
+                source: e,
+                msg: format!("open config {:?} for reading", &self.path),
+            })?;
         let mut contents = Vec::new();
-        f.read_to_end(&mut contents).await.map_err(|e| {
-            ShareError::IoError { source: e, msg: format!("read config {:?} read_to_end", &self.path) }
-        })?;
+        f.read_to_end(&mut contents)
+            .await
+            .map_err(|e| ShareError::IoError {
+                source: e,
+                msg: format!("read config {:?} read_to_end", &self.path),
+            })?;
 
         let config = spawn_blocking(move || -> Result<_, serde_json::Error> {
             serde_json::from_slice(&contents)
@@ -539,38 +560,61 @@ impl<U: UserProvider> ShareConfigFile<U> {
         Ok(config)
     }
 
-    async fn write_config(&self, config: &SmbDropState) -> Result<(), ShareError> {
-        config.check_consistent(&self.user_provider)?;
+    /// Write config without consistency checks. Useful for testing.
+    pub async fn write_config_no_check(&self, config: &SmbDropState) -> Result<(), ShareError> {
         debug!("write_config");
         let config = config.clone();
+        debug!("new config: {:?}", &config);
 
         let serialized =
             spawn_blocking(move || -> Result<_, serde_json::Error> { serde_json::to_vec(&config) })
                 .await??;
 
         let rand_name = make_temporary_fname(&self.path)?;
+        debug!(
+            "serialized config: {}",
+            String::from_utf8_lossy(&serialized)
+        );
         debug!("write_config: writing to {rand_name:?}");
         let mut opts = File::options();
         opts.mode(0o600).create_new(true).write(true);
-        let mut f = opts.open(&rand_name).await.map_err(|e| {
-            ShareError::IoError { source: e, msg: format!("open config {:?} for writing/creating", &rand_name) }
-        })?;
+        let mut f = opts
+            .open(&rand_name)
+            .await
+            .map_err(|e| ShareError::IoError {
+                source: e,
+                msg: format!("open config {:?} for writing/creating", &rand_name),
+            })?;
 
-        f.write_all(&serialized).await.map_err(|e| {
-            ShareError::IoError { source: e, msg: format!("write to {:?}", &rand_name) }
-        })?;
+        f.write_all(&serialized)
+            .await
+            .map_err(|e| ShareError::IoError {
+                source: e,
+                msg: format!("write to {:?}", &rand_name),
+            })?;
         debug!("write_config: wrote all...");
-        f.sync_all().await.map_err(|e| {
-            ShareError::IoError { source: e, msg: format!("sync {:?}", &rand_name) }
+        f.sync_all().await.map_err(|e| ShareError::IoError {
+            source: e,
+            msg: format!("sync {:?}", &rand_name),
         })?;
         debug!("write_config: synced");
 
-        rename(&rand_name, &self.path).await.map_err(|e| {
-            ShareError::IoError { source: e, msg: format!("rename {:?} to {:?}", &rand_name, &self.path) }
-        })?;
+        rename(&rand_name, &self.path)
+            .await
+            .map_err(|e| ShareError::IoError {
+                source: e,
+                msg: format!("rename {:?} to {:?}", &rand_name, &self.path),
+            })?;
 
-        debug!("write_config: renamed");
+        debug!("write_config: renamed to {:?}", &self.path);
+        Ok(())
+    }
 
+    async fn write_config(&self, config: &SmbDropState) -> Result<(), ShareError> {
+        if let Err(e) = config.check_consistent(&self.user_provider) {
+            warn!("consistency check failed, continuing: {e}");
+        }
+        self.write_config_no_check(config).await?;
         Ok(())
     }
 }
@@ -653,9 +697,13 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 
     pub async fn ensure_users(&self, config: &SmbDropState) -> Result<(), ShareError> {
         for user in config.users.values() {
-            let pwd = self.user_provider.passwd_from_uid(user.uid).map_err(|e| {
-                ShareError::IoError { source: e, msg: format!("lookup uid {} in ensure_users", user.uid) }
-            })?;
+            let pwd =
+                self.user_provider
+                    .passwd_from_uid(user.uid)
+                    .map_err(|e| ShareError::IoError {
+                        source: e,
+                        msg: format!("lookup uid {} in ensure_users", user.uid),
+                    })?;
             if pwd.is_none() {
                 self.add_system_user(user).await?;
             }
@@ -703,11 +751,23 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         config_file.read_config_or_default().await
     }
 
+    /// Manipulate the configuration while holding the config file lock,
+    /// hopefully preventing concurrent accessed that could result in
+    /// inconsistent states. You pass in an async closure, which may read
+    /// and write to the `ShareConfigFile` which it is given.
+    pub async fn with_locked_config<R>(
+        &self,
+        fun: impl AsyncFnOnce(&ShareConfigFile<U>) -> R,
+    ) -> Result<R, ShareError> {
+        let config_file = self.config_file.lock().await;
+        Ok(fun(&config_file).await)
+    }
+
     /// Create a new share with the given parameters.
-    /// 
+    ///
     /// This is a high-level function that will take care of the whole process
     /// of adding a new share:
-    /// 
+    ///
     /// - generate a share ID, username and password
     /// - read/modify/write share configuration file
     /// - manage system and samba users
@@ -720,6 +780,9 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         gid: u32,
         resource: Option<String>,
     ) -> Result<Share, ShareError> {
+        // before touching the config, try to heal any inconsistencies:
+        self.try_heal().await?;
+
         let pat = get_path_re().await;
         info!("creating share to {}", &dest_path.to_string_lossy());
 
@@ -804,6 +867,8 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
     }
 
     pub async fn delete_share(&self, share_id: &str) -> Result<(), ShareError> {
+        // before touching the config, try to heal any inconsistencies:
+        self.try_heal().await?;
         let config_file = self.config_file.lock().await;
         let mut state = config_file.read_config_or_default().await?;
         let removed_share = state.remove_share(share_id).await?;
@@ -836,9 +901,13 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
     /// Persist `user` into the system user database, and create a matching
     /// samba user.
     async fn add_system_user(&self, user: &User) -> Result<(), ShareError> {
-        let pwd = self.user_provider.passwd_from_uid(user.uid).map_err(|e| {
-            ShareError::IoError { source: e, msg: format!("look up uid {} in add_system_user", user.uid) }
-        })?;
+        let pwd =
+            self.user_provider
+                .passwd_from_uid(user.uid)
+                .map_err(|e| ShareError::IoError {
+                    source: e,
+                    msg: format!("look up uid {} in add_system_user", user.uid),
+                })?;
         if pwd.is_some() {
             info!("system user {} already exists", &user.username);
             return Ok(());
@@ -894,18 +963,69 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         self.sm.update_shares(shares).await?;
         Ok(())
     }
+
+    async fn try_cleanup_user(&self, state: &mut SmbDropState, uid: u32) -> Result<(), ShareError> {
+        let user = state.users.get(&uid.to_string()).cloned().ok_or_else(|| {
+            ShareError::Inconsistent(format!(
+                "try_heal: could not look up user by uid {uid} - mismatch str key vs. User::uid?"
+            ))
+        })?;
+        state.remove_user(uid);
+        self.remove_system_user(&user.username).await?;
+        Ok(())
+    }
+
+    /// Try to "heal" the configuration - if there are inconsistencies,
+    /// try to resolve them. For example, if users exist that are not used
+    /// by any shares.
+    ///
+    /// Errors that happen while trying to heal are logged, but don't cause the
+    /// healing process to abort, as we want to eventually succeed, and some operations
+    /// might fail because of the inconsistent state (example: a user is present only
+    /// in the configuration, but not as a system user - we want to try to remove
+    /// the user from both places in any case, and not abort, as we want to try to
+    /// continue with the next user, if there is any). Errors from reading/writing
+    /// the configuration file do cause a hard failure though.
+    pub async fn try_heal(&self) -> Result<(), ShareError> {
+        self.with_locked_config(async |config_file| -> Result<(), ShareError> {
+            let mut state = config_file.read_config().await?;
+            let share_uids: HashSet<u32> = state.shares.values().map(|s| s.uid).collect();
+            let user_uids: HashSet<u32> = state.users.values().map(|u| u.uid).collect();
+            let unused_users = &user_uids - &share_uids;
+            debug!("unused_users: {unused_users:?}");
+            for uid in &unused_users {
+                warn!("cleaning up uid {uid}");
+                if let Err(e) = self.try_cleanup_user(&mut state, *uid).await {
+                    error!("cleanup for uid {uid} failed: {e}");
+                }
+            }
+
+            config_file.write_config(&state).await?;
+
+            Ok(())
+        })
+        .await??;
+
+        // TODO: re-create users with uid mismatch (lookup passwd_from_name vs User::uid)
+        // TODO: re-create missing users (system, samba?)
+        // TODO: on username mismatch, update username on share
+        // TODO: see additional checks in `check_consistency` and how we can heal them
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Arc};
 
-    use modama_common::{messages::Share, test_helpers::TempDir};
+    use log::debug;
+    use modama_common::{logging::init_logging, messages::Share, test_helpers::TempDir};
 
     use crate::{
-        share_manager::{ShareConfigFile, ShareError, SmbDropState},
-        test_helpers::MockUserProvider,
+        share_manager::{ShareConfigFile, ShareError, ShareManager, SmbDropState},
+        test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
 
     #[tokio::test]
@@ -1019,7 +1139,7 @@ mod tests {
                 Err(ShareError::Inconsistent(m)) => {
                     assert_eq!(
                         m,
-                        "mismatch in UIDs of shares ({1002}) and users ({1001})".to_owned()
+                        "mismatch in UIDs of shares ([1002]) and users ([1001])".to_owned()
                     )
                 }
                 res => {
@@ -1052,7 +1172,7 @@ mod tests {
                 Err(ShareError::Inconsistent(m)) => {
                     assert_eq!(
                         m,
-                        "mismatch in UIDs of shares ({1001}) and users ({1002})".to_owned()
+                        "mismatch in UIDs of shares ([1001]) and users ([1002])".to_owned()
                     )
                 }
                 res => {
@@ -1166,6 +1286,127 @@ mod tests {
             .unwrap();
         let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
         state.check_consistent(&user_provider).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_heal_inconsistent_uids() {
+        init_logging();
+
+        // same setup as `test_smbdrop_consistency` for the inner state,
+        // but we also need to have a `ShareManager`:
+        let state = SmbDropState {
+            shares: HashMap::new(),
+            users: HashMap::new(),
+        };
+        let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let username = "shareb4fdcdf6e8704ac5994278463f";
+
+        let share_id_2 = String::from("Y4fdcdf6-e870-4ac5-9942-78463f051c5c");
+        let username_2 = "shareY4fdcdf6e8704ac5994278463f";
+
+        let configs_path = TempDir::new("share_manager_configs");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+
+        let user_provider = MockUserProvider::new(vec![
+            (username.to_owned(), 1001),
+            (username_2.to_owned(), 1002),
+        ]);
+        let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
+        let process_manager: MockProcessManager = MockProcessManager::new();
+
+        let share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            configs_path.join("shares_config.json"),
+            configs_path.join("smb_dynamic.conf"),
+            user_provider.clone(),
+            mount_backend,
+            process_manager.clone(),
+        )
+        .await;
+
+        {
+            let mut state = state.clone();
+            let share = Share {
+                resource: Some("res".to_owned()),
+                share_id: share_id.clone(),
+                share_name: share_id.clone(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: username.to_owned(),
+                password: "share-pass".to_owned(),
+                // this uid exists, but there's an additional one in the users key of the config:
+                uid: 1001,
+                gid: 1001,
+            };
+            state.add_share(share.clone()).await.unwrap();
+            state
+                .get_or_create_user(1001, share_id.clone())
+                .await
+                .unwrap();
+            // XXX one additional user here:
+            state
+                .get_or_create_user(1002, share_id_2.clone())
+                .await
+                .unwrap();
+
+            share_manager
+                .with_locked_config(async |config_file| {
+                    config_file.write_config_no_check(&state).await.unwrap();
+                })
+                .await
+                .unwrap();
+
+            match state.check_consistent(&user_provider) {
+                Err(ShareError::Inconsistent(m)) => {
+                    assert_eq!(
+                        m,
+                        "mismatch in UIDs of shares ([1001]) and users ([1001, 1002])".to_owned()
+                    )
+                }
+                res => {
+                    panic!("unexpected result: {res:?}");
+                }
+            };
+
+            let users_snapshot = {
+                let users = user_provider.users.lock().unwrap();
+                users.clone()
+            };
+            debug!("{users_snapshot:?}");
+            assert_eq!(
+                users_snapshot,
+                vec![(username.to_owned(), 1001), (username_2.to_owned(), 1002),]
+            );
+
+            // now let's try to heal:
+            share_manager.try_heal().await.unwrap();
+            let new_state = share_manager.get_state().await.unwrap();
+            debug!("s {:?}", state.shares);
+            debug!("ns {:?}", new_state.shares);
+
+            debug!("u {:?}", state.users);
+            debug!("nu {:?}", new_state.users);
+            new_state
+                .check_consistent(&user_provider)
+                .expect("should no longer return an error");
+
+            assert_eq!(new_state.shares, state.shares);
+
+            // user is gone from the config:
+            let new_uids: Vec<String> = new_state.users.keys().cloned().collect();
+            assert_eq!(new_uids, vec!["1001".to_owned()]);
+
+            // user is gone from "the system" (which we mock here):
+            let users_snapshot = {
+                let users = user_provider.users.lock().unwrap();
+                users.clone()
+            };
+            debug!("{users_snapshot:?}");
+            assert_eq!(
+                users_snapshot,
+                vec![(username.to_owned(), 1001)]
+            );
+        }
     }
 
     #[tokio::test]
