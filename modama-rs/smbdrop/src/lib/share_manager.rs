@@ -83,6 +83,13 @@ pub trait UserProvider: Clone + Sync + Send + 'static {
         &self,
         username: &str,
     ) -> impl std::future::Future<Output = Result<(), CreateUserError>> + Send;
+
+    fn passwd_from_name_string(&self, name: &str) -> io::Result<Option<etc_passwd::Passwd>> {
+        let c_username = CString::new(name.as_bytes()).map_err(|_e| {
+            io::Error::new(io::ErrorKind::InvalidData, "nul encountered in username")
+        })?;
+        self.passwd_from_name(&c_username)
+    }
 }
 
 #[derive(Clone)]
@@ -243,17 +250,9 @@ impl SmbDropState {
         }
 
         for (_uid, user) in self.users.iter().sorted() {
-            let c_username = if let Ok(c_username) = CString::new(user.username.as_bytes()) {
-                c_username
-            } else {
-                return Err(ShareError::Inconsistent(format!(
-                    "invalid username: `{}`",
-                    &user.username
-                )));
-            };
             let pwd =
                 user_provider
-                    .passwd_from_name(&c_username)
+                    .passwd_from_name_string(&user.username)
                     .map_err(|e| ShareError::IoError {
                         source: e,
                         msg: format!("look up username {}", &user.username),
@@ -1000,14 +999,33 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
                 }
             }
 
+            // remove any system users that are in an inconsistent state,
+            // they are re-added afterwards
+            for (uid, user) in state.users.iter().sorted() {
+                if let Ok(Some(sys_pwd)) =
+                    self.user_provider.passwd_from_name_string(&user.username)
+                {
+                    if sys_pwd.uid != user.uid {
+                        if let Err(e) = self.remove_system_user(&user.username).await {
+                            error!("cleanup for uid {uid} failed: {e}");
+                        }
+                    }
+                }
+            }
+
             config_file.write_config(&state).await?;
+
+            // re-add any system users that we may have removed above:
+            self.ensure_users(&state).await?;
 
             Ok(())
         })
         .await??;
 
-        // TODO: re-create users with uid mismatch (lookup passwd_from_name vs User::uid)
-        // TODO: re-create missing users (system, samba?)
+        // TODO: re-create missing samba users
+        // this is not trivial, as we need to check if a samba user already exists
+        // for system users, this is already done in `ensure_users`.
+
         // TODO: on username mismatch, update username on share
         // TODO: see additional checks in `check_consistency` and how we can heal them
 
@@ -1402,10 +1420,7 @@ mod tests {
                 users.clone()
             };
             debug!("{users_snapshot:?}");
-            assert_eq!(
-                users_snapshot,
-                vec![(username.to_owned(), 1001)]
-            );
+            assert_eq!(users_snapshot, vec![(username.to_owned(), 1001)]);
         }
     }
 
