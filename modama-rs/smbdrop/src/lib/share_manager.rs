@@ -988,7 +988,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
     /// the configuration file do cause a hard failure though.
     pub async fn try_heal(&self) -> Result<(), ShareError> {
         self.with_locked_config(async |config_file| -> Result<(), ShareError> {
-            let mut state = config_file.read_config().await?;
+            let mut state = config_file.read_config_or_default().await?;
             let share_uids: HashSet<u32> = state.shares.values().map(|s| s.uid).collect();
             let user_uids: HashSet<u32> = state.users.values().map(|u| u.uid).collect();
             let unused_users = &user_uids - &share_uids;
@@ -1446,5 +1446,27 @@ mod tests {
         let state2 = f2.read_config().await.unwrap();
 
         assert_eq!(state, state2);
+    }
+
+    #[tokio::test]
+    async fn test_heal_without_existing_config() {
+        let tmp = TempDir::new("share_config_file");
+        let cfg_path = tmp.join("shares.json");
+        let user_provider = MockUserProvider::new(vec![]);
+
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+        let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
+        let process_manager: MockProcessManager = MockProcessManager::new();
+        let share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            cfg_path,
+            tmp.join("smb_dynamic.conf"),
+            user_provider.clone(),
+            mount_backend,
+            process_manager.clone(),
+        )
+        .await;
+
+        share_manager.try_heal().await.unwrap();
     }
 }
