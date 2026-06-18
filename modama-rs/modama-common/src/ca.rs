@@ -248,6 +248,8 @@ impl Ca {
         params.is_ca = IsCa::NoCa;
         // FIXME: constrain key usage?
         params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        params.use_authority_key_identifier_extension = true;
+        params.key_identifier_method = rcgen::KeyIdMethod::Sha256;
         params
             .subject_alt_names
             .push(rcgen::SanType::URI(Ia5String::from_str(&format!(
@@ -296,6 +298,8 @@ impl Ca {
             .push(DnType::CommonName, first_name);
         params.is_ca = IsCa::NoCa;
         params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        params.use_authority_key_identifier_extension = true;
+        params.key_identifier_method = rcgen::KeyIdMethod::Sha256;
         let server_cert: Certificate = params.signed_by(&key_pair, &self.issuer())?;
 
         Ok(KeyPairAndCert {
