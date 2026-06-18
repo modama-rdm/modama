@@ -261,6 +261,8 @@ async fn handle_authenticated_connection(
             .send(state_unlocked.inner_state.clone())
             .map_err(|_| HandlerError::Disconnected)?;
     }
+
+    Ok(())
 }
 
 async fn authenticate_agent_connection(
