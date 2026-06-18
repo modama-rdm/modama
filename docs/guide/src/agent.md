@@ -134,9 +134,11 @@ would look like this:
 [services]
 
 [ca]
-ca_cert = """-----BEGIN CERTIFICATE-----
+ca_cert = """
+-----BEGIN CERTIFICATE-----
 MII....==
------END CERTIFICATE-----"""
+-----END CERTIFICATE-----
+"""
 ```
 
 A more complete configuration would look like this (TODO: sensible service URLs):
@@ -153,17 +155,52 @@ smb_port = 445
 smb_domain = "ER-C-INGEST"
 
 [ca]
-ca_cert = """-----BEGIN CERTIFICATE-----
+ca_cert = """
+-----BEGIN CERTIFICATE-----
 MII....==
------END CERTIFICATE-----"""
+-----END CERTIFICATE-----
+"""
 
 [client_cert]
-chain = """..."""
-private_key = """..."""
+chain = """
+...
+"""
+private_key = """
+...
+"""
 ```
+
+Tip: ensure newlines at the beginning and end of the multi-line certificates and keys,
+otherwise you may get a `KeyMismatch` error!
 
 The configuration is read from the following locations:
 
 - Linux: `~/.config/modama-agent/modama-agent.toml`
 
 TODO: add system-wide locations, and other platforms
+
+On Linux, the service can be automatically managed by systemd. An example systemd unit follows:
+
+```
+[Unit]
+Description=modama-agent - modular data management helper
+Wants=network-online.target
+After=network-online.target
+RestartSec=10s
+
+[Service]
+User=root
+Type=exec
+Restart=always
+ExecStart=/usr/local/bin/modama-agent --config-path=/etc/modama-agent.toml
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save this file as `/etc/systemd/system/modama-agent.service`, enable and start the service:
+
+```bash
+systemctl enable modama-agent
+systemctl start modama-agent
+```
