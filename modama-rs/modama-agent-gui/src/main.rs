@@ -1,5 +1,6 @@
 mod state;
 mod app;
+mod buttons;
 
 use std::error::Error;
 
