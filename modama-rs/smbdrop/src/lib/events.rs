@@ -253,6 +253,7 @@ async fn handle_authenticated_connection(
     // NOTE: be careful not to put anything that can panic or return between the
     // update at the top and this one, so the state is properly updated on
     // errors, too
+    // TODO: if possible replace with a guard that removes the agent on Drop
     {
         let mut state_unlocked = last_state.lock().await;
         state_unlocked.connected_agents.remove(&agent_id);
@@ -260,8 +261,6 @@ async fn handle_authenticated_connection(
             .send(state_unlocked.inner_state.clone())
             .map_err(|_| HandlerError::Disconnected)?;
     }
-
-    todo!();
 }
 
 async fn authenticate_agent_connection(
