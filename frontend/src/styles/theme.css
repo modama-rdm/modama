@@ -1,0 +1,104 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens for the ER-C Data Management UI.
+ *
+ * CSS custom properties are the single source of truth. Light values live in
+ * `:root`; the `.dark` block overrides them. `@theme inline` maps each token to
+ * a Tailwind color/font so utilities (`bg-surface`, `text-fg`, `border-default`,
+ * `bg-primary`, `font-mono`, …) resolve to the runtime variable — which means a
+ * dark theme is a drop-in: toggle the `.dark` class on <html>, no component or
+ * utility changes required. Components must never hardcode hex values.
+ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Surfaces & background */
+  --bg: #f1f5fd;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+
+  /* Borders */
+  --border: #e2e8f5;
+
+  /* Foreground / text */
+  --fg: #0f172a;
+  --fg-muted: #475569;
+  --fg-subtle: #64748b;
+  --fg-faint: #94a3b8;
+
+  /* Brand & semantic */
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-fg: #ffffff;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --success: #059669;
+  --warning: #b45309;
+
+  /* Focus ring (used by inputs/buttons) */
+  --ring: rgb(37 99 235 / 0.12);
+}
+
+.dark {
+  --bg: #0b1120;
+  --surface: #111827;
+  --surface-muted: #1e293b;
+
+  --border: #1e293b;
+
+  --fg: #f1f5f9;
+  --fg-muted: #cbd5e1;
+  --fg-subtle: #94a3b8;
+  --fg-faint: #64748b;
+
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-fg: #0b1120;
+  --danger: #ef4444;
+  --danger-hover: #f87171;
+  --success: #10b981;
+  --warning: #f59e0b;
+
+  --ring: rgb(59 130 246 / 0.24);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+
+  --color-default: var(--border);
+  --color-border-default: var(--border);
+
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-faint: var(--fg-faint);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
