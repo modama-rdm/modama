@@ -5,3 +5,6 @@ __pycache__
 .vscode
 /deploy/testfolder/*/*
 .idea
+/design-handoff
+AGENTS.md
+frontend_auth_spike.md
