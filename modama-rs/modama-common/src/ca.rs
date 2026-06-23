@@ -31,7 +31,7 @@ fn set_perms_priv(path: &Path) -> Result<(), CAError> {
     Ok(())
 }
 
-use pkcs8::{DecodePrivateKey, LineEnding, PrivateKeyInfoOwned, der::EncodePem};
+use pkcs8::{der::EncodePem, DecodePrivateKey, LineEnding, PrivateKeyInfoOwned};
 use rcgen::{
     string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
     ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, PKCS_ED25519,
@@ -390,7 +390,12 @@ impl Ca {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::os::unix::fs::MetadataExt;
+    use std::{os::unix::fs::MetadataExt, path::Path};
+
+    use x509_parser::{
+        pem::{self, Pem},
+        prelude::ParsedExtension::SubjectKeyIdentifier,
+    };
 
     use crate::{
         ca::{CAError, Ca},
@@ -398,6 +403,12 @@ mod tests {
     };
 
     const TEST_PASSWORD: &str = "the-password";
+
+    fn read_pem(path: &Path) -> Pem {
+        let server_cert = std::fs::read(path).unwrap();
+        let pem_parsed = pem::parse_x509_pem(&server_cert).unwrap().1;
+        pem_parsed
+    }
 
     #[test]
     fn test_new_ca() {
@@ -591,6 +602,126 @@ mod tests {
                 "test_agent.pub.pem"
             ]
         );
+    }
+
+    #[test]
+    fn test_ca_includes_authority_key_identifier() {
+        let tmpdir = TempDir::new("test-ca");
+        {
+            let ca = Ca::new(Some(tmpdir.to_owned()), TEST_PASSWORD).unwrap();
+            ca.serialize_ca_to_files().unwrap();
+        }
+
+        let ca = Ca::load(tmpdir.to_owned(), TEST_PASSWORD).unwrap();
+
+        let server_names = &["localhost".to_owned(), "smbdrop".to_owned()];
+        let key_and_cert = ca.server_cert(server_names).unwrap();
+        ca.save_server_cert(server_names, &key_and_cert).unwrap();
+
+        let agent_name = "test_agent";
+        let resource_name = "test_resource";
+        let key_and_cert = ca.client_cert(agent_name, resource_name).unwrap();
+        ca.save_client_cert(agent_name, resource_name, &key_and_cert)
+            .unwrap();
+
+        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca").join("pub")).unwrap();
+        let mut ca_files = ca_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        ca_files.sort();
+        assert_eq!(ca_files, &["ca.cert.pem", "ca.pub.pem"]);
+
+        let ca_pem_parsed = read_pem(&tmpdir.join("ca").join("pub").join("ca.cert.pem"));
+        let cert = ca_pem_parsed.parse_x509().unwrap();
+        let ca_ski = cert
+            .iter_extensions()
+            .find_map(|ext| match ext.parsed_extension() {
+                SubjectKeyIdentifier(k) => Some(k),
+                _ex => None,
+            })
+            .unwrap();
+        let ca_ski_bytes = ca_ski.0.to_vec();
+
+        let servers_dir = std::fs::read_dir(&*tmpdir.join("servers").join("localhost")).unwrap();
+        let mut servers_files = servers_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        servers_files.sort();
+        assert_eq!(
+            servers_files,
+            &[
+                "localhost.cert.pem",
+                "localhost.chain.pem",
+                "localhost.priv.pem",
+                "localhost.pub.pem"
+            ]
+        );
+
+        let server_cert = read_pem(
+            &tmpdir
+                .join("servers")
+                .join("localhost")
+                .join("localhost.cert.pem"),
+        );
+        let cert = server_cert.parse_x509().unwrap();
+        let server_aki = cert
+            .iter_extensions()
+            .find_map(|ext| match ext.parsed_extension() {
+                x509_parser::prelude::ParsedExtension::AuthorityKeyIdentifier(aki) => {
+                    aki.key_identifier.clone()
+                }
+                ex => {
+                    eprintln!("other extension: {ex:?}");
+                    None
+                }
+            })
+            .unwrap();
+        let aki_bytes = server_aki.0.to_vec();
+        assert_eq!(&aki_bytes, &ca_ski_bytes);
+
+        let clients_dir =
+            std::fs::read_dir(&*tmpdir.join("clients").join("test_resource")).unwrap();
+        let mut clients_files = clients_dir
+            .into_iter()
+            .map(Result::unwrap)
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        clients_files.sort();
+        assert_eq!(
+            clients_files,
+            &[
+                "test_agent.cert.pem",
+                "test_agent.chain.pem",
+                "test_agent.priv.pem",
+                "test_agent.pub.pem"
+            ]
+        );
+
+        let client_cert = read_pem(
+            &tmpdir
+                .join("clients")
+                .join("test_resource")
+                .join("test_agent.cert.pem"),
+        );
+        let cert = client_cert.parse_x509().unwrap();
+        let client_aki = cert
+            .iter_extensions()
+            .find_map(|ext| match ext.parsed_extension() {
+                x509_parser::prelude::ParsedExtension::AuthorityKeyIdentifier(aki) => {
+                    aki.key_identifier.clone()
+                }
+                ex => {
+                    eprintln!("other extension: {ex:?}");
+                    None
+                }
+            })
+            .unwrap();
+        let aki_bytes = client_aki.0.to_vec();
+        assert_eq!(&aki_bytes, &ca_ski_bytes);
     }
 
     #[test]
