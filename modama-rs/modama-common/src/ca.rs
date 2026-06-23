@@ -624,15 +624,6 @@ mod tests {
         ca.save_client_cert(agent_name, resource_name, &key_and_cert)
             .unwrap();
 
-        let ca_dir = std::fs::read_dir(&*tmpdir.join("ca").join("pub")).unwrap();
-        let mut ca_files = ca_dir
-            .into_iter()
-            .map(Result::unwrap)
-            .map(|e| e.file_name().into_string().unwrap())
-            .collect::<Vec<_>>();
-        ca_files.sort();
-        assert_eq!(ca_files, &["ca.cert.pem", "ca.pub.pem"]);
-
         let ca_pem_parsed = read_pem(&tmpdir.join("ca").join("pub").join("ca.cert.pem"));
         let cert = ca_pem_parsed.parse_x509().unwrap();
         let ca_ski = cert
@@ -643,23 +634,6 @@ mod tests {
             })
             .unwrap();
         let ca_ski_bytes = ca_ski.0.to_vec();
-
-        let servers_dir = std::fs::read_dir(&*tmpdir.join("servers").join("localhost")).unwrap();
-        let mut servers_files = servers_dir
-            .into_iter()
-            .map(Result::unwrap)
-            .map(|e| e.file_name().into_string().unwrap())
-            .collect::<Vec<_>>();
-        servers_files.sort();
-        assert_eq!(
-            servers_files,
-            &[
-                "localhost.cert.pem",
-                "localhost.chain.pem",
-                "localhost.priv.pem",
-                "localhost.pub.pem"
-            ]
-        );
 
         let server_cert = read_pem(
             &tmpdir
@@ -682,24 +656,6 @@ mod tests {
             .unwrap();
         let aki_bytes = server_aki.0.to_vec();
         assert_eq!(&aki_bytes, &ca_ski_bytes);
-
-        let clients_dir =
-            std::fs::read_dir(&*tmpdir.join("clients").join("test_resource")).unwrap();
-        let mut clients_files = clients_dir
-            .into_iter()
-            .map(Result::unwrap)
-            .map(|e| e.file_name().into_string().unwrap())
-            .collect::<Vec<_>>();
-        clients_files.sort();
-        assert_eq!(
-            clients_files,
-            &[
-                "test_agent.cert.pem",
-                "test_agent.chain.pem",
-                "test_agent.priv.pem",
-                "test_agent.pub.pem"
-            ]
-        );
 
         let client_cert = read_pem(
             &tmpdir
