@@ -4,6 +4,7 @@ import { isAuthenticated, login } from '../api/auth'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
+import { AlertTriangleIcon } from '../components/ui/icons'
 
 /**
  * Only allow same-origin relative redirect targets (mirrors the backend's
@@ -60,7 +61,7 @@ export function Login() {
 
           {error && (
             <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-3">
-              <span className="shrink-0 text-base">⚠️</span>
+              <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
               <div>
                 <div className="text-[13px] font-semibold text-danger">
                   Sign-in failed

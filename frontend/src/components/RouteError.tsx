@@ -1,6 +1,7 @@
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router-dom'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
+import { AlertTriangleIcon } from './ui/icons'
 
 /**
  * Global error boundary for the router. Catches loader/render errors so a single
@@ -20,7 +21,7 @@ export function RouteError() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg p-6">
       <Card className="w-full max-w-md p-10 text-center">
-        <div className="text-3xl">⚠️</div>
+        <AlertTriangleIcon className="mx-auto h-8 w-8 text-danger" />
         <h1 className="mt-3 text-lg font-bold text-fg">Unexpected error</h1>
         <p className="mt-2 text-sm text-fg-muted">{detail}</p>
         <div className="mt-6 flex justify-center gap-2">

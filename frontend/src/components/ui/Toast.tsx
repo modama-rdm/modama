@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ToastContext, type ToastType } from './toast-context'
+import { CheckCircleIcon, XCircleIcon } from './icons'
 
 interface ToastItem {
   id: number
@@ -33,9 +34,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             className="flex min-w-[280px] items-start gap-3 rounded-xl border-l-4 bg-surface px-4 py-3.5 shadow-lg [animation:toastIn_0.22s_ease-out]"
             style={{ borderLeftColor: t.type === 'success' ? 'var(--success)' : 'var(--danger)' }}
           >
-            <span className="shrink-0 text-lg leading-none">
-              {t.type === 'success' ? '✅' : '❌'}
-            </span>
+            {t.type === 'success' ? (
+              <CheckCircleIcon className="h-5 w-5 shrink-0 text-success" />
+            ) : (
+              <XCircleIcon className="h-5 w-5 shrink-0 text-danger" />
+            )}
             <div>
               <div className="text-sm font-bold text-fg">
                 {t.type === 'success' ? 'Done!' : 'Error'}
