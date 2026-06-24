@@ -13,16 +13,17 @@ export default defineConfig(({ mode }) => {
   // mapped port). Never point this at production.
   const apiTarget = env.VITE_API_PROXY || 'http://localhost:5001'
 
-  // Routes still owned by the legacy Flask app are proxied through so the SPA
-  // can co-exist with the server-rendered pages during the migration.
-  const proxied = ['/api', '/login', '/logout', '/browse', '/static']
-  const proxy = Object.fromEntries(
-    proxied.map((path) => [path, { target: apiTarget, changeOrigin: true }]),
-  )
+  // Only the JSON API is proxied to the backend. The SPA owns its own /login,
+  // /logout, etc. as client routes — proxying those would send the browser to
+  // the legacy Flask login page instead of this app.
+  const proxy = {
+    '/api': { target: apiTarget, changeOrigin: true },
+  }
 
   return {
     plugins: [react(), tailwindcss()],
-    server: { proxy },
+    // Pinned off Vite's default 5173 so this can run alongside other Vite apps.
+    server: { port: 5180, proxy },
     test: {
       environment: 'jsdom',
       clearMocks: true,

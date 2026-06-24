@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Then open **`http://localhost:5173`**. (The `/new` sub-path is only applied when building for
+Then open **`http://localhost:5180`**. (The `/new` sub-path is only applied when building for
 the parallel deploy, not for local dev.)
 
 The backend is Linux-only and does not run on macOS, so the dev server **proxies `/api` (and
@@ -35,7 +35,7 @@ to it. Follow the steps exactly.
 | VM login                       | username `debian`, password `debian`                                                                                                        |
 | VM IP (UTM **Shared Network**) | `192.168.64.2` — if SSH ever can't connect, get the current one by running `hostname -I` **in the VM** and using its `192.168.64.x` address |
 | Backend address inside the VM  | `127.0.0.1:5001`                                                                                                                            |
-| App URL on the Mac             | `http://localhost:5173`                                                                                                                     |
+| App URL on the Mac             | `http://localhost:5180`                                                                                                                     |
 
 ### First-time-only setup (do these once, ever)
 
@@ -87,7 +87,7 @@ That `401` is the **success** signal — you reached the backend and it's demand
 ```bash
 cd frontend && npm run dev
 ```
-Open **`http://localhost:5173`** and log in with your real IFF/ER-C Unix username +
+Open **`http://localhost:5180`** and log in with your real IFF/ER-C Unix username +
 password. Correct creds → you land on the Projects page with your name in the header.
 
 ### When it breaks — check here first
@@ -101,7 +101,7 @@ password. Correct creds → you land on the Projects page with your name in the 
 | `/api` calls in the app fail after it was working                  | Same — the tunnel window got closed. Reopen Step 2.                                                                                        |
 | VM log `ImportError ... DeleteShareResponse`                       | You pulled a stale image. In the VM run `./build.sh` (never `./pullprod.sh`).                                                              |
 | `./build.sh` stuck on `public.dhe.ibm.com` for ages                | That's the optional `backup` (IBM TSM) image. `Ctrl+C`, then run the "up ... except backup" command from Step 1.                           |
-| You expected the app under `/new/`                                 | That's the **deploy** path only (built into the `new-ui` container). **Local dev runs at root** — open `http://localhost:5173`.            |
+| You expected the app under `/new/`                                 | That's the **deploy** path only (built into the `new-ui` container). **Local dev runs at root** — open `http://localhost:5180`.            |
 
 ## Build
 
