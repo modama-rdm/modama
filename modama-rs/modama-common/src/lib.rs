@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod cert_helpers;
+pub mod config;
 pub mod logging;
 pub mod messages;
 pub mod mgmt_client;

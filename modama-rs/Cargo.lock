@@ -1675,6 +1675,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-rustls",
+ "toml",
  "url",
  "x509-parser",
 ]

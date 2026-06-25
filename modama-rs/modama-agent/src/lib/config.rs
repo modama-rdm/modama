@@ -9,9 +9,9 @@ use modama_common::{
     cert_helpers::{
         cert_chain_from_reader, get_root_cert_store, private_key_from_reader, CertHelperError,
     },
+    config::{AgentConfigFile, AgentConfigFileClientCert},
     tokens::{TokenError, TokenFetcher, TokenProvider},
 };
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{io::AsyncReadExt, sync::OnceCell};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
@@ -289,73 +289,4 @@ impl AgentConfig {
     }
 }
 
-fn default_event_url() -> String {
-    "wss://localhost:5052".to_owned()
-}
 
-fn default_token_service_url() -> String {
-    "https://localhost:5053".to_owned()
-}
-
-fn default_mgmt_api_url() -> String {
-    "http://localhost:5001".to_owned()
-}
-
-fn default_smb_host() -> String {
-    "moellenstedt.iff.kfa-juelich.de".to_owned()
-}
-
-fn default_smb_port() -> u32 {
-    445
-}
-
-fn default_smb_domain() -> String {
-    "ER-C-INGEST".to_owned()
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AgentConfigFileServices {
-    #[serde(default = "default_event_url")]
-    event_url: String,
-
-    #[serde(default = "default_token_service_url")]
-    token_service_url: String,
-
-    #[serde(default = "default_mgmt_api_url")]
-    mgmt_api_url: String,
-
-    #[serde(default = "default_smb_host")]
-    smb_hostname: String,
-
-    #[serde(default = "default_smb_port")]
-    smb_port: u32,
-
-    #[serde(default = "default_smb_domain")]
-    smb_domain: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AgentConfigFileCa {
-    ca_cert: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AgentConfigFileClientCert {
-    chain: String,
-    private_key: String,
-}
-
-fn default_listen_local_api() -> String {
-    "localhost:3003".to_owned()
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AgentConfigFile {
-    services: AgentConfigFileServices,
-
-    #[serde(default = "default_listen_local_api")]
-    listen_local_api: String,
-
-    ca: AgentConfigFileCa,
-    client_cert: Option<AgentConfigFileClientCert>,
-}

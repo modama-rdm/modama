@@ -166,7 +166,7 @@ impl Ca {
         PathBuf::from(prefix).join("ca").join("priv")
     }
 
-    fn get_client_certs_path(prefix: &Path) -> PathBuf {
+    pub fn get_client_certs_path(prefix: &Path) -> PathBuf {
         PathBuf::from(prefix).join("clients")
     }
 
@@ -181,7 +181,7 @@ impl Ca {
     fn get_privkey_path(prefix: &Path) -> PathBuf {
         Self::get_ca_priv_path(prefix).join("ca.priv.pem")
     }
-    fn get_cert_path(prefix: &Path) -> PathBuf {
+    pub fn get_cert_path(prefix: &Path) -> PathBuf {
         Self::get_ca_path(prefix).join("ca.cert.pem")
     }
 
