@@ -7,6 +7,8 @@ import {isAuthenticated} from './api/auth'
 import {AppShell} from './components/AppShell'
 import {RouteError} from './components/RouteError'
 import {Login} from './routes/Login'
+import {NewProject} from './routes/NewProject'
+import {newProjectLoader} from './routes/newProject.loader'
 import {Placeholder} from './routes/Placeholder'
 import {ProjectDetails} from './routes/ProjectDetails'
 import {projectDetailsLoader} from './routes/projectDetails.loader'
@@ -32,7 +34,7 @@ export const router = createBrowserRouter([
         children: [
             {index: true, loader: () => redirect('/projects')},
             {path: 'projects', loader: projectsLoader, element: <Projects/>},
-            {path: 'projects/new', element: <Placeholder title="New Project"/>},
+            {path: 'projects/new', loader: newProjectLoader, element: <NewProject/>},
             {
                 path: 'projects/:name',
                 loader: projectDetailsLoader,
