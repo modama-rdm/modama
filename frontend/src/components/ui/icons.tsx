@@ -83,6 +83,15 @@ export function UploadIcon(props: SVGProps<SVGSVGElement>) {
     )
 }
 
+export function XIcon(props: SVGProps<SVGSVGElement>) {
+    return (
+        <svg {...base} {...props}>
+            <path d="M18 6 6 18"/>
+            <path d="m6 6 12 12"/>
+        </svg>
+    )
+}
+
 export function ArrowLeftIcon(props: SVGProps<SVGSVGElement>) {
     return (
         <svg {...base} {...props}>
