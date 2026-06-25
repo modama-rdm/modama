@@ -23,11 +23,6 @@ const p = (
     usage_bytes: null,
 })
 
-// Minimal fixture:
-//   datamanagement  — owned by weber, shanker is a member
-//   ghost_imaging   — owned by clausen, no weber/shanker
-//   shanker_project — owned by shanker
-//   unrelated       — owned by bryan, no weber/shanker
 const projects: SerializedProject[] = [
     p('datamanagement', 'weber', ['shanker', 'landers'], 1700000003),
     p('ghost_imaging', 'clausen', ['bangun', 'ganeva'], 1700000001),

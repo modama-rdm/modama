@@ -20,9 +20,9 @@
 const SESSION_KEY = 'erc.auth'
 
 interface Session {
-  username: string
-  /** base64(username:password) for the Authorization: Basic header. */
-  token: string
+    username: string
+    /** base64(username:password) for the Authorization: Basic header. */
+    token: string
 }
 
 /**
@@ -31,36 +31,36 @@ interface Session {
  * Swap this object's body to change the storage strategy app-wide.
  */
 const tokenStore = {
-  read(): Session | null {
-    try {
-      const raw = sessionStorage.getItem(SESSION_KEY)
-      return raw ? (JSON.parse(raw) as Session) : null
-    } catch {
-      return null
-    }
-  },
-  write(session: Session): void {
-    try {
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
-    } catch {
-      /* storage unavailable (private mode / disabled) — auth degrades to in-tab only */
-    }
-  },
-  clear(): void {
-    try {
-      sessionStorage.removeItem(SESSION_KEY)
-    } catch {
-      /* ignore */
-    }
-  },
+    read(): Session | null {
+        try {
+            const raw = sessionStorage.getItem(SESSION_KEY)
+            return raw ? (JSON.parse(raw) as Session) : null
+        } catch {
+            return null
+        }
+    },
+    write(session: Session): void {
+        try {
+            sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
+        } catch {
+            /* storage unavailable (private mode / disabled) — auth degrades to in-tab only */
+        }
+    },
+    clear(): void {
+        try {
+            sessionStorage.removeItem(SESSION_KEY)
+        } catch {
+            /* ignore */
+        }
+    },
 }
 
 /** UTF-8 safe base64 — plain btoa throws on non-Latin1 characters. */
 function basicToken(username: string, password: string): string {
-  const bytes = new TextEncoder().encode(`${username}:${password}`)
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary)
+    const bytes = new TextEncoder().encode(`${username}:${password}`)
+    let binary = ''
+    for (const b of bytes) binary += String.fromCharCode(b)
+    return btoa(binary)
 }
 
 export type LoginResult = { ok: true } | { ok: false; message: string }
@@ -71,55 +71,55 @@ export type LoginResult = { ok: true } | { ok: false; message: string }
  * discriminated result the login screen can render.
  */
 export async function login(
-  username: string,
-  password: string,
+    username: string,
+    password: string,
 ): Promise<LoginResult> {
-  let res: Response
-  try {
-    res = await fetch('/api/users/auth/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    })
-  } catch {
-    return { ok: false, message: 'Could not reach the server. Please try again.' }
-  }
+    let res: Response
+    try {
+        res = await fetch('/api/users/auth/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username, password}),
+        })
+    } catch {
+        return {ok: false, message: 'Could not reach the server. Please try again.'}
+    }
 
-  let body: { errno?: number; message?: string } = {}
-  try {
-    body = await res.json()
-  } catch {
-    /* fall through to status-based handling */
-  }
+    let body: { errno?: number; message?: string } = {}
+    try {
+        body = await res.json()
+    } catch {
+        /* fall through to status-based handling */
+    }
 
-  if (res.ok && body.errno === 0) {
-    tokenStore.write({ username, token: basicToken(username, password) })
-    return { ok: true }
-  }
+    if (res.ok && body.errno === 0) {
+        tokenStore.write({username, token: basicToken(username, password)})
+        return {ok: true}
+    }
 
-  return {
-    ok: false,
-    message: body.message || 'Sign-in failed. Check your username and password.',
-  }
+    return {
+        ok: false,
+        message: body.message || 'Sign-in failed. Check your username and password.',
+    }
 }
 
 export function logout(): void {
-  tokenStore.clear()
+    tokenStore.clear()
 }
 
 export function getToken(): string | null {
-  return tokenStore.read()?.token ?? null
+    return tokenStore.read()?.token ?? null
 }
 
 export function getCurrentUser(): string | null {
-  return tokenStore.read()?.username ?? null
+    return tokenStore.read()?.username ?? null
 }
 
 export function isAuthenticated(): boolean {
-  return tokenStore.read() !== null
+    return tokenStore.read() !== null
 }
 
 /** Used by the API client to drop the session on a 401. */
 export function clearSession(): void {
-  tokenStore.clear()
+    tokenStore.clear()
 }
