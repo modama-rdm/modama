@@ -57,6 +57,7 @@ services:
     build:
       context: ..
       dockerfile: test-env/Dockerfile-tests
+    privileged: true  # for mount support
     container_name: modama-agent-1
     depends_on:
       - smbdrop
@@ -74,21 +75,13 @@ services:
       - "--bin"
       - "modama-agent"
       - "--"
-      - "--event-url=wss://smbdrop:5052"
-      - "--token-service=https://smbdrop:5053"
-      - "--mgmt-api-url=http://mgmtinterface"
-      - "--listen-local-api=0.0.0.0:3003"
-      - "--smb-hostname=smbdrop"
-      - "--smb-port=445"
-      - "--smb-domain=ER-C-Ingest"
-      - "--ca-cert=/certs/ca/pub/ca.cert.pem"
-      - "--chain=/certs/clients/testresource/agent1.chain.pem"
-      - "--key=/certs/clients/testresource/agent1.priv.pem"
+      - "--config-path=/certs/agent1.toml"
 
   modama-agent-2:
     build:
       context: ..
       dockerfile: test-env/Dockerfile-tests
+    privileged: true  # for mount support
     container_name: modama-agent-2
     depends_on:
       - smbdrop
@@ -106,21 +99,13 @@ services:
       - "--bin"
       - "modama-agent"
       - "--"
-      - "--event-url=wss://smbdrop:5052"
-      - "--token-service=https://smbdrop:5053"
-      - "--mgmt-api-url=http://mgmtinterface"
-      - "--listen-local-api=0.0.0.0:3003"
-      - "--smb-hostname=smbdrop"
-      - "--smb-port=445"
-      - "--smb-domain=ER-C-Ingest"
-      - "--ca-cert=/certs/ca/pub/ca.cert.pem"
-      - "--chain=/certs/clients/testresource/agent2.chain.pem"
-      - "--key=/certs/clients/testresource/agent2.priv.pem"
+      - "--config-path=/certs/agent2.toml"
 
   modama-agent-untrusted:
     build:
       context: ..
       dockerfile: test-env/Dockerfile-tests
+    privileged: true  # for mount support
     container_name: modama-agent-untrusted
     depends_on:
       - smbdrop
@@ -138,14 +123,7 @@ services:
       - "--bin"
       - "modama-agent"
       - "--"
-      - "--event-url=wss://smbdrop:5052"
-      - "--token-service=https://smbdrop:5053"
-      - "--mgmt-api-url=http://mgmtinterface"
-      - "--listen-local-api=0.0.0.0:3003"
-      - "--smb-hostname=smbdrop"
-      - "--smb-port=445"
-      - "--smb-domain=ER-C-Ingest"
-      - "--ca-cert=/certs/ca/pub/ca.cert.pem"
+      - "--config-path=/certs/agent-untrusted.toml"
 
 
   mgmtinterface:
