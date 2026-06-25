@@ -5,7 +5,7 @@ import {
     groupProjects,
     parseSharePath,
     sortProjects,
-} from './projects'
+} from './projectsUtil.ts'
 
 const p = (
     name: string,

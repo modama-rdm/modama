@@ -1,9 +1,14 @@
-# ER-C Data Management — Frontend
+# ER-C Data Management - Frontend
 
 React SPA for the ER-C Data Management Self-Service portal ("RDM 2026: UI"). Replaces the
 legacy server-rendered Flask + Jinja2 + MUI UI incrementally.
 
-**Stack:** Vite · React + TypeScript · Tailwind CSS v4 · React Router (data mode).
+**Stack:**
+
+- Vite
+- React + TypeScript
+- Tailwind CSS v4
+- React Router (data mode).
 
 ## Develop
 
@@ -12,8 +17,7 @@ npm install
 npm run dev
 ```
 
-Then open **`http://localhost:5180`**. (The `/new` sub-path is only applied when building for
-the parallel deploy, not for local dev.)
+Then open **`http://localhost:5180`**.
 
 The backend is Linux-only and does not run on macOS, so the dev server **proxies `/api` (and
 `/login`, `/logout`, `/browse`, `/static`) to a running backend** — see `vite.config.ts`. It
@@ -51,19 +55,12 @@ to it. Follow the steps exactly.
 
 ```bash
 cd ~/Desktop/data-management-system/deploy
-./build.sh
-```
-- Takes a few minutes. If it gets stuck downloading from `public.dhe.ibm.com` (the optional
-  `backup` / IBM-TSM image), press `Ctrl+C` — the UI doesn't need it.
-- ⚠️ **Never run `./pullprod.sh`.** Pulling gives a broken image
-  (`ImportError: cannot import name 'DeleteShareResponse'`). Always `./build.sh`.
 
-Then start every service **except** `backup`:
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --always-recreate-deps \
-  $(docker compose -f docker-compose.yml -f docker-compose.prod.yml config --services | grep -v '^backup$')
+docker compose up
 ```
+
 Confirm it booted (still in the VM):
+
 ```bash
 curl -I http://127.0.0.1:5001/login/      # expect: HTTP/1.1 200 or 302, no Python traceback
 ```
@@ -73,20 +70,25 @@ curl -I http://127.0.0.1:5001/login/      # expect: HTTP/1.1 200 or 302, no Pyth
 ```bash
 ssh -N -L 5001:127.0.0.1:5001 debian@192.168.64.2
 ```
+
 - Password: `debian`. First time, type `yes` at the fingerprint prompt.
 - It will sit there with **no output and no prompt** — that is correct (`-N` just holds the
   tunnel open). **Do not close this window.** Closing it kills the connection.
 
 **Step 3 — confirm the Mac can reach the VM (a second Mac terminal).**
+
 ```bash
 curl -i http://localhost:5001/api/project/      # expect: HTTP/1.1 401 UNAUTHORIZED
 ```
+
 That `401` is the **success** signal — you reached the backend and it's demanding a login.
 
 **Step 4 — run the app (Mac terminal).**
+
 ```bash
 cd frontend && npm run dev
 ```
+
 Open **`http://localhost:5180`** and log in with your real IFF/ER-C Unix username +
 password. Correct creds → you land on the Projects page with your name in the header.
 
@@ -94,24 +96,17 @@ password. Correct creds → you land on the Projects page with your name in the 
 
 | What you see                                                       | What it means / fix                                                                                                                        |
 |--------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
-| `zsh: parse error near '\n'` on the `ssh` line                     | You left the `<...>` brackets in. Paste the command exactly: `ssh -N -L 5001:127.0.0.1:5001 debian@192.168.64.2`                           |
 | `ssh: connect to host ... port 22: Connection refused`             | SSH server not running in the VM → do the first-time setup. Or the IP changed → run `hostname -I` in the VM, use the `192.168.64.x` value. |
 | `hostname -I` shows `10.0.2.15`                                    | UTM is in NAT mode → switch to **Shared Network**, restart the VM.                                                                         |
 | `curl http://localhost:5001/...` on the Mac → `Connection refused` | The tunnel window (Step 2) is closed. Reopen it and keep it open.                                                                          |
 | `/api` calls in the app fail after it was working                  | Same — the tunnel window got closed. Reopen Step 2.                                                                                        |
-| VM log `ImportError ... DeleteShareResponse`                       | You pulled a stale image. In the VM run `./build.sh` (never `./pullprod.sh`).                                                              |
-| `./build.sh` stuck on `public.dhe.ibm.com` for ages                | That's the optional `backup` (IBM TSM) image. `Ctrl+C`, then run the "up ... except backup" command from Step 1.                           |
-| You expected the app under `/new/`                                 | That's the **deploy** path only (built into the `new-ui` container). **Local dev runs at root** — open `http://localhost:5180`.            |
 
-## Build
+# Build
 
 ```bash
 npm run build    # type-check (tsc -b) + production bundle into dist/
 npm run preview  # serve the built bundle locally
 ```
-
-Production same-domain serving via Flask/nginx is tracked separately (GitLab #158) and is
-not wired up yet.
 
 ## Theming
 

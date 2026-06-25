@@ -8,7 +8,7 @@ import {AppShell} from './components/AppShell'
 import {RouteError} from './components/RouteError'
 import {Login} from './routes/Login'
 import {Placeholder} from './routes/Placeholder'
-import {Projects} from './routes/Projects'
+import {Projects} from './routes/Projects.tsx'
 import {projectsLoader} from './routes/projects.loader'
 
 /** Gate the authenticated area; bounce to /login preserving the attempted URL. */

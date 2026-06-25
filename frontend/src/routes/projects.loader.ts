@@ -9,7 +9,7 @@ export interface ProjectsLoaderData {
     shares: ListSharesResponse
 }
 
-/** Loads the projects list (+ the current user's active ingest shares). */
+/** Loads the project list (+ the current user's active ingested shares). */
 export async function projectsLoader(): Promise<ProjectsLoaderData> {
     const currentUser = getCurrentUser() ?? ''
 

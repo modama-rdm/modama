@@ -12,7 +12,7 @@ import {
     parseSharePath,
     sortProjects,
     type SortBy,
-} from '../lib/projects'
+} from '../lib/projectsUtil.ts'
 import type {ProjectsLoaderData} from './projects.loader'
 
 function MemberAvatars({members}: { members: string[] }) {
@@ -31,7 +31,7 @@ function MemberAvatars({members}: { members: string[] }) {
             ))}
             {extra > 0 && (
                 <div
-                    className="-ml-1.5 flex h-[26px] items-center justify-center rounded-full bg-surface-muted px-2 text-[11px] font-semibold text-fg-subtle ring-2 ring-surface">
+                    className="-ml-1.5 flex h-6.5 items-center justify-center rounded-full bg-surface-muted px-2 text-[11px] font-semibold text-fg-subtle ring-2 ring-surface">
                     +{extra}
                 </div>
             )}
@@ -128,7 +128,7 @@ export function Projects() {
     const openProject = (name: string) => navigate(`/projects/${name}`)
 
     return (
-        <div className="mx-auto max-w-[1080px] px-6 py-8 [animation:fadeIn_0.2s_ease-out]">
+        <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
             <div className="mb-6 flex items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-fg">Projects</h1>

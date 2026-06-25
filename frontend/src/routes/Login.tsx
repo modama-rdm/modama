@@ -49,7 +49,7 @@ export function Login() {
 
     return (
         <div className="flex min-h-screen items-center justify-center bg-bg p-6">
-            <div className="w-full max-w-[400px] [animation:fadeIn_0.3s_ease-out]">
+            <div className="w-full max-w-100 animate-[fadeIn_0.3s_ease-out]">
                 <Card className="px-10 py-11">
                     <div className="mb-8 text-center">
                         <img src="/branding/modama.svg" alt="modama" className="mx-auto h-9"/>
