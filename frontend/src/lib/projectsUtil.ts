@@ -41,7 +41,7 @@ export function filterProjects(
     return projects.filter((p) => p.name.toLowerCase().includes(q))
 }
 
-/** Return a sorted copy: "recent" = newest mtime first, "name" = A–Z. */
+/** Return a sorted copy: "recent" = newest mtime first, "name" = A - Z. */
 export function sortProjects(
     projects: SerializedProject[],
     sortBy: SortBy,

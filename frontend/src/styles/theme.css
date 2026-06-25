@@ -99,7 +99,7 @@ body {
     margin: 0;
     background: var(--bg);
     color: var(--fg);
-    font-family: var(--font-sans);
+    font-family: var(--font-sans), ui-sans-serif;
     -webkit-font-smoothing: antialiased;
 }
 

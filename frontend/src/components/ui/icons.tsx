@@ -2,7 +2,7 @@ import type {SVGProps} from 'react'
 
 /**
  * Minimal inline icon set (Lucide-style line icons). They use `currentColor`,
- * so colour comes from the surrounding `text-*` token and size from the
+ * so color comes from the surrounding `text-*` token and size from the
  * `h-` / `w-` utilities — professional and theme-aware without an icon dep.
  */
 const base: SVGProps<SVGSVGElement> = {

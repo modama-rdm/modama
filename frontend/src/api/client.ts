@@ -1,9 +1,9 @@
 /**
  * Central fetch wrapper for the mgmtinterface `/api/*` endpoints.
  *
- * Injects the HTTP Basic credential on every call and centralises error
+ * Injects the HTTP Basic credential on every call and centralizes error
  * handling. A 401 means the stored credential is missing/expired/invalid, so we
- * drop the session and throw `Unauthorized` — router loaders catch this and
+ * drop the session and throw `Unauthorized` - router loaders catch this and
  * redirect to /login (preserving the attempted URL via ?next).
  */
 

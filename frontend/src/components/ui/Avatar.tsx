@@ -1,7 +1,7 @@
 /**
- * User avatar with deterministic per-user colour.
+ * User avatar with deterministic per-user color.
  *
- * These are categorical identity colours (like chart series colours), not theme
+ * These are categorical identity colors (like chart series colors), not theme
  * surface tokens — they stay constant across light/dark by design, so a fixed
  * palette is appropriate here. The username hash picks a stable entry.
  */

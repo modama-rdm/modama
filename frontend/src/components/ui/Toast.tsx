@@ -27,11 +27,11 @@ export function ToastProvider({children}: { children: ReactNode }) {
     return (
         <ToastContext.Provider value={api}>
             {children}
-            <div className="pointer-events-none fixed bottom-6 right-6 z-[9999] flex flex-col gap-2">
+            <div className="pointer-events-none fixed bottom-6 right-6 z-9999 flex flex-col gap-2">
                 {toasts.map((t) => (
                     <div
                         key={t.id}
-                        className="flex min-w-[280px] items-start gap-3 rounded-xl border-l-4 bg-surface px-4 py-3.5 shadow-lg [animation:toastIn_0.22s_ease-out]"
+                        className="flex min-w-70 items-start gap-3 rounded-xl border-l-4 bg-surface px-4 py-3.5 shadow-lg animate-[toastIn_0.22s_ease-out]"
                         style={{borderLeftColor: t.type === 'success' ? 'var(--success)' : 'var(--danger)'}}
                     >
                         {t.type === 'success' ? (

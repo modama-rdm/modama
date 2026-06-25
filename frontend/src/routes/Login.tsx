@@ -5,6 +5,7 @@ import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {Input} from '../components/ui/Input'
 import {AlertTriangleIcon} from '../components/ui/icons'
+import * as React from "react";
 
 /**
  * Only allow same-origin relative redirect targets (mirrors the backend's
