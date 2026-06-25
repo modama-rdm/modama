@@ -7,7 +7,9 @@ import { isAuthenticated } from './api/auth'
 import { AppShell } from './components/AppShell'
 import { RouteError } from './components/RouteError'
 import { Login } from './routes/Login'
+import {Placeholder} from './routes/Placeholder'
 import { Projects } from './routes/Projects'
+import {projectsLoader} from './routes/projects.loader'
 
 /** Gate the authenticated area; bounce to /login preserving the attempted URL. */
 function protectedLoader({ request }: LoaderFunctionArgs) {
@@ -27,7 +29,9 @@ export const router = createBrowserRouter([
     errorElement: <RouteError />,
     children: [
       { index: true, loader: () => redirect('/projects') },
-      { path: 'projects', element: <Projects /> },
+      {path: 'projects', loader: projectsLoader, element: <Projects/>},
+      {path: 'projects/new', element: <Placeholder title="New Project"/>},
+      {path: 'projects/:name', element: <Placeholder title="Project details"/>},
     ],
   },
 ])
