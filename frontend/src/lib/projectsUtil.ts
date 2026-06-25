@@ -112,3 +112,22 @@ export function sharedDatasetNames(
 export function sortDatasets(datasets: SerializedDataset[]): SerializedDataset[] {
     return [...datasets].sort((a, b) => b.mtime - a.mtime)
 }
+
+/**
+ * Candidate members for the New Project picker: every known user except the
+ * owner (implicit member) and those already chosen, optionally narrowed by a
+ * case-insensitive name query and returned alphabetically.
+ */
+export function availableMembers(
+    allUsers: string[],
+    owner: string,
+    selected: string[],
+    query: string,
+): string[] {
+    const taken = new Set([owner, ...selected])
+    const q = query.trim().toLowerCase()
+    return allUsers
+        .filter((u) => !taken.has(u))
+        .filter((u) => !q || u.toLowerCase().includes(q))
+        .sort((a, b) => a.localeCompare(b))
+}

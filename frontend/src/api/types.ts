@@ -78,6 +78,11 @@ export interface CreateProjectRequest {
     members: string[]
 }
 
+/** `POST /api/project/` success — the freshly created project. */
+export interface CreateProjectResponse extends OkEnvelope {
+    project: SerializedProject
+}
+
 export interface CreateDatasetRequest {
     name: string
     owner: string

@@ -6,6 +6,7 @@ import type {
     SerializedShare,
 } from '../api/types'
 import {
+    availableMembers,
     canonicalProjectPath,
     filterProjects,
     groupProjects,
@@ -173,5 +174,29 @@ describe('sortDatasets', () => {
         const sorted = sortDatasets(input)
         expect(sorted.map((x) => x.name)).toEqual(['b', 'c', 'a'])
         expect(input.map((x) => x.name)).toEqual(['a', 'b', 'c'])
+    })
+})
+
+describe('availableMembers', () => {
+    const users = ['weber', 'shanker', 'landers', 'clausen', 'bangun']
+
+    it('excludes the owner and already-selected members', () => {
+        const result = availableMembers(users, 'weber', ['shanker'], '')
+        expect(result).not.toContain('weber')
+        expect(result).not.toContain('shanker')
+        expect(result).toContain('landers')
+    })
+
+    it('filters by a case-insensitive query and sorts alphabetically', () => {
+        expect(availableMembers(users, 'weber', [], 'AN')).toEqual([
+            'bangun',
+            'landers',
+            'shanker',
+        ])
+    })
+
+    it('returns an empty list when everyone is taken', () => {
+        const taken = users.slice(1)
+        expect(availableMembers(users, 'weber', taken, '')).toEqual([])
     })
 })
