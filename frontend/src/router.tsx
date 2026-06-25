@@ -17,6 +17,16 @@ import {SealSession} from './routes/SealSession'
 import {Projects} from './routes/Projects.tsx'
 import {projectsLoader} from './routes/projects.loader'
 
+/**
+ * The router's basename, derived from the Vite `base` (set per-environment via
+ * VITE_BASE_PATH). Vite exposes that value as import.meta.env.BASE_URL with a
+ * trailing slash ('/' in dev, '/new/' in the production build); React Router
+ * wants it without one. Deriving it here keeps every in-app path (`/projects`,
+ * `/login`, …) sub-path agnostic — the router prepends the basename, so nothing
+ * else in the app needs to know where it's mounted.
+ */
+const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
+
 /** Gate the authenticated area; bounce to /login preserving the attempted URL. */
 function protectedLoader({request}: LoaderFunctionArgs) {
     if (!isAuthenticated()) {
@@ -57,4 +67,4 @@ export const router = createBrowserRouter([
             },
         ],
     },
-])
+], {basename})

@@ -19,7 +19,16 @@ export default defineConfig(({mode}) => {
         '/api': {target: apiTarget, changeOrigin: true},
     }
 
+    // Public base path the app is served from. In production the new UI lives at
+    // a sub-path under the mgmt domain (the legacy Flask UI keeps the root), so
+    // the Docker build sets VITE_BASE_PATH=/new/. Local dev keeps the root ('/')
+    // so the app stays at http://localhost:5180/. The router reads this same
+    // value back via import.meta.env.BASE_URL for its basename — keep them in
+    // sync by never hardcoding the path anywhere else.
+    const base = env.VITE_BASE_PATH || '/'
+
     return {
+        base,
         plugins: [react(), tailwindcss()],
         server: {port: 5180, proxy},
         test: {
