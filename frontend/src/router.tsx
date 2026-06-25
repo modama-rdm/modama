@@ -8,6 +8,8 @@ import {AppShell} from './components/AppShell'
 import {RouteError} from './components/RouteError'
 import {Login} from './routes/Login'
 import {Placeholder} from './routes/Placeholder'
+import {ProjectDetails} from './routes/ProjectDetails'
+import {projectDetailsLoader} from './routes/projectDetails.loader'
 import {Projects} from './routes/Projects.tsx'
 import {projectsLoader} from './routes/projects.loader'
 
@@ -31,7 +33,27 @@ export const router = createBrowserRouter([
             {index: true, loader: () => redirect('/projects')},
             {path: 'projects', loader: projectsLoader, element: <Projects/>},
             {path: 'projects/new', element: <Placeholder title="New Project"/>},
-            {path: 'projects/:name', element: <Placeholder title="Project details"/>},
+            {
+                path: 'projects/:name',
+                loader: projectDetailsLoader,
+                element: <ProjectDetails/>,
+            },
+            {
+                path: 'projects/:name/members',
+                element: <Placeholder title="Manage Members"/>,
+            },
+            {
+                path: 'projects/:name/sessions/new',
+                element: <Placeholder title="New Session"/>,
+            },
+            {
+                path: 'projects/:name/sessions/:dataset/seal',
+                element: <Placeholder title="Seal Session"/>,
+            },
+            {
+                path: 'projects/:name/sessions/:dataset/ingest',
+                element: <Placeholder title="Ingest Share"/>,
+            },
         ],
     },
 ])
