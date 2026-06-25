@@ -14,15 +14,16 @@ services:
       - modama-network
     command:
       - "cargo"
-      - "llvm-cov"
       - "run"
-      - "--no-clean"
+      - "--target-dir"
+      - "/usr/src/modama-rs/target/"
+      - "--release"
       - "--bin"
       - "smbdrop"
       - "--"
-      - "--ca-cert=/certs/ca/ca.cert.pem"
-      - "--chain=/certs/servers/smbdrop.chain.pem"
-      - "--privkey=/certs/servers/smbdrop.priv.pem"
+      - "--ca-cert=/certs/ca/pub/ca.cert.pem"
+      - "--chain=/certs/servers/smbdrop/smbdrop.chain.pem"
+      - "--privkey=/certs/servers/smbdrop/smbdrop.priv.pem"
       - "--api-listen=0.0.0.0:5051"
       - "--ws-listen=0.0.0.0:5052"
       - "--token-api-listen=0.0.0.0:5053"
@@ -41,9 +42,10 @@ services:
       - ./target:/usr/src/modama-rs/target/
     command:
       - "cargo"
-      - "llvm-cov"
       - "run"
-      - "--no-clean"
+      - "--target-dir"
+      - "/usr/src/modama-rs/target/"
+      - "--release"
       - "--bin"
       - "modama-agent"
       - "--"
@@ -54,7 +56,7 @@ services:
       - "--smb-hostname=smbdrop"
       - "--smb-port=445"
       - "--smb-domain=ER-C-Ingest"
-      - "--ca-cert=/certs/ca/ca.cert.pem"
+      - "--ca-cert=/certs/ca/pub/ca.cert.pem"
       - "--chain=/certs/clients/testresource/agent1.chain.pem"
       - "--key=/certs/clients/testresource/agent1.priv.pem"
 
@@ -72,9 +74,10 @@ services:
       - ./target:/usr/src/modama-rs/target/
     command:
       - "cargo"
-      - "llvm-cov"
       - "run"
-      - "--no-clean"
+      - "--target-dir"
+      - "/usr/src/modama-rs/target/"
+      - "--release"
       - "--bin"
       - "modama-agent"
       - "--"
@@ -85,7 +88,7 @@ services:
       - "--smb-hostname=smbdrop"
       - "--smb-port=445"
       - "--smb-domain=ER-C-Ingest"
-      - "--ca-cert=/certs/ca/ca.cert.pem"
+      - "--ca-cert=/certs/ca/pub/ca.cert.pem"
       - "--chain=/certs/clients/testresource/agent2.chain.pem"
       - "--key=/certs/clients/testresource/agent2.priv.pem"
 
@@ -103,9 +106,10 @@ services:
       - ./target:/usr/src/modama-rs/target/
     command:
       - "cargo"
-      - "llvm-cov"
       - "run"
-      - "--no-clean"
+      - "--target-dir"
+      - "/usr/src/modama-rs/target/"
+      - "--release"
       - "--bin"
       - "modama-agent"
       - "--"
@@ -116,34 +120,8 @@ services:
       - "--smb-hostname=smbdrop"
       - "--smb-port=445"
       - "--smb-domain=ER-C-Ingest"
-      - "--ca-cert=/certs/ca/ca.cert.pem"
+      - "--ca-cert=/certs/ca/pub/ca.cert.pem"
 
-  tests:
-    build:
-      context: ..
-      dockerfile: test-env/Dockerfile-tests
-    container_name: modama-tests
-    volumes:
-      - ./target:/usr/src/modama-rs/target/
-    profiles: ["tests"]  # don't run with default "docker compose up" command
-    command:
-      - /bin/bash
-      - "-c"
-      - "cargo llvm-cov --no-report"
-
-  only-report:
-    build:
-      context: ..
-      dockerfile: test-env/Dockerfile-tests
-    container_name: modama-tests
-    volumes:
-      - ./target:/usr/src/modama-rs/target/
-      - ./report-target:/usr/src/modama-rs/target/llvm-cov/
-    profiles: ["tests"]  # don't run with default "docker compose up" command
-    command:
-      - /bin/bash
-      - "-c"
-      - "cargo llvm-cov report --html"
 
   mgmtinterface:
     hostname: mgmtinterface

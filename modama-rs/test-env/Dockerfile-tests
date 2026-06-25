@@ -5,9 +5,8 @@ FROM rust:slim-trixie AS builder
 WORKDIR /usr/src/modama-rs/
 
 RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install clang lld samba samba-client winbind strace
-RUN --mount=type=cache,target=/usr/local/cargo/registry/ cargo +stable install cargo-llvm-cov --locked && rustup component add llvm-tools-preview
 
 COPY . .
 COPY ./smbdrop/smb.conf /etc/samba/smb.conf
 
-CMD [ "/usr/local/cargo/bin/cargo", "llvm-cov" ]
+CMD [ "cargo" ]
