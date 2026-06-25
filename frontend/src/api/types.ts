@@ -88,10 +88,16 @@ export interface CreateDatasetRequest {
     owner: string
 }
 
+/** `POST /api/project/<name>/dataset/` — success carries no payload. */
+export type CreateDatasetResponse = OkEnvelope
+
 export interface SealDatasetRequest {
     name: string
     user: string
 }
+
+/** `POST /api/project/<name>/dataset/seal/` — success carries no payload. */
+export type SealDatasetResponse = OkEnvelope
 
 export interface ChangeMembersRequest {
     op: 'add' | 'remove'
