@@ -1,8 +1,33 @@
 services:
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile-test-runner
+    working_dir: /tests
+    networks:
+      - modama-network
+    volumes:
+      - ./tests:/tests:ro
+    depends_on:
+      - smbdrop
+
+  smbdrop-init:
+    image: debian:13-slim
+    container_name: smbdrop-init
+    command:
+      - sh
+      - -c
+      - mkdir -p /data/adhoc/testproject/session1
+    volumes:
+      - smbdrop_data:/data
+    networks:
+      - modama-network
+
   smbdrop:
     build:
       context: ..
       dockerfile: test-env/Dockerfile-tests
+    privileged: true  # for mount support
     container_name: smbdrop
     ports:
       - "445:445"
@@ -52,7 +77,7 @@ services:
       - "--event-url=wss://smbdrop:5052"
       - "--token-service=https://smbdrop:5053"
       - "--mgmt-api-url=http://mgmtinterface"
-      - "--listen-local-api=localhost:3003"
+      - "--listen-local-api=0.0.0.0:3003"
       - "--smb-hostname=smbdrop"
       - "--smb-port=445"
       - "--smb-domain=ER-C-Ingest"
@@ -84,7 +109,7 @@ services:
       - "--event-url=wss://smbdrop:5052"
       - "--token-service=https://smbdrop:5053"
       - "--mgmt-api-url=http://mgmtinterface"
-      - "--listen-local-api=localhost:3003"
+      - "--listen-local-api=0.0.0.0:3003"
       - "--smb-hostname=smbdrop"
       - "--smb-port=445"
       - "--smb-domain=ER-C-Ingest"
@@ -116,7 +141,7 @@ services:
       - "--event-url=wss://smbdrop:5052"
       - "--token-service=https://smbdrop:5053"
       - "--mgmt-api-url=http://mgmtinterface"
-      - "--listen-local-api=localhost:3003"
+      - "--listen-local-api=0.0.0.0:3003"
       - "--smb-hostname=smbdrop"
       - "--smb-port=445"
       - "--smb-domain=ER-C-Ingest"

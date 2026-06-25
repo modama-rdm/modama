@@ -24,21 +24,33 @@ struct Cli {
 
     #[arg(short, long, default_value = "/certs/")]
     ca_path: PathBuf,
+
+    #[arg(long)]
+    insecure_no_password: bool,
 }
 
-fn ca_with_password(args: &Cli) -> Result<Ca> {
-    let password = prompt_password("Password: ")?;
-Ok(Ca::load(&args.ca_path, &password)?)
+fn ca_with_optional_password(args: &Cli) -> Result<Ca> {
+    let password = if args.insecure_no_password {
+        String::new()
+    } else {
+        prompt_password("Password: ")?
+    };
+    Ok(Ca::load(&args.ca_path, &password)?)
 }
 
 /// Generate a new keypair and a CA root certificate using the private key.
 fn initialize_ca(args: &Cli) -> Result<()> {
-    println!("Creating new CA. Please enter a safe password to encrypt the private key.");
-    let password = prompt_password("Password: ")?;
-    let password_again = prompt_password("Password (again): ")?;
-    if password != password_again {
-        bail!("Passwords don't match.");
-    }
+    let password = if args.insecure_no_password {
+        String::new()
+    } else {
+        println!("Creating new CA. Please enter a safe password to encrypt the private key.");
+        let password = prompt_password("Password: ")?;
+        let password_again = prompt_password("Password (again): ")?;
+        if password != password_again {
+            bail!("Passwords don't match.");
+        }
+        password
+    };
     let ca = Ca::new(Some(&args.ca_path), &password)?;
     ca.serialize_ca_to_files()?;
 
@@ -47,7 +59,7 @@ fn initialize_ca(args: &Cli) -> Result<()> {
 
 /// Enroll the given agent for the given resource by creating a client certificate.
 fn enroll_agent(args: &Cli, agent_name: &str, resource_name: &str) -> Result<()> {
-    let ca = ca_with_password(args)?;
+    let ca = ca_with_optional_password(args)?;
     let key_and_cert = ca.client_cert(agent_name, resource_name)?;
     ca.save_client_cert(agent_name, resource_name, &key_and_cert)?;
 
@@ -56,7 +68,7 @@ fn enroll_agent(args: &Cli, agent_name: &str, resource_name: &str) -> Result<()>
 
 /// Enroll a server by creating a certificate.
 fn enroll_server(args: &Cli, server_names: &[String]) -> Result<()> {
-    let ca = ca_with_password(args)?;
+    let ca = ca_with_optional_password(args)?;
     let key_and_cert = ca.server_cert(server_names)?;
     ca.save_server_cert(server_names, &key_and_cert)?;
 
