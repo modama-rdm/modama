@@ -108,6 +108,36 @@ npm run build    # type-check (tsc -b) + production bundle into dist/
 npm run preview  # serve the built bundle locally
 ```
 
+## Production deployment
+
+In production the new UI is **not** the default. The legacy Flask UI keeps the
+root of the mgmt domain; the new SPA is mounted alongside it at a sub-path:
+
+```
+https://er-c-data-mgmt.fz-juelich.de/new/      ← new React SPA (this app)
+https://er-c-data-mgmt.fz-juelich.de/          ← legacy Flask UI (default)
+```
+
+How the pieces fit together:
+
+- **Sub-path is one knob: `VITE_BASE_PATH`.** It sets Vite's `base` (so asset URLs
+  become `/new/assets/…`) and, via `import.meta.env.BASE_URL`, the React Router
+  `basename`. Local dev leaves it unset (`/`), so the app stays at the root of
+  `http://localhost:5180`. The Docker build sets `VITE_BASE_PATH=/new/`. Never
+  hardcode the path elsewhere — in-app routes (`/projects`, `/login`, …) stay
+  sub-path agnostic and the router prepends the base.
+- **`frontend/Dockerfile`** builds the bundle and serves it with nginx from
+  `/usr/share/nginx/html/new` (`frontend/nginx.conf`), with SPA deep-link
+  fallback to `index.html`. Built and released by `.gitlab-ci.yml` like the other
+  images.
+- **`mgmtinterface-proxy`** (the mgmt-domain nginx) routes `^~ /new/` to the
+  `frontend` container and everything else to the legacy Flask app. The SPA's
+  `/api/*` calls therefore still land on Flask at the domain root, unchanged.
+
+To verify the production build locally against the VM backend, bring the stack up
+(`deploy/`) and open `http://localhost:5001/new/` — the test
+`mgmtinterface-proxy` config mirrors prod.
+
 ## Theming
 
 Design tokens are CSS custom properties in [`src/styles/theme.css`](src/styles/theme.css)
