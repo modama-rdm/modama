@@ -23,6 +23,18 @@ export function formatDateTime(epochSeconds: number): string {
 }
 
 /**
+ * Default session name — today's local date with a trailing dash, e.g.
+ * "2026-06-25-". Mirrors the legacy `default_dataset_name()`: people record data
+ * per day, so we pre-fill the date and let them append a suffix.
+ */
+export function sessionNamePrefix(now: Date = new Date()): string {
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}-`
+}
+
+/**
  * Human-readable byte size — "1.4 GB", "812 MB". Mirrors the legacy
  * `format_filesize` (binary units). `null` size is rendered by the caller.
  */

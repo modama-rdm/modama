@@ -12,13 +12,14 @@ import {Card} from '../components/ui/Card'
 import {Input} from '../components/ui/Input'
 import {AlertTriangleIcon, ArrowLeftIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
+import {sessionNamePrefix} from '../lib/format'
 
 export function NewSession() {
     const {name = ''} = useParams()
     const navigate = useNavigate()
     const {notify} = useToast()
 
-    const [session, setSession] = useState('')
+    const [session, setSession] = useState(sessionNamePrefix)
     const [error, setError] = useState('')
     const [submitting, setSubmitting] = useState(false)
 
