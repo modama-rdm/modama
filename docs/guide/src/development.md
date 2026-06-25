@@ -68,3 +68,9 @@ In short:
 ## TODO
 
 - [ ] document dev env for `modama-agent` and `smbdrop`
+
+## Releasing
+
+Releases are created with "New Release" in the Deploy->Releases view of the Gitlab repository. Create a version tag, set title (can just be the tag) and write short release notes.
+
+Finally, click on the "release" button!
