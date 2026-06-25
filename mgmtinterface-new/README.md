@@ -1,7 +1,8 @@
-# ER-C Data Management - Frontend
+# ER-C Data Management - mgmtinterface-new
 
-React SPA for the ER-C Data Management Self-Service portal ("RDM 2026: UI"). Replaces the
-legacy server-rendered Flask + Jinja2 + MUI UI incrementally.
+React SPA for the ER-C Data Management Self-Service portal ("RDM 2026: UI"). The new
+management interface that replaces the legacy server-rendered Flask + Jinja2 + MUI UI
+(`mgmtinterface`) incrementally — hence `mgmtinterface-new`.
 
 **Stack:**
 
@@ -86,7 +87,7 @@ That `401` is the **success** signal — you reached the backend and it's demand
 **Step 4 — run the app (Mac terminal).**
 
 ```bash
-cd frontend && npm run dev
+cd mgmtinterface-new && npm run dev
 ```
 
 Open **`http://localhost:5180`** and log in with your real IFF/ER-C Unix username +
@@ -126,13 +127,13 @@ How the pieces fit together:
   `http://localhost:5180`. The Docker build sets `VITE_BASE_PATH=/new/`. Never
   hardcode the path elsewhere — in-app routes (`/projects`, `/login`, …) stay
   sub-path agnostic and the router prepends the base.
-- **`frontend/Dockerfile`** builds the bundle and serves it with nginx from
-  `/usr/share/nginx/html/new` (`frontend/nginx.conf`), with SPA deep-link
-  fallback to `index.html`. Built and released by `.gitlab-ci.yml` like the other
-  images.
+- **`mgmtinterface-new/Dockerfile`** builds the bundle and serves it with nginx
+  from `/usr/share/nginx/html/new` (`mgmtinterface-new/nginx.conf`), with SPA
+  deep-link fallback to `index.html`. Built and released by `.gitlab-ci.yml` like
+  the other images.
 - **`mgmtinterface-proxy`** (the mgmt-domain nginx) routes `^~ /new/` to the
-  `frontend` container and everything else to the legacy Flask app. The SPA's
-  `/api/*` calls therefore still land on Flask at the domain root, unchanged.
+  `mgmtinterface-new` container and everything else to the legacy Flask app. The
+  SPA's `/api/*` calls therefore still land on Flask at the domain root, unchanged.
 
 To verify the production build locally against the VM backend, bring the stack up
 (`deploy/`) and open `http://localhost:5001/new/` — the test

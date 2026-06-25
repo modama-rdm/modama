@@ -102,6 +102,14 @@ services:
     depends_on:
       - "nextcloud"
 
+  mgmtinterface-new: # static React SPA (new UI)
+    hostname: mgmtinterface-new
+    restart: always
+    build:
+      context: ../mgmtinterface-new
+      dockerfile: Dockerfile
+    image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-new:latest
+
   mgmtinterface-proxy:  # another nginx, in prod this terminates TLS
     # see prod/override files for config volumes and ports
     hostname: mgmtinterface-proxy
@@ -109,7 +117,8 @@ services:
     restart: always
     depends_on:
       - "mgmtinterface"
-  
+      - "mgmtinterface-new"
+
   permissions:
     hostname: permissions
     restart: always
