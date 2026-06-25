@@ -1,4 +1,4 @@
-er-c-data/testfolder
+deploy/testfolder
 
 # mgmtinterface-new is built from the repo root (so the image can reach the
 # shared branding/ folder); keep its local build artifacts out of the context.
