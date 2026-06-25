@@ -1,4 +1,8 @@
-import type {SerializedProject} from '../api/types'
+import type {
+    ListSharesResponse,
+    SerializedDataset,
+    SerializedProject,
+} from '../api/types'
 
 export type SortBy = 'recent' | 'name'
 
@@ -69,4 +73,42 @@ export function parseSharePath(destPath: string): {
         dataset: parts[parts.length - 1] ?? '',
         project: parts[parts.length - 2] ?? '',
     }
+}
+
+/**
+ * Canonical filesystem path of a project (or a dataset within it) — mirrors the
+ * backend `canonical_path` filter: "/" + relpath [ + "/" + dataset ]. Used for
+ * the Browse links and copy-to-clipboard fields.
+ */
+export function canonicalProjectPath(relpath: string, dataset?: string): string {
+    const base = `/${relpath}`
+    return dataset ? `${base}/${dataset}` : base
+}
+
+/**
+ * Names of this project's datasets that currently have an active ingest share —
+ * the client-side equivalent of the backend `add_share_info`. A share targets a
+ * dataset when its `dest_path` ends with `/<relpath>/<dataset>` (the API already
+ * scopes `/api/share/` to the current user, so no uid check is needed here).
+ */
+export function sharedDatasetNames(
+    shares: ListSharesResponse,
+    relpath: string,
+): Set<string> {
+    const suffix = `/${relpath}/`
+    const names = new Set<string>()
+    for (const share of Object.values(shares)) {
+        const norm = share.dest_path.replace(/\/+$/, '')
+        const slash = norm.lastIndexOf('/')
+        if (slash < 0) continue
+        const dataset = norm.slice(slash + 1)
+        const parent = norm.slice(0, slash + 1)
+        if (parent.endsWith(suffix)) names.add(dataset)
+    }
+    return names
+}
+
+/** Return a copy of the datasets sorted newest-modified first (legacy order). */
+export function sortDatasets(datasets: SerializedDataset[]): SerializedDataset[] {
+    return [...datasets].sort((a, b) => b.mtime - a.mtime)
 }

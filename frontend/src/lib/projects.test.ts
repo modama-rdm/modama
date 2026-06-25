@@ -1,9 +1,17 @@
 import {describe, expect, it} from 'vitest'
-import type {SerializedProject} from '../api/types'
+import type {
+    ListSharesResponse,
+    SerializedDataset,
+    SerializedProject,
+    SerializedShare,
+} from '../api/types'
 import {
+    canonicalProjectPath,
     filterProjects,
     groupProjects,
     parseSharePath,
+    sharedDatasetNames,
+    sortDatasets,
     sortProjects,
 } from './projectsUtil.ts'
 
@@ -104,5 +112,66 @@ describe('parseSharePath', () => {
             project: 'proj',
             dataset: 'sess',
         })
+    })
+})
+
+describe('canonicalProjectPath', () => {
+    it('builds the project path from relpath', () => {
+        expect(canonicalProjectPath('data/ghost_imaging')).toBe('/data/ghost_imaging')
+    })
+
+    it('appends the dataset segment when given', () => {
+        expect(canonicalProjectPath('data/ghost_imaging', '2025-06-18')).toBe(
+            '/data/ghost_imaging/2025-06-18',
+        )
+    })
+})
+
+describe('sharedDatasetNames', () => {
+    const share = (destPath: string): SerializedShare => ({
+        resource: null,
+        share_id: destPath,
+        share_name: 'tmp',
+        dest_path: destPath,
+        created_timestamp: 1700000000,
+        username: 'ingest',
+        password: 'secret',
+        uid: 5001,
+        gid: 5001,
+    })
+    const shares: ListSharesResponse = {
+        a: share('/srv/smb/data/ghost_imaging/2025-06-18'),
+        b: share('/srv/smb/data/ghost_imaging/2025-06-19/'),
+        c: share('/srv/smb/data/other_project/2025-06-18'),
+    }
+
+    it('matches only datasets under the given project relpath', () => {
+        const names = sharedDatasetNames(shares, 'data/ghost_imaging')
+        expect(names).toEqual(new Set(['2025-06-18', '2025-06-19']))
+    })
+
+    it('does not match a same-named dataset in another project', () => {
+        const names = sharedDatasetNames(shares, 'data/other_project')
+        expect(names).toEqual(new Set(['2025-06-18']))
+    })
+
+    it('returns an empty set when nothing matches', () => {
+        expect(sharedDatasetNames(shares, 'data/empty')).toEqual(new Set())
+    })
+})
+
+describe('sortDatasets', () => {
+    const d = (name: string, mtime: number): SerializedDataset => ({
+        name,
+        mtime,
+        ctime: mtime,
+        immutable: false,
+    })
+
+    it('orders newest-modified first without mutating the input', () => {
+        const input = [d('a', 100), d('b', 300), d('c', 200)]
+        const sorted = sortDatasets(input)
+        expect(sorted.map((x) => x.name)).toEqual(['b', 'c', 'a'])
+        expect(input.map((x) => x.name)).toEqual(['a', 'b', 'c'])
     })
 })
