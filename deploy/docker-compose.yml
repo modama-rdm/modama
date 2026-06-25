@@ -106,8 +106,8 @@ services:
     hostname: mgmtinterface-new
     restart: always
     build:
-      context: ../mgmtinterface-new
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: mgmtinterface-new/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-new:latest
 
   mgmtinterface-proxy:  # another nginx, in prod this terminates TLS

@@ -1,1 +1,7 @@
 er-c-data/testfolder
+
+# mgmtinterface-new is built from the repo root (so the image can reach the
+# shared branding/ folder); keep its local build artifacts out of the context.
+mgmtinterface-new/node_modules
+mgmtinterface-new/dist
+mgmtinterface-new/dist-ssr

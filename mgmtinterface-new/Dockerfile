@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+#
 
 # --- Stage 1: build the SPA -------------------------------------------------
 FROM node:22-alpine AS build
@@ -7,8 +8,10 @@ LABEL maintainer="Dieter Weber <d.weber@fz-juelich.de>"
 WORKDIR /app
 
 # Install dependencies first so this layer is cached unless the lockfile changes.
-COPY package.json package-lock.json ./
+COPY mgmtinterface-new/package.json mgmtinterface-new/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
+
+COPY branding/ /branding/
 
 # The new UI is mounted at a sub-path on the mgmt domain (the legacy Flask UI
 # keeps the domain root), so the bundle's asset URLs *and* the router basename
@@ -18,7 +21,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 ARG VITE_BASE_PATH=/new/
 ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 
-COPY . .
+COPY mgmtinterface-new/ ./
 RUN npm run build
 
 # --- Stage 2: serve the static bundle with nginx ----------------------------
@@ -30,4 +33,4 @@ LABEL maintainer="Dieter Weber <d.weber@fz-juelich.de>"
 # mgmt-domain proxy (mgmtinterface-proxy) forwards /new/ here; every other path
 # stays with the legacy Flask app.
 COPY --from=build /app/dist /usr/share/nginx/html/new
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY mgmtinterface-new/nginx.conf /etc/nginx/conf.d/default.conf

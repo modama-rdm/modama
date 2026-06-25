@@ -129,8 +129,9 @@ How the pieces fit together:
   sub-path agnostic and the router prepends the base.
 - **`mgmtinterface-new/Dockerfile`** builds the bundle and serves it with nginx
   from `/usr/share/nginx/html/new` (`mgmtinterface-new/nginx.conf`), with SPA
-  deep-link fallback to `index.html`. Built and released by `.gitlab-ci.yml` like
-  the other images.
+  deep-link fallback to `index.html`. It builds from the **repo root** (so it can
+  reach `branding/`) — see the `context`/`dockerfile` in `docker-compose.yml` and
+  the CI entry. Built and released by `.gitlab-ci.yml` like the other images.
 - **`mgmtinterface-proxy`** (the mgmt-domain nginx) routes `^~ /new/` to the
   `mgmtinterface-new` container and everything else to the legacy Flask app. The
   SPA's `/api/*` calls therefore still land on Flask at the domain root, unchanged.

@@ -27,8 +27,16 @@ export default defineConfig(({mode}) => {
     // sync by never hardcoding the path anywhere else.
     const base = env.VITE_BASE_PATH || '/'
 
+    // Serve static assets (logos, favicon) straight from the repo's shared
+    // top-level branding/ folder instead of keeping a duplicate copy in the app.
+    // Vite publishes everything here at the base root, so `branding/modama.svg`
+    // is referenced as `${BASE_URL}modama.svg`. The Docker build makes this path
+    // resolve by building from the repo root (see Dockerfile).
+    const publicDir = '../branding'
+
     return {
         base,
+        publicDir,
         plugins: [react(), tailwindcss()],
         server: {port: 5180, proxy},
         test: {

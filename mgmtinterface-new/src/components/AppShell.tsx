@@ -23,7 +23,7 @@ export function AppShell() {
         <div className="min-h-screen bg-bg">
             <header
                 className="fixed inset-x-0 top-0 z-50 flex h-14 items-center gap-3.5 border-b border-default bg-surface px-7">
-                <img src={`${import.meta.env.BASE_URL}branding/modama.svg`} alt="modama" className="h-6.5"/>
+                <img src={`${import.meta.env.BASE_URL}modama.svg`} alt="modama" className="h-6.5"/>
                 <div className="h-5.5 w-px shrink-0 bg-default"/>
                 <span className="text-[13px] font-medium text-fg-subtle">
           Data Management Self-Service

@@ -93,7 +93,7 @@ container-image-build:
         CONTEXT: "${CI_PROJECT_DIR}/deploy/tsm-client/"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/tsm-client
       - DOCKERFILE: mgmtinterface-new/Dockerfile
-        CONTEXT: "${CI_PROJECT_DIR}/mgmtinterface-new"
+        CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-new
 
   script:

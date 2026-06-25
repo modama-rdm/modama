@@ -53,7 +53,7 @@ export function Login() {
             <div className="w-full max-w-100 animate-[fadeIn_0.3s_ease-out]">
                 <Card className="px-10 py-11">
                     <div className="mb-8 text-center">
-                        <img src={`${import.meta.env.BASE_URL}branding/modama.svg`} alt="modama"
+                        <img src={`${import.meta.env.BASE_URL}modama.svg`} alt="modama"
                              className="mx-auto h-9"/>
                         <div className="mt-3.5 text-lg font-bold text-fg">Data Management</div>
                         <div className="mt-1 text-[13px] text-fg-subtle">

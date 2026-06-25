@@ -1,9 +1,0 @@
-node_modules
-dist
-dist-ssr
-.env.local
-.env.*.local
-*.local
-npm-debug.log*
-.git
-.gitignore
