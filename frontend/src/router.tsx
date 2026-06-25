@@ -9,9 +9,11 @@ import {RouteError} from './components/RouteError'
 import {Login} from './routes/Login'
 import {NewProject} from './routes/NewProject'
 import {newProjectLoader} from './routes/newProject.loader'
+import {NewSession} from './routes/NewSession'
 import {Placeholder} from './routes/Placeholder'
 import {ProjectDetails} from './routes/ProjectDetails'
 import {projectDetailsLoader} from './routes/projectDetails.loader'
+import {SealSession} from './routes/SealSession'
 import {Projects} from './routes/Projects.tsx'
 import {projectsLoader} from './routes/projects.loader'
 
@@ -44,13 +46,10 @@ export const router = createBrowserRouter([
                 path: 'projects/:name/members',
                 element: <Placeholder title="Manage Members"/>,
             },
-            {
-                path: 'projects/:name/sessions/new',
-                element: <Placeholder title="New Session"/>,
-            },
+            {path: 'projects/:name/sessions/new', element: <NewSession/>},
             {
                 path: 'projects/:name/sessions/:dataset/seal',
-                element: <Placeholder title="Seal Session"/>,
+                element: <SealSession/>,
             },
             {
                 path: 'projects/:name/sessions/:dataset/ingest',
