@@ -33,13 +33,14 @@ interface AvatarProps {
   username: string
   size?: number
   title?: string
+  className?: string
 }
 
-export function Avatar({ username, size = 32, title }: AvatarProps) {
+export function Avatar({ username, size = 32, title, className = '' }: AvatarProps) {
   return (
     <div
       title={title ?? username}
-      className="inline-flex shrink-0 items-center justify-center rounded-full font-bold text-white"
+      className={`inline-flex shrink-0 items-center justify-center rounded-full font-bold text-white ${className}`}
       style={{
         width: size,
         height: size,
