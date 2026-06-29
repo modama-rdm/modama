@@ -13,6 +13,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/venv/bin:$PATH"
-WORKDIR /tests
+WORKDIR /test-env/
 
 CMD ["sleep", "infinity"]

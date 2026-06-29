@@ -5,4 +5,4 @@ dev-env/etc-smbdrop
 test-env/target
 test-env/report-target
 test-env/certs
-test-env/docker-compose.yml
+test-env/cargo-cache/

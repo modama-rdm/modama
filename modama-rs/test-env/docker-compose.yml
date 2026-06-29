@@ -3,23 +3,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile-test-runner
-    working_dir: /tests
+    working_dir: /test-env/
     networks:
       - modama-network
     volumes:
-      - ./tests:/tests:ro
+      - ./:/test-env:ro
+      - type: bind
+        source: "./testfolder/data/"
+        target: "/data/"
     depends_on:
       - smbdrop
+    stop_signal: SIGKILL
 
   smbdrop-init:
     image: debian:13-slim
     container_name: smbdrop-init
-    command:
-      - sh
-      - -c
-      - mkdir -p /data/adhoc/testproject/session1
+    command: "bash -c 'mkdir -p /data/adhoc/testproject/session{1,2,3,4,5}/raw/'"
     volumes:
-      - smbdrop_data:/data
+      - type: bind
+        source: "./testfolder/data/"
+        target: "/data/"
     networks:
       - modama-network
 
@@ -32,9 +35,12 @@ services:
     ports:
       - "445:445"
     volumes:
-      - smbdrop_data:/data
       - ./certs:/certs:ro
+      - ./cargo-cache:/usr/local/cargo/registry/cache/
       - ./target:/usr/src/modama-rs/target/
+      - type: bind
+        source: "./testfolder/data/"
+        target: "/data/"
     networks:
       - modama-network
     command:
@@ -66,6 +72,7 @@ services:
     volumes:
       - ./certs:/certs:ro
       - ./target:/usr/src/modama-rs/target/
+      - ./cargo-cache:/usr/local/cargo/registry/cache/
     command:
       - "cargo"
       - "run"
@@ -90,6 +97,7 @@ services:
     volumes:
       - ./certs:/certs:ro
       - ./target:/usr/src/modama-rs/target/
+      - ./cargo-cache:/usr/local/cargo/registry/cache/
     command:
       - "cargo"
       - "run"
@@ -114,6 +122,7 @@ services:
     volumes:
       - ./certs:/certs:ro
       - ./target:/usr/src/modama-rs/target/
+      - ./cargo-cache:/usr/local/cargo/registry/cache/
     command:
       - "cargo"
       - "run"
@@ -124,7 +133,6 @@ services:
       - "modama-agent"
       - "--"
       - "--config-path=/certs/agent-untrusted.toml"
-
 
   mgmtinterface:
     hostname: mgmtinterface
@@ -139,11 +147,33 @@ services:
       - type: bind
         source: "./mgmt_secret.py"
         target: "/mgmt_secret.py"
+      - type: bind
+        source: "./certs/ca/pub/"
+        target: "/certs/ca/pub/"
+        read_only: true
     depends_on:
       - "smbdrop"
+      - "permissions"
+    working_dir: /
+    command: /venv/bin/flask --app mgmtinterface:app run --debug --port 5000 --host 0.0.0.0
+    networks:
+      - modama-network
 
-volumes:
-  smbdrop_data:
+  permissions:
+    hostname: permissions
+    restart: always
+    volumes:
+      - type: bind
+        source: "./testfolder/data/"
+        target: "/data/"
+    image: iffregistry.fz-juelich.de/weber/data-management-system/permissions:latest
+    cap_add:
+      - LINUX_IMMUTABLE
+    networks:
+      - modama-network
+    environment:
+      - FLASK_APP=permissions.server:app
+    command: /venv/bin/flask run --without-threads --debug --port 5050 --host 0.0.0.0
 
 networks:
   modama-network:

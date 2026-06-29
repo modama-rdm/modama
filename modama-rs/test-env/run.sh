@@ -3,10 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-cleanup() {
-  docker compose down --volumes --remove-orphans || true
-}
-trap cleanup EXIT
+# cleanup() {
+#   docker compose down --volumes --remove-orphans || true
+# }
+# trap cleanup EXIT
 
 cd "$(dirname "$0")"
 
@@ -15,4 +15,11 @@ cd "$(dirname "$0")"
 docker compose run --rm smbdrop-init
 docker compose --progress=plain build --pull
 docker compose up -d
-docker compose run --rm test-runner bash -lc "/opt/venv/bin/python -m pytest -v /tests \"$@\""
+
+docker compose exec permissions bash -c 'useradd weber; useradd clausen; groupadd iff; adduser weber iff; adduser clausen iff;'
+echo -e "weber:1234\nclausen:1234" | docker compose exec -T permissions chpasswd
+docker compose exec permissions bash -c 'mkdir -p /data/adhoc/testproject/session{1,2,3,4,5}/raw/'
+docker compose exec permissions bash -c 'chown clausen -R /data/adhoc/testproject/'
+docker compose exec permissions bash -c 'chgrp iff -R /data/adhoc/testproject/'
+
+docker compose run --rm test-runner bash -lc "/opt/venv/bin/python -m pytest -v tests \"$@\""
