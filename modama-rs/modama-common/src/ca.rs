@@ -33,8 +33,7 @@ fn set_perms_priv(path: &Path) -> Result<(), CAError> {
 
 use pkcs8::{der::EncodePem, DecodePrivateKey, LineEnding, PrivateKeyInfoOwned};
 use rcgen::{
-    string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, PKCS_ED25519,
+    Certificate, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519, string::Ia5String
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -341,7 +340,8 @@ impl Ca {
             .distinguished_name
             .push(DnType::CommonName, "modama CA root certificate");
         params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Constrained(1));
-        // FIXME: constrain key usage?
+        params.key_usages.push(KeyUsagePurpose::KeyCertSign);
+        params.key_usages.push(KeyUsagePurpose::CrlSign);
         params.extended_key_usages = vec![
             ExtendedKeyUsagePurpose::Any,
             ExtendedKeyUsagePurpose::ServerAuth,

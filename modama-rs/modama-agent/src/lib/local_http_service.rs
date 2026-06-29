@@ -18,7 +18,7 @@ use modama_common::{
     mgmt_client::{MgmtClient, MgmtError},
     tokens::{TokenError, TokenProvider},
 };
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 use tokio::sync::Mutex;
 
 use crate::{agent_state::AgentState, config::ConfigError};
@@ -97,6 +97,16 @@ impl IntoResponse for LocalAPIError {
             }
             LocalAPIError::BackendAPI(e) => {
                 error!("backend API error: {e}");
+                if let MgmtError::RequestError(error) = e {
+                    let mut error = &error as &(dyn Error + 'static);
+                    loop {
+                        let source = error.source();
+                        if let Some(inner) = source {
+                            error!("  error details: {:?}", inner);
+                            error = inner;
+                        }
+                    }
+                }
                 // FIXME: json/text depending on accept?
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,

@@ -9,6 +9,12 @@ pub enum MgmtError {
     #[error("request error: {0}")]
     RequestError(#[from] reqwest::Error),
 
+    #[error("deserialize: {source} body={body}")]
+    Deserialize {
+        source: serde_json::Error,
+        body: String,
+    },
+
     #[error("unathorized")]
     Unauthorized,
 
@@ -18,6 +24,16 @@ pub enum MgmtError {
     #[error("url parse error: {0}")]
     UrlParseError(#[from] url::ParseError),
 }
+
+impl MgmtError {
+    fn from_serde(value: serde_json::Error, body: String) -> Self {
+        Self::Deserialize {
+            source: value,
+            body,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateShareRequest {
     pub project: String,
@@ -114,7 +130,8 @@ impl MgmtClient {
             .send()
             .await?;
         maybe_status_to_err(&resp)?;
-        Ok(resp.json().await?)
+        let body = resp.text().await?;
+        serde_json::from_str(&body).map_err(|e| MgmtError::from_serde(e, body))
     }
 
     pub async fn create_share(
