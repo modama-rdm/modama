@@ -37,9 +37,14 @@ def wait_for_url(
         f"{service_name} did not become available under {url} within {timeout}s (last error: {e})"
     )
 
+
 @pytest.fixture
 def agent_api() -> str:
-    return wait_for_url(AGENT_BASE_URL, service_name="modama-agent-1 local API", expected_status_codes=(200, 401))
+    return wait_for_url(
+        AGENT_BASE_URL,
+        service_name="modama-agent-1 local API",
+        expected_status_codes=(200, 401),
+    )
 
 
 @pytest.fixture
@@ -53,9 +58,7 @@ def smbdrop_token_api(ca_cert: pathlib.Path) -> str:
     _ = wait_for_url(
         url=SMBDROP_TOKEN_BASE_URL + "/verify/",
         service_name="smbdrop token API",
-        request_kwargs={
-            "verify": ca_cert
-        },
+        request_kwargs={"verify": ca_cert},
         expected_status_codes=(200, 405),  # method not allowed for GET...
     )
     return SMBDROP_TOKEN_BASE_URL

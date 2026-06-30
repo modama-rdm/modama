@@ -14,7 +14,7 @@ def test_agent_api_create_share(agent_api: str):
     )
     response.raise_for_status()
     resp_data = response.json()
-    share  = resp_data["share"]
+    share = resp_data["share"]
     assert share["resource"] == "testresource"
     # FIXME: this should change to an /adhoc/-relative path:
     assert share["dest_path"] == "/data/adhoc/testproject/session2"
