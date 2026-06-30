@@ -41,6 +41,14 @@ pub struct CreateShareRequest {
     pub resource: Option<String>,
 }
 
+/// Corresponds to CREATE_DATASET_REQUEST_SCHEMA
+/// in the permissions API
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateDatasetRequest {
+    pub name: String,
+    pub owner: String,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AdhocProject {
     pub relpath: String,
@@ -72,6 +80,11 @@ pub struct ProjectDetailsResponse {
     pub errno: u64,
     pub project: AdhocProject,
     pub datasets: Vec<DataInProject>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateDatasetResponse {
+    pub errno: u64,
 }
 
 pub struct MgmtClient {
@@ -158,5 +171,31 @@ impl MgmtClient {
             .await?;
         maybe_status_to_err(&resp)?;
         Ok(resp.json().await?)
+    }
+
+    pub async fn create_dataset(
+        &self,
+        project: &str,
+        dataset: &str,
+        owner: &str,
+    ) -> Result<CreateDatasetResponse, MgmtError> {
+        let full_url = self
+            .base_url
+            .join(&format!("/api/project/{project}/dataset/"))?;
+        let request = CreateDatasetRequest {
+            name: dataset.to_owned(),
+            owner: owner.to_owned(),
+        };
+
+        let resp = self
+            .client
+            .post(full_url)
+            .basic_auth(&self.username, Some(&self.password))
+            .json(&request)
+            .send()
+            .await?;
+        maybe_status_to_err(&resp)?;
+        let text = resp.text().await?;
+        serde_json::from_str(&text).map_err(|e| MgmtError::from_serde(e, text))
     }
 }

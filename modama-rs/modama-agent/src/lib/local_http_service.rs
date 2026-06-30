@@ -3,7 +3,7 @@ use axum::{
     http::{header, StatusCode},
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
+    Router,
 };
 use axum_extra::{
     headers::{authorization::Basic, Authorization},
@@ -11,17 +11,16 @@ use axum_extra::{
     TypedHeader,
 };
 use axum_macros::debug_handler;
-use log::{error, warn};
+use log::error;
 use minijinja::{context, Environment};
 use modama_common::{
-    messages::CurrentForegroundShare,
     mgmt_client::{MgmtClient, MgmtError},
     tokens::{TokenError, TokenProvider},
 };
 use std::{error::Error, sync::Arc};
 use tokio::sync::Mutex;
 
-use crate::{agent_state::AgentState, config::ConfigError};
+use crate::{agent_state::AgentState, config::ConfigError, http_api::add_api_routes};
 
 fn create_env() -> Environment<'static> {
     let mut env = Environment::new();
@@ -38,7 +37,7 @@ fn create_env() -> Environment<'static> {
 
 /// Wrapper around the AgentState for the local API server
 #[derive(Clone)]
-struct ApiState {
+pub struct ApiState {
     pub state: Arc<Mutex<AgentState>>,
     pub token_provider: Arc<dyn TokenProvider + Send + Sync>,
     pub jinja_env: Environment<'static>,
@@ -151,29 +150,7 @@ impl IntoResponse for LocalAPIError {
     }
 }
 
-// #[debug_handler]
-async fn handler_shares_foreground(
-    State(api_state): State<ApiState>,
-) -> Json<CurrentForegroundShare> {
-    Json(
-        match &api_state.state.lock().await.current_shares.foreground_share {
-            None => CurrentForegroundShare::None,
-            Some(s) => match s.mount_path.to_str() {
-                None => {
-                    let p = s.mount_path.to_string_lossy();
-                    warn!("Mount path {p} contains invalid unicode, cannot get foreground share!");
-                    CurrentForegroundShare::None
-                }
-                Some(mount_path) => CurrentForegroundShare::Share {
-                    dest_path: s.share.dest_path.to_owned(),
-                    mount_path: mount_path.to_owned(),
-                },
-            },
-        },
-    )
-}
-
-async fn get_auth(
+pub async fn get_auth(
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
 ) -> Result<Authorization<Basic>, LocalAPIError> {
     match auth {
@@ -344,8 +321,7 @@ pub async fn serve_local_web_api(
 }
 
 fn make_app(state: ApiState) -> Router {
-    Router::new()
-        .route("/shares/foreground/", get(handler_shares_foreground))
+    let router = Router::new()
         .route("/", get(serve_index_page))
         .route("/start-ingest/{project_name}/", get(start_ingest_step1))
         .route(
@@ -355,7 +331,9 @@ fn make_app(state: ApiState) -> Router {
         .route(
             "/start-ingest/{project_name}/{session_name}/",
             post(start_ingest_step3),
-        )
+        );
+
+    add_api_routes(router)
         .with_state(state)
 }
 
@@ -472,7 +450,7 @@ mod tests {
             .current_shares
             .foreground_share = Some(mshare.clone());
         let req = Request::builder()
-            .uri("/shares/foreground/")
+            .uri("/api/shares/foreground/")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -492,7 +470,7 @@ mod tests {
         let test_setup = TestSetup::start().await;
 
         let req = Request::builder()
-            .uri("/shares/foreground/")
+            .uri("/api/shares/foreground/")
             .method("GET")
             .body(Body::empty())
             .unwrap();

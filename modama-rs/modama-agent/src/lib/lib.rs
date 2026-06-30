@@ -12,3 +12,4 @@ pub mod mount_backend;
 pub mod local_net_token_provider;
 pub mod local_net_token_proxy;
 pub mod local_net_common;
+pub mod http_api;
