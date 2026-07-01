@@ -23,7 +23,7 @@ use modama_common::{
     mgmt_client::MgmtClient,
 };
 
-// #[debug_handler]
+/// Query for the current foreground share
 async fn api_shares_foreground(
     State(api_state): State<ApiState>,
 ) -> Json<APICurrentForegroundShare> {

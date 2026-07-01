@@ -18,16 +18,20 @@ pub enum APICurrentForegroundShare {
     },
 }
 
+/// Response when successfully creating a new ingest share.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct APICreateShareResponse {
     pub share: Share,
 }
 
+/// Response listing projects the current user has access to,
+/// with the intent of creating a session or 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct APIListProjectsResponse {
     pub projects: Vec<String>,
 }
 
+/// Response listing existing sessions in the given project
 #[derive(Serialize, Deserialize, Clone)]
 pub struct APIListSessionsResponse {
     pub project: String,
@@ -35,11 +39,14 @@ pub struct APIListSessionsResponse {
 }
 
 /// Create a new session in the given project
+/// (`project_name` is part of the URL)
 #[derive(Serialize, Deserialize, Clone)]
 pub struct APICreateSessionRequest {
     pub session: String,
 }
 
+/// Response when successfully creating a new session
+/// in a project
 #[derive(Serialize, Deserialize, Clone)]
 pub struct APICreateSessionResponse {
     pub project: String,
