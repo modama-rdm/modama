@@ -1,5 +1,6 @@
 use reqwest::{Client, ClientBuilder, Response, StatusCode};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value;
 use url::Url;
 
 use crate::{messages::Share, version::modama_git_version};
@@ -20,6 +21,12 @@ pub enum MgmtError {
 
     #[error("object not found")]
     NotFound,
+
+    #[error("error {errno}: {message}")]
+    Backend { errno: i64, message: String },
+
+    #[error("response format error: {0}")]
+    Formatting(String),
 
     #[error("url parse error: {0}")]
     UrlParseError(#[from] url::ParseError),
@@ -85,6 +92,7 @@ pub struct ProjectDetailsResponse {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateDatasetResponse {
     pub errno: u64,
+    pub message: Option<String>,
 }
 
 pub struct MgmtClient {
@@ -104,6 +112,55 @@ fn maybe_status_to_err(resp: &Response) -> Result<(), MgmtError> {
     }
 
     Ok(())
+}
+
+fn get_errno_msg(value: &Value) -> Result<(i64, Option<String>), MgmtError> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| MgmtError::Formatting("response json must be an object".to_owned()))?;
+
+    let errno_num = if let Some(num) = map.get("errno") {
+        num
+    } else {
+        // we don't have an errno, we must assume all is good
+        // if the status code is also good.
+        return Ok((0, None));
+    };
+
+    let errno = errno_num
+        .as_i64()
+        .ok_or_else(|| MgmtError::Formatting("errno must fit into i64".to_owned()))?;
+
+    let message = if errno != 0 {
+        let msg_value = map
+            .get("message")
+            .ok_or_else(|| MgmtError::Formatting("response must have a message key".to_owned()))?;
+
+        Some(
+            msg_value
+                .as_str()
+                .ok_or_else(|| MgmtError::Formatting("message must be a string".to_owned()))?
+                .to_owned(),
+        )
+    } else {
+        None
+    };
+
+    Ok((errno, message))
+}
+
+async fn parse_to_response<T: DeserializeOwned>(resp: Response) -> Result<T, MgmtError> {
+    let body = resp.text().await?;
+    let value: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| MgmtError::from_serde(e, body.clone()))?;
+    let (errno, message) = get_errno_msg(&value)?;
+    if let Some(msg) = message {
+        return Err(MgmtError::Backend {
+            errno,
+            message: msg,
+        });
+    }
+    serde_json::from_str(&body).map_err(|e| MgmtError::from_serde(e, body.clone()))
 }
 
 impl MgmtClient {
@@ -128,7 +185,7 @@ impl MgmtClient {
             .send()
             .await?;
         maybe_status_to_err(&resp)?;
-        Ok(resp.json().await?)
+        parse_to_response(resp).await
     }
 
     pub async fn project_details(
@@ -143,8 +200,7 @@ impl MgmtClient {
             .send()
             .await?;
         maybe_status_to_err(&resp)?;
-        let body = resp.text().await?;
-        serde_json::from_str(&body).map_err(|e| MgmtError::from_serde(e, body))
+        parse_to_response(resp).await
     }
 
     pub async fn create_share(
@@ -170,7 +226,7 @@ impl MgmtClient {
             .send()
             .await?;
         maybe_status_to_err(&resp)?;
-        Ok(resp.json().await?)
+        parse_to_response(resp).await
     }
 
     pub async fn create_dataset(
@@ -195,7 +251,6 @@ impl MgmtClient {
             .send()
             .await?;
         maybe_status_to_err(&resp)?;
-        let text = resp.text().await?;
-        serde_json::from_str(&text).map_err(|e| MgmtError::from_serde(e, text))
+        parse_to_response(resp).await
     }
 }

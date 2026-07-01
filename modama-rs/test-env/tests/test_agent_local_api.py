@@ -75,3 +75,28 @@ def test_agent_api_list_projects(agent_api: str):
     assert resp_data == {
         "projects": ["testproject"],
     }
+
+
+def test_create_duplicate_session(agent_api: str):
+    name = "duplicate-session"
+    response = requests.post(
+        url=f"{agent_api}/api/projects/testproject/sessions/",
+        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
+        json={
+            "session": name,
+        },
+        timeout=3,
+    )
+    response.raise_for_status()
+
+    response = requests.post(
+        url=f"{agent_api}/api/projects/testproject/sessions/",
+        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
+        json={
+            "session": name,
+        },
+        timeout=3,
+    )
+    assert (
+        response.status_code == 500
+    )  # should be bad request - the session already exists
