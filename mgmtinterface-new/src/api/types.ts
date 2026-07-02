@@ -105,6 +105,11 @@ export interface ChangeMembersRequest {
     user: string
 }
 
+/** `PATCH /api/project/<name>/members/` success - the updated project. */
+export interface ChangeMembersResponse extends OkEnvelope {
+    project: SerializedProject
+}
+
 export interface CreateShareRequest {
     project: string
     dataset: string

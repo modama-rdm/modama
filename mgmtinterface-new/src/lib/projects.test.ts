@@ -10,6 +10,7 @@ import {
     canonicalProjectPath,
     filterProjects,
     groupProjects,
+    memberChanges,
     parseSharePath,
     sharedDatasetNames,
     sortDatasets,
@@ -198,5 +199,35 @@ describe('availableMembers', () => {
     it('returns an empty list when everyone is taken', () => {
         const taken = users.slice(1)
         expect(availableMembers(users, 'weber', taken, '')).toEqual([])
+    })
+})
+
+describe('memberChanges', () => {
+    it('reports added and removed members against the original set', () => {
+        expect(memberChanges(['landers', 'shanker'], ['shanker', 'clausen'])).toEqual({
+            added: ['clausen'],
+            removed: ['landers'],
+        })
+    })
+
+    it('returns empty lists when the selection is unchanged (order-independent)', () => {
+        expect(memberChanges(['landers', 'shanker'], ['shanker', 'landers'])).toEqual({
+            added: [],
+            removed: [],
+        })
+    })
+
+    it('handles a previously empty membership and sorts the result', () => {
+        expect(memberChanges([], ['shanker', 'bangun', 'landers'])).toEqual({
+            added: ['bangun', 'landers', 'shanker'],
+            removed: [],
+        })
+    })
+
+    it('reports all removed when the selection is cleared', () => {
+        expect(memberChanges(['shanker', 'landers'], [])).toEqual({
+            added: [],
+            removed: ['landers', 'shanker'],
+        })
     })
 })

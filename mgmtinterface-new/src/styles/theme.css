@@ -124,3 +124,15 @@ body {
         transform: translateY(0);
     }
 }
+
+/* Indeterminate sliver that sweeps across the top progress bar during route
+   transitions; the sliver is ~1/3 the track width so the offsets carry it just
+   past either edge. */
+@keyframes progressIndeterminate {
+    from {
+        transform: translateX(-120%);
+    }
+    to {
+        transform: translateX(360%);
+    }
+}

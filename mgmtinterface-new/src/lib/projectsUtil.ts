@@ -114,6 +114,23 @@ export function sortDatasets(datasets: SerializedDataset[]): SerializedDataset[]
 }
 
 /**
+ * Diff a project's original members against the edited selection - mirrors the
+ * legacy `project_members` route, which computes `to_add`/`to_remove` from the
+ * set difference and issues a separate `change_project_members` call for each.
+ * Returned lists are sorted for stable ordering in requests/tests.
+ */
+export function memberChanges(
+    original: string[],
+    selected: string[],
+): { added: string[]; removed: string[] } {
+    const before = new Set(original)
+    const after = new Set(selected)
+    const added = selected.filter((m) => !before.has(m)).sort((a, b) => a.localeCompare(b))
+    const removed = original.filter((m) => !after.has(m)).sort((a, b) => a.localeCompare(b))
+    return {added, removed}
+}
+
+/**
  * Candidate members for the New Project picker: every known user except the
  * owner (implicit member) and those already chosen, optionally narrowed by a
  * case-insensitive name query and returned alphabetically.

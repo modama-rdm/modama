@@ -1,5 +1,6 @@
 import {Outlet, useNavigate} from 'react-router-dom'
 import {getCurrentUser, logout} from '../api/auth'
+import {NavigationProgress} from './NavigationProgress'
 import {Avatar} from './ui/Avatar'
 import {useToast} from './ui/toast-context'
 
@@ -21,6 +22,7 @@ export function AppShell() {
 
     return (
         <div className="min-h-screen bg-bg">
+            <NavigationProgress/>
             <header
                 className="fixed inset-x-0 top-0 z-50 flex h-14 items-center gap-3.5 border-b border-default bg-surface px-7">
                 <img src={`${import.meta.env.BASE_URL}modama.svg`} alt="modama" className="h-6.5"/>

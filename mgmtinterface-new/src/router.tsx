@@ -7,6 +7,8 @@ import {isAuthenticated} from './api/auth'
 import {AppShell} from './components/AppShell'
 import {RouteError} from './components/RouteError'
 import {Login} from './routes/Login'
+import {ManageMembers} from './routes/ManageMembers'
+import {manageMembersLoader} from './routes/manageMembers.loader'
 import {NewProject} from './routes/NewProject'
 import {newProjectLoader} from './routes/newProject.loader'
 import {NewSession} from './routes/NewSession'
@@ -54,7 +56,8 @@ export const router = createBrowserRouter([
             },
             {
                 path: 'projects/:name/members',
-                element: <Placeholder title="Manage Members"/>,
+                loader: manageMembersLoader,
+                element: <ManageMembers/>,
             },
             {path: 'projects/:name/sessions/new', element: <NewSession/>},
             {
