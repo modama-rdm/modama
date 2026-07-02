@@ -2,6 +2,7 @@ import type {
     ListSharesResponse,
     SerializedDataset,
     SerializedProject,
+    SerializedShare,
 } from '../api/types'
 
 export type SortBy = 'recent' | 'name'
@@ -86,26 +87,49 @@ export function canonicalProjectPath(relpath: string, dataset?: string): string 
 }
 
 /**
- * Names of this project's datasets that currently have an active ingest share —
- * the client-side equivalent of the backend `add_share_info`. A share targets a
- * dataset when its `dest_path` ends with `/<relpath>/<dataset>` (the API already
- * scopes `/api/share/` to the current user, so no uid check is needed here).
+ * If a share targets a dataset inside the given project `relpath`, return that
+ * dataset's name, else `null` — the shared matcher behind `sharedDatasetNames`
+ * and `findDatasetShare`. A share belongs to the project when its `dest_path` is
+ * `.../<relpath>/<dataset>` (the API already scopes `/api/share/` to the current
+ * user, so no uid check is needed here). Mirrors the backend `add_share_info`.
+ */
+function shareDatasetName(destPath: string, relpath: string): string | null {
+    const norm = destPath.replace(/\/+$/, '')
+    const slash = norm.lastIndexOf('/')
+    if (slash < 0) return null
+    const dataset = norm.slice(slash + 1)
+    const parent = norm.slice(0, slash + 1)
+    return parent.endsWith(`/${relpath}/`) ? dataset : null
+}
+
+/**
+ * Names of this project's datasets that currently have an active ingest share.
  */
 export function sharedDatasetNames(
     shares: ListSharesResponse,
     relpath: string,
 ): Set<string> {
-    const suffix = `/${relpath}/`
     const names = new Set<string>()
     for (const share of Object.values(shares)) {
-        const norm = share.dest_path.replace(/\/+$/, '')
-        const slash = norm.lastIndexOf('/')
-        if (slash < 0) continue
-        const dataset = norm.slice(slash + 1)
-        const parent = norm.slice(0, slash + 1)
-        if (parent.endsWith(suffix)) names.add(dataset)
+        const dataset = shareDatasetName(share.dest_path, relpath)
+        if (dataset) names.add(dataset)
     }
     return names
+}
+
+/**
+ * The active ingest share for one dataset, or `null` if none — the single-share
+ * lookup the Ingest screen needs (`sharedDatasetNames` only yields names).
+ */
+export function findDatasetShare(
+    shares: ListSharesResponse,
+    relpath: string,
+    dataset: string,
+): SerializedShare | null {
+    for (const share of Object.values(shares)) {
+        if (shareDatasetName(share.dest_path, relpath) === dataset) return share
+    }
+    return null
 }
 
 /** Return a copy of the datasets sorted newest-modified first (legacy order). */

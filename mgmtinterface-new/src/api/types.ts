@@ -115,3 +115,16 @@ export interface CreateShareRequest {
     dataset: string
     resource?: string
 }
+
+/**
+ * `POST /api/share/` success — the freshly created share. The endpoint unwraps
+ * the smbdrop `{share}` envelope and returns the bare {@link SerializedShare}.
+ * The `smb_host`/`workgroup` needed to render connection details are not part of
+ * this payload; the client supplies them (see `lib/shares.ts`).
+ */
+export type CreateShareResponse = SerializedShare
+
+/** `DELETE /api/share/<share_id>/` success. */
+export interface DeleteShareResponse {
+    status: 'ok'
+}

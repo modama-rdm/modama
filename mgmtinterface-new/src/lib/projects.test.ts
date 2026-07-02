@@ -9,6 +9,7 @@ import {
     availableMembers,
     canonicalProjectPath,
     filterProjects,
+    findDatasetShare,
     groupProjects,
     memberChanges,
     parseSharePath,
@@ -159,6 +160,24 @@ describe('sharedDatasetNames', () => {
 
     it('returns an empty set when nothing matches', () => {
         expect(sharedDatasetNames(shares, 'data/empty')).toEqual(new Set())
+    })
+
+    it('finds the share for a specific dataset', () => {
+        const found = findDatasetShare(shares, 'data/ghost_imaging', '2025-06-19')
+        expect(found?.dest_path).toBe('/srv/smb/data/ghost_imaging/2025-06-19/')
+    })
+
+    it('does not match a same-named dataset in another project', () => {
+        expect(
+            findDatasetShare(shares, 'data/ghost_imaging', '2025-06-18')?.dest_path,
+        ).toBe('/srv/smb/data/ghost_imaging/2025-06-18')
+        expect(
+            findDatasetShare(shares, 'data/other_project', '2025-06-19'),
+        ).toBeNull()
+    })
+
+    it('returns null when the dataset has no share', () => {
+        expect(findDatasetShare(shares, 'data/ghost_imaging', '2025-01-01')).toBeNull()
     })
 })
 
