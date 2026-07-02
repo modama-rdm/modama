@@ -1,4 +1,4 @@
-import {Suspense, useState, type ReactNode} from 'react'
+import {Suspense, type ReactNode} from 'react'
 import {
     Await,
     Link,
@@ -10,13 +10,12 @@ import {
 } from 'react-router-dom'
 import {Unauthorized} from '../api/client'
 import type {ProjectDetailsResponse, SerializedDataset} from '../api/types'
+import {CopyButton} from '../components/CopyField'
 import {Avatar} from '../components/ui/Avatar'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {
     ArrowLeftIcon,
-    CheckCircleIcon,
-    CopyIcon,
     FolderIcon,
     LockIcon,
     PlusIcon,
@@ -34,29 +33,6 @@ import type {ProjectDetailsLoaderData} from './projectDetails.loader'
 /** Server-rendered browse route (stays server-side until the FastAPI rewrite). */
 function browseHref(path: string): string {
     return `/browse/?path=${encodeURIComponent(path)}`
-}
-
-function CopyButton({value, label}: { value: string; label: string }) {
-    const [copied, setCopied] = useState(false)
-    return (
-        <button
-            type="button"
-            title={`Copy ${label}`}
-            aria-label={`Copy ${label}`}
-            onClick={() => {
-                void navigator.clipboard?.writeText(value)
-                setCopied(true)
-                window.setTimeout(() => setCopied(false), 1500)
-            }}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-faint transition-colors hover:bg-surface-muted hover:text-fg-muted"
-        >
-            {copied ? (
-                <CheckCircleIcon className="h-3.5 w-3.5 text-success"/>
-            ) : (
-                <CopyIcon className="h-3.5 w-3.5"/>
-            )}
-        </button>
-    )
 }
 
 const badgeBase =
