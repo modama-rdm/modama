@@ -6,13 +6,14 @@ import {
 import {isAuthenticated} from './api/auth'
 import {AppShell} from './components/AppShell'
 import {RouteError} from './components/RouteError'
+import {IngestShare} from './routes/IngestShare'
+import {ingestShareLoader} from './routes/ingestShare.loader'
 import {Login} from './routes/Login'
 import {ManageMembers} from './routes/ManageMembers'
 import {manageMembersLoader} from './routes/manageMembers.loader'
 import {NewProject} from './routes/NewProject'
 import {newProjectLoader} from './routes/newProject.loader'
 import {NewSession} from './routes/NewSession'
-import {Placeholder} from './routes/Placeholder'
 import {ProjectDetails} from './routes/ProjectDetails'
 import {projectDetailsLoader} from './routes/projectDetails.loader'
 import {SealSession} from './routes/SealSession'
@@ -66,7 +67,8 @@ export const router = createBrowserRouter([
             },
             {
                 path: 'projects/:name/sessions/:dataset/ingest',
-                element: <Placeholder title="Ingest Share"/>,
+                loader: ingestShareLoader,
+                element: <IngestShare/>,
             },
         ],
     },

@@ -1,0 +1,355 @@
+import {Suspense, useState, type ReactNode} from 'react'
+import {
+    Await,
+    Link,
+    Navigate,
+    useAsyncError,
+    useAsyncValue,
+    useLoaderData,
+    useNavigate,
+} from 'react-router-dom'
+import {Unauthorized, apiFetch} from '../api/client'
+import type {
+    CreateShareRequest,
+    CreateShareResponse,
+    DeleteShareResponse,
+    ProjectDetailsResponse,
+    SerializedShare,
+} from '../api/types'
+import {CopyField} from '../components/CopyField'
+import {Button} from '../components/ui/Button'
+import {Card} from '../components/ui/Card'
+import {
+    AlertTriangleIcon,
+    ArrowLeftIcon,
+    LockIcon,
+    UploadIcon,
+} from '../components/ui/icons'
+import {useToast} from '../components/ui/toast-context'
+import {findDatasetShare} from '../lib/projectsUtil'
+import {shareAccess} from '../lib/shares'
+import type {IngestShareLoaderData} from './ingestShare.loader'
+
+function ErrorBanner({message}: { message: string }) {
+    return (
+        <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-3">
+            <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger"/>
+            <div className="text-[13px] text-danger">{message}</div>
+        </div>
+    )
+}
+
+function SectionTitle({children}: { children: ReactNode }) {
+    return (
+        <h2 className="mb-3 text-[13px] font-bold uppercase tracking-wide text-fg-faint">
+            {children}
+        </h2>
+    )
+}
+
+/** The connection details + Close button shown while a share is active. */
+function ActiveShare({
+                         share,
+                         dataset,
+                         onClose,
+                         closing,
+                     }: {
+    share: SerializedShare
+    dataset: string
+    onClose: () => void
+    closing: boolean
+}) {
+    const a = shareAccess(share)
+    return (
+        <>
+            <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-success/30 bg-success/5 px-3.5 py-3">
+                <UploadIcon className="mt-0.5 h-4 w-4 shrink-0 text-success"/>
+                <div className="text-[13px] text-fg-muted">
+                    An ingest share is <strong className="text-fg">active</strong> for this
+                    session. Map it on the acquisition machine with the temporary
+                    credentials below, then close it when you are done.
+                </div>
+            </div>
+
+            <Card className="mb-5 p-6">
+                <SectionTitle>Windows — file explorer</SectionTitle>
+                <div className="flex flex-col gap-4">
+                    <CopyField label="Address" value={a.winAddress}/>
+                    <CopyField label="Username" value={a.winUsername}/>
+                    <CopyField label="Password" value={a.password}/>
+                </div>
+
+                <div className="my-5 border-t border-default/60"/>
+
+                <SectionTitle>Windows — map as network drive Z:</SectionTitle>
+                <div className="flex flex-col gap-4">
+                    <CopyField label="Map drive" value={a.winMap}/>
+                    <CopyField
+                        label="Unmap drive"
+                        value={a.winUnmap}
+                        hint="run when finished"
+                    />
+                    <CopyField
+                        label="Unmap after opening in Explorer"
+                        value={a.winUnmapExplorer}
+                    />
+                </div>
+            </Card>
+
+            <Card className="mb-6 p-6">
+                <SectionTitle>Linux / macOS — file manager</SectionTitle>
+                <div className="flex flex-col gap-4">
+                    <CopyField label="Address" value={a.unixAddress}/>
+                    <CopyField label="Password" value={a.password}/>
+                </div>
+            </Card>
+
+            <div className="flex items-center gap-3">
+                <Button variant="danger" onClick={onClose} disabled={closing}>
+                    {closing ? 'Closing…' : `Close ingest share for "${dataset}"`}
+                </Button>
+            </div>
+        </>
+    )
+}
+
+/** The "no share yet" state with the create call to action. */
+function CreateShare({
+                         dataset,
+                         sealed,
+                         onCreate,
+                         creating,
+                     }: {
+    dataset: string
+    sealed: boolean
+    onCreate: () => void
+    creating: boolean
+}) {
+    return (
+        <Card className="p-6">
+            <p className="text-sm leading-relaxed text-fg-muted">
+                Creating an ingest share opens a temporary Windows network share
+                (SMB/CIFS) with one-time credentials for{' '}
+                <span className="font-mono text-fg">{dataset}</span>. Map it on a
+                microscope or acquisition machine to write data straight into this
+                session with the correct ownership — no stored credentials, no system
+                account.
+            </p>
+            {sealed && (
+                <div
+                    className="mt-4 flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/5 px-3.5 py-3">
+                    <LockIcon className="mt-0.5 h-4 w-4 shrink-0 text-warning"/>
+                    <div className="text-[13px] text-fg-muted">
+                        This session is sealed. Its{' '}
+                        <code className="font-mono">raw</code> data is immutable; new
+                        files can still be written elsewhere in the session.
+                    </div>
+                </div>
+            )}
+            <div className="mt-5">
+                <Button onClick={onCreate} disabled={creating}>
+                    <UploadIcon className="h-4 w-4"/>
+                    {creating ? 'Creating…' : 'Create ingest share'}
+                </Button>
+            </div>
+        </Card>
+    )
+}
+
+/** Renders once the slow `details` promise resolves; owns the share state. */
+function IngestPanel() {
+    const {name, dataset, currentUser, shares} =
+        useLoaderData() as IngestShareLoaderData
+    const {project, datasets} = useAsyncValue() as ProjectDetailsResponse
+    const navigate = useNavigate()
+    const {notify} = useToast()
+
+    const ds = datasets.find((d) => d.name === dataset)
+    const [share, setShare] = useState<SerializedShare | null>(() =>
+        findDatasetShare(shares, project.relpath, dataset),
+    )
+    const [error, setError] = useState('')
+    const [busy, setBusy] = useState(false)
+
+    const backTo = `/projects/${project.name}`
+    const next = `/projects/${project.name}/sessions/${dataset}/ingest`
+    const canManage =
+        currentUser === project.owner || project.members.includes(currentUser)
+
+    if (!ds) {
+        return (
+            <Card className="border-danger/40 bg-danger/5 p-8 text-center">
+                <div className="text-base font-semibold text-fg">Session not found</div>
+                <div className="mt-1.5 text-sm text-fg-muted">
+                    No session named{' '}
+                    <span className="font-mono">{dataset}</span> in this project.
+                </div>
+                <Link
+                    to={backTo}
+                    className="mt-4 inline-block text-sm text-primary hover:underline"
+                >
+                    Back to project
+                </Link>
+            </Card>
+        )
+    }
+
+    if (!canManage) {
+        return (
+            <Card className="border-danger/40 bg-danger/5 p-8 text-center">
+                <div className="text-base font-semibold text-fg">
+                    Only project members can manage ingest shares
+                </div>
+                <div className="mt-1.5 text-sm text-fg-muted">
+                    This project is owned by {project.owner}.
+                </div>
+                <Link
+                    to={backTo}
+                    className="mt-4 inline-block text-sm text-primary hover:underline"
+                >
+                    Back to project
+                </Link>
+            </Card>
+        )
+    }
+
+    async function onCreate() {
+        setError('')
+        setBusy(true)
+        try {
+            const body: CreateShareRequest = {project: name, dataset}
+            const created = await apiFetch<CreateShareResponse>('/api/share/', {
+                method: 'POST',
+                body: JSON.stringify(body),
+            })
+            setShare(created)
+            notify(`Ingest share for "${dataset}" created.`)
+        } catch (err) {
+            if (err instanceof Unauthorized) {
+                navigate(`/login?next=${next}`)
+                return
+            }
+            setError('Could not create the ingest share. Please try again.')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    async function onClose() {
+        if (!share) return
+        setError('')
+        setBusy(true)
+        try {
+            await apiFetch<DeleteShareResponse>(
+                `/api/share/${encodeURIComponent(share.share_id)}/`,
+                {method: 'DELETE'},
+            )
+            setShare(null)
+            notify(`Ingest share for "${dataset}" closed.`)
+        } catch (err) {
+            if (err instanceof Unauthorized) {
+                navigate(`/login?next=${next}`)
+                return
+            }
+            setError('Could not close the ingest share. Please try again.')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    return (
+        <>
+            {error && <ErrorBanner message={error}/>}
+            {share ? (
+                <ActiveShare
+                    share={share}
+                    dataset={dataset}
+                    onClose={onClose}
+                    closing={busy}
+                />
+            ) : (
+                <CreateShare
+                    dataset={dataset}
+                    sealed={ds.immutable}
+                    onCreate={onCreate}
+                    creating={busy}
+                />
+            )}
+
+            <div
+                className="mt-6 rounded-lg border border-default/60 bg-surface-muted/30 px-4 py-3 text-[12px] leading-relaxed text-fg-subtle">
+                Windows allows only one set of credentials per host, so all of your
+                ingest shares reuse the same credentials and can be mapped in parallel;
+                shares from a different user cannot coexist and must be closed first.
+                List active shares with <code className="font-mono">net use</code> and
+                close one with{' '}
+                <code className="font-mono">net use &lt;drive&gt; /delete</code>.
+            </div>
+        </>
+    )
+}
+
+function PanelSkeleton() {
+    const bar = 'animate-pulse rounded bg-surface-muted'
+    return (
+        <>
+            <div className={`${bar} mb-5 h-14 w-full`}/>
+            <Card className="p-6">
+                <div className={`${bar} mb-4 h-4 w-40`}/>
+                {Array.from({length: 3}).map((_, i) => (
+                    <div key={i} className={`${bar} mb-4 h-11 w-full last:mb-0`}/>
+                ))}
+            </Card>
+        </>
+    )
+}
+
+/** `<Await>` error boundary — bounce to login on 401, else surface the error. */
+function PanelError({next}: { next: string }) {
+    const error = useAsyncError()
+    if (error instanceof Unauthorized) {
+        return <Navigate to={`/login?next=${next}`} replace/>
+    }
+    return (
+        <Card className="border-danger/40 bg-danger/5 p-8 text-center">
+            <div className="text-base font-semibold text-fg">
+                Could not load this session
+            </div>
+            <div className="mt-1.5 text-sm text-fg-muted">
+                {error instanceof Error ? error.message : 'Please try again.'}
+            </div>
+        </Card>
+    )
+}
+
+export function IngestShare() {
+    const {name, dataset, details} = useLoaderData() as IngestShareLoaderData
+    const next = `/projects/${name}/sessions/${dataset}/ingest`
+
+    return (
+        <div className="mx-auto max-w-170 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
+            <Link
+                to={`/projects/${name}`}
+                className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
+            >
+                <ArrowLeftIcon className="h-4 w-4"/>
+                <span className="font-mono">{name}</span>
+            </Link>
+
+            <h1 className="flex items-center gap-2 text-2xl font-bold text-fg">
+                <UploadIcon className="h-6 w-6 text-fg-muted"/>
+                Ingest share
+            </h1>
+            <p className="mt-0.5 mb-6 text-sm text-fg-subtle">
+                Temporary SMB share for session{' '}
+                <span className="font-mono text-fg-muted">{dataset}</span>.
+            </p>
+
+            <Suspense fallback={<PanelSkeleton/>}>
+                <Await resolve={details} errorElement={<PanelError next={next}/>}>
+                    <IngestPanel/>
+                </Await>
+            </Suspense>
+        </div>
+    )
+}
