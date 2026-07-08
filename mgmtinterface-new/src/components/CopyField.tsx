@@ -1,18 +1,6 @@
-import {useState, type ReactNode} from 'react'
+import type {ReactNode} from 'react'
 import {CheckCircleIcon, CopyIcon} from './ui/icons'
-
-/** Copy `text` to the clipboard and flash `true` for `ms`. */
-export function useCopy(ms = 1500): [boolean, (text: string) => void] {
-    const [copied, setCopied] = useState(false)
-
-    function copy(text: string) {
-        void navigator.clipboard?.writeText(text)
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), ms)
-    }
-
-    return [copied, copy]
-}
+import {useCopy} from '../hooks/useCopy'
 
 /** Icon-only button that copies `value` and briefly shows a check. */
 export function CopyButton({

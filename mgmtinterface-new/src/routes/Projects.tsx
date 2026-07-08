@@ -116,11 +116,11 @@ export function Projects() {
             member: sortProjects(g.member, sortBy),
             other: sortProjects(g.other, sortBy),
         }
-    }, [query, sortBy])
+    }, [query, sortBy, currentUser, projects])
 
     const ingests = useMemo(
         () => Object.values(shares).map((s) => parseSharePath(s.dest_path)),
-        [],
+        [shares],
     )
 
     const visibleCount =

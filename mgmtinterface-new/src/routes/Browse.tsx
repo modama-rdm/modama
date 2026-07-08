@@ -1,7 +1,8 @@
 import {Fragment} from 'react'
 import {Link, useLoaderData} from 'react-router-dom'
 import type {BrowseAccess, BrowseEntry, BrowseInfo} from '../api/types'
-import {CopyButton, CopyField, useCopy} from '../components/CopyField'
+import {CopyButton, CopyField} from '../components/CopyField'
+import {useCopy} from '../hooks/useCopy'
 import {Card} from '../components/ui/Card'
 import {
     ArrowLeftIcon,
