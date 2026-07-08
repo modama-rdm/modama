@@ -1,7 +1,9 @@
 import {Link, Outlet, useNavigate} from 'react-router-dom'
 import {getCurrentUser, logout} from '../api/auth'
+import {useTheme} from '../hooks/useTheme'
 import {NavigationProgress} from './NavigationProgress'
 import {Avatar} from './ui/Avatar'
+import {MoonIcon, SunIcon} from './ui/icons'
 import {useToast} from './ui/toast-context'
 
 /**
@@ -12,6 +14,7 @@ import {useToast} from './ui/toast-context'
 export function AppShell() {
     const navigate = useNavigate()
     const {notify} = useToast()
+    const {theme, toggleTheme} = useTheme()
     const user = getCurrentUser() ?? ''
 
     function onLogout() {
@@ -36,6 +39,15 @@ export function AppShell() {
         </span>
                 <div className="flex-1"/>
                 <div className="flex items-center gap-2.5">
+                    <button
+                        onClick={toggleTheme}
+                        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                        title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                        className="flex h-8 w-8 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-muted hover:text-fg-muted focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]"
+                    >
+                        {theme === 'dark' ? <SunIcon className="h-4.5 w-4.5"/> : <MoonIcon className="h-4.5 w-4.5"/>}
+                    </button>
+                    <span className="inline-block h-4.5 w-px shrink-0 bg-default"/>
                     <Avatar username={user}/>
                     <span className="text-sm font-medium text-fg-muted">{user}</span>
                     <span className="inline-block h-4.5 w-px shrink-0 bg-default"/>
