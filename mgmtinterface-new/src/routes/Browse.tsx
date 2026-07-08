@@ -4,6 +4,7 @@ import type {BrowseAccess, BrowseEntry, BrowseInfo} from '../api/types'
 import {CopyButton, CopyField} from '../components/CopyField'
 import {Card} from '../components/ui/Card'
 import {
+    ArrowLeftIcon,
     ExternalLinkIcon,
     FileIcon,
     FolderIcon,
@@ -247,6 +248,18 @@ function BrowseBody({
     )
 }
 
+function BackToProjects() {
+    return (
+        <Link
+            to="/projects"
+            className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
+        >
+            <ArrowLeftIcon className="h-4 w-4"/>
+            Projects
+        </Link>
+    )
+}
+
 export function Browse() {
     const {result} = useLoaderData() as BrowseLoaderData
 
@@ -255,6 +268,7 @@ export function Browse() {
     if (!('info' in result)) {
         return (
             <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
+                <BackToProjects/>
                 <BrowseError message={result.message} backto={result.backto}/>
             </div>
         )
@@ -264,6 +278,7 @@ export function Browse() {
 
     return (
         <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
+            <BackToProjects/>
             <Breadcrumb pyramid={path_pyramid}/>
 
             <div className="mb-6 flex items-center gap-3">

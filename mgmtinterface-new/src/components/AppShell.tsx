@@ -1,4 +1,4 @@
-import {Outlet, useNavigate} from 'react-router-dom'
+import {Link, Outlet, useNavigate} from 'react-router-dom'
 import {getCurrentUser, logout} from '../api/auth'
 import {NavigationProgress} from './NavigationProgress'
 import {Avatar} from './ui/Avatar'
@@ -25,7 +25,11 @@ export function AppShell() {
             <NavigationProgress/>
             <header
                 className="fixed inset-x-0 top-0 z-50 flex h-14 items-center gap-3.5 border-b border-default bg-surface px-7">
-                <img src={`${import.meta.env.BASE_URL}modama.svg`} alt="modama" className="h-6.5"/>
+                <Link to="/projects"
+                      className="flex items-center rounded-md focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]">
+                    <img src={`${import.meta.env.BASE_URL}modama.svg`} alt="modama — back to Projects"
+                         className="h-6.5"/>
+                </Link>
                 <div className="h-5.5 w-px shrink-0 bg-default"/>
                 <span className="text-[13px] font-medium text-fg-subtle">
           Data Management Self-Service
