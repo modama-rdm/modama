@@ -184,6 +184,6 @@ The sampledb container is configured to expect the `sampledb` database. It will 
 The configuration for FZ Jülich IBM Spectrum Protect is only present for production, meaning any
 `docker compose` command requires `-f docker-compose.yml -f docker-compose.prod.yml`. The necessary configuration and password are saved on iff1020 outside the repository. Resources for using the `dsmc` command line client: https://intranet.fz-juelich.de/de/organisation/it-portal/software_services/infrastruktur/datensicherung/nutzen-lernen
 
-# Formatting and linting
+# Development docs
 
-We are using `ruff` for formatting and linting; integrated using `pre-commit`. Please run `pre-commit install --install-hooks` to let the formatter and linter run before each commit.
+Please see the development section of the guide book for guidelines on how to develop modama.

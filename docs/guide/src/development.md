@@ -4,6 +4,8 @@
 
 We are using `ruff` for formatting and linting of Python code; integrated using `pre-commit`. Please run `pre-commit install --install-hooks` to let the formatter and linter run before each commit.
 
+You can also let `ruff` format the code for you, run for example `uvx ruff format <path-to-directory>`.
+
 There's some configuration for `basedpyright` included, but it's type checking and linting
 is not part of the CI pipeline yet.
 
