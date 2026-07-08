@@ -31,6 +31,8 @@ const APP_LINKS: { key: keyof BrowseAccess; label: string }[] = [
     {key: 'libertem', label: 'LiberTEM'},
     {key: 'imageviewer', label: 'Image viewer'},
     {key: 'sampledb', label: 'SampleDB'},
+    {key: 'sampledb_erc3', label: 'SampleDB (ER-C-3)'},
+    {key: 'elabftw_erc3', label: 'ElabFTW (ER-C-3)'},
 ]
 
 const accessLinkClass =

@@ -142,6 +142,8 @@ export interface BrowseAccess {
     libertem?: string
     imageviewer?: string
     sampledb?: string
+    sampledb_erc3?: string
+    elabftw_erc3?: string
     rsync?: string
     sftp?: string
     smb_windows?: string

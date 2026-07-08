@@ -348,6 +348,21 @@ def sampledbsearch(path: str):
 
 
 @app.template_filter()
+def sampledb_erc3_search(path: str):
+    base = app.config["SAMPLEDB_ERC3_BASE"] + "objects/"
+    urlpart = quote_path(path)
+    search = f'"{urlpart}" in file_name'
+    return f"{base}?q={quote_plus(search)}&advanced=on"
+
+
+@app.template_filter()
+def elabftw_erc3_search(path: str):
+    base = app.config["ELABFTW_ERC3_BASE"] + "search.php"
+    urlpart = quote_path(path)
+    return f"{base}?type=experiments&body={quote_plus(urlpart)}"
+
+
+@app.template_filter()
 def add_path_to_query(url: str, path: str) -> str:
     """
     Add a query string part to the `url` containing the `path`.
@@ -1043,6 +1058,8 @@ def browse_current_access(path: str, isdir: bool, user: str) -> dict:
         "jupyter": jupyterlink(path, isdir),
         "libertem": libertemlink(path),
         "sampledb": sampledbsearch(path),
+        "sampledb_erc3": sampledb_erc3_search(path),
+        "elabftw_erc3": elabftw_erc3_search(path),
         "rsync": rsync_command(path, isdir, user),
         "sftp": sftp_command(path, isdir, user),
         "smb_windows": main_smbpath(path),
@@ -1066,6 +1083,8 @@ def browse_member_access(path: str, isdir: bool) -> dict:
         access = {"imageviewer": imageviewerlink(path)}
     access["libertem"] = libertemlink(path)
     access["sampledb"] = sampledbsearch(path)
+    access["sampledb_erc3"] = sampledb_erc3_search(path)
+    access["elabftw_erc3"] = elabftw_erc3_search(path)
     return access
 
 
