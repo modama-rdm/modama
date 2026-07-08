@@ -2,7 +2,7 @@ import {useState, type ReactNode} from 'react'
 import {CheckCircleIcon, CopyIcon} from './ui/icons'
 
 /** Copy `text` to the clipboard and flash `true` for `ms`. */
-function useCopy(ms = 1500): [boolean, (text: string) => void] {
+export function useCopy(ms = 1500): [boolean, (text: string) => void] {
     const [copied, setCopied] = useState(false)
 
     function copy(text: string) {
