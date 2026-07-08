@@ -436,10 +436,10 @@ class DatasetWithShareInfo(TypedDict):
 
 
 def add_share_info(
-        datasets: list[proxy.SerializedDataset],
-        project: proxy.SerializedProject,
-        uid: int,
-        shares: ListSharesResponse,
+    datasets: list[proxy.SerializedDataset],
+    project: proxy.SerializedProject,
+    uid: int,
+    shares: ListSharesResponse,
 ) -> list[DatasetWithShareInfo]:
     result: list[DatasetWithShareInfo] = []
     for ds_orig in datasets:
@@ -645,8 +645,8 @@ def share_dataset(name: str, dataset: str):
     updated = False
     if request.method == "POST" and form.validate():
         if (
-                current_user.user_id in pr_info["project"]["members"]
-                or current_user.user_id == pr_info["project"]["owner"]
+            current_user.user_id in pr_info["project"]["members"]
+            or current_user.user_id == pr_info["project"]["owner"]
         ):
             if form.op.data == "create":
                 updated = True
@@ -776,7 +776,7 @@ def api_list_projects() -> proxy.ListProjectsResponse:
 @app.route("/api/project/<project_name>/", methods=["GET"])
 @apiauth.login_required
 def api_project_details(
-        project_name: str,
+    project_name: str,
 ) -> proxy.ProjectDetailsResponse | proxy.GenericErrorResponse:
     return client.projectdetails(project_name)
 
@@ -784,7 +784,7 @@ def api_project_details(
 @app.route("/api/project/<project_name>/dataset/", methods=["POST"])
 @apiauth.login_required
 def api_create_dataset(
-        project_name: str,
+    project_name: str,
 ) -> proxy.CreateDatasetResponse | proxy.GenericErrorResponse:
     request_data: proxy.CreateDatasetRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
@@ -830,7 +830,7 @@ def api_seal_dataset(project_name: str):
 @app.route("/api/project/<project_name>/members/", methods=["PATCH"])
 @apiauth.login_required
 def api_change_project_members(
-        project_name: str,
+    project_name: str,
 ) -> proxy.ChangeProjectMembersResponse | proxy.GenericErrorResponse:
     request_data: proxy.ChangeMembersRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
@@ -882,8 +882,8 @@ def api_create_share() -> SerializedShare:
     if ds is None:
         raise RuntimeError(f"Dataset not found in project {pr_info['project']['name']}")
     if (
-            apiauth.current_user() not in pr_info["project"]["members"]
-            and apiauth.current_user() != pr_info["project"]["owner"]
+        apiauth.current_user() not in pr_info["project"]["members"]
+        and apiauth.current_user() != pr_info["project"]["owner"]
     ):
         raise RuntimeError(
             f"API user {apiauth.current_user()} "
