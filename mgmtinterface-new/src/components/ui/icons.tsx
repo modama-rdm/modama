@@ -55,6 +55,25 @@ export function FolderIcon(props: SVGProps<SVGSVGElement>) {
     )
 }
 
+export function FileIcon(props: SVGProps<SVGSVGElement>) {
+    return (
+        <svg {...base} {...props}>
+            <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
+            <path d="M14 2v5h5"/>
+        </svg>
+    )
+}
+
+export function ExternalLinkIcon(props: SVGProps<SVGSVGElement>) {
+    return (
+        <svg {...base} {...props}>
+            <path d="M15 3h6v6"/>
+            <path d="M10 14 21 3"/>
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+        </svg>
+    )
+}
+
 export function SearchIcon(props: SVGProps<SVGSVGElement>) {
     return (
         <svg {...base} {...props}>

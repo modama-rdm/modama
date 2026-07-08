@@ -128,3 +128,68 @@ export type CreateShareResponse = SerializedShare
 export interface DeleteShareResponse {
     status: 'ok'
 }
+
+/**
+ * Server-computed access links / transfer commands for a browse resource. Keys
+ * are optional because which ones apply depends on the resource: the current
+ * item carries the app links + rsync/sftp/SMB; listing rows carry only the
+ * columns `browse.html.j2` shows (Nextcloud/JupyterHub for dirs, image viewer
+ * for files, LiberTEM + SampleDB for both). The `..` row carries none.
+ */
+export interface BrowseAccess {
+    nextcloud?: string
+    jupyter?: string
+    libertem?: string
+    imageviewer?: string
+    sampledb?: string
+    rsync?: string
+    sftp?: string
+    smb_windows?: string
+    smb_unix?: string
+}
+
+export interface BrowseInfo {
+    name: string
+    isdir: boolean
+    /** Owning project name, or null outside a project tree. */
+    project: string | null
+    /** WebDAV timestamps, passed through as-is (may be null). */
+    created: string | null
+    modified: string | null
+    /** WebDAV reports size as a string; null for directories. */
+    size: string | number | null
+    member_count: number
+    /** True when the listing was capped at 1024 entries. */
+    truncated: boolean
+}
+
+export interface BrowseEntry {
+    name: string
+    /** Normalized path; null only would be unexpected. `..` points at the parent. */
+    path: string
+    isdir: boolean
+    created: string | null
+    modified: string | null
+    size: string | number | null
+    access: BrowseAccess
+}
+
+/** `GET /api/browse/?path=` success. */
+export interface BrowseSuccess extends OkEnvelope {
+    /** Canonical (normalized) path — the client syncs its URL to this. */
+    path: string
+    info: BrowseInfo
+    access: BrowseAccess
+    /** Breadcrumb: `[fullPath, tail]` from the root down to the current path. */
+    path_pyramid: [string, string][]
+    members: BrowseEntry[]
+}
+
+/** `GET /api/browse/?path=` logical error (e.g. path not found), errno != 0. */
+export interface BrowseErrorResponse extends GenericErrorResponse {
+    path: string
+    /** Nearest existing ancestor to offer as a way back. */
+    backto: string | null
+}
+
+export type BrowseResponse = BrowseSuccess | BrowseErrorResponse
