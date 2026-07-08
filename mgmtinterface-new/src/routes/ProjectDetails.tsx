@@ -30,9 +30,9 @@ import {
 } from '../lib/projectsUtil'
 import type {ProjectDetailsLoaderData} from './projectDetails.loader'
 
-/** Server-rendered browse route (stays server-side until the FastAPI rewrite). */
+/** In-app data browser route (uses `<Link>` so the router basename applies). */
 function browseHref(path: string): string {
-    return `/browse/?path=${encodeURIComponent(path)}`
+    return `/browse?path=${encodeURIComponent(path)}`
 }
 
 const badgeBase =
@@ -107,15 +107,15 @@ function SessionsTable({
                                 <div className="font-mono text-sm font-semibold text-fg">
                                     {d.name}
                                 </div>
-                                <a
-                                    href={browseHref(
+                                <Link
+                                    to={browseHref(
                                         canonicalProjectPath(project.relpath, d.name),
                                     )}
                                     className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-fg-faint hover:text-primary"
                                 >
                                     <FolderIcon className="h-3 w-3"/>
                                     Browse
-                                </a>
+                                </Link>
                             </td>
                             <td className="px-5 py-3.5 text-sm text-fg-muted">
                                 {formatDateTime(d.mtime)}
@@ -246,12 +246,12 @@ function ProjectBody() {
                     </DetailRow>
                     <DetailRow label="Path">
                         <div className="flex items-center gap-1.5">
-                            <a
-                                href={browseHref(projectPath)}
+                            <Link
+                                to={browseHref(projectPath)}
                                 className="font-mono text-sm text-primary hover:underline"
                             >
                                 {projectPath}
-                            </a>
+                            </Link>
                             <CopyButton value={projectPath} label="path"/>
                         </div>
                     </DetailRow>
