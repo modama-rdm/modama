@@ -39,7 +39,6 @@ import permissions_client.schema as proxy
 from mgmtinterface_client.schema import CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
 from .token_client import TokenClient
 
-
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_port=1)
 
@@ -301,8 +300,7 @@ def imageviewerlink(path: str) -> str:
     return app.config["IMAGE_VIEWER_BASE"] + quote_plus(path)
 
 
-@app.template_filter()
-def rsync(path: str, isdir: bool = False) -> str:
+def rsync_command(path: str, isdir: bool, user: str) -> str:
     target = app.config["MOELLENSTEDT_BASE"] + path
     if isdir:
         target += "/"
@@ -311,16 +309,25 @@ def rsync(path: str, isdir: bool = False) -> str:
         src = "<src_file>"
     return (
         f'rsync -av --info=progress2 -e "ssh -T -c aes128-ctr -o Compression=no -x" "{src}" '
-        f"{shellescape(current_user.user_id + '@' + target)}"
+        f"{shellescape(user + '@' + target)}"
     )
 
 
 @app.template_filter()
-def sftp(path: str, isdir: bool = False) -> str:
+def rsync(path: str, isdir: bool = False) -> str:
+    return rsync_command(path, isdir, current_user.user_id)
+
+
+def sftp_command(path: str, isdir: bool, user: str) -> str:
     if not isdir:
         path = os.path.dirname(path)
     target = app.config["MOELLENSTEDT_BASE"] + path
-    return f"sftp -c aes128-ctr -o Compression=no {shellescape(current_user.user_id + '@' + target)}"
+    return f"sftp -c aes128-ctr -o Compression=no {shellescape(user + '@' + target)}"
+
+
+@app.template_filter()
+def sftp(path: str, isdir: bool = False) -> str:
+    return sftp_command(path, isdir, current_user.user_id)
 
 
 def quote_path(path: str):
@@ -414,10 +421,10 @@ class DatasetWithShareInfo(TypedDict):
 
 
 def add_share_info(
-    datasets: list[proxy.SerializedDataset],
-    project: proxy.SerializedProject,
-    uid: int,
-    shares: ListSharesResponse,
+        datasets: list[proxy.SerializedDataset],
+        project: proxy.SerializedProject,
+        uid: int,
+        shares: ListSharesResponse,
 ) -> list[DatasetWithShareInfo]:
     result: list[DatasetWithShareInfo] = []
     for ds_orig in datasets:
@@ -623,8 +630,8 @@ def share_dataset(name: str, dataset: str):
     updated = False
     if request.method == "POST" and form.validate():
         if (
-            current_user.user_id in pr_info["project"]["members"]
-            or current_user.user_id == pr_info["project"]["owner"]
+                current_user.user_id in pr_info["project"]["members"]
+                or current_user.user_id == pr_info["project"]["owner"]
         ):
             if form.op.data == "create":
                 updated = True
@@ -754,7 +761,7 @@ def api_list_projects() -> proxy.ListProjectsResponse:
 @app.route("/api/project/<project_name>/", methods=["GET"])
 @apiauth.login_required
 def api_project_details(
-    project_name: str,
+        project_name: str,
 ) -> proxy.ProjectDetailsResponse | proxy.GenericErrorResponse:
     return client.projectdetails(project_name)
 
@@ -762,7 +769,7 @@ def api_project_details(
 @app.route("/api/project/<project_name>/dataset/", methods=["POST"])
 @apiauth.login_required
 def api_create_dataset(
-    project_name: str,
+        project_name: str,
 ) -> proxy.CreateDatasetResponse | proxy.GenericErrorResponse:
     request_data: proxy.CreateDatasetRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
@@ -808,7 +815,7 @@ def api_seal_dataset(project_name: str):
 @app.route("/api/project/<project_name>/members/", methods=["PATCH"])
 @apiauth.login_required
 def api_change_project_members(
-    project_name: str,
+        project_name: str,
 ) -> proxy.ChangeProjectMembersResponse | proxy.GenericErrorResponse:
     request_data: proxy.ChangeMembersRequest = request.json  # pyright: ignore[reportAssignmentType]
     try:
@@ -860,8 +867,8 @@ def api_create_share() -> SerializedShare:
     if ds is None:
         raise RuntimeError(f"Dataset not found in project {pr_info['project']['name']}")
     if (
-        apiauth.current_user() not in pr_info["project"]["members"]
-        and apiauth.current_user() != pr_info["project"]["owner"]
+            apiauth.current_user() not in pr_info["project"]["members"]
+            and apiauth.current_user() != pr_info["project"]["owner"]
     ):
         raise RuntimeError(
             f"API user {apiauth.current_user()} "
@@ -1025,3 +1032,143 @@ def browse():
         "browse.html.j2",
         components=components,
     )
+
+
+def browse_current_access(path: str, isdir: bool, user: str) -> dict:
+    """Access links and transfer commands for the resource shown at the top of the
+    browse screen. Mirrors the "Access this file or folder" cards and the
+    rsync/sftp/SMB fields of ``browse.html.j2``."""
+    access = {
+        "nextcloud": nextcloudlink(path, isdir),
+        "jupyter": jupyterlink(path, isdir),
+        "libertem": libertemlink(path),
+        "sampledb": sampledbsearch(path),
+        "rsync": rsync_command(path, isdir, user),
+        "sftp": sftp_command(path, isdir, user),
+        "smb_windows": main_smbpath(path),
+        "smb_unix": smblink(path),
+    }
+    if not isdir:
+        access["imageviewer"] = imageviewerlink(path)
+    return access
+
+
+def browse_member_access(path: str, isdir: bool) -> dict:
+    """Per-row external links for the listing table, mirroring the columns of
+    ``browse.html.j2``: Nextcloud/JupyterHub for directories, image viewer for
+    files, LiberTEM + SampleDB for both."""
+    if isdir:
+        access = {
+            "nextcloud": nextcloudlink(path, isdir),
+            "jupyter": jupyterlink(path, isdir),
+        }
+    else:
+        access = {"imageviewer": imageviewerlink(path)}
+    access["libertem"] = libertemlink(path)
+    access["sampledb"] = sampledbsearch(path)
+    return access
+
+
+@app.route("/api/browse/", methods=["GET"])
+@apiauth.login_required
+def api_browse():
+    """JSON sibling of :func:`browse` for the React UI. Lists a WebDAV path and
+    returns it together with the server-computed access links/commands.
+    Until the FastAPI browse endpoint (#172) is ready, this can be used.
+    mirrors: func:`browse` behaviour. Logical errors come back as an ``errno`` envelope with HTTP 200
+    so the SPA can show a friendly not-found state linking to the nearest
+    existing parent, rather than a bare HTTP error."""
+    user = apiauth.current_user()
+    path = request.args.get("path") or "/"
+    options = {
+        "webdav_hostname": app.config["WEBDAV_BASE"],
+        "webdav_login": user,
+        "webdav_password": "1234",
+        "webdav_timeout": 30,
+    }
+    normpath = os.path.normpath(path)
+    cl = WebDAVClient(options)
+    resource = cl.resource(normpath)
+    # Canonical path (leading slash / normalization); the client updates its URL
+    # to this value instead of us issuing an HTTP redirect.
+    canonical = resource.urn.path()
+    path_pyramid = get_path_pyramid(canonical)
+
+    try:
+        info = resource.info()
+        info["isdir"] = resource.is_dir()
+    except (RemoteResourceNotFound, ResponseErrorCode) as e:
+        if isinstance(e, RemoteResourceNotFound):
+            code = 404
+            message = f"Remote path {canonical} not found."
+        else:
+            code = e.code
+            message = e.message
+        parent = get_first_existing(cl, path_pyramid)
+        return {
+            "errno": code,
+            "message": message,
+            "path": canonical,
+            "backto": parent,
+        }
+
+    members = cl.list(canonical, get_info=True)
+    member_count = len(members)
+    truncated = member_count > 1024
+    if truncated:
+        members = members[:1024]
+    members.sort(key=lambda m: (not m["isdir"], m["name"]), reverse=False)
+    for m in members:
+        m["path"] = os.path.normpath(m["path"])
+
+    project = None
+    parent_path = None
+    if len(path_pyramid) > 2:
+        parent_path = path_pyramid[-2][0]
+        project = path_pyramid[2][1]
+    elif len(path_pyramid) == 2:
+        parent_path = "/"
+
+    entries = []
+    if parent_path is not None:
+        entries.append(
+            {
+                "name": "..",
+                "path": parent_path,
+                "isdir": True,
+                "created": None,
+                "modified": None,
+                "size": None,
+                "access": {},
+            }
+        )
+    for m in members:
+        entries.append(
+            {
+                "name": m["name"],
+                "path": m["path"],
+                "isdir": m["isdir"],
+                "created": m.get("created"),
+                "modified": m.get("modified"),
+                "size": m.get("size"),
+                "access": browse_member_access(m["path"], m["isdir"]),
+            }
+        )
+
+    return {
+        "errno": 0,
+        "path": canonical,
+        "info": {
+            "name": info.get("name") or "",
+            "isdir": info["isdir"],
+            "project": project,
+            "created": info.get("created"),
+            "modified": info.get("modified"),
+            "size": info.get("size"),
+            "member_count": member_count,
+            "truncated": truncated,
+        },
+        "access": browse_current_access(canonical, info["isdir"], user),
+        "path_pyramid": path_pyramid,
+        "members": entries,
+    }
