@@ -1,5 +1,5 @@
 import {useState, type FormEvent} from 'react'
-import {Link, useNavigate, useParams} from 'react-router-dom'
+import {useNavigate, useParams} from 'react-router-dom'
 import {getCurrentUser} from '../api/auth'
 import {Unauthorized, apiFetch} from '../api/client'
 import type {
@@ -7,10 +7,11 @@ import type {
     CreateDatasetResponse,
     GenericErrorResponse,
 } from '../api/types'
+import {Breadcrumbs} from '../components/Breadcrumbs'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {Input} from '../components/ui/Input'
-import {AlertTriangleIcon, ArrowLeftIcon} from '../components/ui/icons'
+import {AlertTriangleIcon, InfoIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import {sessionNamePrefix} from '../lib/format'
 
@@ -69,42 +70,59 @@ export function NewSession() {
 
     return (
         <div className="mx-auto max-w-150 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <Link
-                to={`/projects/${name}`}
-                className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
-            >
-                <ArrowLeftIcon className="h-4 w-4"/>
-                <span className="font-mono">{name}</span>
-            </Link>
+            <Breadcrumbs
+                crumbs={[
+                    {label: 'Projects', to: '/projects'},
+                    {label: name, to: `/projects/${name}`, mono: true},
+                    {label: 'New Session'},
+                ]}
+            />
 
-            <h1 className="text-2xl font-bold text-fg">Create session</h1>
-            <p className="mt-0.5 mb-6 text-sm text-fg-subtle">
-                A session is a top-level folder in{' '}
-                <span className="font-mono text-fg-muted">{name}</span> with a{' '}
-                <code className="font-mono">raw</code> subfolder. It can be mapped as a
-                network drive on a microscope and sealed once data collection is done.
-            </p>
+            <Card className="px-10 py-9">
+                <h1 className="mb-5 text-[22px] font-bold text-fg">Create a session</h1>
 
-            {error && (
-                <div
-                    className="mb-5 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-3">
-                    <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger"/>
-                    <div className="text-[13px] text-danger">{error}</div>
+                <div className="mb-7 rounded-xl border border-primary/25 bg-primary/5 px-4.5 py-4">
+                    <div className="mb-1.5 flex items-center gap-1.5 text-[13px] font-bold text-primary">
+                        <InfoIcon className="h-4 w-4"/>
+                        What is a session?
+                    </div>
+                    <div className="text-[13px] leading-relaxed text-fg-muted">
+                        A session is a folder within this project for one measurement run
+                        or experiment. Once data collection is complete, you can{' '}
+                        <strong>seal</strong> it to permanently protect the raw data from
+                        accidental changes.
+                    </div>
                 </div>
-            )}
 
-            <Card className="p-6">
-                <form onSubmit={onSubmit} className="flex flex-col gap-5">
+                {error && (
+                    <div
+                        className="mb-5 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-3">
+                        <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger"/>
+                        <div className="text-[13px] text-danger">{error}</div>
+                    </div>
+                )}
+
+                <form onSubmit={onSubmit} className="flex flex-col gap-6">
                     <Input
                         label="Session name"
                         value={session}
                         onChange={(e) => setSession(e.target.value)}
-                        placeholder="e.g. 2026-06-25"
+                        className="font-mono"
+                        help={
+                            <>
+                                Pre-filled with today&#39;s date. Customize as needed —
+                                e.g.{' '}
+                                <code
+                                    className="rounded bg-surface-muted px-1 py-0.5 font-mono text-[11px]">
+                                    {sessionNamePrefix()}alignment_run
+                                </code>
+                            </>
+                        }
                         autoFocus
                     />
                     <div className="mt-1 flex items-center gap-3">
                         <Button type="submit" disabled={submitting}>
-                            {submitting ? 'Creating…' : 'Create session'}
+                            {submitting ? 'Creating…' : 'Create Session'}
                         </Button>
                         <Button type="button" variant="secondary" onClick={backToProject}>
                             Cancel

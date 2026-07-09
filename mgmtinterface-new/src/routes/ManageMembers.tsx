@@ -15,10 +15,12 @@ import type {
     GenericErrorResponse,
     ProjectDetailsResponse,
 } from '../api/types'
+import {Breadcrumbs} from '../components/Breadcrumbs'
 import {MemberPicker} from '../components/MemberPicker'
+import {Avatar} from '../components/ui/Avatar'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
-import {AlertTriangleIcon, ArrowLeftIcon} from '../components/ui/icons'
+import {AlertTriangleIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import {memberChanges} from '../lib/projectsUtil'
 import type {ManageMembersLoaderData} from './manageMembers.loader'
@@ -125,11 +127,11 @@ function MembersForm() {
     }
 
     return (
-        <>
-            <h1 className="font-mono text-2xl font-bold text-fg">{project.name}</h1>
-            <p className="mt-0.5 mb-6 text-sm text-fg-subtle">
-                Members can read and write files in this project. You own it, so you
-                are always a member.
+        <Card className="px-10 py-9">
+            <h1 className="text-[22px] font-bold text-fg">Manage members</h1>
+            <p className="mt-2 mb-7 text-sm leading-relaxed text-fg-subtle">
+                Members can create files and folders within this project. Only you as
+                project owner can manage membership.
             </p>
 
             {error && (
@@ -140,30 +142,45 @@ function MembersForm() {
                 </div>
             )}
 
-            <Card className="p-6">
-                <form onSubmit={onSubmit} className="flex flex-col gap-5">
-                    <MemberPicker
-                        allUsers={users}
-                        owner={project.owner}
-                        selected={selected}
-                        onChange={setSelected}
-                        helpText="Search by username to add a member; use the remove button on a chip to drop one."
-                    />
-                    <div className="mt-1 flex items-center gap-3">
-                        <Button type="submit" disabled={submitting || !dirty}>
-                            {submitting ? 'Saving…' : 'Save changes'}
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="secondary"
-                            onClick={() => navigate(backTo)}
-                        >
-                            Cancel
-                        </Button>
-                    </div>
-                </form>
-            </Card>
-        </>
+            <div className="mb-6">
+                <div className="mb-2.5 text-[13px] font-semibold text-fg-muted">
+                    Project owner
+                </div>
+                <div
+                    className="inline-flex items-center gap-2.5 rounded-xl border border-success/30 bg-success/5 px-3.5 py-2.5">
+                    <Avatar username={project.owner} size={32}/>
+                    <span className="text-sm font-semibold text-success">
+                        {project.owner}
+                    </span>
+                    <span
+                        className="rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-success">
+                        Owner
+                    </span>
+                </div>
+            </div>
+
+            <form onSubmit={onSubmit} className="flex flex-col gap-6">
+                <MemberPicker
+                    allUsers={users}
+                    owner={project.owner}
+                    selected={selected}
+                    onChange={setSelected}
+                    helpText="Search by username to add a member; use the remove button on a chip to drop one."
+                />
+                <div className="mt-1 flex items-center gap-3">
+                    <Button type="submit" disabled={submitting || !dirty}>
+                        {submitting ? 'Saving…' : 'Save Changes'}
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => navigate(backTo)}
+                    >
+                        Cancel
+                    </Button>
+                </div>
+            </form>
+        </Card>
     )
 }
 
@@ -204,13 +221,13 @@ export function ManageMembers() {
 
     return (
         <div className="mx-auto max-w-150 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <Link
-                to={`/projects/${name}`}
-                className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
-            >
-                <ArrowLeftIcon className="h-4 w-4"/>
-                Back to project
-            </Link>
+            <Breadcrumbs
+                crumbs={[
+                    {label: 'Projects', to: '/projects'},
+                    {label: name, to: `/projects/${name}`, mono: true},
+                    {label: 'Manage Members'},
+                ]}
+            />
 
             <Suspense fallback={<FormSkeleton/>}>
                 <Await resolve={details} errorElement={<FormError name={name}/>}>

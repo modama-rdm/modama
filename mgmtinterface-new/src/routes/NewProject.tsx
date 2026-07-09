@@ -1,16 +1,17 @@
 import {useState, type FormEvent} from 'react'
-import {Link, useLoaderData, useNavigate} from 'react-router-dom'
+import {useLoaderData, useNavigate} from 'react-router-dom'
 import {Unauthorized, apiFetch} from '../api/client'
 import type {
     CreateProjectRequest,
     CreateProjectResponse,
     GenericErrorResponse,
 } from '../api/types'
+import {Breadcrumbs} from '../components/Breadcrumbs'
 import {MemberPicker} from '../components/MemberPicker'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {Input} from '../components/ui/Input'
-import {AlertTriangleIcon, ArrowLeftIcon} from '../components/ui/icons'
+import {AlertTriangleIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import type {NewProjectLoaderData} from './newProject.loader'
 
@@ -68,35 +69,40 @@ export function NewProject() {
 
     return (
         <div className="mx-auto max-w-150 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <Link
-                to="/projects"
-                className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
-            >
-                <ArrowLeftIcon className="h-4 w-4"/>
-                Projects
-            </Link>
+            <Breadcrumbs
+                crumbs={[
+                    {label: 'Projects', to: '/projects'},
+                    {label: 'New Project'},
+                ]}
+            />
 
-            <h1 className="text-2xl font-bold text-fg">Create project</h1>
-            <p className="mt-0.5 mb-6 text-sm text-fg-subtle">
-                Projects are folders under <code className="font-mono">/adhoc</code>. You
-                own it and manage its membership.
-            </p>
+            <Card className="px-10 py-9">
+                <h1 className="text-[22px] font-bold text-fg">Create a new project</h1>
+                <p className="mt-2 mb-8 text-sm leading-relaxed text-fg-subtle">
+                    A project is a shared folder for your experiment data. All members
+                    can contribute files; you as owner manage membership.
+                </p>
 
-            {error && (
-                <div
-                    className="mb-5 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-3">
-                    <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger"/>
-                    <div className="text-[13px] text-danger">{error}</div>
-                </div>
-            )}
+                {error && (
+                    <div
+                        className="mb-5 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-3">
+                        <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger"/>
+                        <div className="text-[13px] text-danger">{error}</div>
+                    </div>
+                )}
 
-            <Card className="p-6">
-                <form onSubmit={onSubmit} className="flex flex-col gap-5">
+                <form onSubmit={onSubmit} className="flex flex-col gap-6">
                     <Input
-                        label="Project name"
+                        label={
+                            <>
+                                Project name <span className="text-danger">*</span>
+                            </>
+                        }
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="e.g. ghost_imaging"
+                        placeholder="e.g. ghost_imaging_2025"
+                        className="font-mono"
+                        help="Lowercase letters, numbers, and underscores only. Will become a folder name."
                         autoFocus
                     />
                     <MemberPicker
@@ -104,10 +110,11 @@ export function NewProject() {
                         owner={currentUser}
                         selected={members}
                         onChange={setMembers}
+                        optional
                     />
                     <div className="mt-1 flex items-center gap-3">
                         <Button type="submit" disabled={submitting}>
-                            {submitting ? 'Creating…' : 'Create project'}
+                            {submitting ? 'Creating…' : 'Create Project'}
                         </Button>
                         <Button
                             type="button"
