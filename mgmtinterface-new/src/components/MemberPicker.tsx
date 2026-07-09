@@ -33,12 +33,15 @@ export function MemberPicker({
                                  selected,
                                  onChange,
                                  helpText = 'You are the owner. Members can read and write files in the project.',
+                                 optional = false,
                              }: {
     allUsers: string[]
     owner: string
     selected: string[]
     onChange: (next: string[]) => void
     helpText?: string
+    /** Mark the field "(optional)" in the label, per the New Project design. */
+    optional?: boolean
 }) {
     const [query, setQuery] = useState('')
     const [open, setOpen] = useState(false)
@@ -53,7 +56,10 @@ export function MemberPicker({
     return (
         <div>
             <label className="mb-1.5 block text-sm font-semibold text-fg-muted">
-                Members
+                Members{' '}
+                {optional && (
+                    <span className="font-normal text-fg-faint">(optional)</span>
+                )}
             </label>
             <div className="relative">
                 <div

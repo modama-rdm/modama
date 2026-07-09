@@ -1,11 +1,13 @@
-import type {InputHTMLAttributes} from 'react'
+import type {InputHTMLAttributes, ReactNode} from 'react'
 import {useId} from 'react'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-    label?: string
+    label?: ReactNode
+    /** Small helper line rendered under the field. */
+    help?: ReactNode
 }
 
-export function Input({label, id, className = '', ...props}: InputProps) {
+export function Input({label, help, id, className = '', ...props}: InputProps) {
     const generatedId = useId()
     const inputId = id ?? generatedId
     return (
@@ -28,6 +30,7 @@ export function Input({label, id, className = '', ...props}: InputProps) {
                 }
                 {...props}
             />
+            {help && <p className="mt-1.5 text-xs text-fg-faint">{help}</p>}
         </div>
     )
 }
