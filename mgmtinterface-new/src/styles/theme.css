@@ -103,6 +103,14 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* Browsers don't give <button> a pointer cursor by default (unlike <a>), so
+   without this every button's cursor depends on whether someone remembered to
+   add cursor-pointer by hand — hence the inconsistency across the app. */
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+}
+
 @keyframes toastIn {
     from {
         opacity: 0;
