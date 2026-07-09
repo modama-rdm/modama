@@ -15,10 +15,10 @@ import {
 } from '../lib/projectsUtil.ts'
 import type {ProjectsLoaderData} from './projects.loader'
 
-function MemberAvatars({members}: { members: string[] }) {
-    if (members.length === 0) return <span className="text-sm text-fg-faint">—</span>
-    const shown = members.slice(0, 5)
-    const extra = members.length - shown.length
+function MemberAvatars({owner, members}: { owner: string; members: string[] }) {
+    const all = [owner, ...members.filter((m) => m !== owner)]
+    const shown = all.slice(0, 5)
+    const extra = all.length - shown.length
     return (
         <div className="flex items-center">
             {shown.map((m) => (
@@ -89,7 +89,7 @@ function ProjectsSection({
                                 </td>
                             )}
                             <td className="px-5 py-3.5">
-                                <MemberAvatars members={p.members}/>
+                                <MemberAvatars owner={p.owner} members={p.members}/>
                             </td>
                             <td className="px-5 py-3.5 text-sm text-fg-muted">
                                 {formatDate(p.mtime)}
@@ -164,34 +164,51 @@ export function Projects() {
             </div>
 
             {ingests.length > 0 && (
-                <Card className="mb-7 border-warning/40 bg-warning/5 p-5">
+                <div
+                    className="mb-7 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 px-5 py-4 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-orange-500/10">
                     <div
-                        className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-warning">
+                        className="mb-2.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
                         <UploadIcon className="h-3.5 w-3.5"/>
-                        Active ingest {ingests.length === 1 ? 'session' : 'sessions'}
+                        Active upload{ingests.length === 1 ? '' : 's'} in progress
                     </div>
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-3">
                         {ingests.map((s, i) => (
                             <div
                                 key={`${s.project}/${s.dataset}/${i}`}
-                                className="flex items-center justify-between gap-3"
+                                className="flex flex-wrap items-center justify-between gap-3"
                             >
-                                <div className="text-sm text-fg">
-                                    <span className="font-mono font-semibold">{s.project}</span>
-                                    <span className="mx-1.5 text-fg-faint">/</span>
-                                    <span className="font-mono">{s.dataset}</span>
+                                <div>
+                                    <div className="text-sm font-semibold text-fg">
+                                        <span className="font-mono">{s.project}</span>
+                                        <span className="mx-1.5 font-normal text-fg-faint">/</span>
+                                        <span className="font-mono">{s.dataset}</span>
+                                    </div>
+                                    <div className="mt-0.5 text-xs text-amber-800 dark:text-amber-200">
+                                        Ingest share is open — data is being uploaded to this session
+                                    </div>
                                 </div>
-                                <Button
-                                    variant="secondary"
-                                    onClick={() => openProject(s.project)}
-                                    className="px-3 py-1.5 text-xs"
-                                >
-                                    View project
-                                </Button>
+                                <div className="flex shrink-0 gap-2">
+                                    <button
+                                        onClick={() => openProject(s.project)}
+                                        className="rounded-lg border border-amber-200 bg-surface px-3.5 py-1.5 text-[13px] font-medium text-amber-800 transition-colors hover:bg-amber-50 dark:border-amber-500/30 dark:text-amber-200 dark:hover:bg-amber-500/10"
+                                    >
+                                        View project
+                                    </button>
+                                    <button
+                                        onClick={() =>
+                                            navigate(
+                                                `/projects/${s.project}/sessions/${s.dataset}/ingest`,
+                                            )
+                                        }
+                                        className="rounded-lg bg-amber-600 px-4 py-1.5 text-[13px] font-semibold text-white transition-colors hover:bg-amber-700"
+                                    >
+                                        Manage ingest
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
-                </Card>
+                </div>
             )}
 
             <ProjectsSection title="My Projects" projects={grouped.own} onOpen={openProject}/>
