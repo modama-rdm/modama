@@ -10,16 +10,15 @@ import {
 } from 'react-router-dom'
 import {Unauthorized} from '../api/client'
 import type {ProjectDetailsResponse, SerializedDataset} from '../api/types'
+import {Breadcrumbs} from '../components/Breadcrumbs'
 import {CopyButton} from '../components/CopyField'
 import {Avatar} from '../components/ui/Avatar'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {
-    ArrowLeftIcon,
+    CheckCircleIcon,
     FolderIcon,
-    LockIcon,
     PlusIcon,
-    UploadIcon,
     UsersIcon,
 } from '../components/ui/icons'
 import {formatBytes, formatDateTime} from '../lib/format'
@@ -35,24 +34,28 @@ function browseHref(path: string): string {
     return `/browse?path=${encodeURIComponent(path)}`
 }
 
+/* Design badge palette: Sealed = green check, Open = amber, Sharing = purple.
+ * Purple is a categorical accent with no semantic token, so it uses the raw
+ * Tailwind palette like the Browse app badges. */
 const badgeBase =
-    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold'
+    'inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide'
 
 function StatusBadges({dataset, shared}: { dataset: SerializedDataset; shared: boolean }) {
     return (
         <div className="flex flex-wrap items-center gap-1.5">
             {dataset.immutable ? (
-                <span className={`${badgeBase} bg-surface-muted text-fg-muted`}>
-                    <LockIcon className="h-3 w-3"/>
+                <span className={`${badgeBase} bg-success/10 text-success`}>
+                    <CheckCircleIcon className="h-3 w-3"/>
                     Sealed
                 </span>
             ) : (
-                <span className={`${badgeBase} bg-primary/10 text-primary`}>Open</span>
+                <span className={`${badgeBase} bg-warning/15 text-warning`}>Open</span>
             )}
             {shared && (
-                <span className={`${badgeBase} bg-warning/15 text-warning`}>
-                    <UploadIcon className="h-3 w-3"/>
-                    Ingest active
+                <span
+                    className={`${badgeBase} bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300`}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-current"/>
+                    Sharing
                 </span>
             )}
         </div>
@@ -76,11 +79,22 @@ function SessionsTable({
     const navigate = useNavigate()
     if (datasets.length === 0) {
         return (
-            <Card className="p-10 text-center">
-                <div className="text-sm font-semibold text-fg">No sessions yet</div>
-                <div className="mt-1 text-sm text-fg-muted">
-                    Create a session to start ingesting data into this project.
+            <Card className="p-12 text-center">
+                <FolderIcon className="mx-auto h-8 w-8 text-fg-faint"/>
+                <div className="mt-3 text-[15px] font-semibold text-fg">
+                    No sessions yet
                 </div>
+                <div className="mt-1.5 text-[13px] text-fg-subtle">
+                    Create a session to start organizing your measurement data.
+                </div>
+                {canMutate && (
+                    <Button
+                        onClick={() => navigate(`/projects/${project.name}/sessions/new`)}
+                        className="mt-5"
+                    >
+                        Create first session
+                    </Button>
+                )}
             </Card>
         )
     }
@@ -90,7 +104,7 @@ function SessionsTable({
                 <thead>
                 <tr className="border-b border-default">
                     <th className={thClass}>Session</th>
-                    <th className={thClass}>Modified</th>
+                    <th className={thClass}>Created</th>
                     <th className={thClass}>Status</th>
                     <th className={thClass}/>
                 </tr>
@@ -107,53 +121,58 @@ function SessionsTable({
                                 <div className="font-mono text-sm font-semibold text-fg">
                                     {d.name}
                                 </div>
-                                <Link
-                                    to={browseHref(
-                                        canonicalProjectPath(project.relpath, d.name),
-                                    )}
-                                    className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-fg-faint hover:text-primary"
-                                >
-                                    <FolderIcon className="h-3 w-3"/>
-                                    Browse
-                                </Link>
                             </td>
                             <td className="px-5 py-3.5 text-sm text-fg-muted">
-                                {formatDateTime(d.mtime)}
+                                {formatDateTime(d.ctime)}
                             </td>
                             <td className="px-5 py-3.5">
                                 <StatusBadges dataset={d} shared={shared}/>
                             </td>
                             <td className="px-5 py-3.5">
-                                {canMutate && (
-                                    <div className="flex items-center justify-end gap-2">
-                                        {!d.immutable && (
-                                            <Button
-                                                variant="secondary"
-                                                onClick={() =>
-                                                    navigate(
-                                                        `/projects/${project.name}/sessions/${d.name}/seal`,
-                                                    )
-                                                }
-                                                className="px-3 py-1.5 text-xs"
-                                            >
-                                                Seal…
-                                            </Button>
-                                        )}
-                                        {(!d.immutable || shared) && (
-                                            <Button
-                                                variant="secondary"
-                                                onClick={() =>
-                                                    navigate(
-                                                        `/projects/${project.name}/sessions/${d.name}/ingest`,
-                                                    )
-                                                }
-                                                className="px-3 py-1.5 text-xs"
-                                            >
-                                                Manage ingest…
-                                            </Button>
-                                        )}
-                                    </div>
-                                )}
+                                <div className="flex items-center justify-end gap-2">
+                                    <Button
+                                        variant="secondary"
+                                        onClick={() =>
+                                            navigate(
+                                                browseHref(
+                                                    canonicalProjectPath(
+                                                        project.relpath,
+                                                        d.name,
+                                                    ),
+                                                ),
+                                            )
+                                        }
+                                        className="px-3 py-1.5 text-xs"
+                                    >
+                                        Browse
+                                    </Button>
+                                    {canMutate && (!d.immutable || shared) && (
+                                        <Button
+                                            variant="secondary"
+                                            onClick={() =>
+                                                navigate(
+                                                    `/projects/${project.name}/sessions/${d.name}/ingest`,
+                                                )
+                                            }
+                                            className="px-3 py-1.5 text-xs"
+                                        >
+                                            {shared ? 'Manage ingest' : 'Start ingest'}
+                                        </Button>
+                                    )}
+                                    {canMutate && !d.immutable && (
+                                        <Button
+                                            variant="dangerOutline"
+                                            onClick={() =>
+                                                navigate(
+                                                    `/projects/${project.name}/sessions/${d.name}/seal`,
+                                                )
+                                            }
+                                            className="px-3 py-1.5 text-xs"
+                                        >
+                                            Seal…
+                                        </Button>
+                                    )}
+                                </div>
                             </td>
                         </tr>
                     )
@@ -326,13 +345,13 @@ export function ProjectDetails() {
 
     return (
         <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <Link
-                to="/projects"
-                className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
-            >
-                <ArrowLeftIcon className="h-4 w-4"/>
-                Projects
-            </Link>
+            <Breadcrumbs
+                className="mb-5"
+                crumbs={[
+                    {label: 'Projects', to: '/projects'},
+                    {label: name, mono: true},
+                ]}
+            />
 
             <Suspense fallback={<DetailsSkeleton/>}>
                 <Await resolve={details} errorElement={<DetailsError name={name}/>}>
