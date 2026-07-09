@@ -31,7 +31,7 @@ export function AppShell() {
                 <Link to="/projects"
                       className="flex items-center rounded-md focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]">
                     <img src={`${import.meta.env.BASE_URL}modama.svg`} alt="modama — back to Projects"
-                         className="h-6.5"/>
+                         className="h-6.5 dark:invert"/>
                 </Link>
                 <div className="h-5.5 w-px shrink-0 bg-default"/>
                 <span className="text-[13px] font-medium text-fg-subtle">
