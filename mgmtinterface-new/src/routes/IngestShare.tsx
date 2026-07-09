@@ -1,4 +1,4 @@
-import {Suspense, useState, type ReactNode} from 'react'
+import {Suspense, useState} from 'react'
 import {
     Await,
     Link,
@@ -16,12 +16,14 @@ import type {
     ProjectDetailsResponse,
     SerializedShare,
 } from '../api/types'
+import {Breadcrumbs} from '../components/Breadcrumbs'
 import {CopyField} from '../components/CopyField'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {
     AlertTriangleIcon,
     ArrowLeftIcon,
+    InfoIcon,
     LockIcon,
     UploadIcon,
 } from '../components/ui/icons'
@@ -39,14 +41,6 @@ function ErrorBanner({message}: { message: string }) {
     )
 }
 
-function SectionTitle({children}: { children: ReactNode }) {
-    return (
-        <h2 className="mb-3 text-[13px] font-bold uppercase tracking-wide text-fg-faint">
-            {children}
-        </h2>
-    )
-}
-
 /** The connection details + Close button shown while a share is active. */
 function ActiveShare({
                          share,
@@ -60,55 +54,118 @@ function ActiveShare({
     closing: boolean
 }) {
     const a = shareAccess(share)
+    const [tab, setTab] = useState<'windows' | 'linux'>('windows')
+    const tabBase = '-mb-0.5 border-b-2 px-5 py-2 text-sm font-semibold transition-colors'
+    const tabClass = (active: boolean) =>
+        `${tabBase} ${
+            active
+                ? 'border-primary text-primary'
+                : 'border-transparent text-fg-faint hover:text-fg-subtle'
+        }`
     return (
         <>
-            <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-success/30 bg-success/5 px-3.5 py-3">
-                <UploadIcon className="mt-0.5 h-4 w-4 shrink-0 text-success"/>
-                <div className="text-[13px] text-fg-muted">
-                    An ingest share is <strong className="text-fg">active</strong> for this
-                    session. Map it on the acquisition machine with the temporary
-                    credentials below, then close it when you are done.
-                </div>
-            </div>
-
-            <Card className="mb-5 p-6">
-                <SectionTitle>Windows — file explorer</SectionTitle>
-                <div className="flex flex-col gap-4">
-                    <CopyField label="Address" value={a.winAddress}/>
-                    <CopyField label="Username" value={a.winUsername}/>
-                    <CopyField label="Password" value={a.password}/>
-                </div>
-
-                <div className="my-5 border-t border-default/60"/>
-
-                <SectionTitle>Windows — map as network drive Z:</SectionTitle>
-                <div className="flex flex-col gap-4">
-                    <CopyField label="Map drive" value={a.winMap}/>
-                    <CopyField
-                        label="Unmap drive"
-                        value={a.winUnmap}
-                        hint="run when finished"
-                    />
-                    <CopyField
-                        label="Unmap after opening in Explorer"
-                        value={a.winUnmapExplorer}
-                    />
+            {/* Status card */}
+            <Card className="mb-4 px-7 py-6">
+                <div className="flex flex-wrap items-start justify-between gap-5">
+                    <div>
+                        <div className="mb-2 flex flex-wrap items-center gap-2.5">
+                            <h1 className="text-xl font-bold text-fg">
+                                Ingest share is live
+                            </h1>
+                            <span
+                                className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-bold text-success">
+                                <span className="h-1.5 w-1.5 rounded-full bg-success"/>
+                                Active
+                            </span>
+                        </div>
+                        <p className="max-w-110 text-[13px] leading-relaxed text-fg-subtle">
+                            Map this share on your microscope computer to upload data
+                            directly into session{' '}
+                            <strong className="font-mono text-xs text-fg">{dataset}</strong>{' '}
+                            with your identity and permissions.
+                        </p>
+                    </div>
+                    <Button
+                        variant="dangerOutline"
+                        onClick={onClose}
+                        disabled={closing}
+                        className="shrink-0 whitespace-nowrap"
+                    >
+                        {closing ? 'Closing…' : 'Close share'}
+                    </Button>
                 </div>
             </Card>
 
-            <Card className="mb-6 p-6">
-                <SectionTitle>Linux / macOS — file manager</SectionTitle>
-                <div className="flex flex-col gap-4">
-                    <CopyField label="Address" value={a.unixAddress}/>
-                    <CopyField label="Password" value={a.password}/>
+            {/* Credentials card */}
+            <Card className="mb-4 px-7 py-6">
+                <h2 className="mb-4 text-[15px] font-bold text-fg">
+                    Connection credentials
+                </h2>
+                <div className="flex flex-col gap-3.5">
+                    <CopyField label="Windows address" value={a.winAddress}/>
+                    <div className="grid gap-3.5 sm:grid-cols-2">
+                        <CopyField label="Username" value={a.winUsername}/>
+                        <CopyField label="Password" value={a.password}/>
+                    </div>
                 </div>
             </Card>
 
-            <div className="flex items-center gap-3">
-                <Button variant="danger" onClick={onClose} disabled={closing}>
-                    {closing ? 'Closing…' : `Close ingest share for "${dataset}"`}
-                </Button>
-            </div>
+            {/* Mount commands card */}
+            <Card className="px-7 py-6">
+                <h2 className="mb-4 text-[15px] font-bold text-fg">Mount commands</h2>
+                <div className="mb-5 flex border-b-2 border-default">
+                    <button
+                        type="button"
+                        onClick={() => setTab('windows')}
+                        className={tabClass(tab === 'windows')}
+                    >
+                        Windows
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setTab('linux')}
+                        className={tabClass(tab === 'linux')}
+                    >
+                        Linux / macOS
+                    </button>
+                </div>
+                {tab === 'windows' ? (
+                    <div className="flex flex-col gap-3.5">
+                        <CopyField label="Map as network drive Z:" value={a.winMap}/>
+                        <div className="grid gap-3.5 sm:grid-cols-2">
+                            <CopyField
+                                label="Unmap drive Z:"
+                                value={a.winUnmap}
+                                hint="run when finished"
+                            />
+                            <CopyField
+                                label="Unmap UNC path"
+                                value={a.winUnmapExplorer}
+                            />
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex flex-col gap-3.5">
+                        <div
+                            className="flex items-start gap-2.5 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3 text-[13px] leading-relaxed text-fg-muted">
+                            <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary"/>
+                            <span>
+                                Open the SMB URL in your file manager (e.g. Nautilus,
+                                macOS Finder). Enter the password when prompted — same as
+                                the Windows password above.
+                            </span>
+                        </div>
+                        <CopyField
+                            label="SMB URL (file manager / Finder)"
+                            value={a.unixAddress}
+                        />
+                        <CopyField
+                            label="Password (same as Windows)"
+                            value={a.password}
+                        />
+                    </div>
+                )}
+            </Card>
         </>
     )
 }
@@ -126,7 +183,8 @@ function CreateShare({
     creating: boolean
 }) {
     return (
-        <Card className="p-6">
+        <Card className="px-7 py-6">
+            <h1 className="mb-2 text-xl font-bold text-fg">Ingest share</h1>
             <p className="text-sm leading-relaxed text-fg-muted">
                 Creating an ingest share opens a temporary Windows network share
                 (SMB/CIFS) with one-time credentials for{' '}
@@ -327,29 +385,31 @@ export function IngestShare() {
     const next = `/projects/${name}/sessions/${dataset}/ingest`
 
     return (
-        <div className="mx-auto max-w-170 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <Link
-                to={`/projects/${name}`}
-                className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
-            >
-                <ArrowLeftIcon className="h-4 w-4"/>
-                <span className="font-mono">{name}</span>
-            </Link>
-
-            <h1 className="flex items-center gap-2 text-2xl font-bold text-fg">
-                <UploadIcon className="h-6 w-6 text-fg-muted"/>
-                Ingest share
-            </h1>
-            <p className="mt-0.5 mb-6 text-sm text-fg-subtle">
-                Temporary SMB share for session{' '}
-                <span className="font-mono text-fg-muted">{dataset}</span>.
-            </p>
+        <div className="mx-auto max-w-200 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
+            <Breadcrumbs
+                className="mb-5"
+                crumbs={[
+                    {label: 'Projects', to: '/projects'},
+                    {label: name, to: `/projects/${name}`, mono: true},
+                    {label: `Ingest Share — ${dataset}`},
+                ]}
+            />
 
             <Suspense fallback={<PanelSkeleton/>}>
                 <Await resolve={details} errorElement={<PanelError next={next}/>}>
                     <IngestPanel/>
                 </Await>
             </Suspense>
+
+            <div className="mt-5 text-center">
+                <Link
+                    to={`/projects/${name}`}
+                    className="inline-flex items-center gap-1.5 text-[13px] font-medium text-fg-subtle hover:text-fg-muted"
+                >
+                    <ArrowLeftIcon className="h-3.5 w-3.5"/>
+                    Back to project
+                </Link>
+            </div>
         </div>
     )
 }

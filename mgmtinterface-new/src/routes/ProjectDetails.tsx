@@ -34,9 +34,6 @@ function browseHref(path: string): string {
     return `/browse?path=${encodeURIComponent(path)}`
 }
 
-/* Design badge palette: Sealed = green check, Open = amber, Sharing = purple.
- * Purple is a categorical accent with no semantic token, so it uses the raw
- * Tailwind palette like the Browse app badges. */
 const badgeBase =
     'inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide'
 

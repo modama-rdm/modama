@@ -248,16 +248,20 @@ function AccessCommands({access}: { access: BrowseAccess }) {
     )
 }
 
-/** File/folder breadcrumb from the path pyramid. The trailing crumb is the
- *  current location — shown as mono text, not a link. */
+/** File/folder breadcrumb from the path pyramid, prefixed with a "Projects"
+ *  crumb back to the app. The trailing crumb is the current
+ *  location — shown as mono text, not a link. */
 function Breadcrumb({pyramid}: { pyramid: [string, string][] }) {
     return (
         <nav className="mb-3.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]">
+            <Link to="/projects" className="rounded px-0.5 text-primary hover:underline">
+                Projects
+            </Link>
             {pyramid.map(([full, tail], i) => {
                 const isLast = i === pyramid.length - 1
                 return (
                     <Fragment key={full}>
-                        {i > 0 && <span className="text-fg-faint">›</span>}
+                        <span className="text-fg-faint">›</span>
                         {isLast ? (
                             <span className="px-0.5 font-mono text-xs font-medium text-fg-muted">
                                 {tail}
@@ -409,7 +413,6 @@ export function Browse() {
 
     return (
         <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <BackToProjects/>
             <Breadcrumb pyramid={path_pyramid}/>
             <ResourceBar info={info} access={access} path={result.path}/>
 
