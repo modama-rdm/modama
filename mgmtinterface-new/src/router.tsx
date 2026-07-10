@@ -4,6 +4,7 @@ import {
     type LoaderFunctionArgs,
 } from 'react-router-dom'
 import {isAuthenticated} from './api/auth'
+import {stripBasename} from './lib/basePath'
 import {AppShell} from './components/AppShell'
 import {RouteError} from './components/RouteError'
 import {Browse} from './routes/Browse'
@@ -36,7 +37,7 @@ const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
 function protectedLoader({request}: LoaderFunctionArgs) {
     if (!isAuthenticated()) {
         const url = new URL(request.url)
-        const next = url.pathname + url.search
+        const next = stripBasename(url.pathname, basename) + url.search
         return redirect(`/login?next=${encodeURIComponent(next)}`)
     }
     return null
