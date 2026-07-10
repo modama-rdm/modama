@@ -260,13 +260,17 @@ function ProjectBody() {
                             </div>
                         )}
                     </DetailRow>
-                    <DetailRow label="Path">
-                        <div className="flex items-center gap-1.5">
+                    <DetailRow label="Browse">
+                        <div className="flex items-center gap-2">
                             <Link
                                 to={browseHref(projectPath)}
-                                className="font-mono text-sm text-primary hover:underline"
+                                title="Open in data browser"
+                                className="group inline-flex items-center gap-1.5 font-mono text-sm text-primary"
                             >
-                                {projectPath}
+                                <FolderIcon className="h-3.5 w-3.5 shrink-0"/>
+                                <span className="underline decoration-primary/40 underline-offset-2 group-hover:decoration-primary">
+                                    {projectPath}
+                                </span>
                             </Link>
                             <CopyButton value={projectPath} label="path"/>
                         </div>
