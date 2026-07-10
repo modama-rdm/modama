@@ -76,6 +76,23 @@ def verify_password(username: str, password: str):
         return username
 
 
+@apiauth.error_handler
+def api_auth_error(status: int):
+    # flask-httpauth otherwise challenges failed /api/* requests with
+    # `WWW-Authenticate: Basic`, which makes the browser pop its own native login
+    # dialog on top of the SPA's login screen (same credentials, twice). The SPA
+    # manages the Basic token itself and only needs the 401 to redirect to its
+    # own /login, so we answer with a non-Basic scheme: browsers ignore unknown
+    # auth schemes, while the 401 status the SPA and the Rust agent
+    # rely on is unchanged. flask-httpauth only injects its Basic header when one
+    # is absent, so setting it here suppresses it. Legacy HTML pages use
+    # flask-login (not this handler), so they are unaffected.
+    response = flask.jsonify({"errno": 1, "message": "Authentication required."})
+    response.status_code = status
+    response.headers["WWW-Authenticate"] = 'xBasic realm="mgmtinterface-api"'
+    return response
+
+
 @final
 class User:
     def __init__(self, user_id: str):
