@@ -9,6 +9,7 @@ import {AppShell} from './components/AppShell'
 import {RouteError} from './components/RouteError'
 import {Browse} from './routes/Browse'
 import {browseLoader} from './routes/browse.loader'
+import {Changelog} from './routes/Changelog'
 import {IngestShare} from './routes/IngestShare'
 import {ingestShareLoader} from './routes/ingestShare.loader'
 import {Login} from './routes/Login'
@@ -52,6 +53,7 @@ export const router = createBrowserRouter([
         children: [
             {index: true, loader: () => redirect('/projects')},
             {path: 'browse', loader: browseLoader, element: <Browse/>},
+            {path: 'changelog', element: <Changelog/>},
             {path: 'projects', loader: projectsLoader, element: <Projects/>},
             {path: 'projects/new', loader: newProjectLoader, element: <NewProject/>},
             {
