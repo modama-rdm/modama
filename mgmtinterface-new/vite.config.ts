@@ -1,6 +1,13 @@
+import {readFileSync} from 'node:fs'
 import {defineConfig, loadEnv} from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+
+// Single source of truth for the app version: package.json. Read it here and
+// inject it as the `__APP_VERSION__` global (see `define` below) so the UI never
+// keeps a second copy that can drift. Bump `version` in package.json in the same
+// commit as a feature and add a matching CHANGELOG.md entry.
+const pkg = JSON.parse(readFileSync('./package.json', 'utf-8')) as {version: string}
 
 // https://vite.dev/config/
 export default defineConfig(({mode}) => {
@@ -37,6 +44,7 @@ export default defineConfig(({mode}) => {
     return {
         base,
         publicDir,
+        define: {__APP_VERSION__: JSON.stringify(pkg.version)},
         plugins: [react(), tailwindcss()],
         server: {port: 5180, proxy},
         test: {
