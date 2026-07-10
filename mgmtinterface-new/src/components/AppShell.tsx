@@ -1,6 +1,7 @@
 import {Link, Outlet, useNavigate} from 'react-router-dom'
 import {getCurrentUser, logout} from '../api/auth'
 import {useTheme} from '../hooks/useTheme'
+import {Footer} from './Footer'
 import {NavigationProgress} from './NavigationProgress'
 import {Avatar} from './ui/Avatar'
 import {MoonIcon, SunIcon} from './ui/icons'
@@ -24,7 +25,7 @@ export function AppShell() {
     }
 
     return (
-        <div className="min-h-screen bg-bg">
+        <div className="flex min-h-screen flex-col bg-bg">
             <NavigationProgress/>
             <header
                 className="fixed inset-x-0 top-0 z-50 flex h-14 items-center gap-3.5 border-b border-default bg-surface px-7">
@@ -59,9 +60,10 @@ export function AppShell() {
                     </button>
                 </div>
             </header>
-            <main className="pt-14">
+            <main className="flex-1 pt-14">
                 <Outlet/>
             </main>
+            <Footer/>
         </div>
     )
 }
