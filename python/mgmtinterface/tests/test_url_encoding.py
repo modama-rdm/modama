@@ -145,27 +145,27 @@ def test_sampledb_erc3_search_url(in_path, expected, decoded):
     (
         (
             "",
-            "https://elab.its.kfa-juelich.de/search.php?type=experiments&body=",
+            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=",
             "",
         ),
         (
             "/adhoc/data/my stuff/",  # space -> + -> 2B
-            "https://elab.its.kfa-juelich.de/search.php?type=experiments&body=%2Fadhoc%2Fdata%2Fmy%2Bstuff%2F",
+            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=%2Fadhoc%2Fdata%2Fmy%2Bstuff%2F",
             "/adhoc/data/my+stuff/",
         ),
         (
             "/adhoc/data/my'stuff/",  # ' -> 0x27
-            "https://elab.its.kfa-juelich.de/search.php?type=experiments&body=%2Fadhoc%2Fdata%2Fmy%27stuff%2F",
+            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=%2Fadhoc%2Fdata%2Fmy%27stuff%2F",
             "/adhoc/data/my'stuff/",
         ),
         (
             "/weird/!$'()*,/:;?@/",  # all these are "passed through" the inner encoding layer
-            "https://elab.its.kfa-juelich.de/search.php?type=experiments&body=%2Fweird%2F%21%24%27%28%29%2A%2C%2F%3A%3B%3F%40%2F",
+            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=%2Fweird%2F%21%24%27%28%29%2A%2C%2F%3A%3B%3F%40%2F",
             "/weird/!$'()*,/:;?@/",
         ),
         (
             "/weird/\\/",  # backslash is a potential trouble maker
-            "https://elab.its.kfa-juelich.de/search.php?type=experiments&body=%2Fweird%2F%255C%2F",
+            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=%2Fweird%2F%255C%2F",
             "/weird/%5C/",
         ),
     ),
