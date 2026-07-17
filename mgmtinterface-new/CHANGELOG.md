@@ -11,6 +11,31 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.12.0] - 2026-07-17
+
+### Added
+
+- Folders now show "Open in" links for Nextcloud and Jupyter in their info bar.
+
+### Changed
+
+- The copy button in the data browser copies the full URL of a folder rather than
+  its filesystem path, so it can be pasted into an ELN entry. The copy button on
+  the project details page does the same.
+
+### Fixed
+
+- Browse URLs are encoded the same way as the legacy portal's (slashes kept
+  literal, spaces as `+`), so the URL for a given path is byte-identical between
+  the two and stays searchable in ELN entries.
+- The ElabFTW "Open in" link pointed at the old server; it now uses the current
+  address. Note this is backend configuration - it needs a backend image rebuild
+  to take effect in production.
+- A stale saved session made the browser show its own Basic-auth dialog on top of
+  the portal's sign-in screen, asking for the same credentials twice. The API's
+  401 challenge now uses a scheme browsers don't act on, so only the portal's own
+  sign-in screen appears.
+
 ## [0.11.0] - 2026-07-10
 
 ### Added

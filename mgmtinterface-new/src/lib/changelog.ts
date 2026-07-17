@@ -23,6 +23,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.12.0',
+        date: '2026-07-17',
+        title: 'Shareable browse links',
+        changes: [
+            'The copy button in the browser now copies the full link to a folder instead of just its path, so you can paste it straight into an ELN entry.',
+            'Browse links are now written exactly like the ones from the old portal, so a link to a given folder always looks the same and you can search your ELN for it word-for-word.',
+            'The copy button on a project’s page copies the same kind of link.',
+            'Folders now offer “Open in” links for Nextcloud and Jupyter in their info bar.',
+            'Fixed the ElabFTW “Open in” link, which still pointed at the old server address.',
+            'Fixed being asked to log in twice: when a saved session had expired, the browser’s own login box appeared on top of the portal’s sign-in screen. Only the portal’s screen shows now.',
+        ],
+    },
+    {
         version: '0.11.0',
         date: '2026-07-10',
         title: 'Dark mode & version history',
