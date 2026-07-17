@@ -27,12 +27,8 @@ import {
     sharedDatasetNames,
     sortDatasets,
 } from '../lib/projectsUtil'
+import {browsePath, browseUrl} from '../lib/quotePath'
 import type {ProjectDetailsLoaderData} from './projectDetails.loader'
-
-/** In-app data browser route (uses `<Link>` so the router basename applies). */
-function browseHref(path: string): string {
-    return `/browse?path=${encodeURIComponent(path)}`
-}
 
 const badgeBase =
     'inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide'
@@ -131,7 +127,7 @@ function SessionsTable({
                                         variant="secondary"
                                         onClick={() =>
                                             navigate(
-                                                browseHref(
+                                                browsePath(
                                                     canonicalProjectPath(
                                                         project.relpath,
                                                         d.name,
@@ -263,7 +259,7 @@ function ProjectBody() {
                     <DetailRow label="Browse">
                         <div className="flex items-center gap-2">
                             <Link
-                                to={browseHref(projectPath)}
+                                to={browsePath(projectPath)}
                                 title="Open in data browser"
                                 className="group inline-flex items-center gap-1.5 font-mono text-sm text-primary"
                             >
@@ -272,7 +268,7 @@ function ProjectBody() {
                                     {projectPath}
                                 </span>
                             </Link>
-                            <CopyButton value={projectPath} label="path"/>
+                            <CopyButton value={browseUrl(projectPath)} label="browse URL"/>
                         </div>
                     </DetailRow>
                 </dl>

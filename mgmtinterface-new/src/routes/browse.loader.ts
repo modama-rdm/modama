@@ -1,6 +1,7 @@
 import {redirect, type LoaderFunctionArgs} from 'react-router-dom'
 import {Unauthorized, apiFetch} from '../api/client'
 import type {BrowseResponse} from '../api/types'
+import {browsePath} from '../lib/quotePath'
 
 export interface BrowseLoaderData {
     /** The path that was requested (from `?path=`); defaults to root. */
@@ -22,7 +23,7 @@ export async function browseLoader({
                                    }: LoaderFunctionArgs): Promise<BrowseLoaderData> {
     const url = new URL(request.url)
     const path = url.searchParams.get('path') || '/'
-    const next = `/browse?path=${encodeURIComponent(path)}`
+    const next = browsePath(path)
     try {
         const result = await apiFetch<BrowseResponse>(
             `/api/browse/?path=${encodeURIComponent(path)}`,

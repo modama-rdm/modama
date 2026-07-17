@@ -11,12 +11,8 @@ import {
     FolderIcon,
 } from '../components/ui/icons'
 import {formatBytes} from '../lib/format'
+import {browsePath, browseUrl} from '../lib/quotePath'
 import type {BrowseLoaderData} from './browse.loader'
-
-/** Link to another path in the data browser. */
-function browsePath(path: string): string {
-    return `/browse?path=${encodeURIComponent(path)}`
-}
 
 /** WebDAV reports size as a numeric string; render it human-readably, else "—". */
 function formatSize(size: string | number | null): string {
@@ -118,14 +114,14 @@ function AccessBadge({
     )
 }
 
-/** Text button that copies `value`, briefly flipping to a check — the design's
- *  "Copy path" affordance in the folder info bar. */
-function CopyPathButton({value}: { value: string }) {
+/** Text button that copies the shareable URL for `path`, briefly flipping to
+ *  a check — for referencing this location in ELN entries (#202). */
+function CopyUrlButton({path}: { path: string }) {
     const [copied, copy] = useCopy()
     return (
         <button
             type="button"
-            onClick={() => copy(value)}
+            onClick={() => copy(browseUrl(path))}
             className="inline-flex shrink-0 items-center gap-1 rounded-md border border-default px-2.5 py-1 text-[11px] font-semibold text-fg-subtle transition-colors hover:bg-primary/5 hover:text-primary"
         >
             {copied ? (
@@ -134,7 +130,7 @@ function CopyPathButton({value}: { value: string }) {
                     Copied
                 </>
             ) : (
-                'Copy path'
+                'Copy URL'
             )}
         </button>
     )
@@ -199,7 +195,7 @@ function ResourceBar({
                     >
                         {path}
                     </code>
-                    <CopyPathButton value={path}/>
+                    <CopyUrlButton path={path}/>
                 </div>
             </div>
             {links.length > 0 && (
