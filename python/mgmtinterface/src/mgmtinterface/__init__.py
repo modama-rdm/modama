@@ -374,9 +374,9 @@ def sampledb_erc3_search(path: str):
 
 @app.template_filter()
 def elabftw_erc3_search(path: str):
-    base = app.config["ELABFTW_ERC3_BASE"] + "search.php"
+    base = app.config["ELABFTW_ERC3_BASE"] + "experiments.php"
     urlpart = quote_path(path)
-    return f"{base}?type=experiments&body={quote_plus(urlpart)}"
+    return f"{base}?q={quote_plus(urlpart)}"
 
 
 @app.template_filter()

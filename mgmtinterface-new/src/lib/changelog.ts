@@ -23,6 +23,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.12.1',
+        date: '2026-07-17',
+        title: 'Browse link fixes',
+        changes: [
+            'The copy button next to each file and folder in the browser listing now also copies the full shareable link, matching the “Copy URL” button in the info bar. It previously copied only the filesystem path.',
+            'The ElabFTW (ER-C-3) “Open in” link now opens the experiments list filtered by the folder’s link, so matching entries are found again.',
+        ],
+    },
+    {
         version: '0.12.0',
         date: '2026-07-17',
         title: 'Shareable browse links',

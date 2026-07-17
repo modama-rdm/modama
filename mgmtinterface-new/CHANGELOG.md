@@ -11,6 +11,17 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.12.1] - 2026-07-17
+
+### Fixed
+
+- The per-row copy button in the data browser listing still copied the raw
+  filesystem path; it now copies the full encoded browse URL like the info-bar
+  "Copy URL" button and the project details page.
+- The ElabFTW (ER-C-3) search link now targets the experiments listing
+  (`experiments.php?q=<encoded path>`) instead of the old
+  `search.php?type=experiments&body=` form, which no longer returned results.
+
 ## [0.12.0] - 2026-07-17
 
 ### Added

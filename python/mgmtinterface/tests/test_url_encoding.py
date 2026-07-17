@@ -137,35 +137,41 @@ def test_sampledb_erc3_search_url(in_path, expected, decoded):
     assert parse_qs(parsed.query)["q"][0] == decoded
 
 
-# ElabFTW gets the quote_path-encoded path as the `body` search term,
-# double-encoded like the SampleDB searches: the decoded `body` must
-# still be the encoded form of the path, as ElabFTW stores URLs "as entered".
+# ElabFTW gets the quote_path-encoded path as the `q` search term on the
+# experiments listing, double-encoded like the SampleDB searches: the decoded
+# `q` must still be the encoded form of the path, as ElabFTW stores URLs
+# "as entered".
 @pytest.mark.parametrize(
     "in_path,expected,decoded",
     (
         (
             "",
-            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=",
+            "https://erc3elab.app.fz-juelich.de/experiments.php?q=",
             "",
         ),
         (
+            "/adhoc/datamanagement/chaitali",  # nothing to escape -> single-encoded
+            "https://erc3elab.app.fz-juelich.de/experiments.php?q=%2Fadhoc%2Fdatamanagement%2Fchaitali",
+            "/adhoc/datamanagement/chaitali",
+        ),
+        (
             "/adhoc/data/my stuff/",  # space -> + -> 2B
-            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=%2Fadhoc%2Fdata%2Fmy%2Bstuff%2F",
+            "https://erc3elab.app.fz-juelich.de/experiments.php?q=%2Fadhoc%2Fdata%2Fmy%2Bstuff%2F",
             "/adhoc/data/my+stuff/",
         ),
         (
             "/adhoc/data/my'stuff/",  # ' -> 0x27
-            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=%2Fadhoc%2Fdata%2Fmy%27stuff%2F",
+            "https://erc3elab.app.fz-juelich.de/experiments.php?q=%2Fadhoc%2Fdata%2Fmy%27stuff%2F",
             "/adhoc/data/my'stuff/",
         ),
         (
             "/weird/!$'()*,/:;?@/",  # all these are "passed through" the inner encoding layer
-            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=%2Fweird%2F%21%24%27%28%29%2A%2C%2F%3A%3B%3F%40%2F",
+            "https://erc3elab.app.fz-juelich.de/experiments.php?q=%2Fweird%2F%21%24%27%28%29%2A%2C%2F%3A%3B%3F%40%2F",
             "/weird/!$'()*,/:;?@/",
         ),
         (
             "/weird/\\/",  # backslash is a potential trouble maker
-            "https://erc3elab.app.fz-juelich.de/search.php?type=experiments&body=%2Fweird%2F%255C%2F",
+            "https://erc3elab.app.fz-juelich.de/experiments.php?q=%2Fweird%2F%255C%2F",
             "/weird/%5C/",
         ),
     ),
@@ -173,7 +179,7 @@ def test_sampledb_erc3_search_url(in_path, expected, decoded):
 def test_elabftw_erc3_search_url(in_path, expected, decoded):
     assert elabftw_erc3_search(in_path) == expected
     parsed = urlparse(elabftw_erc3_search(in_path))
-    assert parse_qs(parsed.query, keep_blank_values=True)["body"][0] == decoded
+    assert parse_qs(parsed.query, keep_blank_values=True)["q"][0] == decoded
 
 
 def test_add_path_to_query():

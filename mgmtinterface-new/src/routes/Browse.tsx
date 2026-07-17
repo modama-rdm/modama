@@ -332,7 +332,7 @@ function Listing({entries}: { entries: BrowseEntry[] }) {
                                         {e.name}
                                     </Link>
                                     {!isUp && (
-                                        <CopyButton value={e.path} label="path"/>
+                                        <CopyButton value={browseUrl(e.path)} label="browse URL"/>
                                     )}
                                 </div>
                             </td>
