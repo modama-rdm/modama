@@ -154,10 +154,7 @@ function ResourceBar({
         }`
         : formatSize(info.size)
 
-    const FOLDER_TOP_KEYS: (keyof BrowseAccess)[] = ['nextcloud', 'jupyter']
-    const links = info.isdir
-        ? APP_LINKS.filter(({key}) => FOLDER_TOP_KEYS.includes(key) && access[key])
-        : APP_LINKS.filter(({key}) => access[key])
+    const links = APP_LINKS.filter(({key}) => access[key])
     return (
         <Card className="mb-3.5 px-5 py-3.5">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
