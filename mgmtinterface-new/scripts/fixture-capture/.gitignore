@@ -1,0 +1,6 @@
+# Transient capture output. raw/ holds real, unscrubbed identities — it must
+# never be committed. scrubbed/ is safe-ish but is a working copy, not the
+# source of truth (src/test/fixtures/*.ts is); regenerate it instead of
+# committing it.
+/raw/
+/scrubbed/
