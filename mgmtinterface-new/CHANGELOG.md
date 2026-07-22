@@ -13,6 +13,12 @@ planned for the cutover.
 
 ## [0.12.1] - 2026-07-22
 
+### Changed
+
+- A folder's info bar now shows an "Open in" link for every app available for
+  that location (Nextcloud, JupyterHub, LiberTEM, the image viewer, SampleDB and
+  ElabFTW), matching what files already do, instead of only Nextcloud and Jupyter.
+
 ### Fixed
 
 - Opening a file in a new browser tab or window no longer forces a fresh sign-in.

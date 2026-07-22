@@ -29,6 +29,7 @@ export const CHANGELOG: ChangelogEntry[] = [
         changes: [
             'Opening a file in a new tab or window no longer makes you sign in again — you’re now signed in across every tab and window at once.',
             'The light/dark theme no longer breaks the app in private-browsing mode; when the browser won’t let it save your choice, it falls back to your system setting.',
+            'A folder’s info bar now shows an “Open in” link for every app available for that location — Nextcloud, JupyterHub, LiberTEM, the image viewer, SampleDB and ElabFTW — instead of only Nextcloud and Jupyter.',
         ],
     },
     {
