@@ -50,6 +50,8 @@ export default defineConfig(({mode}) => {
         test: {
             environment: 'jsdom',
             clearMocks: true,
+            unstubGlobals: true,
+            setupFiles: ['./src/test/setup.ts'],
         },
     }
 })
