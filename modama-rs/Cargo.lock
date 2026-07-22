@@ -2924,9 +2924,11 @@ dependencies = [
  "egui_extras",
  "env_logger",
  "log",
+ "modama-common",
  "reqwest",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]

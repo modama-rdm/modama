@@ -10,28 +10,22 @@ use eframe::egui::{
 
 use crate::{
     buttons::action_button,
-    state::{ActiveSession, AgentGuiState},
+    state::{ActiveSession, AgentAppState, AgentGuiState},
 };
 
 pub struct AgentGuiApp {
-    state: Arc<Mutex<AgentGuiState>>,
+    state: Arc<Mutex<AgentAppState>>,
 }
 
 impl AgentGuiApp {
     pub fn new() -> Self {
-        let state = Arc::new(Mutex::new(AgentGuiState::new()));
+        let state = Arc::new(Mutex::new(AgentAppState::new()));
         let state_clone = Arc::clone(&state);
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(500));
             #[allow(clippy::unwrap_used)]
             let mut s = state_clone.lock().unwrap();
-            *s = AgentGuiState::Overview {
-                // session: Some(ActiveSession {
-                //     path: "2026-06-16-testsession".to_owned(),
-                //     project: "automation_holography".to_owned(),
-                // }),
-                session: None,
-            };
+            s.gui_state = AgentGuiState::Overview {};
         });
         Self { state }
     }
@@ -112,6 +106,7 @@ impl AgentGuiApp {
                 new_state = Some(AgentGuiState::SelectCreateSession {
                     project: project_name.clone(),
                     selected_session: None,
+                    new_session_input: "".to_owned(),
                 });
             }
         }
@@ -125,6 +120,7 @@ impl AgentGuiApp {
         frame: &mut eframe::Frame,
         selected_project: &str,
         selected_session: &Option<String>,
+        new_session_input: &str,
     ) -> Option<AgentGuiState> {
         ui.add(Label::new(
             RichText::new(format!(
@@ -143,17 +139,20 @@ impl AgentGuiApp {
         ];
         let mut new_state = None;
         for name in project_names {
-            let checked = Some(name) == selected_session.as_ref().map(|s| s.as_ref());
-            if ui.selectable_label(checked, name).clicked() {
-                if checked {
+            let name_is_selected = Some(name) == selected_session.as_ref().map(|s| s.as_ref());
+            if ui.selectable_label(name_is_selected, name).clicked() {
+                // toggle selection:
+                if name_is_selected {
                     new_state = Some(AgentGuiState::SelectCreateSession {
                         project: selected_project.to_owned(),
                         selected_session: None,
+                        new_session_input: new_session_input.to_owned(),
                     });
                 } else {
                     new_state = Some(AgentGuiState::SelectCreateSession {
                         project: selected_project.to_owned(),
                         selected_session: Some(name.to_owned()),
+                        new_session_input: new_session_input.to_owned(),
                     })
                 }
             }
@@ -166,12 +165,7 @@ impl AgentGuiApp {
         {
             // TODO: dispatch action to fetch sessions in project?
             if let Some(session_name) = selected_session {
-                new_state = Some(AgentGuiState::Overview {
-                    session: Some(ActiveSession {
-                        session: session_name.to_owned(),
-                        project: selected_project.to_owned(),
-                    }),
-                });
+                todo!("dispatch fetch, update the active session in the state etc.");
             }
         }
 
@@ -258,32 +252,44 @@ impl eframe::App for AgentGuiApp {
                     .max_width(256.0),
             );
             egui::Frame::default().inner_margin(27.0).show(ui, |ui| {
-                #[allow(clippy::expect_used)]
                 // as we borrow from the locked state here, we can't
                 // replace it in the render_* functions, so instead
                 // these functions return a new state, or None if the current state should be kept.
-                let new_state = match &*state.lock().expect("lock") {
-                    AgentGuiState::Connecting => {
-                        self.render_connecting(ui, frame);
-                        None
+                let new_state = {
+                    #[allow(clippy::expect_used)]
+                    let state_here = &state.lock().expect("lock");
+                    match &state_here.gui_state {
+                        AgentGuiState::Connecting => {
+                            self.render_connecting(ui, frame);
+                            None
+                        }
+                        AgentGuiState::Overview {} => {
+                            self.render_overview(ui, frame, &state_here.session)
+                        }
+                        AgentGuiState::Login { username, password } => {
+                            self.render_login(ui, frame, username, password)
+                        }
+                        AgentGuiState::SessionSelectProject { selected_project } => {
+                            self.render_select_project(ui, frame, selected_project)
+                        }
+                        AgentGuiState::SelectCreateSession {
+                            project,
+                            selected_session,
+                            new_session_input,
+                        } => self.render_select_create_session(
+                            ui,
+                            frame,
+                            project,
+                            selected_session,
+                            new_session_input,
+                        ),
                     }
-                    AgentGuiState::Overview { session } => self.render_overview(ui, frame, session),
-                    AgentGuiState::Login { username, password } => {
-                        self.render_login(ui, frame, username, password)
-                    }
-                    AgentGuiState::SessionSelectProject { selected_project } => {
-                        self.render_select_project(ui, frame, selected_project)
-                    }
-                    AgentGuiState::SelectCreateSession {
-                        project,
-                        selected_session,
-                    } => self.render_select_create_session(ui, frame, project, selected_session),
                 };
 
                 if let Some(new_state) = new_state {
                     #[allow(clippy::expect_used)]
                     let mut state_locked = state.lock().expect("lock");
-                    *state_locked = new_state;
+                    state_locked.gui_state = new_state;
                 }
             });
         });

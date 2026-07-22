@@ -1,6 +1,7 @@
 mod state;
 mod app;
 mod buttons;
+mod fetcher;
 
 use std::error::Error;
 

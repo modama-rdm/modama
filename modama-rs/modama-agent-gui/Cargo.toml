@@ -13,6 +13,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
 egui_extras = { version = "0.34.3", features = ["svg"] }
+modama-common = { path = "../modama-common" }
+url = { workspace = true }
 
 [lints]
 workspace = true
