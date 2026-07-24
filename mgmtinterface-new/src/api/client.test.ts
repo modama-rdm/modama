@@ -17,7 +17,7 @@ async function seedSession() {
 }
 
 beforeEach(() => {
-    sessionStorage.clear()
+    localStorage.clear()
 })
 
 afterEach(() => {

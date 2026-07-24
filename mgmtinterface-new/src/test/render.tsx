@@ -36,5 +36,5 @@ export function renderApp({route = '/'}: AppOptions = {}) {
  */
 export function signIn(username = 'user1', password = 'correct-horse'): void {
     const token = btoa(`${username}:${password}`)
-    sessionStorage.setItem('erc.auth', JSON.stringify({username, token}))
+    localStorage.setItem('erc.auth', JSON.stringify({username, token}))
 }

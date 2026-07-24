@@ -11,16 +11,16 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
-## [0.12.1] - 2026-07-17
+## [0.12.1] - 2026-07-22
 
 ### Fixed
 
-- The per-row copy button in the data browser listing still copied the raw
-  filesystem path; it now copies the full encoded browse URL like the info-bar
-  "Copy URL" button and the project details page.
-- The ElabFTW (ER-C-3) search link now targets the experiments listing
-  (`experiments.php?q=<encoded path>`) instead of the old
-  `search.php?type=experiments&body=` form, which no longer returned results.
+- Opening a file in a new browser tab or window no longer forces a fresh sign-in.
+  The session is now shared across all tabs and windows of the portal instead of
+  being tied to a single tab. (#204)
+- Choosing a light/dark theme no longer takes the app down when browser storage
+  is unavailable (e.g. private-browsing mode or storage disabled); the theme
+  falls back to the system preference and the toggle still works for the session.
 
 ## [0.12.0] - 2026-07-17
 

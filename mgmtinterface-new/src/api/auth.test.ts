@@ -19,7 +19,7 @@ function mockFetchOnce(body: unknown, init: { ok?: boolean; status?: number } = 
 }
 
 beforeEach(() => {
-    sessionStorage.clear()
+    localStorage.clear()
 })
 
 afterEach(() => {

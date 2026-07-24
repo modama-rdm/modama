@@ -24,11 +24,11 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = [
     {
         version: '0.12.1',
-        date: '2026-07-17',
-        title: 'Browse link fixes',
+        date: '2026-07-22',
+        title: 'Stay signed in across tabs',
         changes: [
-            'The copy button next to each file and folder in the browser listing now also copies the full shareable link, matching the “Copy URL” button in the info bar. It previously copied only the filesystem path.',
-            'The ElabFTW (ER-C-3) “Open in” link now opens the experiments list filtered by the folder’s link, so matching entries are found again.',
+            'Opening a file in a new tab or window no longer makes you sign in again — you’re now signed in across every tab and window at once.',
+            'The light/dark theme no longer breaks the app in private-browsing mode; when the browser won’t let it save your choice, it falls back to your system setting.',
         ],
     },
     {

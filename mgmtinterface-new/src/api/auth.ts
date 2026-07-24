@@ -9,7 +9,7 @@
  * SECURITY (known, accepted risk — see PR discussion / GitLab #156, #172):
  * Basic auth means the stored token is base64(username:password) — reversible
  * encoding, i.e. the user's *reusable IFF/ER-C Unix password*. It lives in
- * `sessionStorage`, which any XSS on the page can read. This is an accepted
+ * `localStorage`, which any XSS on the page can read. This is an accepted
  * interim compromise: the proper fix (httpOnly cookie / short-lived bearer token
  * the JS never sees) requires a backend change and is owned by the FastAPI
  * rewrite (#172). To keep that future swap to a single file, all storage access
@@ -26,14 +26,17 @@ interface Session {
 }
 
 /**
- * The single, swappable persistence layer for the credential. Currently
- * sessionStorage (per-tab, cleared on tab close — safer than localStorage).
+ * The single, swappable persistence layer for the credential. Uses
+ * `localStorage` so a signed-in session is shared across every tab and window of
+ * the same origin (GitLab #204 — opening a file in a new tab must not force a
+ * re-login). This trades the per-tab isolation of sessionStorage for that shared
+ * session; the XSS exposure is unchanged (either store is readable by page JS).
  * Swap this object's body to change the storage strategy app-wide.
  */
 const tokenStore = {
     read(): Session | null {
         try {
-            const raw = sessionStorage.getItem(SESSION_KEY)
+            const raw = localStorage.getItem(SESSION_KEY)
             return raw ? (JSON.parse(raw) as Session) : null
         } catch {
             return null
@@ -41,14 +44,14 @@ const tokenStore = {
     },
     write(session: Session): void {
         try {
-            sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
+            localStorage.setItem(SESSION_KEY, JSON.stringify(session))
         } catch {
             /* storage unavailable (private mode / disabled) — auth degrades to in-tab only */
         }
     },
     clear(): void {
         try {
-            sessionStorage.removeItem(SESSION_KEY)
+            localStorage.removeItem(SESSION_KEY)
         } catch {
             /* ignore */
         }
