@@ -35,6 +35,7 @@ session folder. We call this the "foreground share". For example, in Python:
 
 ```python
 import requests
+
 shares = requests.get("http://localhost:3003/shares/foreground/").json()
 # if there is no foreground share: {"type": None}
 # if there is a foreground share: {"type": "Share", "dest_path": "...", "mount_path": "Z:\\..."}

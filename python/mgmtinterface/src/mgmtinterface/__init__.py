@@ -1,42 +1,43 @@
 import os
-from datetime import datetime
 import shlex
+from datetime import datetime, timezone
 from typing import TypedDict, final
-from typing_extensions import NotRequired
+from urllib.parse import quote, quote_plus, urlencode, urljoin, urlparse
 
-import jsonschema
+import flask
 import humanize
+import jsonschema
+import permissions_client.schema as proxy
 from flask import Flask, render_template, request
+from flask_httpauth import HTTPBasicAuth
+from flask_login import (
+    LoginManager,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
+from flask_wtf import FlaskForm
+from mgmtinterface_client.schema import CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
+from permissions_client import PermissionsClient
+from smbdrop_client import ShareClient
 from smbdrop_client.schema import (
     DeleteShareResponse,
     ListSharesResponse,
     SerializedShare,
 )
-from werkzeug.middleware.proxy_fix import ProxyFix
-import flask
-from flask_login import (
-    LoginManager,
-    login_required,
-    login_user,
-    current_user,
-    logout_user,
-)
-from flask_httpauth import HTTPBasicAuth
-from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SelectMultipleField, HiddenField
-from wtforms.validators import DataRequired
-from urllib.parse import urlparse, urljoin, quote_plus, quote, urlencode
+from typing_extensions import NotRequired
 from webdav3.client import (
     Client as WebDAVClient,
+)
+from webdav3.client import (
     RemoteResourceNotFound,
     ResponseErrorCode,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
+from wtforms import HiddenField, PasswordField, SelectMultipleField, StringField
+from wtforms.validators import DataRequired
 
-from permissions_client import PermissionsClient
-from smbdrop_client import ShareClient
-import permissions_client.schema as proxy
-
-from mgmtinterface_client.schema import CREATE_SHARE_REQUEST_SCHEMA, CreateShareRequest
 from .token_client import TokenClient
 
 app = Flask(__name__)
@@ -136,7 +137,7 @@ class ChangeProjectMembersForm(FlaskForm):
 
 
 def default_dataset_name():
-    now = datetime.now()
+    now = datetime.now(tz=timezone.utc).astimezone()
     return now.strftime("%Y-%m-%d-")
 
 
@@ -164,7 +165,7 @@ def format_filesize(value: int):
 
 @app.template_filter()
 def format_unixtime(value: float):
-    d = datetime.fromtimestamp(value)
+    d = datetime.fromtimestamp(value, tz=timezone.utc).astimezone()
     return d.strftime("%Y-%m-%d %H:%M")
 
 
@@ -236,7 +237,7 @@ def project():
 
     shares = smbclient.list()
     own_shareinfo = []
-    for _, share in shares.items():
+    for share in shares.values():
         if share["uid"] == user_info["id"]["uid"]:
             project, dsname = split_smbpath(share["dest_path"])
             own_shareinfo.append(

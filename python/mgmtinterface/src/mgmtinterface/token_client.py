@@ -1,5 +1,6 @@
 from typing import Any, Literal, final
-from urllib.parse import urlparse, ParseResult
+from urllib.parse import ParseResult, urlparse
+
 import requests
 from typing_extensions import override
 

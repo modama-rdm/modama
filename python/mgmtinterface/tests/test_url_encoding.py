@@ -1,5 +1,5 @@
 import os
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -11,12 +11,12 @@ BASE_DIR = os.path.join(
 os.environ["MGMTINTERFACE_CONFIG"] = "default_config.py"
 os.environ["MGMTINTERFACE_SECRET"] = os.path.join(BASE_DIR, "tests/secrets_for_test.py")
 
-from mgmtinterface import (  # noqa: E402
-    sampledbsearch,
-    sampledb_erc3_search,
+from mgmtinterface import (
+    add_path_to_query,
     elabftw_erc3_search,
     quote_path,
-    add_path_to_query,
+    sampledb_erc3_search,
+    sampledbsearch,
 )
 
 

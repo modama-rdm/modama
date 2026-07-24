@@ -1,7 +1,6 @@
-import os
-import fcntl
 import array
-
+import fcntl
+import os
 
 # From https://www.geeklab.info/2021/04/chattr-and-lsattr-in-python/
 FS_IOC_GETFLAGS = 0x80086601

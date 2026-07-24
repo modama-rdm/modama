@@ -1,10 +1,9 @@
-import time
 import pathlib
+import time
 from typing import Any
 
 import pytest
 import requests
-
 
 AGENT_BASE_URL = "http://modama-agent-1:3003"
 SMBDROP_BASE_URL = "http://smbdrop:5051"

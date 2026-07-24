@@ -1,5 +1,4 @@
 import requests
-
 from permissions_client import PermissionsClient, quote
 from smbdrop_client.schema import (
     DeleteShareResponse,
@@ -29,7 +28,6 @@ class MgmtClient(PermissionsClient):
     def create_share(
         self, project: str, dataset: str, resource: str | None = None
     ) -> SerializedShare:
-        """ """
         resp = requests.post(
             f"{self.base_url}/share/",
             json={

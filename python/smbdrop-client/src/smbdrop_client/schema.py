@@ -1,6 +1,5 @@
 from typing import Literal, TypedDict
 
-
 CREATE_SHARE_REQUEST_SCHEMA = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "http://smbdrop.cloud-erc.fz-juelich.de/create-share-request.schema.json",

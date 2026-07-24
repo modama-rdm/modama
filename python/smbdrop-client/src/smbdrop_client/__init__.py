@@ -1,4 +1,5 @@
 import requests
+
 from smbdrop_client.schema import (
     CreateShareResponse,
     DeleteShareResponse,
@@ -22,7 +23,6 @@ class ShareClient:
     def create(
         self, dest_path: str, uid: int, gid: int, resource: str | None = None
     ) -> CreateShareResponse:
-        """ """
         url = _make_url(self._base_url, "/share/")
         payload = {"dest_path": dest_path, "uid": uid, "gid": gid, "resource": resource}
         resp = requests.post(url, json=payload, auth=self.auth)

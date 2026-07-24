@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-import subprocess
 import json
+import subprocess
 
 OCC = ("sudo", "-u", "www-data", "php", "-d", "memory_limit=-1", "/var/www/html/occ")
 

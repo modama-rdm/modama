@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import stat
 import subprocess
@@ -7,7 +8,6 @@ import sys
 # https://github.com/uellue/PyInotify/tree/nofollowsymlinks
 import inotify.adapters
 import inotify.constants
-
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
@@ -54,6 +54,6 @@ if __name__ == "__main__":
                 print("chmod g-w", name)
                 mode = os.stat(name).st_mode
                 os.chmod(name, mode & ~stat.S_IWGRP)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - must keep watching even if one event fails
             print(e)
         sys.stdout.flush()

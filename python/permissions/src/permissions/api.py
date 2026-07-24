@@ -6,7 +6,7 @@ import shutil
 import stat
 import subprocess
 from collections.abc import Collection
-from typing import NamedTuple, final, TypedDict
+from typing import NamedTuple, TypedDict, final
 
 import pamela
 import posix1e  # pylibacl, needs libacl1-dev, https://pylibacl.k1024.org/
@@ -21,7 +21,7 @@ SHARING_PATH = os.path.join(BASE_PATH, "sharing")
 ADHOC_GROUP = "testerc"
 
 with open("/etc/group", "r") as groupfile:
-    system_groups = set(line.split(":")[0] for line in groupfile)
+    system_groups = {line.split(":")[0] for line in groupfile}
 
 
 class ValidationError(ValueError):
@@ -31,8 +31,6 @@ class ValidationError(ValueError):
     Details provided in error message.
     """
 
-    pass
-
 
 class ACLError(IOError):
     """
@@ -40,8 +38,6 @@ class ACLError(IOError):
 
     See https://pylibacl.k1024.org/module.html#posix1e.ACL.check
     """
-
-    pass
 
 
 FS_ERRORS = (ACLError, PermissionError, FileNotFoundError, OSError)
@@ -58,8 +54,6 @@ class AccumulatedMemberError(RuntimeError):
 
     With this exception we can raise a collection with all errors that occurred.
     """
-
-    pass
 
 
 # From https://unix.stackexchange.com/questions/11477/what-are-the-allowed-group-names-for-groupadd
@@ -278,9 +272,9 @@ class AdhocProject:
             )
             project = cls(name, adhoc_group=adhoc_group)
             project.add_members(members + [owner], owner)
-        except Exception as e:
+        except Exception:
             os.rmdir(folder)
-            raise e
+            raise
         return project
 
     def check_can_modify(self, username: str):
@@ -347,11 +341,11 @@ class AdhocProject:
                 acl = posix1e.ACL(mode=st.st_mode)
                 if acl.check() is not False:
                     raise ACLError(
-                        f"Attempt to generate initial ACL {str(acl)} failed for {filename}."
+                        f"Attempt to generate initial ACL {acl!s} failed for {filename}."
                     )
             else:
                 raise ACLError(
-                    f"Invalid pre-existing ACL encountered: ACL {acl} error {str(initial_res)} for {filename}"
+                    f"Invalid pre-existing ACL encountered: ACL {acl} error {initial_res!s} for {filename}"
                 )
         return acl
 
@@ -396,7 +390,7 @@ class AdhocProject:
             check_res = acl.check()
             if check_res is not False:
                 raise ACLError(
-                    f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}"
+                    f"Invalid ACL encountered: ACL {acl} error {check_res!s} for {filename}"
                 )
             acl.applyto(filename)
 
@@ -411,13 +405,13 @@ class AdhocProject:
             defcheck_res = defacl.check()
             if defcheck_res is not False:
                 raise ACLError(
-                    f"Invalid ACL encountered: ACL {defacl} error {str(defcheck_res)} for {filename}"
+                    f"Invalid ACL encountered: ACL {defacl} error {defcheck_res!s} for {filename}"
                 )
             defacl.applyto(filename, posix1e.ACL_TYPE_DEFAULT)
 
         self.check_can_modify(user)
         source = posix1e.ACL(file=self.path)
-        new_uids = set(pwd.getpwnam(username).pw_uid for username in usernames)
+        new_uids = {pwd.getpwnam(username).pw_uid for username in usernames}
         new_acl_entries = []
         # List of (path, exception) tuples
         errors = []
@@ -470,7 +464,7 @@ class AdhocProject:
             check_res = acl.check()
             if check_res is not False:
                 raise ACLError(
-                    f"Invalid ACL encountered: ACL {acl} error {str(check_res)} for {filename}"
+                    f"Invalid ACL encountered: ACL {acl} error {check_res!s} for {filename}"
                 )
             acl.applyto(filename)
             defacl = self.get_initial_acl(filename, default=True)
@@ -480,12 +474,12 @@ class AdhocProject:
             defcheck_res = defacl.check()
             if defcheck_res is not False:
                 raise ACLError(
-                    f"Invalid ACL encountered: ACL {defacl} error {str(defcheck_res)} for {filename}"
+                    f"Invalid ACL encountered: ACL {defacl} error {defcheck_res!s} for {filename}"
                 )
             defacl.applyto(filename, posix1e.ACL_TYPE_DEFAULT)
 
         self.check_can_modify(user)
-        uids = set(pwd.getpwnam(username).pw_uid for username in usernames)
+        uids = {pwd.getpwnam(username).pw_uid for username in usernames}
         # List of (path, exception) tuples
         errors = []
         try:
@@ -657,14 +651,18 @@ if __name__ == "__main__":
     myproj = AdhocProject.create(
         "pythoncreated", "testdieter", ["testalex", "testpenghan"]
     )
-    assert set(myproj.members) == set(("testdieter", "testalex", "testpenghan"))
+    assert set(myproj.members) == {"testdieter", "testalex", "testpenghan"}
     myproj.add_members(["testjanghyun", "testthibaud"])
     myproj.add_members(["testjanghyun", "testthibaud"])
-    assert set(myproj.members) == set(
-        ("testdieter", "testalex", "testpenghan", "testjanghyun", "testthibaud")
-    )
+    assert set(myproj.members) == {
+        "testdieter",
+        "testalex",
+        "testpenghan",
+        "testjanghyun",
+        "testthibaud",
+    }
     myproj.remove_members(["testpenghan", "testalex"])
-    assert set(myproj.members) == set(("testdieter", "testjanghyun", "testthibaud"))
+    assert set(myproj.members) == {"testdieter", "testjanghyun", "testthibaud"}
     myproj.add_dataset("helloworld", "testjanghyun")
 
     print(AdhocProject.list_all())

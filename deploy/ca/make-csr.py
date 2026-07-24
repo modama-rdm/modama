@@ -4,8 +4,9 @@ For internal services (like the mgmt interface), we can't use letsencrypt, so
 we have to generate CSRs etc. Needs tomllib for config (py311+).
 """
 
-from pathlib import Path
 import subprocess
+from pathlib import Path
+
 import tomllib
 
 

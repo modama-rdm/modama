@@ -1,6 +1,6 @@
 from typing import Literal
-from typing_extensions import TypedDict
 
+from typing_extensions import TypedDict
 
 ADHOC = "adhoc"
 

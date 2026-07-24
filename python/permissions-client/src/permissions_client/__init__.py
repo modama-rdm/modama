@@ -90,7 +90,7 @@ class PermissionsClient:
     def change_project_members(
         self,
         projectname: str,
-        op: Literal["add"] | Literal["remove"],
+        op: Literal["add", "remove"],
         members: Iterable[str],
         user: str,
     ) -> ChangeProjectMembersResponse | GenericErrorResponse:

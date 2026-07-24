@@ -1,34 +1,34 @@
 from subprocess import CalledProcessError
 
-from flask import Flask, request, jsonify
 import jsonschema
 import jsonschema.exceptions
 import pamela
-
-from permissions.api import AdhocProject, ValidationError, authenticate, list_users, uid
+from flask import Flask, jsonify, request
 from permissions_client.schema import (
+    AUTHENTICATE_USER_REQUEST_SCHEMA,
+    CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA,
+    CREATE_DATASET_REQUEST_SCHEMA,
+    CREATE_PROJECT_REQUEST_SCHEMA,
+    SEAL_DATASET_REQUEST_SCHEMA,
     AuthenticateResponse,
+    AuthenticateUserRequest,
+    ChangeMembersRequest,
     ChangeProjectMembersResponse,
+    CreateDatasetRequest,
     CreateDatasetResponse,
+    CreateProjectRequest,
     CreateProjectResponse,
     GenericErrorResponse,
     GetUserListResponse,
     IdUserResponse,
     InvalidAPIUsage,
-    AUTHENTICATE_USER_REQUEST_SCHEMA,
-    AuthenticateUserRequest,
-    CREATE_PROJECT_REQUEST_SCHEMA,
-    CreateProjectRequest,
-    CREATE_DATASET_REQUEST_SCHEMA,
-    CreateDatasetRequest,
-    SEAL_DATASET_REQUEST_SCHEMA,
     ListProjectsResponse,
     ProjectDetailsResponse,
     SealDatasetRequest,
-    CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA,
-    ChangeMembersRequest,
     SealDatasetResponse,
 )
+
+from permissions.api import AdhocProject, ValidationError, authenticate, list_users, uid
 
 app = Flask(__name__)
 
