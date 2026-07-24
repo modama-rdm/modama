@@ -134,9 +134,9 @@ impl UserProvider for DefaultUserProvider {
             .await?;
         if !useradd_res.status.success() {
             let stderr = String::from_utf8_lossy(&useradd_res.stderr);
-            warn!("useradd failed; stderr:\n {}", &stderr);
+            warn!("useradd failed; stderr:\n {}", stderr);
             let stdout = String::from_utf8_lossy(&useradd_res.stdout);
-            debug!("stdout from useradd:\n {}", &stdout);
+            debug!("stdout from useradd:\n {}", stdout);
             return Err(CreateUserError::Usermgmt {
                 username: user.username.clone(),
                 stderr: stderr.to_string(),
@@ -156,14 +156,14 @@ impl UserProvider for DefaultUserProvider {
             .stdin
             .take()
             .ok_or(CreateUserError::SmbpasswdError)?;
-        let smbpasswd_in: String = format!("{}\n{}\n", &user.password, &user.password);
+        let smbpasswd_in: String = format!("{}\n{}\n", user.password, user.password);
         stdin.write_all(smbpasswd_in.as_bytes()).await?;
         let res = smbpasswd.wait_with_output().await?;
         if !res.status.success() {
             let stderr = String::from_utf8_lossy(&res.stderr);
-            warn!("smbpasswd failed; stderr:\n {}", &stderr);
+            warn!("smbpasswd failed; stderr:\n {}", stderr);
             let stdout = String::from_utf8_lossy(&res.stdout);
-            debug!("stdout from smbpasswd:\n {}", &stdout);
+            debug!("stdout from smbpasswd:\n {}", stdout);
             return Err(CreateUserError::Usermgmt {
                 username: user.username.clone(),
                 stderr: stderr.to_string(),
@@ -184,9 +184,9 @@ impl UserProvider for DefaultUserProvider {
             .await?;
         if !userdel_res.status.success() {
             let stderr = String::from_utf8_lossy(&userdel_res.stderr);
-            warn!("userdel failed; stderr:\n {}", &stderr);
+            warn!("userdel failed; stderr:\n {}", stderr);
             let stdout = String::from_utf8_lossy(&userdel_res.stdout);
-            debug!("stdout from userdel:\n {}", &stdout);
+            debug!("stdout from userdel:\n {}", stdout);
             return Err(CreateUserError::Usermgmt {
                 username: username.to_string(),
                 stderr: stderr.to_string(),
@@ -205,9 +205,9 @@ impl UserProvider for DefaultUserProvider {
             .await?;
         if !smbpasswd_res.status.success() {
             let stderr = String::from_utf8_lossy(&smbpasswd_res.stderr);
-            warn!("smbpasswd failed; stderr:\n {}", &stderr);
+            warn!("smbpasswd failed; stderr:\n {}", stderr);
             let stdout = String::from_utf8_lossy(&smbpasswd_res.stdout);
-            debug!("stdout from smbpasswd:\n {}", &stdout);
+            debug!("stdout from smbpasswd:\n {}", stdout);
             return Err(CreateUserError::Usermgmt {
                 username: username.to_string(),
                 stderr: stderr.to_string(),
@@ -255,7 +255,7 @@ impl SmbDropState {
                     .passwd_from_name_string(&user.username)
                     .map_err(|e| ShareError::IoError {
                         source: e,
-                        msg: format!("look up username {}", &user.username),
+                        msg: format!("look up username {}", user.username),
                     })?;
             if let Some(pwd) = pwd {
                 if pwd.uid != user.uid {
@@ -267,7 +267,7 @@ impl SmbDropState {
             } else {
                 return Err(ShareError::Inconsistent(format!(
                     "user `{}` not found",
-                    &user.username
+                    user.username
                 )));
             }
 
@@ -275,14 +275,14 @@ impl SmbDropState {
                 .passwd_from_uid(user.uid)
                 .map_err(|e| ShareError::IoError {
                     source: e,
-                    msg: format!("look up uid {}", &user.uid),
+                    msg: format!("look up uid {}", user.uid),
                 })?;
             if let Some(pwd) = pwd {
                 let pwd_name = pwd.name.to_string_lossy();
                 if pwd_name != user.username {
                     return Err(ShareError::Inconsistent(format!(
                         "username mismatch for {}: `{}` (system) vs `{}` (share config)",
-                        user.uid, &pwd_name, &user.username
+                        user.uid, pwd_name, user.username
                     )));
                 }
             } else {
@@ -292,7 +292,7 @@ impl SmbDropState {
                 )));
             }
 
-            for (_share_id, share) in self.shares.iter() {
+            for share in self.shares.values() {
                 let user_entry = if let Some(user) = self.users.get(&share.uid.to_string()) {
                     user
                 } else {
@@ -541,14 +541,14 @@ impl<U: UserProvider> ShareConfigFile<U> {
             .await
             .map_err(|e| ShareError::IoError {
                 source: e,
-                msg: format!("open config {:?} for reading", &self.path),
+                msg: format!("open config {:?} for reading", self.path),
             })?;
         let mut contents = Vec::new();
         f.read_to_end(&mut contents)
             .await
             .map_err(|e| ShareError::IoError {
                 source: e,
-                msg: format!("read config {:?} read_to_end", &self.path),
+                msg: format!("read config {:?} read_to_end", self.path),
             })?;
 
         let config = spawn_blocking(move || -> Result<_, serde_json::Error> {
@@ -563,7 +563,7 @@ impl<U: UserProvider> ShareConfigFile<U> {
     pub async fn write_config_no_check(&self, config: &SmbDropState) -> Result<(), ShareError> {
         debug!("write_config");
         let config = config.clone();
-        debug!("new config: {:?}", &config);
+        debug!("new config: {:?}", config);
 
         let serialized =
             spawn_blocking(move || -> Result<_, serde_json::Error> { serde_json::to_vec(&config) })
@@ -582,19 +582,19 @@ impl<U: UserProvider> ShareConfigFile<U> {
             .await
             .map_err(|e| ShareError::IoError {
                 source: e,
-                msg: format!("open config {:?} for writing/creating", &rand_name),
+                msg: format!("open config {:?} for writing/creating", rand_name),
             })?;
 
         f.write_all(&serialized)
             .await
             .map_err(|e| ShareError::IoError {
                 source: e,
-                msg: format!("write to {:?}", &rand_name),
+                msg: format!("write to {:?}", rand_name),
             })?;
         debug!("write_config: wrote all...");
         f.sync_all().await.map_err(|e| ShareError::IoError {
             source: e,
-            msg: format!("sync {:?}", &rand_name),
+            msg: format!("sync {:?}", rand_name),
         })?;
         debug!("write_config: synced");
 
@@ -602,10 +602,10 @@ impl<U: UserProvider> ShareConfigFile<U> {
             .await
             .map_err(|e| ShareError::IoError {
                 source: e,
-                msg: format!("rename {:?} to {:?}", &rand_name, &self.path),
+                msg: format!("rename {:?} to {:?}", rand_name, self.path),
             })?;
 
-        debug!("write_config: renamed to {:?}", &self.path);
+        debug!("write_config: renamed to {:?}", self.path);
         Ok(())
     }
 
@@ -783,7 +783,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         self.try_heal().await?;
 
         let pat = get_path_re().await;
-        info!("creating share to {}", &dest_path.to_string_lossy());
+        info!("creating share to {}", dest_path.to_string_lossy());
 
         let dest_path = if let Some(path) = dest_path.to_str() {
             path
@@ -861,7 +861,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         }
 
         debug!("create_share: done!");
-        info!("created share {} to {}", &share.share_id, &share.dest_path);
+        info!("created share {} to {}", share.share_id, share.dest_path);
         Ok(share)
     }
 
@@ -892,7 +892,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         // where unused users aren't removed yet
         config_file.write_config(&state).await?;
 
-        info!("removed share {}", &share_id);
+        info!("removed share {}", share_id);
 
         Ok(())
     }
@@ -908,7 +908,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
                     msg: format!("look up uid {} in add_system_user", user.uid),
                 })?;
         if pwd.is_some() {
-            info!("system user {} already exists", &user.username);
+            info!("system user {} already exists", user.username);
             return Ok(());
         }
 

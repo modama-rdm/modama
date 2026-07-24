@@ -43,7 +43,7 @@ async fn do_sign(state: &ConnState) -> Result<TokenSignResponse, SignError> {
     } else {
         return Err(SignError::Auth);
     };
-    eprintln!("agent id {:?}", &agent_id);
+    eprintln!("agent id {:?}", agent_id);
 
     let sub = &agent_id.san_encoded;
     let claims = Claims {

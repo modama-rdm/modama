@@ -47,7 +47,7 @@ async fn ensure_mounted(
         Some(c) => c.clone(),
     };
 
-    let source = format!("//{}/{}", &config.smb_hostname, share.share_name);
+    let source = format!("//{}/{}", config.smb_hostname, share.share_name);
     let target = target_for_share(share, config);
 
     if is_mounted(share, config).map_err(|e| EnsureMountedError::PlatformError(e.into()))? {
@@ -59,20 +59,20 @@ async fn ensure_mounted(
 
     let options = format!(
         "domain={},username={},password={},uid={},gid={},forceuid,forcegid,vers=3.1.1,ip={},port={}",
-        &config.smb_domain,
-        &share.username,
-        &share.password,
-        &linux_config.uid,
+        config.smb_domain,
+        share.username,
+        share.password,
+        linux_config.uid,
         linux_config.gid,
-        &config.get_smb_ip().await?,
-        &config.smb_port,
+        config.get_smb_ip().await?,
+        config.smb_port,
     );
 
     if !target.exists() {
         std::fs::create_dir_all(&target)?;
     }
 
-    info!("Mounting {} at {}", &source, &target.to_string_lossy());
+    info!("Mounting {} at {}", source, target.to_string_lossy());
 
     nix::mount::mount::<str, Path, str, str>(
         Some(source.as_ref()),
@@ -125,7 +125,7 @@ async fn ensure_umounted(
     _config: &AgentConfig,
 ) -> Result<(), EnsureMountedError> {
     {
-        info!("Umounting {}", &mount_point.to_string_lossy());
+        info!("Umounting {}", mount_point.to_string_lossy());
         nix::mount::umount(mount_point).map_err(|e| EnsureMountedError::PlatformError(e.into()))?;
         std::fs::remove_dir(mount_point)?;
         Ok(())
@@ -202,9 +202,9 @@ fn cleanup_mount_points(config: &AgentConfig) {
         .filter(|path| !mounts_in_prefix.contains(path))
         .for_each(|path| {
             if let Err(err) = std::fs::remove_dir(&path) {
-                warn!("Cannot clean up {}: {err}", &path.to_string_lossy());
+                warn!("Cannot clean up {}: {err}", path.to_string_lossy());
             } else {
-                info!("Cleaned up unused mount point {}", &path.to_string_lossy());
+                info!("Cleaned up unused mount point {}", path.to_string_lossy());
             }
         });
 }

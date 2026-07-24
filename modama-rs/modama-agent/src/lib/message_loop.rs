@@ -60,7 +60,7 @@ async fn update_share_list(
 
     debug!(
         "desired mounts: {:?}",
-        &state
+        state
             .current_shares
             .shares
             .iter()

@@ -40,7 +40,7 @@ impl<U: UserProvider, M: MountBackend, P: ProcessManager> ApiState<U, M, P> {
     async fn send_state_update(&self) {
         match self.share_manager.get_state().await {
             Ok(new_state) => {
-                info!("sending state update: {:?}", &new_state);
+                info!("sending state update: {:?}", new_state);
                 if self.state_updates_tx.send(new_state).is_err() {
                     error!("tried to send state update but no one cared...");
                 };
@@ -565,7 +565,7 @@ mod tests {
             CreateShareResponse::Ok { share } => {
                 // try to delete the share we just created:
                 let mut url = api_base_url.clone();
-                url.set_path(&format!("/share/{}/", &share.share_id));
+                url.set_path(&format!("/share/{}/", share.share_id));
                 let resp_delete = client
                     .execute(client.delete(url).build().unwrap())
                     .await
@@ -664,7 +664,7 @@ mod tests {
 
         // try to delete the share we just created:
         let mut url = api_base_url.clone();
-        url.set_path(&format!("/share/{}/", &share.share_id));
+        url.set_path(&format!("/share/{}/", share.share_id));
         let resp_delete = client
             .execute(client.delete(url).build().unwrap())
             .await

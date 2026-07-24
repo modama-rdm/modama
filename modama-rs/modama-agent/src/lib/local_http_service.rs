@@ -189,7 +189,7 @@ async fn serve_index_page(
                 result += &(a.san_encoded.to_owned() + " ");
             }
             result += "\n";
-            result += &format!("This agent: {} at {}", &agent_name, &resource_name);
+            result += &format!("This agent: {} at {}", agent_name, resource_name);
         }
     }
 

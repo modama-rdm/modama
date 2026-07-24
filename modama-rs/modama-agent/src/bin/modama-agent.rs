@@ -38,7 +38,7 @@ async fn main() -> AnyResult<()> {
     info!("looking for config at {path:?}");
     let config = AgentConfig::from_file(&path).await?;
 
-    info!("This is modama-agent `{:?}`", &config.identity);
+    info!("This is modama-agent `{:?}`", config.identity);
 
     let state: Arc<Mutex<AgentState>> = Arc::new(Mutex::new(AgentState::new(&config)));
 

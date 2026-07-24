@@ -50,7 +50,7 @@ impl MountBackend for LinuxMountBackend {
             if let Err(e) = create_dir_all(&mount.mount_point) {
                 Err(MountBackendError::Preflight(format!(
                     "could not create mount point `{:?}`: {e}",
-                    &mount.mount_point
+                    mount.mount_point
                 )))?;
             }
         }
@@ -177,7 +177,7 @@ impl MountManager {
         let failed_mounts: Vec<BindMount> = bind_mounts
             .filter(|bm| {
                 if let Err(e) = self.backend.umount(&bm.mount_point) {
-                    log::error!("umount of {:?} failed: {e}", &bm.mount_point);
+                    log::error!("umount of {:?} failed: {e}", bm.mount_point);
                     true
                 } else {
                     false
@@ -201,8 +201,8 @@ impl MountManager {
                 if let Err(e) = self.backend.mount(bm) {
                     log::error!(
                         "bind mount from {:?} to {:?} failed: {e}",
-                        &bm.mount_source,
-                        &bm.mount_point
+                        bm.mount_source,
+                        bm.mount_point
                     );
                     true
                 } else {
