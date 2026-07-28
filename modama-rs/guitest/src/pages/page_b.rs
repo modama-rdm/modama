@@ -55,7 +55,7 @@ impl StateB {
     }
 
     pub fn poll(&mut self) -> Action {
-        if let AsyncState::Ready { payload } = self.name_checking.poll() {
+        if let Some(payload) = self.name_checking.poll().take_ready() {
             if payload.name_is_good {
                 return Action::ConfirmName {
                     name: payload.name.clone(),

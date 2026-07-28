@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 // TODO: error handling, remove the allow
-use std::thread::JoinHandle;
+use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, thread::JoinHandle};
 
 use eframe::egui::Context;
 
@@ -11,7 +11,10 @@ pub enum AsyncState<T> {
     #[default]
     Idle,
     Pending {
+        // TODO: consider mpsc w/ try_recv, mainly
+        // if we need to stream results, like a progress bar
         handle: Option<JoinHandle<T>>,
+        cancelled: Arc<AtomicBool>,
     },
     Ready {
         payload: T,
@@ -20,25 +23,32 @@ pub enum AsyncState<T> {
 }
 
 impl<T: Clone + Send + 'static> AsyncState<T> {
-    /// Spawn `task` as a background  and send it to the bg thread
+    /// Spawn `task` as a background thread.
+    ///
+    /// Once the task has run, a redraw will be requested.
     pub fn spawn<F>(&mut self, task: F, ctx: Context)
     where
         F: FnOnce() -> T + Send + 'static,
     {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled_in_thread = Arc::clone(&cancelled);
         let handle = std::thread::spawn(move || {
             let res = task();
-            ctx.request_repaint();
+            if !cancelled_in_thread.load(Ordering::Relaxed) {
+                ctx.request_repaint();
+            }
             res
         });
         *self = Self::Pending {
             handle: Some(handle),
+            cancelled,
         };
     }
 
     pub fn poll(&mut self) -> &mut Self {
         match self {
             AsyncState::Idle => {}
-            AsyncState::Pending { handle } => {
+            AsyncState::Pending { handle, cancelled: _ } => {
                 if let Some(inner_handle) = handle.take() {
                     if inner_handle.is_finished() {
                         let res = inner_handle.join().unwrap();
@@ -56,5 +66,28 @@ impl<T: Clone + Send + 'static> AsyncState<T> {
             AsyncState::Error => todo!("error handling"),
         }
         self
+    }
+
+    pub fn take_ready(&mut self) -> Option<T> {
+        if let Self::Ready { payload } = self {
+            let result = payload.clone();
+            *self = Self::Idle;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+impl<T> Drop for AsyncState<T> {
+    fn drop(&mut self) {
+        match self {
+            AsyncState::Idle => {}
+            AsyncState::Pending { handle: _, cancelled } => {
+                cancelled.store(true, Ordering::Relaxed);
+            }
+            AsyncState::Ready { payload: _ } => {},
+            AsyncState::Error => {},
+        }
     }
 }

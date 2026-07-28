@@ -40,15 +40,11 @@ impl MyApp {
             }
         }
     }
-
-    fn poll(&mut self) -> Action {
-        self.current_page.poll()
-    }
 }
 
 impl eframe::App for MyApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let action = self.poll();
+        let action = self.current_page.poll();
         self.dispatch_action(action);
         let action = self.current_page.ui(ui, frame);
         self.dispatch_action(action);
