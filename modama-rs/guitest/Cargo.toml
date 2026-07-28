@@ -1,0 +1,21 @@
+[package]
+name = "guitest"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+eframe = "0.34.3"
+anyhow = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+egui_extras = { version = "0.34.3", features = ["svg"] }
+modama-common = { path = "../modama-common" }
+url = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -5,7 +5,6 @@ use eframe::egui;
 use crate::app::AgentGuiApp;
 
 fn main() -> Result<(), Box<dyn Error>> {
-
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1024., 1024.0]),
         ..Default::default()

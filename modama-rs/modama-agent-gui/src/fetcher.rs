@@ -11,6 +11,7 @@
 //!
 //! NOTE: these are just some thoughts to be filled in with real code
 //! step by step, nothing here is final!
+#![allow(clippy::unwrap_used)]
 
 use std::{
     any::Any,
@@ -58,9 +59,6 @@ fn list_projects() -> Result<APIListProjectsResponse, ()> {
 
 // when we dispatch a background action, the state should be immediately
 // updated for the new frame, so we can't spawn more bg tasks at once
-//
-//
-
 trait BackgroundTask {
     type Error;
     type Request: Send;

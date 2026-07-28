@@ -2053,6 +2053,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "guitest"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "eframe",
+ "egui_extras",
+ "env_logger",
+ "log",
+ "modama-common",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "url",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
