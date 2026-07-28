@@ -52,16 +52,19 @@ impl AgentAppState {
 #[derive(Clone, Debug)]
 pub enum AgentGuiState {
     Connecting,
+
     Overview {},
+
     /// Login UI state - username/password are those currenctly entered in the text input elements
     Login {
         username: String,
         password: String,
-        waiting_for_next: bool,  // true if we spin a lil and wait for a response from the backend.
     },
+
     SessionSelectProject {
         selected_project: Option<String>,
     },
+
     SelectCreateSession {
         project: String,
         selected_session: Option<String>,
