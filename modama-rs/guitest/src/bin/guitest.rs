@@ -1,37 +1,15 @@
 #![allow(clippy::unwrap_used)]
-use std::{
-    error::Error,
-    sync::mpsc::{Receiver, Sender, TryRecvError},
-    thread::JoinHandle,
-    time::Duration,
-};
+use std::error::Error;
 
 use eframe::egui;
-use guitest::async_state::{AsyncRequest, AsyncResponse, AsyncState};
-
-type MessageId = String;
-
-impl Page {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) -> Action {
-        match self {
-            Page::A { inner } => inner.ui(ui, frame),
-            Page::B { inner } => inner.ui(ui, frame),
-            Page::C { inner } => inner.ui(ui, frame),
-        }
-    }
-
-    fn on_background_msg(&mut self, msg: &AsyncResponse<BackgroundResponse>) -> Action {
-        match self {
-            Page::A { inner } => Action::None,
-            Page::B { inner } => inner.on_background_message(msg),
-            Page::C { inner } => Action::None,
-        }
-    }
-}
+use guitest::{
+    actions::Action,
+    pages::{page_b::StateB, page_c::StateC, Page},
+};
 
 struct MyApp {
-    bg: Background,
     current_page: Page,
+    ctx: eframe::egui::Context,
 }
 
 impl MyApp {
@@ -40,75 +18,40 @@ impl MyApp {
             current_page: Page::A {
                 inner: Default::default(),
             },
-            bg: Background::spawn(ctx),
+            ctx,
         }
     }
 
     fn dispatch_action(&mut self, action: Action) {
+        if !action.is_none() {
+            self.ctx.request_repaint();
+        }
         match action {
             Action::None => {}
             Action::ConfirmName { name } => {
                 self.current_page = Page::C {
-                    inner: StateC { name },
+                    inner: StateC::new(name),
                 };
             }
             Action::GoToEnterName => {
                 self.current_page = Page::B {
-                    inner: StateB::new(self.bg.to_bg.clone()),
+                    inner: StateB::new(),
                 }
             }
         }
     }
 
-    fn check_for_bg(&mut self) -> Action {
-        match self.bg.from_bg.try_recv() {
-            Ok(msg) => {
-                self.current_page.on_background_msg(&msg)
-            }
-            Err(TryRecvError::Empty) => {
-                // nothing to do here I guess
-                Action::None
-            }
-            Err(TryRecvError::Disconnected) => {
-                panic!("background thread is gone");
-            }
-        }
-
-        /*
-        match self.bg.from_bg.try_recv() {
-            Ok(BackgroundResponse::CheckName {
-                ref name,
-                good_name: name_is_good,
-            }) => {
-                if name_is_good {
-                    self.dispatch_action(Action::ConfirmName { name: name.clone() });
-                } else {
-                    // TODO: need to unblock the UI which is waiting for confirmation from bg...
-                    todo!("not good");
-                }
-                Some(msg.clone())
-            }
-            Ok(msg @ BackgroundResponse::ShutdownComplete) => {
-                eprintln!("bg shut down complete");
-                self.bg.join_handle.take().unwrap().join().unwrap();
-                Some(msg)
-            }
-            Err(TryRecvError::Empty) => {
-                // nothing to do here I guess
-                None
-            }
-            Err(TryRecvError::Disconnected) => {
-                panic!("background thread is gone");
-            }
-        }*/
+    fn poll(&mut self) -> Action {
+        self.current_page.poll()
     }
 }
 
 impl eframe::App for MyApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let action = self.poll();
+        self.dispatch_action(action);
         let action = self.current_page.ui(ui, frame);
         self.dispatch_action(action);
-        let bg = self.check_for_bg();
     }
 }
 

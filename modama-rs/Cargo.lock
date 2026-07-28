@@ -2063,6 +2063,7 @@ dependencies = [
  "env_logger",
  "log",
  "modama-common",
+ "rand 0.9.4",
  "reqwest",
  "serde",
  "serde_json",

@@ -16,6 +16,7 @@ egui_extras = { version = "0.34.3", features = ["svg"] }
 modama-common = { path = "../modama-common" }
 url = { workspace = true }
 thiserror = { workspace = true }
+rand = { workspace = true }
 
 [lints]
 workspace = true

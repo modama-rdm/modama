@@ -12,6 +12,10 @@ impl StateC {
         ui.label(&self.name);
         Action::None
     }
+
+    pub fn new(name: String) -> Self {
+        Self { name }
+    }
 }
 
 

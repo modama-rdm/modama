@@ -6,7 +6,7 @@ use crate::actions::Action;
 pub struct StateA {}
 
 impl StateA {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
+    pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         if ui.button("Next").clicked() {
             Action::GoToEnterName
         } else {
