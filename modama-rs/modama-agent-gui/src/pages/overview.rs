@@ -1,4 +1,4 @@
-use eframe::egui::{self, text::LayoutJob, Label, RichText, TextFormat};
+use eframe::egui::{self, Label, RichText};
 use std::time::Duration;
 
 use crate::{
@@ -53,22 +53,10 @@ impl PageOverview {
         ));
 
         if let Some(session) = session {
-            let prose_format = TextFormat {
-                font_id: styles::typography::body::font_id(),
-                color: styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals()),
-                ..Default::default()
-            };
-            let value_format = TextFormat {
-                font_id: styles::typography::mono_medium::font_id(),
-                color: styles::color::on_surface::VALUE.resolve_egui(ui.visuals()),
-                ..Default::default()
-            };
-            let mut job = LayoutJob::default();
-            job.append("Active session ", 0.0, prose_format.clone());
-            job.append(&session.session, 0.0, value_format.clone());
-            job.append(" in project ", 0.0, prose_format);
-            job.append(&session.project, 0.0, value_format);
-            ui.add(Label::new(job));
+            ui.add(Label::new(format!(
+                "Active session '{}' in project '{}'",
+                session.session, session.project
+            )));
 
             self.show_close_card(ui);
             if self.close_confirmation_open {
