@@ -7,7 +7,7 @@ pub(crate) fn display_error(ui: &mut egui::Ui, message: &str) {
     styles::danger_frame(ui.visuals()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.colored_label(
-            styles::color::danger::VALUE.resolve_egui(ui.visuals()),
+            styles::color::error::VALUE.resolve_egui(ui.visuals()),
             RichText::new(message).font(styles::typography::body::font_id()),
         );
     });
@@ -23,7 +23,7 @@ pub(crate) fn labeled_text_input(
         ui.label(
             RichText::new(label)
                 .font(styles::typography::label::font_id())
-                .color(styles::color::fg_muted::VALUE.resolve_egui(ui.visuals())),
+                .color(styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals())),
         );
         ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
         let response = ui.add(

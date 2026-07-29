@@ -15,12 +15,12 @@ pub enum ButtonVariant {
 /// Construct a button using one of the semantic design-system variants.
 pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> egui::Button<'a> {
     let visuals = ui.visuals();
-    let radius = styles::radius(styles::shapes::radius_lg::EGUI_POINTS);
+    let radius = styles::radius(styles::rounded::lg::EGUI_POINTS);
     let text_color = match variant {
-        ButtonVariant::Primary => styles::color::primary_fg::VALUE.resolve_egui(visuals),
-        ButtonVariant::Secondary => styles::color::fg_muted::VALUE.resolve_egui(visuals),
+        ButtonVariant::Primary => styles::color::on_primary::VALUE.resolve_egui(visuals),
+        ButtonVariant::Secondary => styles::color::on_surface_variant::VALUE.resolve_egui(visuals),
         ButtonVariant::Danger => Color32::WHITE,
-        ButtonVariant::DangerOutline => styles::color::danger::VALUE.resolve_egui(visuals),
+        ButtonVariant::DangerOutline => styles::color::error::VALUE.resolve_egui(visuals),
     };
     let button = egui::Button::new(
         RichText::new(label)
@@ -38,21 +38,19 @@ pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> egui
             .fill(styles::color::surface::VALUE.resolve_egui(visuals))
             .stroke(Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
-                styles::color::border::VALUE.resolve_egui(visuals),
+                styles::color::outline::VALUE.resolve_egui(visuals),
             )),
         ButtonVariant::Danger => button
-            .fill(styles::color::danger::VALUE.resolve_egui(visuals))
+            .fill(styles::color::error::VALUE.resolve_egui(visuals))
             .stroke(Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
-                styles::color::danger::VALUE.resolve_egui(visuals),
+                styles::color::error::VALUE.resolve_egui(visuals),
             )),
         ButtonVariant::DangerOutline => button
             .fill(styles::color::surface::VALUE.resolve_egui(visuals))
             .stroke(Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
-                styles::color::danger::VALUE
-                    .resolve_egui(visuals)
-                    .gamma_multiply(styles::components::danger_border_alpha::size::VALUE),
+                styles::color::error_variant::VALUE.resolve_egui(visuals),
             )),
     }
 }
@@ -86,7 +84,7 @@ pub fn primary_loading_button(
     egui::Spinner::new()
         .size(spinner_size)
         .color(
-            styles::color::primary_fg::VALUE
+            styles::color::on_primary::VALUE
                 .resolve_egui(ui.visuals())
                 .gamma_multiply(ui.visuals().disabled_alpha),
         )

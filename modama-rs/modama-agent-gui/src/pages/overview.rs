@@ -28,12 +28,12 @@ impl PageOverview {
         if let Some(session) = session {
             let prose_format = TextFormat {
                 font_id: styles::typography::body::font_id(),
-                color: styles::color::fg_muted::VALUE.resolve_egui(ui.visuals()),
+                color: styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals()),
                 ..Default::default()
             };
             let value_format = TextFormat {
                 font_id: styles::typography::mono_medium::font_id(),
-                color: styles::color::fg::VALUE.resolve_egui(ui.visuals()),
+                color: styles::color::on_surface::VALUE.resolve_egui(ui.visuals()),
                 ..Default::default()
             };
             let mut job = LayoutJob::default();

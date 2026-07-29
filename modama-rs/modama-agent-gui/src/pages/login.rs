@@ -76,7 +76,7 @@ impl PageLogin {
 
         if let Some(error) = self.login_error.as_deref() {
             display_error(ui, error);
-            ui.add_space(styles::spacing::SCALE[7] * styles::spacing::UNIT_EGUI_POINTS);
+            ui.add_space(styles::spacing::login_error_gap::EGUI_POINTS);
         }
 
         self.show_fields(ui, is_logging_in);
@@ -147,20 +147,20 @@ fn show_login_header(ui: &mut egui::Ui) {
     ui.vertical_centered(|ui| {
         ui.add(
             egui::Image::new(egui::include_image!("../../assets/modama-tint.svg"))
-                .tint(styles::color::fg::VALUE.resolve_egui(ui.visuals()))
+                .tint(styles::color::on_surface::VALUE.resolve_egui(ui.visuals()))
                 .max_height(styles::typography::login_logo::FONT_SIZE),
         );
         ui.add_space(styles::spacing::header_title_gap::EGUI_POINTS);
         ui.label(
             RichText::new("Data Management")
                 .font(styles::typography::login_title::font_id())
-                .color(styles::color::fg::VALUE.resolve_egui(ui.visuals())),
+                .color(styles::color::on_surface::VALUE.resolve_egui(ui.visuals())),
         );
         ui.add_space(styles::spacing::header_subtitle_gap::EGUI_POINTS);
         ui.label(
             RichText::new("Ingest Agent")
                 .font(styles::typography::login_subtitle::font_id())
-                .color(styles::color::fg_subtle::VALUE.resolve_egui(ui.visuals())),
+                .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
         );
     });
 }

@@ -1,6 +1,6 @@
 use eframe::egui::{
-    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, Frame, Margin, Shadow,
-    Stroke, TextStyle,
+    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame, Margin,
+    Shadow, Stroke, TextStyle,
 };
 use std::sync::Arc;
 
@@ -26,6 +26,19 @@ pub mod font {
 
     fn family(name: &str) -> FontFamily {
         FontFamily::Name(name.into())
+    }
+
+    pub(crate) fn font_id(font_family: &str, font_weight: u16, size: f32) -> FontId {
+        let native_family = match (font_family, font_weight) {
+            (family, 400) if family.starts_with("Plus Jakarta Sans") => SANS_REGULAR_FAMILY,
+            (family, 500) if family.starts_with("Plus Jakarta Sans") => SANS_MEDIUM_FAMILY,
+            (family, 600) if family.starts_with("Plus Jakarta Sans") => SANS_SEMIBOLD_FAMILY,
+            (family, 700) if family.starts_with("Plus Jakarta Sans") => SANS_BOLD_FAMILY,
+            (family, 400) if family.starts_with("JetBrains Mono") => MONO_REGULAR_FAMILY,
+            (family, 500) if family.starts_with("JetBrains Mono") => MONO_MEDIUM_FAMILY,
+            _ => panic!("no bundled native font for {font_family} weight {font_weight}"),
+        };
+        FontId::new(size, family(native_family))
     }
 
     /// Install the static design-spec font faces and map egui's default text
@@ -125,34 +138,35 @@ pub mod theme {
                 color.light_egui
             }
         };
-        let bg = resolve(color::bg::VALUE);
+        let bg = resolve(color::background::VALUE);
         let surface = resolve(color::surface::VALUE);
-        let surface_muted = resolve(color::surface_muted::VALUE);
-        let border = resolve(color::border::VALUE);
-        let fg = resolve(color::fg::VALUE);
-        let fg_muted = resolve(color::fg_muted::VALUE);
+        let surface_muted = resolve(color::surface_variant::VALUE);
+        let border = resolve(color::outline::VALUE);
+        let fg = resolve(color::on_surface::VALUE);
+        let fg_muted = resolve(color::on_surface_variant::VALUE);
         let primary = resolve(color::primary::VALUE);
-        let primary_hover = resolve(color::primary_hover::VALUE);
+        let primary_hover = resolve(color::primary_variant::VALUE);
 
         let mut visuals = base;
         visuals.panel_fill = bg;
         visuals.window_fill = surface;
-        visuals.window_corner_radius = radius(shapes::radius_2xl::EGUI_POINTS);
+        visuals.window_corner_radius = radius(rounded::_2xl::EGUI_POINTS);
         visuals.window_stroke =
             Stroke::new(components::standard_border::width::EGUI_POINTS, border);
-        visuals.window_shadow = card_shadow();
-        visuals.popup_shadow = card_shadow();
+        let shadow = card_shadow_with_color(resolve(color::shadow::VALUE));
+        visuals.window_shadow = shadow;
+        visuals.popup_shadow = shadow;
         visuals.extreme_bg_color = surface;
         visuals.text_edit_bg_color = Some(surface);
         visuals.faint_bg_color = surface_muted;
         visuals.code_bg_color = surface_muted;
         visuals.override_text_color = Some(fg);
         visuals.weak_text_color = Some(fg_muted);
-        visuals.error_fg_color = resolve(color::danger::VALUE);
-        visuals.warn_fg_color = resolve(color::warning::VALUE);
+        visuals.error_fg_color = resolve(color::error::VALUE);
+        visuals.warn_fg_color = resolve(color::secondary::VALUE);
         visuals.hyperlink_color = primary;
         visuals.button_frame = true;
-        visuals.disabled_alpha = components::interaction_disabled_alpha::size::VALUE;
+        visuals.disabled_alpha = 0.6;
 
         for widget in [
             &mut visuals.widgets.inactive,
@@ -160,7 +174,7 @@ pub mod theme {
             &mut visuals.widgets.active,
             &mut visuals.widgets.open,
         ] {
-            widget.corner_radius = radius(shapes::radius_lg::EGUI_POINTS);
+            widget.corner_radius = radius(rounded::lg::EGUI_POINTS);
             widget.fg_stroke = Stroke::new(components::standard_border::width::EGUI_POINTS, fg);
         }
         visuals.widgets.inactive.weak_bg_fill = primary;
@@ -187,7 +201,7 @@ pub mod theme {
             Stroke::new(components::standard_border::width::EGUI_POINTS, border);
         visuals.widgets.noninteractive.fg_stroke =
             Stroke::new(components::standard_border::width::EGUI_POINTS, fg);
-        visuals.widgets.noninteractive.corner_radius = radius(shapes::radius_lg::EGUI_POINTS);
+        visuals.widgets.noninteractive.corner_radius = radius(rounded::lg::EGUI_POINTS);
         visuals
     }
 }
@@ -211,11 +225,11 @@ fn card_frame_with_padding(visuals: &egui::Visuals, padding: Margin) -> Frame {
         .fill(color::surface::VALUE.resolve_egui(visuals))
         .stroke(Stroke::new(
             components::standard_border::width::EGUI_POINTS,
-            color::border::VALUE.resolve_egui(visuals),
+            color::outline::VALUE.resolve_egui(visuals),
         ))
-        .corner_radius(radius(shapes::radius_2xl::EGUI_POINTS))
+        .corner_radius(radius(rounded::_2xl::EGUI_POINTS))
         .inner_margin(padding)
-        .shadow(card_shadow())
+        .shadow(card_shadow(visuals))
 }
 
 pub fn input_frame(visuals: &egui::Visuals, margin: Margin) -> Frame {
@@ -223,27 +237,31 @@ pub fn input_frame(visuals: &egui::Visuals, margin: Margin) -> Frame {
         .fill(color::surface::VALUE.resolve_egui(visuals))
         .stroke(Stroke::new(
             components::standard_border::width::EGUI_POINTS,
-            color::border::VALUE.resolve_egui(visuals),
+            color::outline::VALUE.resolve_egui(visuals),
         ))
-        .corner_radius(radius(shapes::radius_lg::EGUI_POINTS))
+        .corner_radius(radius(rounded::lg::EGUI_POINTS))
         .inner_margin(margin)
 }
 
-pub fn card_shadow() -> Shadow {
+pub fn card_shadow(visuals: &egui::Visuals) -> Shadow {
+    card_shadow_with_color(color::shadow::VALUE.resolve_egui(visuals))
+}
+
+fn card_shadow_with_color(color: Color32) -> Shadow {
     Shadow {
         offset: [0, components::card_shadow_offset_y::size::EGUI_POINTS as i8],
         blur: components::card_shadow_blur::size::EGUI_POINTS as u8,
         spread: components::card_shadow_spread::size::EGUI_POINTS as u8,
-        color: Color32::from_black_alpha(components::card_shadow_alpha::size::VALUE as u8),
+        color,
     }
 }
 
 pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
     if response.has_focus() {
-        let width = shapes::focus_ring_width::EGUI_POINTS;
+        let width = components::focus_ring::width::EGUI_POINTS;
         ui.painter().rect_stroke(
             response.rect,
-            radius(shapes::radius_lg::EGUI_POINTS),
+            radius(rounded::lg::EGUI_POINTS),
             Stroke::new(
                 components::standard_border::width::EGUI_POINTS,
                 color::primary::VALUE.resolve_egui(ui.visuals()),
@@ -252,22 +270,21 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
         );
         ui.painter().rect_stroke(
             response.rect,
-            radius(shapes::radius_lg::EGUI_POINTS),
-            Stroke::new(width, color::ring::VALUE.resolve_egui(ui.visuals())),
+            radius(rounded::lg::EGUI_POINTS),
+            Stroke::new(width, color::primary_tint::VALUE.resolve_egui(ui.visuals())),
             egui::StrokeKind::Outside,
         );
     }
 }
 
 pub fn danger_frame(visuals: &egui::Visuals) -> Frame {
-    let danger = color::danger::VALUE.resolve_egui(visuals);
     Frame::new()
-        .fill(danger.gamma_multiply(components::danger_subtle_fill_alpha::size::VALUE))
+        .fill(color::error_container::VALUE.resolve_egui(visuals))
         .stroke(Stroke::new(
             components::standard_border::width::EGUI_POINTS,
-            danger.gamma_multiply(components::danger_border_alpha::size::VALUE),
+            color::error_variant::VALUE.resolve_egui(visuals),
         ))
-        .corner_radius(radius(shapes::radius_xl::EGUI_POINTS))
+        .corner_radius(radius(rounded::xl::EGUI_POINTS))
         .inner_margin(Margin::symmetric(
             components::danger_alert_padding_x::padding::EGUI_POINTS as i8,
             components::danger_alert_padding_y::padding::EGUI_POINTS as i8,

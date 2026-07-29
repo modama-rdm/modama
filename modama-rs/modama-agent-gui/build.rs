@@ -101,9 +101,8 @@ impl ThemeColor {
     );
 
     generate_colors(&mut output, design.values.get("colors"))?;
-    generate_scalar_group(&mut output, "spacing", design.values.get("spacing"), true)?;
-    generate_scalar_group(&mut output, "rounded", design.values.get("rounded"), false)?;
-    generate_scalar_group(&mut output, "shapes", design.values.get("shapes"), false)?;
+    generate_scalar_group(&mut output, "spacing", design.values.get("spacing"))?;
+    generate_scalar_group(&mut output, "rounded", design.values.get("rounded"))?;
     generate_typography(&mut output, design.values.get("typography"))?;
     generate_components(&mut output, design.values.get("components"))?;
 
@@ -119,30 +118,36 @@ fn generate_colors(output: &mut String, value: Option<&Value>) -> Result<(), Str
         return Ok(());
     };
 
-    let (light, dark) =
-        if contains_mapping_key(colors, "light") || contains_mapping_key(colors, "dark") {
-            (
-                mapping(colors, "light").unwrap_or(colors),
-                mapping(colors, "dark").unwrap_or(colors),
-            )
-        } else {
-            (colors, colors)
-        };
-    let names = light
+    let names = colors
         .keys()
-        .chain(dark.keys())
         .filter_map(Value::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
+        .filter(|name| !name.starts_with("inverse-"))
+        .collect::<Vec<_>>();
+    for inverse_name in colors
+        .keys()
+        .filter_map(Value::as_str)
+        .filter(|name| name.starts_with("inverse-"))
+    {
+        let base_name = inverse_name.trim_start_matches("inverse-");
+        if mapping_value(colors, base_name).is_none() {
+            return Err(format!(
+                "colors.{inverse_name} is missing its light pair colors.{base_name}"
+            ));
+        }
+    }
 
     let mut identifiers = BTreeSet::new();
     for name in names {
-        let light_value = scalar_string(mapping_value(light, name).unwrap_or(&Value::Null));
-        let dark_value = scalar_string(mapping_value(dark, name).unwrap_or(&Value::Null));
+        let light_value = scalar_string(mapping_value(colors, name).unwrap_or(&Value::Null));
+        let inverse_name = format!("inverse-{name}");
+        let dark_value = mapping_value(colors, &inverse_name)
+            .map(scalar_string)
+            .ok_or_else(|| format!("colors.{name} is missing colors.{inverse_name}"))?;
         let identifier = unique_identifier(name, &mut identifiers);
         let light_egui = color_literal(&light_value)
-            .ok_or_else(|| format!("colors.light.{name} is not representable by egui"))?;
+            .ok_or_else(|| format!("colors.{name} is not representable by egui"))?;
         let dark_egui = color_literal(&dark_value)
-            .ok_or_else(|| format!("colors.dark.{name} is not representable by egui"))?;
+            .ok_or_else(|| format!("colors.{inverse_name} is not representable by egui"))?;
         output.push_str(&format!(
             "    pub mod {identifier} {{\n        use super::ThemeColor;\n        pub const VALUE: ThemeColor = ThemeColor::new({:?}, {:?}, {light_egui}, {dark_egui});\n    }}\n",
             light_value,
@@ -157,7 +162,6 @@ fn generate_scalar_group(
     output: &mut String,
     module_name: &str,
     value: Option<&Value>,
-    support_legacy_scale: bool,
 ) -> Result<(), String> {
     output.push_str(&format!(
         "#[allow(non_upper_case_globals, unused_imports)]\npub mod {module_name} {{\n"
@@ -167,68 +171,11 @@ fn generate_scalar_group(
         return Ok(());
     };
 
-    if support_legacy_scale {
-        if let Some(unit) = mapping_value(values, "unit").and_then(Value::as_str) {
-            if let Some(dimension) = parse_dimension(unit) {
-                output.push_str(&format!(
-                    "    pub const UNIT_EGUI_POINTS: f32 = {:?};\n",
-                    dimension_to_egui_points(dimension)
-                ));
-            }
-        }
-        if let Some(Value::Sequence(scale)) = mapping_value(values, "scale") {
-            let numbers = scale.iter().filter_map(number_value).collect::<Vec<_>>();
-            if numbers.len() == scale.len() {
-                let unit_value = mapping_value(values, "unit")
-                    .and_then(Value::as_str)
-                    .and_then(parse_dimension)
-                    .map(|dimension| dimension.value)
-                    .ok_or_else(|| "spacing unit must be a supported dimension".to_owned())?;
-                output.push_str(&format!(
-                    "    pub const SCALE: &[f32] = &[{}];\n",
-                    numbers
-                        .iter()
-                        .map(|number| format!("{number:?}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-
-                for (name, scale_value) in [
-                    ("card_padding_x", 10.0),
-                    ("card_padding_y", 11.0),
-                    ("input_padding_x", 3.0),
-                    ("input_padding_y", 2.5),
-                    ("button_padding_x", 5.0),
-                    ("button_padding_y", 2.5),
-                    ("field_label_gap", 1.5),
-                    ("form_field_gap", 4.0),
-                    ("header_title_gap", 3.5),
-                    ("header_subtitle_gap", 1.0),
-                    ("header_bottom_gap", 8.0),
-                    ("button_margin_top", 2.0),
-                ] {
-                    let Some(index) = numbers
-                        .iter()
-                        .position(|value| (*value - scale_value).abs() < f32::EPSILON)
-                    else {
-                        return Err(format!(
-                            "spacing scale is missing the token value for {name}"
-                        ));
-                    };
-                    emit_dimension_module(output, name, numbers[index] * unit_value);
-                }
-            }
-        }
-    }
-
     let mut identifiers = BTreeSet::new();
     for (name, value) in values {
         let Some(name) = name.as_str() else {
             continue;
         };
-        if support_legacy_scale && matches!(name, "unit" | "scale") {
-            continue;
-        }
         let identifier = unique_identifier(name, &mut identifiers);
         emit_scalar_module(output, &identifier, value)?;
     }
@@ -254,13 +201,6 @@ fn generate_typography(output: &mut String, value: Option<&Value>) -> Result<(),
         let identifier = unique_identifier(name, &mut identifiers);
         output.push_str(&format!("    pub mod {identifier} {{\n"));
         emit_optional_string_property(output, properties, "fontFamily", "FONT_FAMILY", name)?;
-        emit_optional_string_property(
-            output,
-            properties,
-            "nativeFontFamily",
-            "NATIVE_FONT_FAMILY",
-            name,
-        )?;
         emit_optional_dimension_property(output, properties, "fontSize", "FONT_SIZE", name)?;
         emit_optional_number_property(output, properties, "fontWeight", "FONT_WEIGHT", name)?;
         emit_optional_string_property(output, properties, "lineHeight", "LINE_HEIGHT", name)?;
@@ -274,32 +214,12 @@ fn generate_typography(output: &mut String, value: Option<&Value>) -> Result<(),
         emit_optional_string_property(output, properties, "fontFeature", "FONT_FEATURE", name)?;
         emit_optional_string_property(output, properties, "fontVariation", "FONT_VARIATION", name)?;
         if mapping_value(properties, "fontSize").is_some()
-            && mapping_value(properties, "nativeFontFamily").is_some()
+            && mapping_value(properties, "fontFamily").is_some()
+            && mapping_value(properties, "fontWeight").is_some()
         {
             output.push_str(
-                "        pub fn font_id() -> eframe::egui::FontId {\n            eframe::egui::FontId::new(FONT_SIZE, eframe::egui::FontFamily::Name(NATIVE_FONT_FAMILY.into()))\n        }\n",
+                "        pub fn font_id() -> eframe::egui::FontId {\n            super::super::font::font_id(FONT_FAMILY, FONT_WEIGHT, FONT_SIZE)\n        }\n",
             );
-        }
-        if let Some(weights) = mapping_value(properties, "weights") {
-            let values = weights.as_sequence().ok_or_else(|| {
-                format!("typography.{name}.weights must be a sequence of numeric weights")
-            })?;
-            let weights = values
-                .iter()
-                .map(|value| {
-                    number_value(value)
-                        .map(|value| value as u16)
-                        .ok_or_else(|| format!("typography.{name}.weights contains a non-number"))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            output.push_str(&format!(
-                "        pub const WEIGHTS: &[u16] = &[{}];\n",
-                weights
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
         }
         output.push_str("    }\n");
     }
@@ -435,16 +355,8 @@ fn dimension_to_egui_points(dimension: Dimension) -> f32 {
     }
 }
 
-fn mapping<'a>(value: &'a serde_yaml::Mapping, key: &str) -> Option<&'a serde_yaml::Mapping> {
-    mapping_value(value, key).and_then(Value::as_mapping)
-}
-
 fn mapping_value<'a>(value: &'a serde_yaml::Mapping, key: &str) -> Option<&'a Value> {
     value.get(Value::String(key.to_owned()))
-}
-
-fn contains_mapping_key(value: &serde_yaml::Mapping, key: &str) -> bool {
-    mapping(value, key).is_some()
 }
 
 fn scalar_string(value: &Value) -> String {

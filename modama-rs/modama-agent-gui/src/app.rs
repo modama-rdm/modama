@@ -75,14 +75,14 @@ impl eframe::App for AgentGuiApp {
         {
             let spacing = &mut ui.style_mut().spacing;
             spacing.item_spacing = vec2(
-                styles::spacing::SCALE[3] * styles::spacing::UNIT_EGUI_POINTS,
-                styles::spacing::SCALE[4] * styles::spacing::UNIT_EGUI_POINTS,
+                styles::spacing::app_item_gap_x::EGUI_POINTS,
+                styles::spacing::app_item_gap_y::EGUI_POINTS,
             );
             spacing.window_margin = Margin {
-                left: (styles::spacing::SCALE[3] * styles::spacing::UNIT_EGUI_POINTS) as i8,
-                right: (styles::spacing::SCALE[3] * styles::spacing::UNIT_EGUI_POINTS) as i8,
-                top: (styles::spacing::SCALE[4] * styles::spacing::UNIT_EGUI_POINTS) as i8,
-                bottom: (styles::spacing::SCALE[4] * styles::spacing::UNIT_EGUI_POINTS) as i8,
+                left: styles::spacing::app_window_margin_x::EGUI_POINTS as i8,
+                right: styles::spacing::app_window_margin_x::EGUI_POINTS as i8,
+                top: styles::spacing::app_window_margin_y::EGUI_POINTS as i8,
+                bottom: styles::spacing::app_window_margin_y::EGUI_POINTS as i8,
             };
         }
 

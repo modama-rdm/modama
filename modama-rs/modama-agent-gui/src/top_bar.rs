@@ -54,7 +54,7 @@ impl TopBar {
         panel
             .show_inside(parent, |ui| {
                 let action = self.content(ui, username, page_busy, show_login_action);
-                let border = styles::color::border::VALUE.resolve_egui(ui.visuals());
+                let border = styles::color::outline::VALUE.resolve_egui(ui.visuals());
                 ui.painter().hline(
                     ui.max_rect().x_range(),
                     ui.max_rect().bottom()
@@ -85,12 +85,12 @@ impl TopBar {
                     compact_button_spacing(ui);
                     let logo = egui::Button::image(
                         egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
-                            .tint(styles::color::fg::VALUE.resolve_egui(ui.visuals()))
+                            .tint(styles::color::on_surface::VALUE.resolve_egui(ui.visuals()))
                             .alt_text("modama — go to Overview")
                             .max_height(styles::components::top_bar_logo::height::EGUI_POINTS),
                     )
                     .frame(false)
-                    .corner_radius(styles::radius(styles::shapes::radius_lg::EGUI_POINTS));
+                    .corner_radius(styles::radius(styles::rounded::lg::EGUI_POINTS));
                     ui.add_enabled(!navigation_busy, logo)
                 })
                 .inner
@@ -109,7 +109,7 @@ impl TopBar {
             ui.label(
                 RichText::new("Data Management Ingest Agent")
                     .font(styles::typography::login_subtitle::font_id())
-                    .color(styles::color::fg_subtle::VALUE.resolve_egui(ui.visuals())),
+                    .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
             );
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -145,7 +145,9 @@ impl TopBar {
                     ui.label(
                         RichText::new(username)
                             .font(styles::typography::navigation::font_id())
-                            .color(styles::color::fg_muted::VALUE.resolve_egui(ui.visuals())),
+                            .color(
+                                styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals()),
+                            ),
                     );
                     avatar(ui, username);
                     ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
@@ -191,7 +193,7 @@ fn divider(ui: &mut egui::Ui, height: f32) {
         rect.y_range(),
         Stroke::new(
             styles::components::standard_border::width::EGUI_POINTS,
-            styles::color::border::VALUE.resolve_egui(ui.visuals()),
+            styles::color::outline::VALUE.resolve_egui(ui.visuals()),
         ),
     );
 }
@@ -213,11 +215,11 @@ fn theme_button(ui: &mut egui::Ui) {
                             styles::components::top_bar_icon::size::EGUI_POINTS,
                             FontFamily::Proportional,
                         ))
-                        .color(styles::color::fg_subtle::VALUE.resolve_egui(ui.visuals())),
+                        .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
                 )
                 .fill(Color32::TRANSPARENT)
                 .stroke(Stroke::NONE)
-                .corner_radius(styles::radius(styles::shapes::radius_lg::EGUI_POINTS))
+                .corner_radius(styles::radius(styles::rounded::lg::EGUI_POINTS))
                 .min_size(egui::Vec2::splat(
                     styles::components::top_bar_control::size::EGUI_POINTS,
                 )),

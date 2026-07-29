@@ -19,16 +19,16 @@ mod style_tests {
     #[test]
     fn generated_tokens_are_typed_and_available() {
         assert_eq!(
-            styles::color::bg::VALUE.resolve(&egui::Visuals::light()),
+            styles::color::background::VALUE.resolve(&egui::Visuals::light()),
             "#f1f5fd"
         );
         assert_eq!(
-            styles::typography::heading::NATIVE_FONT_FAMILY,
-            "Plus Jakarta Sans Bold"
+            styles::color::background::VALUE.resolve(&egui::Visuals::dark()),
+            "#0b1120"
         );
         assert_eq!(styles::typography::button::FONT_WEIGHT, 600);
         assert_eq!(styles::spacing::button_padding_x::EGUI_POINTS, 20.0);
-        assert_eq!(styles::shapes::radius_2xl::EGUI_POINTS, 16.0);
+        assert_eq!(styles::rounded::_2xl::EGUI_POINTS, 16.0);
         assert_eq!(styles::components::top_bar::height::EGUI_POINTS, 56.0);
         assert_eq!(styles::components::app_shell::padding::EGUI_POINTS, 27.0);
     }
@@ -40,7 +40,7 @@ mod style_tests {
 
         assert_eq!(
             ctx.global_style().visuals.panel_fill,
-            styles::color::bg::VALUE.light_egui
+            styles::color::background::VALUE.light_egui
         );
         assert_eq!(
             ctx.style_of(egui::Theme::Light).spacing.button_padding,
@@ -48,6 +48,30 @@ mod style_tests {
                 styles::spacing::button_padding_x::EGUI_POINTS,
                 styles::spacing::button_padding_y::EGUI_POINTS,
             )
+        );
+    }
+
+    #[test]
+    fn alpha_color_tokens_preserve_native_treatments() {
+        assert_eq!(
+            styles::color::error_container::VALUE.light_egui,
+            styles::color::error::VALUE.light_egui.gamma_multiply(0.05)
+        );
+        assert_eq!(
+            styles::color::error_container::VALUE.dark_egui,
+            styles::color::error::VALUE.dark_egui.gamma_multiply(0.05)
+        );
+        assert_eq!(
+            styles::color::error_variant::VALUE.light_egui,
+            styles::color::error::VALUE.light_egui.gamma_multiply(0.30)
+        );
+        assert_eq!(
+            styles::color::error_variant::VALUE.dark_egui,
+            styles::color::error::VALUE.dark_egui.gamma_multiply(0.30)
+        );
+        assert_eq!(
+            styles::color::shadow::VALUE.light_egui,
+            egui::Color32::from_black_alpha(20)
         );
     }
 
