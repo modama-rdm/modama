@@ -5,7 +5,7 @@ use modama_agent_gui::{app::AgentGuiApp, styles};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1024., 1024.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1024.0, 768.0]),
         ..Default::default()
     };
 
