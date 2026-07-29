@@ -1,8 +1,7 @@
 use std::error::Error;
 
 use eframe::egui;
-
-use crate::app::AgentGuiApp;
+use modama_agent_gui::app::AgentGuiApp;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = eframe::NativeOptions {

@@ -1,227 +1,63 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
-use eframe::egui::{
-    self, text::LayoutJob, vec2, FontFamily, FontId, Label, Margin, RichText, Spacing, TextEdit,
-    TextFormat,
-};
+use eframe::egui::{self, vec2, Margin, Spacing};
 
 use crate::{
-    buttons::action_button,
-    state::{ActiveSession, AgentAppState, AgentGuiState},
+    actions::Action,
+    pages::{
+        Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
+    },
+    state::AgentAppState,
 };
 
 pub struct AgentGuiApp {
-    state: Arc<Mutex<AgentAppState>>,
+    pub page: Page,
+    pub app_state: AgentAppState,
+}
+
+impl Default for AgentGuiApp {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AgentGuiApp {
     pub fn new() -> Self {
-        let state = Arc::new(Mutex::new(AgentAppState::new()));
-        let state_clone = Arc::clone(&state);
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(500));
-            #[allow(clippy::unwrap_used)]
-            let mut s = state_clone.lock().unwrap();
-            s.gui_state = AgentGuiState::Overview {};
-        });
-        Self { state }
-    }
-
-    fn render_login(
-        &mut self,
-        ui: &mut egui::Ui,
-        frame: &mut eframe::Frame,
-        username: &str,
-        password: &str,
-    ) -> Option<AgentGuiState> {
-        ui.add(Label::new(RichText::new("Login").size(25.0).strong()));
-        let new_u = ui
-            .horizontal(|ui| {
-                ui.label("Username:");
-                let mut username = username.to_owned();
-                ui.text_edit_singleline(&mut username);
-                username
-            })
-            .inner;
-        let new_p = ui
-            .horizontal(|ui| {
-                ui.label("Password:");
-                let mut password = password.to_owned();
-                ui.add(TextEdit::singleline(&mut password).password(true));
-                password
-            })
-            .inner;
-        let login_btn = action_button("Login");
-        if ui.add(login_btn).clicked() {
-            // TODO: dispatch login request to background thread when clicking on the login button,
-            // and wait for it to succeed/fail
-            return Some(AgentGuiState::SessionSelectProject {
-                selected_project: None,
-            });
+        Self {
+            page: Page::Connecting(PageConnecting::new()),
+            app_state: AgentAppState::new(),
         }
-        Some(AgentGuiState::Login {
-            username: new_u,
-            password: new_p,
-        })
     }
 
-    fn render_select_project(
-        &mut self,
-        ui: &mut egui::Ui,
-        frame: &mut eframe::Frame,
-        selected_project: &Option<String>,
-    ) -> Option<AgentGuiState> {
-        ui.add(Label::new(
-            RichText::new("Select a project").size(25.0).strong(),
-        ));
-        // TODO: scrollable area for project list (as it can become long)
-        let project_names = vec!["Project 1", "Project 2", "Project 3", "Project 4"];
-        let mut new_state = None;
-        for name in project_names {
-            let checked = Some(name) == selected_project.as_ref().map(|s| s.as_ref());
-            if ui.selectable_label(checked, name).clicked() {
-                if checked {
-                    new_state = Some(AgentGuiState::SessionSelectProject {
-                        selected_project: None,
-                    });
+    pub fn handle_action(&mut self, action: Action) {
+        match action {
+            Action::None => {}
+            Action::GoToLogin => {
+                self.page = Page::Login(PageLogin::new());
+            }
+            Action::CreateSession => {
+                if self.app_state.creds.is_some() {
+                    self.page = Page::SelectProject(PageSelectProject::new());
                 } else {
-                    new_state = Some(AgentGuiState::SessionSelectProject {
-                        selected_project: Some(name.to_owned()),
-                    })
+                    self.page = Page::Login(PageLogin::new());
                 }
             }
-        }
-
-        let enabled = selected_project.is_some();
-
-        if ui
-            .add_enabled(enabled, action_button("Select Project"))
-            .clicked()
-        {
-            // TODO: dispatch action to fetch sessions in project?
-            if let Some(project_name) = selected_project {
-                new_state = Some(AgentGuiState::SelectCreateSession {
-                    project: project_name.clone(),
-                    selected_session: None,
-                    new_session_input: "".to_owned(),
-                });
+            Action::LoginSuccess { creds } => {
+                self.app_state.creds = Some(creds);
+                self.page = Page::SelectProject(PageSelectProject::new());
+            }
+            Action::GoToSelectProject => {
+                self.page = Page::SelectProject(PageSelectProject::new());
+            }
+            Action::SelectProject { project } => {
+                self.page = Page::SelectCreateSession(PageSelectCreateSession::new(project));
+            }
+            Action::SelectSession { session } => {
+                self.app_state.session = Some(session);
+                self.page = Page::Overview(PageOverview::new());
+            }
+            Action::GoToOverview => {
+                self.page = Page::Overview(PageOverview::new());
             }
         }
-
-        new_state
-    }
-
-    fn render_select_create_session(
-        &mut self,
-        ui: &mut egui::Ui,
-        frame: &mut eframe::Frame,
-        selected_project: &str,
-        selected_session: &Option<String>,
-        new_session_input: &str,
-    ) -> Option<AgentGuiState> {
-        ui.add(Label::new(
-            RichText::new(format!(
-                "Select or create a session in project '{selected_project}'"
-            ))
-            .size(25.0)
-            .strong(),
-        ));
-
-        // TODO: scrollable area for session list (as it can become long)
-        let project_names = vec![
-            "2026-06-16-holo-stacks",
-            "2026-06-18-holo-stacks",
-            "2026-06-20-holo-stacks",
-            "2026-06-26-holo-stacks",
-        ];
-        let mut new_state = None;
-        for name in project_names {
-            let name_is_selected = Some(name) == selected_session.as_ref().map(|s| s.as_ref());
-            if ui.selectable_label(name_is_selected, name).clicked() {
-                // toggle selection:
-                if name_is_selected {
-                    new_state = Some(AgentGuiState::SelectCreateSession {
-                        project: selected_project.to_owned(),
-                        selected_session: None,
-                        new_session_input: new_session_input.to_owned(),
-                    });
-                } else {
-                    new_state = Some(AgentGuiState::SelectCreateSession {
-                        project: selected_project.to_owned(),
-                        selected_session: Some(name.to_owned()),
-                        new_session_input: new_session_input.to_owned(),
-                    })
-                }
-            }
-        }
-
-        let enabled = selected_session.is_some();
-        if ui
-            .add_enabled(enabled, action_button("Select Session"))
-            .clicked()
-        {
-            // TODO: dispatch action to fetch sessions in project?
-            if let Some(session_name) = selected_session {
-                todo!("dispatch fetch, update the active session in the state etc.");
-            }
-        }
-
-        new_state
-    }
-
-    fn render_overview(
-        &mut self,
-        ui: &mut egui::Ui,
-        frame: &mut eframe::Frame,
-        session: &Option<ActiveSession>,
-    ) -> Option<AgentGuiState> {
-        ui.add(Label::new(RichText::new("Overview").size(25.0).strong()));
-        if let Some(session) = session {
-            // FIXME: use bold instead of italics (include ttf files in the repo)
-            let mut job = LayoutJob::default();
-            job.append("Active session ", 0.0, TextFormat::default());
-            job.append(
-                &session.session,
-                0.0,
-                TextFormat {
-                    font_id: FontId::new(14.0, FontFamily::Proportional),
-                    italics: true,
-                    ..Default::default()
-                },
-            );
-            job.append(" in project ", 0.0, TextFormat::default());
-            job.append(
-                &session.project,
-                0.0,
-                TextFormat {
-                    font_id: FontId::new(14.0, FontFamily::Proportional),
-                    italics: true,
-                    ..Default::default()
-                },
-            );
-            ui.add(Label::new(job));
-        };
-
-        let mut new_state = None;
-
-        if ui.add(action_button("Create Session")).clicked() {
-            new_state = Some(AgentGuiState::Login {
-                username: "".to_owned(),
-                password: "".to_owned(),
-            });
-        }
-
-        new_state
-    }
-
-    fn render_connecting(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        ui.vertical_centered(|ui| {
-            ui.spinner();
-            ui.label("Connecting to modama...");
-        });
     }
 }
 
@@ -244,7 +80,10 @@ impl eframe::App for AgentGuiApp {
             button_padding: vec2(H, V),
             ..Default::default()
         };
-        let state = Arc::clone(&self.state);
+
+        // Poll current page for async completions
+        let poll_action = self.page.poll();
+        self.handle_action(poll_action);
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.add(
@@ -252,46 +91,36 @@ impl eframe::App for AgentGuiApp {
                     .max_width(256.0),
             );
             egui::Frame::default().inner_margin(27.0).show(ui, |ui| {
-                // as we borrow from the locked state here, we can't
-                // replace it in the render_* functions, so instead
-                // these functions return a new state, or None if the current state should be kept.
-                let new_state = {
-                    #[allow(clippy::expect_used)]
-                    let state_here = &state.lock().expect("lock");
-                    match &state_here.gui_state {
-                        AgentGuiState::Connecting => {
-                            self.render_connecting(ui, frame);
-                            None
-                        }
-                        AgentGuiState::Overview {} => {
-                            self.render_overview(ui, frame, &state_here.session)
-                        }
-                        AgentGuiState::Login { username, password } => {
-                            self.render_login(ui, frame, username, password)
-                        }
-                        AgentGuiState::SessionSelectProject { selected_project } => {
-                            self.render_select_project(ui, frame, selected_project)
-                        }
-                        AgentGuiState::SelectCreateSession {
-                            project,
-                            selected_session,
-                            new_session_input,
-                        } => self.render_select_create_session(
-                            ui,
-                            frame,
-                            project,
-                            selected_session,
-                            new_session_input,
-                        ),
-                    }
-                };
-
-                if let Some(new_state) = new_state {
-                    #[allow(clippy::expect_used)]
-                    let mut state_locked = state.lock().expect("lock");
-                    state_locked.gui_state = new_state;
-                }
+                let ui_action = self.page.ui(ui, frame, &self.app_state.session);
+                self.handle_action(ui_action);
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::Credentials;
+
+    #[test]
+    fn test_create_session_action_logged_out() {
+        let mut app = AgentGuiApp::new();
+        assert!(app.app_state.creds.is_none());
+
+        app.handle_action(Action::CreateSession);
+        assert!(matches!(app.page, Page::Login(_)));
+    }
+
+    #[test]
+    fn test_create_session_action_logged_in() {
+        let mut app = AgentGuiApp::new();
+        app.app_state.creds = Some(Credentials {
+            username: "user".to_string(),
+            password: "pass".to_string(),
+        });
+
+        app.handle_action(Action::CreateSession);
+        assert!(matches!(app.page, Page::SelectProject(_)));
     }
 }
