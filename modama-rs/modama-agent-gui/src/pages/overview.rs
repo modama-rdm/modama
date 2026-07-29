@@ -44,7 +44,26 @@ impl PageOverview {
             ui.add(Label::new(job));
         }
 
-        if ui.add(primary_button("Create Session", ui)).clicked() {
+        let mut create_session_clicked = false;
+        styles::card_frame(ui.visuals()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(Label::new(
+                RichText::new("Start an ingest session")
+                    .font(styles::typography::login_title::font_id()),
+            ));
+            ui.add(Label::new(
+                RichText::new(
+                    "Choose a project and session to open an ingest share for incoming data on \
+                     this agent.",
+                )
+                .font(styles::typography::body::font_id())
+                .color(styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals())),
+            ));
+            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+            create_session_clicked = ui.add(primary_button("Create Session", ui)).clicked();
+        });
+
+        if create_session_clicked {
             return Action::CreateSession;
         }
 
