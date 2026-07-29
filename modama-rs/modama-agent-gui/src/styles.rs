@@ -28,36 +28,15 @@ pub mod font {
         FontFamily::Name(name.into())
     }
 
-    pub fn body() -> FontId {
-        FontId::new(14.0, family(SANS_REGULAR_FAMILY))
-    }
-
-    pub fn label() -> FontId {
-        FontId::new(14.0, family(SANS_SEMIBOLD_FAMILY))
-    }
-
-    pub fn button() -> FontId {
-        FontId::new(14.0, family(SANS_SEMIBOLD_FAMILY))
-    }
-
-    pub fn heading() -> FontId {
-        FontId::new(22.0, family(SANS_BOLD_FAMILY))
-    }
-
-    pub fn login_title() -> FontId {
-        FontId::new(18.0, family(SANS_BOLD_FAMILY))
-    }
-
-    pub fn login_subtitle() -> FontId {
-        FontId::new(13.0, family(SANS_REGULAR_FAMILY))
-    }
-
-    pub fn mono() -> FontId {
-        FontId::new(14.0, family(MONO_REGULAR_FAMILY))
-    }
-
-    pub fn mono_medium() -> FontId {
-        FontId::new(14.0, family(MONO_MEDIUM_FAMILY))
+    pub fn from_token(token: Typography) -> FontId {
+        FontId::new(
+            token.font_size.map(token_to_px).unwrap_or(14.0),
+            family(
+                token
+                    .native_font_family
+                    .expect("typography tokens used by egui require nativeFontFamily"),
+            ),
+        )
     }
 
     /// Install the static design-spec font faces and map egui's default text
@@ -105,10 +84,18 @@ pub mod font {
         }
         ctx.set_fonts(fonts);
         ctx.all_styles_mut(|style| {
-            style.text_styles.insert(TextStyle::Body, body());
-            style.text_styles.insert(TextStyle::Button, button());
-            style.text_styles.insert(TextStyle::Heading, heading());
-            style.text_styles.insert(TextStyle::Monospace, mono());
+            style
+                .text_styles
+                .insert(TextStyle::Body, from_token(typography::body));
+            style
+                .text_styles
+                .insert(TextStyle::Button, from_token(typography::button));
+            style
+                .text_styles
+                .insert(TextStyle::Heading, from_token(typography::heading));
+            style
+                .text_styles
+                .insert(TextStyle::Monospace, from_token(typography::mono));
         });
     }
 }
@@ -126,6 +113,12 @@ pub mod theme {
         let dark = visuals(true);
         ctx.set_visuals_of(egui::Theme::Light, light);
         ctx.set_visuals_of(egui::Theme::Dark, dark);
+        ctx.all_styles_mut(|style| {
+            style.spacing.button_padding = egui::vec2(
+                token_to_px(spacing::button_padding_x),
+                token_to_px(spacing::button_padding_y),
+            );
+        });
         ctx.set_theme(egui::Theme::Light);
     }
 

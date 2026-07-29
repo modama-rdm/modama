@@ -41,6 +41,16 @@ mod style_tests {
         assert_eq!(styles::shapes::radius_2xl.value, 1.0);
         assert_eq!(styles::shapes::radius_2xl.unit, "rem");
         assert_eq!(styles::typography::sans.weights, &[400, 500, 600, 700]);
+        assert_eq!(
+            styles::typography::heading.native_font_family,
+            Some("Plus Jakarta Sans Bold")
+        );
+        assert_eq!(styles::typography::heading.font_weight, Some(700));
+        assert_eq!(styles::typography::button.font_weight, Some(600));
+        assert_eq!(
+            styles::typography::mono_medium.native_font_family,
+            Some("JetBrains Mono Medium")
+        );
     }
 
     #[test]
@@ -64,6 +74,13 @@ mod style_tests {
             ctx.global_style().visuals.strong_text_color(),
             styles::color::fg.light_egui
         );
+        assert_eq!(
+            ctx.style_of(egui::Theme::Light).spacing.button_padding,
+            egui::vec2(
+                styles::token_to_px(styles::spacing::button_padding_x),
+                styles::token_to_px(styles::spacing::button_padding_y),
+            )
+        );
 
         ctx.set_theme(egui::Theme::Dark);
         assert_eq!(
@@ -73,6 +90,13 @@ mod style_tests {
         assert_eq!(
             ctx.global_style().visuals.window_fill,
             styles::color::surface.dark_egui
+        );
+        assert_eq!(
+            ctx.style_of(egui::Theme::Dark).spacing.button_padding,
+            egui::vec2(
+                styles::token_to_px(styles::spacing::button_padding_x),
+                styles::token_to_px(styles::spacing::button_padding_y),
+            )
         );
     }
 
@@ -84,31 +108,32 @@ mod style_tests {
         let style = ctx.global_style();
         assert_eq!(
             style.text_styles[&egui::TextStyle::Body],
-            styles::font::body()
+            styles::font::from_token(styles::typography::body)
         );
         assert_eq!(
             style.text_styles[&egui::TextStyle::Button],
-            styles::font::button()
+            styles::font::from_token(styles::typography::button)
         );
         assert_eq!(
             style.text_styles[&egui::TextStyle::Heading],
-            styles::font::heading()
+            styles::font::from_token(styles::typography::heading)
         );
         assert_eq!(
             style.text_styles[&egui::TextStyle::Monospace],
-            styles::font::mono()
+            styles::font::from_token(styles::typography::mono)
         );
 
         let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         for font_id in [
-            styles::font::body(),
-            styles::font::label(),
-            styles::font::button(),
-            styles::font::heading(),
-            styles::font::login_title(),
-            styles::font::login_subtitle(),
-            styles::font::mono(),
-            styles::font::mono_medium(),
+            styles::font::from_token(styles::typography::body),
+            styles::font::from_token(styles::typography::navigation),
+            styles::font::from_token(styles::typography::label),
+            styles::font::from_token(styles::typography::button),
+            styles::font::from_token(styles::typography::heading),
+            styles::font::from_token(styles::typography::login_title),
+            styles::font::from_token(styles::typography::login_subtitle),
+            styles::font::from_token(styles::typography::mono),
+            styles::font::from_token(styles::typography::mono_medium),
         ] {
             ctx.fonts_mut(|fonts| assert!(fonts.fonts.font(&font_id.family).has_glyphs("A")));
         }

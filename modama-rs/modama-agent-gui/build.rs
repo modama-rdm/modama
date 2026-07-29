@@ -112,6 +112,7 @@ pub struct StringToken(pub &'static str);
 #[derive(Debug, PartialEq)]
 pub struct Typography {
     pub font_family: Option<&'static str>,
+    pub native_font_family: Option<&'static str>,
     pub font_size: Option<Dimension>,
     pub font_weight: Option<u16>,
     pub line_height: Option<StringToken>,
@@ -288,6 +289,7 @@ fn generate_typography(output: &mut String, value: Option<&Value>) -> Result<(),
         };
         let identifier = unique_identifier(name, &mut identifiers);
         let font_family = optional_string(properties, "fontFamily");
+        let native_font_family = optional_string(properties, "nativeFontFamily");
         let font_size = optional_dimension(properties, "fontSize");
         let font_weight = optional_number(properties, "fontWeight").map(|number| number as u16);
         let line_height = optional_string_token(properties, "lineHeight");
@@ -306,7 +308,7 @@ fn generate_typography(output: &mut String, value: Option<&Value>) -> Result<(),
             .unwrap_or_default();
 
         output.push_str(&format!(
-            "    pub const {identifier}: Typography = Typography {{ font_family: {font_family}, font_size: {font_size}, font_weight: {:?}, line_height: {line_height}, letter_spacing: {letter_spacing}, font_feature: {font_feature}, font_variation: {font_variation}, weights: &[{}] }};\n",
+            "    pub const {identifier}: Typography = Typography {{ font_family: {font_family}, native_font_family: {native_font_family}, font_size: {font_size}, font_weight: {:?}, line_height: {line_height}, letter_spacing: {letter_spacing}, font_feature: {font_feature}, font_variation: {font_variation}, weights: &[{}] }};\n",
             font_weight,
             weights.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
         ));

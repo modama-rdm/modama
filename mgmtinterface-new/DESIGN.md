@@ -42,10 +42,39 @@ typography:
   sans:
     fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
     weights: [400, 500, 600, 700]
+  body:
+    fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    nativeFontFamily: "Plus Jakarta Sans Regular"
+    fontSize: 0.875rem
+    fontWeight: 400
+  navigation:
+    fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    nativeFontFamily: "Plus Jakarta Sans Medium"
+    fontSize: 0.875rem
+    fontWeight: 500
+  label:
+    fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    nativeFontFamily: "Plus Jakarta Sans SemiBold"
+    fontSize: 0.875rem
+    fontWeight: 600
+  button:
+    fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    nativeFontFamily: "Plus Jakarta Sans SemiBold"
+    fontSize: 0.875rem
+    fontWeight: 600
+  heading:
+    fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    nativeFontFamily: "Plus Jakarta Sans Bold"
+    fontSize: 1.375rem
+    fontWeight: 700
   login-title:
+    fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    nativeFontFamily: "Plus Jakarta Sans Bold"
     fontSize: 1.125rem
     fontWeight: 700
   login-subtitle:
+    fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    nativeFontFamily: "Plus Jakarta Sans Regular"
     fontSize: 0.8125rem
     fontWeight: 400
   login-logo:
@@ -53,7 +82,15 @@ typography:
     fontWeight: 400
   mono:
     fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace"
+    nativeFontFamily: "JetBrains Mono Regular"
+    fontSize: 0.875rem
+    fontWeight: 400
     weights: [400, 500]
+  mono-medium:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace"
+    nativeFontFamily: "JetBrains Mono Medium"
+    fontSize: 0.875rem
+    fontWeight: 500
 
 spacing:
   unit: 4px

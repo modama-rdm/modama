@@ -72,10 +72,6 @@ impl eframe::App for AgentGuiApp {
                 top: styles::spacing(4) as i8,
                 bottom: styles::spacing(4) as i8,
             },
-            button_padding: vec2(
-                styles::token_to_px(styles::spacing::button_padding_x),
-                styles::token_to_px(styles::spacing::button_padding_y),
-            ),
             ..Default::default()
         };
 

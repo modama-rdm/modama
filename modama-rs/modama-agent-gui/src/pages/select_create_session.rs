@@ -2,7 +2,7 @@ use eframe::egui::{self, Label, RichText};
 use std::time::Duration;
 
 use crate::{
-    actions::Action, async_state::AsyncState, buttons::action_button, state::ActiveSession, styles,
+    actions::Action, async_state::AsyncState, buttons::primary_button, state::ActiveSession, styles,
 };
 
 #[derive(Debug, Clone)]
@@ -55,19 +55,26 @@ impl PageSelectCreateSession {
                 "Select or create a session in project '{}'",
                 self.project
             ))
-            .font(styles::font::heading()),
+            .font(styles::font::from_token(styles::typography::heading)),
         ));
 
         if self.sessions_task.is_pending() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(RichText::new("Fetching sessions...").font(styles::font::body()));
+                ui.label(
+                    RichText::new("Fetching sessions...")
+                        .font(styles::font::from_token(styles::typography::body)),
+                );
             });
         } else {
             for name in &self.available_sessions {
                 let is_selected = Some(name.as_str()) == self.selected_session.as_deref();
                 if ui
-                    .selectable_label(is_selected, RichText::new(name).font(styles::font::mono()))
+                    .selectable_label(
+                        is_selected,
+                        RichText::new(name)
+                            .font(styles::font::from_token(styles::typography::mono)),
+                    )
                     .clicked()
                 {
                     if is_selected {
@@ -80,7 +87,7 @@ impl PageSelectCreateSession {
 
             let enabled = self.selected_session.is_some();
             if ui
-                .add_enabled(enabled, action_button("Select Session", ui))
+                .add_enabled(enabled, primary_button("Select Session", ui))
                 .clicked()
             {
                 if let Some(session_name) = &self.selected_session {

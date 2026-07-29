@@ -2,7 +2,7 @@ use eframe::egui::{self, RichText, TextEdit};
 use std::time::Duration;
 
 use crate::{
-    actions::Action, async_state::AsyncState, buttons::action_button, state::Credentials, styles,
+    actions::Action, async_state::AsyncState, buttons::primary_button, state::Credentials, styles,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,10 +51,6 @@ impl PageLogin {
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ui.ctx(), |ui| {
                 ui.set_max_width(styles::spacing(12) * 10.0);
-                ui.style_mut().spacing.button_padding = egui::vec2(
-                    styles::token_to_px(styles::spacing::button_padding_x),
-                    styles::token_to_px(styles::spacing::button_padding_y),
-                );
                 let frame = styles::card_frame(
                     ui.visuals(),
                     egui::Margin::symmetric(
@@ -81,13 +77,15 @@ impl PageLogin {
                             ui.add_space(styles::token_to_px(styles::spacing::header_title_gap));
                             ui.label(
                                 RichText::new("Data Management")
-                                    .font(styles::font::login_title())
+                                    .font(styles::font::from_token(styles::typography::login_title))
                                     .color(styles::color::fg.resolve_egui(ui.visuals())),
                             );
                             ui.add_space(styles::token_to_px(styles::spacing::header_subtitle_gap));
                             ui.label(
                                 RichText::new("Ingest Agent")
-                                    .font(styles::font::login_subtitle())
+                                    .font(styles::font::from_token(
+                                        styles::typography::login_subtitle,
+                                    ))
                                     .color(styles::color::fg_subtle.resolve_egui(ui.visuals())),
                             );
                         });
@@ -98,7 +96,8 @@ impl PageLogin {
                                 ui.set_width(ui.available_width());
                                 ui.colored_label(
                                     styles::color::danger.resolve_egui(ui.visuals()),
-                                    RichText::new(error).font(styles::font::body()),
+                                    RichText::new(error)
+                                        .font(styles::font::from_token(styles::typography::body)),
                                 );
                             });
                             ui.add_space(styles::spacing(7));
@@ -110,13 +109,13 @@ impl PageLogin {
                             ui.vertical(|ui| {
                                 ui.label(
                                     RichText::new("Username")
-                                        .font(styles::font::label())
+                                        .font(styles::font::from_token(styles::typography::label))
                                         .color(styles::color::fg_muted.resolve_egui(ui.visuals())),
                                 );
                                 ui.add_space(styles::token_to_px(styles::spacing::field_label_gap));
                                 let response = ui.add(
                                     TextEdit::singleline(&mut self.username)
-                                        .font(styles::font::body())
+                                        .font(styles::font::from_token(styles::typography::body))
                                         .frame(styles::input_frame(
                                             ui.visuals(),
                                             egui::Margin::symmetric(
@@ -140,13 +139,13 @@ impl PageLogin {
                             ui.vertical(|ui| {
                                 ui.label(
                                     RichText::new("Password")
-                                        .font(styles::font::label())
+                                        .font(styles::font::from_token(styles::typography::label))
                                         .color(styles::color::fg_muted.resolve_egui(ui.visuals())),
                                 );
                                 ui.add_space(styles::token_to_px(styles::spacing::field_label_gap));
                                 let response = ui.add(
                                     TextEdit::singleline(&mut self.password)
-                                        .font(styles::font::body())
+                                        .font(styles::font::from_token(styles::typography::body))
                                         .password(true)
                                         .frame(styles::input_frame(
                                             ui.visuals(),
@@ -171,14 +170,15 @@ impl PageLogin {
                             ui.horizontal(|ui| {
                                 ui.spinner();
                                 ui.label(
-                                    RichText::new("Authenticating...").font(styles::font::body()),
+                                    RichText::new("Authenticating...")
+                                        .font(styles::font::from_token(styles::typography::body)),
                                 );
                             });
                         } else {
                             ui.add_space(styles::token_to_px(styles::spacing::form_field_gap));
                             ui.add_space(styles::token_to_px(styles::spacing::button_margin_top));
                             ui.vertical_centered(|ui| {
-                                let login_btn = action_button("Sign in", ui)
+                                let login_btn = primary_button("Sign in", ui)
                                     .min_size(egui::vec2(ui.available_width(), 0.0));
                                 let response = ui.add(login_btn);
                                 styles::paint_focus_ring(ui, &response);

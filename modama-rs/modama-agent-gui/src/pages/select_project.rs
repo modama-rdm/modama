@@ -1,7 +1,7 @@
 use eframe::egui::{self, Label, RichText};
 use std::time::Duration;
 
-use crate::{actions::Action, async_state::AsyncState, buttons::action_button, styles};
+use crate::{actions::Action, async_state::AsyncState, buttons::primary_button, styles};
 
 #[derive(Debug, Clone)]
 pub struct FetchProjectsRequest;
@@ -47,19 +47,27 @@ impl PageSelectProject {
         }
 
         ui.add(Label::new(
-            RichText::new("Select a project").font(styles::font::heading()),
+            RichText::new("Select a project")
+                .font(styles::font::from_token(styles::typography::heading)),
         ));
 
         if self.projects_task.is_pending() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(RichText::new("Fetching projects...").font(styles::font::body()));
+                ui.label(
+                    RichText::new("Fetching projects...")
+                        .font(styles::font::from_token(styles::typography::body)),
+                );
             });
         } else {
             for name in &self.available_projects {
                 let checked = Some(name.as_str()) == self.selected_project.as_deref();
                 if ui
-                    .selectable_label(checked, RichText::new(name).font(styles::font::mono()))
+                    .selectable_label(
+                        checked,
+                        RichText::new(name)
+                            .font(styles::font::from_token(styles::typography::mono)),
+                    )
                     .clicked()
                 {
                     if checked {
@@ -72,7 +80,7 @@ impl PageSelectProject {
 
             let enabled = self.selected_project.is_some();
             if ui
-                .add_enabled(enabled, action_button("Select Project", ui))
+                .add_enabled(enabled, primary_button("Select Project", ui))
                 .clicked()
             {
                 if let Some(project) = &self.selected_project {

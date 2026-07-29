@@ -1,6 +1,6 @@
 use eframe::egui::{self, text::LayoutJob, Label, RichText, TextFormat};
 
-use crate::{actions::Action, buttons::action_button, state::ActiveSession, styles};
+use crate::{actions::Action, buttons::primary_button, state::ActiveSession, styles};
 
 pub struct PageOverview;
 
@@ -22,7 +22,7 @@ impl PageOverview {
         session: &Option<ActiveSession>,
     ) -> Action {
         ui.add(Label::new(
-            RichText::new("Overview").font(styles::font::heading()),
+            RichText::new("Overview").font(styles::font::from_token(styles::typography::heading)),
         ));
 
         if let Some(session) = session {
@@ -32,7 +32,7 @@ impl PageOverview {
                 &session.session,
                 0.0,
                 TextFormat {
-                    font_id: styles::font::mono_medium(),
+                    font_id: styles::font::from_token(styles::typography::mono_medium),
                     ..Default::default()
                 },
             );
@@ -41,14 +41,14 @@ impl PageOverview {
                 &session.project,
                 0.0,
                 TextFormat {
-                    font_id: styles::font::mono_medium(),
+                    font_id: styles::font::from_token(styles::typography::mono_medium),
                     ..Default::default()
                 },
             );
             ui.add(Label::new(job));
         }
 
-        if ui.add(action_button("Create Session", ui)).clicked() {
+        if ui.add(primary_button("Create Session", ui)).clicked() {
             return Action::CreateSession;
         }
 
