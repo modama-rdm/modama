@@ -53,3 +53,8 @@
     - [ ] check if design tokens are "abused" and need either to be copied to a different name (component-specific maybe?) or might need to be renamed to be more generic
 - [ ] add a little decorating bottom bar like in react?
 - [ ] BUG: logging out does not close the ingest share. in logged out state, the active ingest share must be shown anyways
+- [ ] once versioned axum is feasible, 
+    - [ ] update modama-agent local API to have versioned endpoints and schemas
+    - [ ] auto-generate a rust client for it
+    - [ ] have the GUI use that client
+    - [ ] mock the API for the GUI tests? 
