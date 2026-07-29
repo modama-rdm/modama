@@ -65,12 +65,15 @@ impl AgentGuiApp {
 impl eframe::App for AgentGuiApp {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, frame: &mut eframe::Frame) {
         ui.style_mut().spacing = Spacing {
-            item_spacing: vec2(styles::spacing(3), styles::spacing(4)),
+            item_spacing: vec2(
+                styles::spacing::SCALE[3] * styles::spacing::UNIT_EGUI_POINTS,
+                styles::spacing::SCALE[4] * styles::spacing::UNIT_EGUI_POINTS,
+            ),
             window_margin: Margin {
-                left: styles::spacing(3) as i8,
-                right: styles::spacing(3) as i8,
-                top: styles::spacing(4) as i8,
-                bottom: styles::spacing(4) as i8,
+                left: (styles::spacing::SCALE[3] * styles::spacing::UNIT_EGUI_POINTS) as i8,
+                right: (styles::spacing::SCALE[3] * styles::spacing::UNIT_EGUI_POINTS) as i8,
+                top: (styles::spacing::SCALE[4] * styles::spacing::UNIT_EGUI_POINTS) as i8,
+                bottom: (styles::spacing::SCALE[4] * styles::spacing::UNIT_EGUI_POINTS) as i8,
             },
             ..Default::default()
         };
@@ -86,7 +89,7 @@ impl eframe::App for AgentGuiApp {
             } else {
                 ui.add(
                     egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
-                        .tint(styles::color::fg.resolve_egui(ui.visuals()))
+                        .tint(styles::color::fg::VALUE.resolve_egui(ui.visuals()))
                         .max_width(256.0),
                 );
                 egui::Frame::default().inner_margin(27.0).show(ui, |ui| {

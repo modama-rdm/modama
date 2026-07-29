@@ -97,36 +97,6 @@ impl ThemeColor {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Dimension {
-    pub value: f32,
-    pub unit: &'static str,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Number(pub f32);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StringToken(pub &'static str);
-
-#[derive(Debug, PartialEq)]
-pub struct Typography {
-    pub font_family: Option<&'static str>,
-    pub native_font_family: Option<&'static str>,
-    pub font_size: Option<Dimension>,
-    pub font_weight: Option<u16>,
-    pub line_height: Option<StringToken>,
-    pub letter_spacing: Option<Dimension>,
-    pub font_feature: Option<&'static str>,
-    pub font_variation: Option<&'static str>,
-    pub weights: &'static [u16],
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Component {
-    pub properties: &'static [(&'static str, &'static str)],
-}
-
 "#,
     );
 
@@ -169,13 +139,12 @@ fn generate_colors(output: &mut String, value: Option<&Value>) -> Result<(), Str
         let light_value = scalar_string(mapping_value(light, name).unwrap_or(&Value::Null));
         let dark_value = scalar_string(mapping_value(dark, name).unwrap_or(&Value::Null));
         let identifier = unique_identifier(name, &mut identifiers);
-        let light_egui = color_literal(name, "light", &light_value);
-        let dark_egui = color_literal(name, "dark", &dark_value);
-        let (Some(light_egui), Some(dark_egui)) = (light_egui, dark_egui) else {
-            continue;
-        };
+        let light_egui = color_literal(&light_value)
+            .ok_or_else(|| format!("colors.light.{name} is not representable by egui"))?;
+        let dark_egui = color_literal(&dark_value)
+            .ok_or_else(|| format!("colors.dark.{name} is not representable by egui"))?;
         output.push_str(&format!(
-            "    pub const {identifier}: ThemeColor = ThemeColor::new({:?}, {:?}, {light_egui}, {dark_egui});\n",
+            "    pub mod {identifier} {{\n        use super::ThemeColor;\n        pub const VALUE: ThemeColor = ThemeColor::new({:?}, {:?}, {light_egui}, {dark_egui});\n    }}\n",
             light_value,
             dark_value,
         ));
@@ -191,7 +160,7 @@ fn generate_scalar_group(
     support_legacy_scale: bool,
 ) -> Result<(), String> {
     output.push_str(&format!(
-        "#[allow(non_upper_case_globals, unused_imports)]\npub mod {module_name} {{\n    use super::{{Dimension, Number, StringToken}};\n\n"
+        "#[allow(non_upper_case_globals, unused_imports)]\npub mod {module_name} {{\n"
     ));
     let Some(Value::Mapping(values)) = value else {
         output.push_str("}\n\n");
@@ -202,8 +171,8 @@ fn generate_scalar_group(
         if let Some(unit) = mapping_value(values, "unit").and_then(Value::as_str) {
             if let Some(dimension) = parse_dimension(unit) {
                 output.push_str(&format!(
-                    "    pub const unit: Dimension = Dimension {{ value: {:?}, unit: {:?} }};\n",
-                    dimension.value, dimension.unit
+                    "    pub const UNIT_EGUI_POINTS: f32 = {:?};\n",
+                    dimension_to_egui_points(dimension)
                 ));
             }
         }
@@ -216,7 +185,7 @@ fn generate_scalar_group(
                     .map(|dimension| dimension.value)
                     .ok_or_else(|| "spacing unit must be a supported dimension".to_owned())?;
                 output.push_str(&format!(
-                    "    pub const scale: &[f32] = &[{}];\n",
+                    "    pub const SCALE: &[f32] = &[{}];\n",
                     numbers
                         .iter()
                         .map(|number| format!("{number:?}"))
@@ -246,10 +215,7 @@ fn generate_scalar_group(
                             "spacing scale is missing the token value for {name}"
                         ));
                     };
-                    output.push_str(&format!(
-                        "    pub const {name}: Dimension = Dimension {{ value: {:?}, unit: unit.unit }};\n",
-                        numbers[index] * unit_value
-                    ));
+                    emit_dimension_module(output, name, numbers[index] * unit_value);
                 }
             }
         }
@@ -264,16 +230,14 @@ fn generate_scalar_group(
             continue;
         }
         let identifier = unique_identifier(name, &mut identifiers);
-        output.push_str(&scalar_constant(identifier, value)?);
+        emit_scalar_module(output, &identifier, value)?;
     }
     output.push_str("}\n\n");
     Ok(())
 }
 
 fn generate_typography(output: &mut String, value: Option<&Value>) -> Result<(), String> {
-    output.push_str(
-        "#[allow(non_upper_case_globals, unused_imports)]\npub mod typography {\n    use super::{Dimension, StringToken, Typography};\n\n",
-    );
+    output.push_str("#[allow(non_upper_case_globals, unused_imports)]\npub mod typography {\n");
     let Some(Value::Mapping(values)) = value else {
         output.push_str("}\n\n");
         return Ok(());
@@ -288,39 +252,63 @@ fn generate_typography(output: &mut String, value: Option<&Value>) -> Result<(),
             return Err(format!("typography token {name} must be a mapping"));
         };
         let identifier = unique_identifier(name, &mut identifiers);
-        let font_family = optional_string(properties, "fontFamily");
-        let native_font_family = optional_string(properties, "nativeFontFamily");
-        let font_size = optional_dimension(properties, "fontSize");
-        let font_weight = optional_number(properties, "fontWeight").map(|number| number as u16);
-        let line_height = optional_string_token(properties, "lineHeight");
-        let letter_spacing = optional_dimension(properties, "letterSpacing");
-        let font_feature = optional_string(properties, "fontFeature");
-        let font_variation = optional_string(properties, "fontVariation");
-        let weights = mapping_value(properties, "weights")
-            .and_then(Value::as_sequence)
-            .map(|values| {
-                values
+        output.push_str(&format!("    pub mod {identifier} {{\n"));
+        emit_optional_string_property(output, properties, "fontFamily", "FONT_FAMILY", name)?;
+        emit_optional_string_property(
+            output,
+            properties,
+            "nativeFontFamily",
+            "NATIVE_FONT_FAMILY",
+            name,
+        )?;
+        emit_optional_dimension_property(output, properties, "fontSize", "FONT_SIZE", name)?;
+        emit_optional_number_property(output, properties, "fontWeight", "FONT_WEIGHT", name)?;
+        emit_optional_string_property(output, properties, "lineHeight", "LINE_HEIGHT", name)?;
+        emit_optional_dimension_property(
+            output,
+            properties,
+            "letterSpacing",
+            "LETTER_SPACING",
+            name,
+        )?;
+        emit_optional_string_property(output, properties, "fontFeature", "FONT_FEATURE", name)?;
+        emit_optional_string_property(output, properties, "fontVariation", "FONT_VARIATION", name)?;
+        if mapping_value(properties, "fontSize").is_some()
+            && mapping_value(properties, "nativeFontFamily").is_some()
+        {
+            output.push_str(
+                "        pub fn font_id() -> eframe::egui::FontId {\n            eframe::egui::FontId::new(FONT_SIZE, eframe::egui::FontFamily::Name(NATIVE_FONT_FAMILY.into()))\n        }\n",
+            );
+        }
+        if let Some(weights) = mapping_value(properties, "weights") {
+            let values = weights.as_sequence().ok_or_else(|| {
+                format!("typography.{name}.weights must be a sequence of numeric weights")
+            })?;
+            let weights = values
+                .iter()
+                .map(|value| {
+                    number_value(value)
+                        .map(|value| value as u16)
+                        .ok_or_else(|| format!("typography.{name}.weights contains a non-number"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            output.push_str(&format!(
+                "        pub const WEIGHTS: &[u16] = &[{}];\n",
+                weights
                     .iter()
-                    .filter_map(number_value)
-                    .map(|value| value as u16)
+                    .map(ToString::to_string)
                     .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        output.push_str(&format!(
-            "    pub const {identifier}: Typography = Typography {{ font_family: {font_family}, native_font_family: {native_font_family}, font_size: {font_size}, font_weight: {:?}, line_height: {line_height}, letter_spacing: {letter_spacing}, font_feature: {font_feature}, font_variation: {font_variation}, weights: &[{}] }};\n",
-            font_weight,
-            weights.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
-        ));
+                    .join(", ")
+            ));
+        }
+        output.push_str("    }\n");
     }
     output.push_str("}\n\n");
     Ok(())
 }
 
 fn generate_components(output: &mut String, value: Option<&Value>) -> Result<(), String> {
-    output.push_str(
-        "#[allow(non_upper_case_globals, unused_imports)]\npub mod components {\n    use super::Component;\n\n",
-    );
+    output.push_str("#[allow(non_upper_case_globals, unused_imports)]\npub mod components {\n");
     let Some(Value::Mapping(values)) = value else {
         output.push_str("}\n\n");
         return Ok(());
@@ -335,36 +323,116 @@ fn generate_components(output: &mut String, value: Option<&Value>) -> Result<(),
             return Err(format!("component {name} must be a mapping"));
         };
         let identifier = unique_identifier(name, &mut identifiers);
-        let properties = properties
-            .iter()
-            .filter_map(|(key, value)| key.as_str().map(|key| (key, scalar_string(value))))
-            .map(|(key, value)| format!("({key:?}, {value:?})"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        output.push_str(&format!(
-            "    pub const {identifier}: Component = Component {{ properties: &[{properties}] }};\n"
-        ));
+        output.push_str(&format!("    pub mod {identifier} {{\n"));
+        let mut property_identifiers = BTreeSet::new();
+        for (key, value) in properties {
+            let Some(key) = key.as_str() else {
+                return Err(format!("components.{name} has a non-string property name"));
+            };
+            emit_scalar_module(
+                output,
+                &unique_identifier(key, &mut property_identifiers),
+                value,
+            )?;
+        }
+        output.push_str("    }\n");
     }
     output.push_str("}\n\n");
     Ok(())
 }
 
-fn scalar_constant(identifier: String, value: &Value) -> Result<String, String> {
+fn emit_dimension_module(output: &mut String, identifier: &str, points: f32) {
+    output.push_str(&format!(
+        "    pub mod {identifier} {{\n        pub const EGUI_POINTS: f32 = {points:?};\n    }}\n"
+    ));
+}
+
+fn emit_scalar_module(output: &mut String, identifier: &str, value: &Value) -> Result<(), String> {
     if let Some(dimension) = value.as_str().and_then(parse_dimension) {
-        return Ok(format!(
-            "    pub const {identifier}: Dimension = Dimension {{ value: {:?}, unit: {:?} }};\n",
-            dimension.value, dimension.unit
-        ));
+        emit_dimension_module(output, identifier, dimension_to_egui_points(dimension));
+        return Ok(());
     }
     if let Some(number) = number_value(value) {
-        return Ok(format!(
-            "    pub const {identifier}: Number = Number({number:?});\n"
+        output.push_str(&format!(
+            "    pub mod {identifier} {{\n        pub const VALUE: f32 = {number:?};\n    }}\n"
         ));
+        return Ok(());
     }
-    Ok(format!(
-        "    pub const {identifier}: StringToken = StringToken({:?});\n",
-        scalar_string(value)
+    if value.is_string() {
+        output.push_str(&format!(
+            "    pub mod {identifier} {{\n        pub const VALUE: &str = {:?};\n    }}\n",
+            scalar_string(value)
+        ));
+        return Ok(());
+    }
+    Err(format!(
+        "{identifier} must be a dimension, number, or string"
     ))
+}
+
+fn emit_optional_string_property(
+    output: &mut String,
+    properties: &serde_yaml::Mapping,
+    yaml_name: &str,
+    rust_name: &str,
+    token_name: &str,
+) -> Result<(), String> {
+    let Some(value) = mapping_value(properties, yaml_name) else {
+        return Ok(());
+    };
+    let value = value
+        .as_str()
+        .ok_or_else(|| format!("typography.{token_name}.{yaml_name} must be a string"))?;
+    output.push_str(&format!(
+        "        pub const {rust_name}: &str = {value:?};\n"
+    ));
+    Ok(())
+}
+
+fn emit_optional_dimension_property(
+    output: &mut String,
+    properties: &serde_yaml::Mapping,
+    yaml_name: &str,
+    rust_name: &str,
+    token_name: &str,
+) -> Result<(), String> {
+    let Some(value) = mapping_value(properties, yaml_name) else {
+        return Ok(());
+    };
+    let value = value.as_str().and_then(parse_dimension).ok_or_else(|| {
+        format!("typography.{token_name}.{yaml_name} must be a px, rem, or em dimension")
+    })?;
+    output.push_str(&format!(
+        "        pub const {rust_name}: f32 = {:?};\n",
+        dimension_to_egui_points(value)
+    ));
+    Ok(())
+}
+
+fn emit_optional_number_property(
+    output: &mut String,
+    properties: &serde_yaml::Mapping,
+    yaml_name: &str,
+    rust_name: &str,
+    token_name: &str,
+) -> Result<(), String> {
+    let Some(value) = mapping_value(properties, yaml_name) else {
+        return Ok(());
+    };
+    let value = number_value(value)
+        .ok_or_else(|| format!("typography.{token_name}.{yaml_name} must be a number"))?;
+    output.push_str(&format!(
+        "        pub const {rust_name}: u16 = {}u16;\n",
+        value as u16
+    ));
+    Ok(())
+}
+
+fn dimension_to_egui_points(dimension: Dimension) -> f32 {
+    match dimension.unit {
+        "rem" | "em" => dimension.value * 16.0,
+        _ => dimension.value,
+    }
 }
 
 fn mapping<'a>(value: &'a serde_yaml::Mapping, key: &str) -> Option<&'a serde_yaml::Mapping> {
@@ -388,36 +456,6 @@ fn scalar_string(value: &Value) -> String {
             .trim()
             .to_owned(),
     }
-}
-
-fn optional_string(value: &serde_yaml::Mapping, key: &str) -> String {
-    mapping_value(value, key)
-        .and_then(Value::as_str)
-        .map(|value| format!("Some({value:?})"))
-        .unwrap_or_else(|| "None".to_owned())
-}
-
-fn optional_string_token(value: &serde_yaml::Mapping, key: &str) -> String {
-    mapping_value(value, key)
-        .map(|value| format!("Some(StringToken({:?}))", scalar_string(value)))
-        .unwrap_or_else(|| "None".to_owned())
-}
-
-fn optional_dimension(value: &serde_yaml::Mapping, key: &str) -> String {
-    mapping_value(value, key)
-        .and_then(Value::as_str)
-        .and_then(parse_dimension)
-        .map(|dimension| {
-            format!(
-                "Some(Dimension {{ value: {:?}, unit: {:?} }})",
-                dimension.value, dimension.unit
-            )
-        })
-        .unwrap_or_else(|| "None".to_owned())
-}
-
-fn optional_number(value: &serde_yaml::Mapping, key: &str) -> Option<f32> {
-    mapping_value(value, key).and_then(number_value)
 }
 
 fn number_value(value: &Value) -> Option<f32> {
@@ -445,17 +483,12 @@ fn parse_dimension(value: &str) -> Option<Dimension> {
     })
 }
 
-fn color_literal(name: &str, mode: &str, value: &str) -> Option<String> {
+fn color_literal(value: &str) -> Option<String> {
     parse_color(value).map(|color| {
         format!(
             "eframe::egui::Color32::from_rgba_unmultiplied_const({}, {}, {}, {})",
             color.0, color.1, color.2, color.3
         )
-    }).or_else(|| {
-        println!(
-            "cargo:warning=unrepresentable CSS color for colors.{name} ({mode}): {value}; token omitted"
-        );
-        None
     })
 }
 

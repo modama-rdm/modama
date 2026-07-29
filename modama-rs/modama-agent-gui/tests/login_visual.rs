@@ -5,6 +5,7 @@ use modama_agent_gui::{
     pages::{Page, PageLogin},
     styles,
 };
+use std::sync::{Arc, Barrier};
 
 const VIEWPORT: egui::Vec2 = egui::vec2(1024.0, 1024.0);
 
@@ -62,6 +63,26 @@ fn login_snapshots() {
     error.run();
     error.snapshot("login_full_width_error");
     results.extend_harness(&mut error);
+
+    let mut pending = login_harness(false);
+    let release = Arc::new(Barrier::new(2));
+    let task_release = Arc::clone(&release);
+    let ctx = pending.ctx.clone();
+    if let Page::Login(login) = &mut pending.state_mut().page {
+        login.username = "representative.user".to_string();
+        login.password = "representative-password".to_string();
+        login.login_task.spawn(
+            move || {
+                task_release.wait();
+                Err("pending login snapshot complete".to_string())
+            },
+            ctx,
+        );
+    }
+    pending.run_steps(1);
+    pending.snapshot("login_pending");
+    results.extend_harness(&mut pending);
+    release.wait();
 
     results.unwrap();
 }

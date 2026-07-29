@@ -47,16 +47,14 @@ impl PageSelectProject {
         }
 
         ui.add(Label::new(
-            RichText::new("Select a project")
-                .font(styles::font::from_token(styles::typography::heading)),
+            RichText::new("Select a project").font(styles::typography::heading::font_id()),
         ));
 
         if self.projects_task.is_pending() {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label(
-                    RichText::new("Fetching projects...")
-                        .font(styles::font::from_token(styles::typography::body)),
+                    RichText::new("Fetching projects...").font(styles::typography::body::font_id()),
                 );
             });
         } else {
@@ -65,8 +63,7 @@ impl PageSelectProject {
                 if ui
                     .selectable_label(
                         checked,
-                        RichText::new(name)
-                            .font(styles::font::from_token(styles::typography::mono)),
+                        RichText::new(name).font(styles::typography::mono::font_id()),
                     )
                     .clicked()
                 {

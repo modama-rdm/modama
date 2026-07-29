@@ -55,15 +55,14 @@ impl PageSelectCreateSession {
                 "Select or create a session in project '{}'",
                 self.project
             ))
-            .font(styles::font::from_token(styles::typography::heading)),
+            .font(styles::typography::heading::font_id()),
         ));
 
         if self.sessions_task.is_pending() {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label(
-                    RichText::new("Fetching sessions...")
-                        .font(styles::font::from_token(styles::typography::body)),
+                    RichText::new("Fetching sessions...").font(styles::typography::body::font_id()),
                 );
             });
         } else {
@@ -72,8 +71,7 @@ impl PageSelectCreateSession {
                 if ui
                     .selectable_label(
                         is_selected,
-                        RichText::new(name)
-                            .font(styles::font::from_token(styles::typography::mono)),
+                        RichText::new(name).font(styles::typography::mono::font_id()),
                     )
                     .clicked()
                 {
