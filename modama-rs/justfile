@@ -9,11 +9,8 @@ visual-tests:
 # Update committed visual-test golden PNGs.
 update-goldens:
     UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests --test {{ login_visual_test }}
+    oxipng -o max --strip safe {{ snapshot_dir }}/*.png
 
 # Remove generated visual-test review artifacts.
-clean-golden-clutter:
+clean-clutter:
     find {{ snapshot_dir }} -maxdepth 1 -type f \( -name '*.new.png' -o -name '*.diff.png' -o -name '*.old.png' \) -delete
-
-# Recompress committed visual-test golden PNGs with oxipng's maximum preset.
-crush-goldens:
-    oxipng -o max --strip safe {{ snapshot_dir }}/*.png

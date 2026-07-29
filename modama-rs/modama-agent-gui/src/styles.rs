@@ -151,6 +151,6 @@ pub fn danger_frame(visuals: &egui::Visuals) -> Frame {
     Frame::new()
         .fill(danger.gamma_multiply(0.05))
         .stroke(Stroke::new(1.0_f32, danger.gamma_multiply(0.30)))
-        .corner_radius(radius(shapes::radius_lg))
+        .corner_radius(radius(shapes::radius_xl))
         .inner_margin(Margin::symmetric(14, 12))
 }
