@@ -49,18 +49,24 @@ fn button_text_color(visuals: &egui::Visuals, variant: ButtonVariant) -> Color32
 
 /// Construct a button using one of the semantic design-system variants.
 pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> DesignButton<'a> {
+    let text = RichText::new(label)
+        .font(styles::typography::button::font_id())
+        .color(button_text_color(ui.visuals(), variant));
+    DesignButton::new(button_inner(text, ui, variant))
+}
+
+fn button_inner<'a>(
+    content: impl egui::IntoAtoms<'a>,
+    ui: &egui::Ui,
+    variant: ButtonVariant,
+) -> egui::Button<'a> {
     let visuals = ui.visuals();
     let radius = styles::radius(styles::rounded::lg::EGUI_POINTS);
-    let text_color = button_text_color(visuals, variant);
-    let button = egui::Button::new(
-        RichText::new(label)
-            .font(styles::typography::button::font_id())
-            .color(text_color),
-    )
-    .corner_radius(radius)
-    .min_size(egui::Vec2::ZERO);
+    let button = egui::Button::new(content)
+        .corner_radius(radius)
+        .min_size(egui::Vec2::ZERO);
 
-    let inner = match variant {
+    match variant {
         // Primary buttons use the application widget visuals, which provide the
         // documented primary-to-primary-hover transition.
         ButtonVariant::Primary => button,
@@ -82,8 +88,7 @@ pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> Desi
                 styles::components::standard_border::width::EGUI_POINTS,
                 styles::color::error_variant::VALUE.resolve_egui(visuals),
             )),
-    };
-    DesignButton::new(inner)
+    }
 }
 
 pub fn primary_button<'a>(label: &'a str, ui: &egui::Ui) -> DesignButton<'a> {
@@ -98,30 +103,30 @@ pub fn loading_button(
     variant: ButtonVariant,
 ) -> egui::Response {
     let spinner_size = styles::typography::button::FONT_SIZE;
-    let label_width = ui
-        .painter()
-        .layout_no_wrap(
-            label.to_owned(),
-            styles::typography::button::font_id(),
-            Color32::TRANSPARENT,
-        )
-        .rect
-        .width();
     let gap = styles::spacing::field_label_gap::EGUI_POINTS;
-    let content_width = spinner_size + gap + label_width;
-    let minimum_content_width =
-        content_width + 2.0 * styles::spacing::button_padding_x::EGUI_POINTS;
-    let min_size = egui::vec2(min_size.x.max(minimum_content_width), min_size.y);
-    let response = ui.add_enabled(false, button(label, ui, variant).min_size(min_size));
-    let spinner_center =
-        response.rect.center() - egui::vec2(label_width / 2.0 + gap + spinner_size / 2.0, 0.0);
-    let spinner_rect =
-        egui::Rect::from_center_size(spinner_center, egui::vec2(spinner_size, spinner_size));
-    egui::Spinner::new()
-        .size(spinner_size)
-        .color(button_text_color(ui.visuals(), variant).gamma_multiply(ui.visuals().disabled_alpha))
-        .paint_at(ui, spinner_rect);
-    response
+    let spinner_id = ui.next_auto_id().with("loading-spinner");
+    let spinner_atom = egui::Atom::custom(spinner_id, egui::Vec2::splat(spinner_size));
+    let text = RichText::new(label)
+        .font(styles::typography::button::font_id())
+        .color(button_text_color(ui.visuals(), variant));
+    let button = button_inner((spinner_atom, text), ui, variant)
+        .gap(gap)
+        .min_size(min_size);
+
+    ui.add_enabled_ui(false, |ui| {
+        let response = button.atom_ui(ui);
+        if let Some(spinner_rect) = response.rect(spinner_id) {
+            egui::Spinner::new()
+                .size(spinner_size)
+                .color(
+                    button_text_color(ui.visuals(), variant)
+                        .gamma_multiply(ui.visuals().disabled_alpha),
+                )
+                .paint_at(ui, spinner_rect);
+        }
+        response.response
+    })
+    .inner
 }
 
 /// Render a disabled primary button with an in-button loading indicator.
