@@ -19,6 +19,18 @@ pub enum AgentIdentity {
     },
 }
 
+impl AgentIdentity {
+    pub fn format(&self) -> String {
+        match self {
+            AgentIdentity::Anonymous { hostname } => format!("modama-agent @ {hostname}"),
+            AgentIdentity::AgentId {
+                agent_name,
+                resource_name,
+            } => format!("modama-agent {agent_name} on {resource_name}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Credentials {
     pub username: String,

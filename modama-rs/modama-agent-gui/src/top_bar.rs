@@ -5,7 +5,8 @@ use eframe::egui::{self, Align, Color32, FontFamily, FontId, Layout, RichText, S
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    buttons::{primary_button, secondary_button},
+    buttons::{primary_button, secondary_button, DesignButton},
+    state::AgentIdentity,
     styles,
 };
 
@@ -37,6 +38,7 @@ impl TopBar {
         &mut self,
         parent: &mut egui::Ui,
         username: Option<&str>,
+        agent_identity: &Option<AgentIdentity>,
         page_busy: bool,
         show_login_action: bool,
     ) -> Action {
@@ -53,7 +55,8 @@ impl TopBar {
 
         panel
             .show_inside(parent, |ui| {
-                let action = self.content(ui, username, page_busy, show_login_action);
+                let action =
+                    self.content(ui, username, agent_identity, page_busy, show_login_action);
                 let border = styles::color::outline::VALUE.resolve_egui(ui.visuals());
                 ui.painter().hline(
                     ui.max_rect().x_range(),
@@ -73,6 +76,7 @@ impl TopBar {
         &mut self,
         ui: &mut egui::Ui,
         username: Option<&str>,
+        agent_identity: &Option<AgentIdentity>,
         page_busy: bool,
         show_login_action: bool,
     ) -> Action {
@@ -86,16 +90,15 @@ impl TopBar {
                     let logo = egui::Button::image(
                         egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
                             .tint(styles::color::on_surface::VALUE.resolve_egui(ui.visuals()))
-                            .alt_text("modama — go to Overview")
+                            .alt_text("go to Overview")
                             .max_height(styles::components::top_bar_logo::height::EGUI_POINTS),
                     )
                     .frame(false)
                     .corner_radius(styles::radius(styles::rounded::lg::EGUI_POINTS));
-                    ui.add_enabled(!navigation_busy, logo)
+                    ui.add_enabled(!navigation_busy, DesignButton::new(logo))
                 })
                 .inner
                 .on_hover_text("Go to Overview");
-            styles::paint_focus_ring(ui, &logo_response);
             if logo_response.clicked() {
                 action = Action::GoToOverview;
             }
@@ -107,9 +110,14 @@ impl TopBar {
             );
             ui.add_space(styles::components::top_bar_brand_gap::size::EGUI_POINTS);
             ui.label(
-                RichText::new("Data Management Ingest Agent")
-                    .font(styles::typography::login_subtitle::font_id())
-                    .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
+                RichText::new(
+                    agent_identity
+                        .as_ref()
+                        .map(|i| i.format())
+                        .unwrap_or_else(|| "Ingest Agent".to_owned()),
+                )
+                .font(styles::typography::login_subtitle::font_id())
+                .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
             );
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -125,7 +133,6 @@ impl TopBar {
                             ui,
                         ),
                     );
-                    styles::paint_focus_ring(ui, &response);
                     if response.clicked() {
                         self.logout_task.spawn(
                             || std::thread::sleep(Duration::from_millis(500)),
@@ -158,7 +165,6 @@ impl TopBar {
                     ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
                 } else if show_login_action {
                     let response = ui.add_enabled(!navigation_busy, primary_button("Log in", ui));
-                    styles::paint_focus_ring(ui, &response);
                     if response.clicked() {
                         action = Action::GoToLogin;
                     }
@@ -208,7 +214,7 @@ fn theme_button(ui: &mut egui::Ui) {
     let response = ui
         .scope(|ui| {
             compact_button_spacing(ui);
-            ui.add(
+            ui.add(DesignButton::new(
                 egui::Button::new(
                     RichText::new(icon)
                         .font(FontId::new(
@@ -223,12 +229,11 @@ fn theme_button(ui: &mut egui::Ui) {
                 .min_size(egui::Vec2::splat(
                     styles::components::top_bar_control::size::EGUI_POINTS,
                 )),
-            )
+            ))
         })
         .inner
         .on_hover_text(tooltip);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tooltip));
-    styles::paint_focus_ring(ui, &response);
     if response.clicked() {
         ui.ctx().set_theme(if dark {
             egui::Theme::Light

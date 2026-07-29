@@ -103,9 +103,13 @@ impl eframe::App for AgentGuiApp {
             .map(|credentials| credentials.username.clone());
         let page_busy = self.page.is_busy();
         let show_login_action = !matches!(self.page, Page::Login(_));
-        let action =
-            self.top_bar
-                .show_inside(ui, username.as_deref(), page_busy, show_login_action);
+        let action = self.top_bar.show_inside(
+            ui,
+            username.as_deref(),
+            &self.app_state.identity,
+            page_busy,
+            show_login_action,
+        );
         self.handle_action(action);
 
         egui::CentralPanel::default().show_inside(ui, |ui| {

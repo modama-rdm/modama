@@ -1,0 +1,43 @@
+# TODO
+
+- [x] include agent information in the top bar
+    - [x] agent name + resource
+    - [x] or hostname for anonymous?
+- [ ] overview page
+    - [ ] actions styling: card with a lil description plus button?
+        - [ ] similar to the react ui
+    - [ ] add "close session" action
+        - [ ] currently mutually exclusive to create session
+            - create session button not visible when we have active ingest share
+        - [ ] only visible if there is a current ingest share
+        - [ ] similar to the react ui
+    - [ ] put information about current ingest share into card
+        - [ ] include mount path for the current agent
+- [ ] select project page
+    - [ ] more realistic test data for project list: 20+ projects
+    - [ ] design; show more info
+        - [ ] design similar to react ui
+        - [ ] show members (avatars?)
+        - [ ] show last modified
+    - [ ] search (prioritize substring, but switch to fuzzy if no match)
+    - [ ] scrollable?
+- [ ] select or create session
+    - [ ] styling for the session list
+        - [ ] `ScrollArea.vertical().max_height(...)` maybe?
+    - [ ] implement the "create new session" form
+        - [ ] text input pre-filled with iso date prefix "YYYY-MM-DD-"
+        - [ ] like login form, enter submits form, button submits form
+    - [ ] add a decision "switch" UI to either pick existing session, or show a "create new session" form
+        - [ ] have the first item in the session list be a placeholder "create new" item
+- [ ] keyboard ux: logical "tab indexes" (top-left to bottom-right-ish)
+    - [ ] shortcuts where they are missing
+        - [ ] Ctrl+N (or platform's equivalent) for creating new items
+        - [ ] escape to cancel?
+            - [ ] login -> overview
+            - [ ] select project -> overview
+            - [ ] select/create session -> maybe go back to project selection?
+            - [ ] any missing combinations/states?
+    - [ ] focus on the most likely element
+        - [ ] login: first form input
+        - [ ] overview: "create session" button, or "close session" if one is active
+        - [ ] what else?

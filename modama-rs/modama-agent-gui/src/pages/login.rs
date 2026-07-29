@@ -79,24 +79,32 @@ impl PageLogin {
             ui.add_space(styles::spacing::login_error_gap::EGUI_POINTS);
         }
 
-        self.show_fields(ui, is_logging_in);
-        self.show_submit(ui, is_logging_in);
+        let submit_from_input = self.show_fields(ui, is_logging_in);
+        self.show_submit(ui, is_logging_in, submit_from_input);
     }
 
-    fn show_fields(&mut self, ui: &mut egui::Ui, is_logging_in: bool) {
-        ui.add_enabled_ui(!is_logging_in, |ui| {
-            ui.style_mut().spacing.item_spacing.y = 0.0;
-            labeled_text_input(ui, "Username", TextEdit::singleline(&mut self.username));
-            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-            labeled_text_input(
-                ui,
-                "Password",
-                TextEdit::singleline(&mut self.password).password(true),
-            );
-        });
+    fn show_fields(&mut self, ui: &mut egui::Ui, is_logging_in: bool) -> bool {
+        let lost_focus = ui
+            .add_enabled_ui(!is_logging_in, |ui| {
+                ui.style_mut().spacing.item_spacing.y = 0.0;
+                let user_lost_focus =
+                    labeled_text_input(ui, "Username", TextEdit::singleline(&mut self.username))
+                        .lost_focus();
+                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+                let pw_lost_focus = labeled_text_input(
+                    ui,
+                    "Password",
+                    TextEdit::singleline(&mut self.password).password(true),
+                )
+                .lost_focus();
+                user_lost_focus || pw_lost_focus
+            })
+            .inner;
+        let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
+        !is_logging_in && enter_pressed && lost_focus
     }
 
-    fn show_submit(&mut self, ui: &mut egui::Ui, is_logging_in: bool) {
+    fn show_submit(&mut self, ui: &mut egui::Ui, is_logging_in: bool, submit_from_input: bool) {
         ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
         ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
         ui.vertical_centered(|ui| {
@@ -106,10 +114,7 @@ impl PageLogin {
             } else {
                 ui.add(primary_button("Sign in", ui).min_size(button_size))
             };
-            if !is_logging_in {
-                styles::paint_focus_ring(ui, &response);
-            }
-            if response.clicked() {
+            if response.clicked() || submit_from_input {
                 self.start_login(ui.ctx().clone());
             }
         });

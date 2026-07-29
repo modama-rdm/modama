@@ -2,6 +2,32 @@ use eframe::egui::{self, Color32, RichText, Stroke};
 
 use crate::styles;
 
+/// An application button that owns its focus-ring behavior.
+pub struct DesignButton<'a> {
+    inner: egui::Button<'a>,
+}
+
+impl<'a> DesignButton<'a> {
+    pub fn new(inner: egui::Button<'a>) -> Self {
+        Self { inner }
+    }
+
+    pub fn min_size(mut self, min_size: egui::Vec2) -> Self {
+        self.inner = self.inner.min_size(min_size);
+        self
+    }
+}
+
+impl egui::Widget for DesignButton<'_> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let response = ui.add(self.inner);
+        if response.enabled() {
+            styles::paint_focus_ring(ui, &response);
+        }
+        response
+    }
+}
+
 /// Visual treatments defined by the shared data-management UI specification.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonVariant {
@@ -13,7 +39,7 @@ pub enum ButtonVariant {
 }
 
 /// Construct a button using one of the semantic design-system variants.
-pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> egui::Button<'a> {
+pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> DesignButton<'a> {
     let visuals = ui.visuals();
     let radius = styles::radius(styles::rounded::lg::EGUI_POINTS);
     let text_color = match variant {
@@ -30,7 +56,7 @@ pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> egui
     .corner_radius(radius)
     .min_size(egui::Vec2::ZERO);
 
-    match variant {
+    let inner = match variant {
         // Primary buttons use the application widget visuals, which provide the
         // documented primary-to-primary-hover transition.
         ButtonVariant::Primary => button,
@@ -52,10 +78,11 @@ pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> egui
                 styles::components::standard_border::width::EGUI_POINTS,
                 styles::color::error_variant::VALUE.resolve_egui(visuals),
             )),
-    }
+    };
+    DesignButton::new(inner)
 }
 
-pub fn primary_button<'a>(label: &'a str, ui: &egui::Ui) -> egui::Button<'a> {
+pub fn primary_button<'a>(label: &'a str, ui: &egui::Ui) -> DesignButton<'a> {
     button(label, ui, ButtonVariant::Primary)
 }
 
@@ -92,15 +119,15 @@ pub fn primary_loading_button(
     response
 }
 
-pub fn secondary_button<'a>(label: &'a str, ui: &egui::Ui) -> egui::Button<'a> {
+pub fn secondary_button<'a>(label: &'a str, ui: &egui::Ui) -> DesignButton<'a> {
     button(label, ui, ButtonVariant::Secondary)
 }
 
-pub fn danger_button<'a>(label: &'a str, ui: &egui::Ui) -> egui::Button<'a> {
+pub fn danger_button<'a>(label: &'a str, ui: &egui::Ui) -> DesignButton<'a> {
     button(label, ui, ButtonVariant::Danger)
 }
 
-pub fn danger_outline_button<'a>(label: &'a str, ui: &egui::Ui) -> egui::Button<'a> {
+pub fn danger_outline_button<'a>(label: &'a str, ui: &egui::Ui) -> DesignButton<'a> {
     button(label, ui, ButtonVariant::DangerOutline)
 }
 
