@@ -1,6 +1,4 @@
-use eframe::egui::{
-    self, text::LayoutJob, FontFamily, FontId, Label, RichText, TextFormat,
-};
+use eframe::egui::{self, text::LayoutJob, FontFamily, FontId, Label, RichText, TextFormat};
 
 use crate::{actions::Action, buttons::action_button, state::ActiveSession};
 
@@ -50,7 +48,7 @@ impl PageOverview {
             ui.add(Label::new(job));
         }
 
-        if ui.add(action_button("Create Session")).clicked() {
+        if ui.add(action_button("Create Session", ui)).clicked() {
             return Action::CreateSession;
         }
 

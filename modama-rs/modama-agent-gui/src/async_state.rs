@@ -51,7 +51,10 @@ impl<T: Clone + Send + 'static> AsyncState<T> {
     pub fn poll(&mut self) -> &mut Self {
         match self {
             AsyncState::Idle => {}
-            AsyncState::Pending { handle, cancelled: _ } => {
+            AsyncState::Pending {
+                handle,
+                cancelled: _,
+            } => {
                 if let Some(inner_handle) = handle.take() {
                     if inner_handle.is_finished() {
                         let res = inner_handle.join().unwrap();
@@ -88,7 +91,10 @@ impl<T> Drop for AsyncState<T> {
     fn drop(&mut self) {
         match self {
             AsyncState::Idle => {}
-            AsyncState::Pending { handle: _, cancelled } => {
+            AsyncState::Pending {
+                handle: _,
+                cancelled,
+            } => {
                 cancelled.store(true, Ordering::Relaxed);
             }
             AsyncState::Ready { payload: _ } => {}

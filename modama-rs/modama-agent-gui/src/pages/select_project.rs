@@ -1,5 +1,5 @@
-use std::time::Duration;
 use eframe::egui::{self, Label, RichText};
+use std::time::Duration;
 
 use crate::{actions::Action, async_state::AsyncState, buttons::action_button};
 
@@ -42,10 +42,8 @@ impl PageSelectProject {
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         if matches!(self.projects_task, AsyncState::Idle) && self.available_projects.is_empty() {
             let ctx = ui.ctx().clone();
-            self.projects_task.spawn(
-                move || FetchProjectsRequest.execute(),
-                ctx,
-            );
+            self.projects_task
+                .spawn(move || FetchProjectsRequest.execute(), ctx);
         }
 
         ui.add(Label::new(
@@ -71,7 +69,7 @@ impl PageSelectProject {
 
             let enabled = self.selected_project.is_some();
             if ui
-                .add_enabled(enabled, action_button("Select Project"))
+                .add_enabled(enabled, action_button("Select Project", ui))
                 .clicked()
             {
                 if let Some(project) = &self.selected_project {

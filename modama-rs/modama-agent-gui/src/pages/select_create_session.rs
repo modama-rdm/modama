@@ -1,11 +1,8 @@
-use std::time::Duration;
 use eframe::egui::{self, Label, RichText};
+use std::time::Duration;
 
 use crate::{
-    actions::Action,
-    async_state::AsyncState,
-    buttons::action_button,
-    state::ActiveSession,
+    actions::Action, async_state::AsyncState, buttons::action_button, state::ActiveSession,
 };
 
 #[derive(Debug, Clone)]
@@ -81,7 +78,7 @@ impl PageSelectCreateSession {
 
             let enabled = self.selected_session.is_some();
             if ui
-                .add_enabled(enabled, action_button("Select Session"))
+                .add_enabled(enabled, action_button("Select Session", ui))
                 .clicked()
             {
                 if let Some(session_name) = &self.selected_session {

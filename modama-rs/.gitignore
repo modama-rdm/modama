@@ -1,4 +1,6 @@
 target
+.new.png
+.diff.png
 dev-env/data
 dev-env/certs
 dev-env/etc-smbdrop

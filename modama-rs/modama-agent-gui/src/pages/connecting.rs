@@ -1,5 +1,5 @@
-use std::time::Duration;
 use eframe::egui;
+use std::time::Duration;
 
 use crate::{actions::Action, async_state::AsyncState};
 

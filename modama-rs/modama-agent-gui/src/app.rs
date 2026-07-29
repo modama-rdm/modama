@@ -6,6 +6,7 @@ use crate::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
     },
     state::AgentAppState,
+    styles,
 };
 
 pub struct AgentGuiApp {
@@ -61,23 +62,20 @@ impl AgentGuiApp {
     }
 }
 
-const H: f32 = 15.0;
-const H_I: i8 = 15;
-const V: f32 = 10.0;
-const V_I: i8 = 10;
-
 impl eframe::App for AgentGuiApp {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, frame: &mut eframe::Frame) {
-        ui.style_mut().visuals = egui::Visuals::light();
         ui.style_mut().spacing = Spacing {
-            item_spacing: vec2(H, V),
+            item_spacing: vec2(styles::spacing(3), styles::spacing(4)),
             window_margin: Margin {
-                left: H_I,
-                right: H_I,
-                top: V_I,
-                bottom: V_I,
+                left: styles::spacing(3) as i8,
+                right: styles::spacing(3) as i8,
+                top: styles::spacing(4) as i8,
+                bottom: styles::spacing(4) as i8,
             },
-            button_padding: vec2(H, V),
+            button_padding: vec2(
+                styles::token_to_px(styles::spacing::button_padding_x),
+                styles::token_to_px(styles::spacing::button_padding_y),
+            ),
             ..Default::default()
         };
 
@@ -86,14 +84,20 @@ impl eframe::App for AgentGuiApp {
         self.handle_action(poll_action);
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.add(
-                egui::Image::new(egui::include_image!("../../../branding/modama.svg"))
-                    .max_width(256.0),
-            );
-            egui::Frame::default().inner_margin(27.0).show(ui, |ui| {
+            if matches!(self.page, Page::Login(_)) {
                 let ui_action = self.page.ui(ui, frame, &self.app_state.session);
                 self.handle_action(ui_action);
-            });
+            } else {
+                ui.add(
+                    egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
+                        .tint(styles::color::fg.resolve_egui(ui.visuals()))
+                        .max_width(256.0),
+                );
+                egui::Frame::default().inner_margin(27.0).show(ui, |ui| {
+                    let ui_action = self.page.ui(ui, frame, &self.app_state.session);
+                    self.handle_action(ui_action);
+                });
+            }
         });
     }
 }

@@ -1,11 +1,8 @@
+use eframe::egui::{self, RichText, TextEdit};
 use std::time::Duration;
-use eframe::egui::{self, Label, RichText, TextEdit};
 
 use crate::{
-    actions::Action,
-    async_state::AsyncState,
-    buttons::action_button,
-    state::Credentials,
+    actions::Action, async_state::AsyncState, buttons::action_button, state::Credentials, styles,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +24,7 @@ impl LoginRequest {
 pub struct PageLogin {
     pub username: String,
     pub password: String,
+    pub login_error: Option<String>,
     pub login_task: AsyncState<Result<Credentials, String>>,
 }
 
@@ -41,6 +39,7 @@ impl PageLogin {
         Self {
             username: String::new(),
             password: String::new(),
+            login_error: None,
             login_task: AsyncState::Idle,
         }
     }
@@ -48,37 +47,164 @@ impl PageLogin {
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         let is_logging_in = self.login_task.is_pending();
 
-        ui.add(Label::new(RichText::new("Login").size(25.0).strong()));
+        egui::Area::new(egui::Id::new("login-card"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ui.ctx(), |ui| {
+                ui.set_max_width(styles::spacing(12) * 10.0);
+                ui.style_mut().spacing.button_padding = egui::vec2(
+                    styles::token_to_px(styles::spacing::button_padding_x),
+                    styles::token_to_px(styles::spacing::button_padding_y),
+                );
+                let frame = styles::card_frame(
+                    ui.visuals(),
+                    egui::Margin::symmetric(
+                        styles::token_to_px(styles::spacing::card_padding_x) as i8,
+                        styles::token_to_px(styles::spacing::card_padding_y) as i8,
+                    ),
+                );
+                frame.show(ui, |ui| {
+                    ui.style_mut().spacing.item_spacing.y = 0.0;
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add(
+                                egui::Image::new(egui::include_image!(
+                                    "../../assets/modama-tint.svg"
+                                ))
+                                .tint(styles::color::fg.resolve_egui(ui.visuals()))
+                                .max_height(
+                                    styles::typography::login_logo
+                                        .font_size
+                                        .map(styles::token_to_px)
+                                        .unwrap_or_default(),
+                                ),
+                            );
+                            ui.add_space(styles::token_to_px(styles::spacing::header_title_gap));
+                            ui.label(
+                                RichText::new("Data Management")
+                                    .size(
+                                        styles::typography::login_title
+                                            .font_size
+                                            .map(styles::token_to_px)
+                                            .unwrap_or_default(),
+                                    )
+                                    .strong()
+                                    .color(styles::color::fg.resolve_egui(ui.visuals())),
+                            );
+                            ui.add_space(styles::token_to_px(styles::spacing::header_subtitle_gap));
+                            ui.label(
+                                RichText::new("Ingest Agent")
+                                    .size(
+                                        styles::typography::login_subtitle
+                                            .font_size
+                                            .map(styles::token_to_px)
+                                            .unwrap_or_default(),
+                                    )
+                                    .color(styles::color::fg_subtle.resolve_egui(ui.visuals())),
+                            );
+                        });
+                        ui.add_space(styles::token_to_px(styles::spacing::header_bottom_gap));
 
-        ui.add_enabled_ui(!is_logging_in, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Username:");
-                ui.text_edit_singleline(&mut self.username);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Password:");
-                ui.add(TextEdit::singleline(&mut self.password).password(true));
-            });
-        });
+                        if let Some(error) = &self.login_error {
+                            styles::danger_frame(ui.visuals()).show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.colored_label(
+                                    styles::color::danger.resolve_egui(ui.visuals()),
+                                    error,
+                                );
+                            });
+                            ui.add_space(styles::spacing(7));
+                        }
 
-        if is_logging_in {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Authenticating...");
+                        ui.add_enabled_ui(!is_logging_in, |ui| {
+                            ui.style_mut().spacing.item_spacing.y = 0.0;
+
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new("Username")
+                                        .strong()
+                                        .color(styles::color::fg_muted.resolve_egui(ui.visuals())),
+                                );
+                                ui.add_space(styles::token_to_px(styles::spacing::field_label_gap));
+                                let response = ui.add(
+                                    TextEdit::singleline(&mut self.username)
+                                        .frame(styles::input_frame(
+                                            ui.visuals(),
+                                            egui::Margin::symmetric(
+                                                styles::token_to_px(
+                                                    styles::spacing::input_padding_x,
+                                                )
+                                                    as i8,
+                                                styles::token_to_px(
+                                                    styles::spacing::input_padding_y,
+                                                )
+                                                    as i8,
+                                            ),
+                                        ))
+                                        .desired_width(f32::INFINITY),
+                                );
+                                styles::paint_focus_ring(ui, &response);
+                            });
+
+                            ui.add_space(styles::token_to_px(styles::spacing::form_field_gap));
+
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new("Password")
+                                        .strong()
+                                        .color(styles::color::fg_muted.resolve_egui(ui.visuals())),
+                                );
+                                ui.add_space(styles::token_to_px(styles::spacing::field_label_gap));
+                                let response = ui.add(
+                                    TextEdit::singleline(&mut self.password)
+                                        .password(true)
+                                        .frame(styles::input_frame(
+                                            ui.visuals(),
+                                            egui::Margin::symmetric(
+                                                styles::token_to_px(
+                                                    styles::spacing::input_padding_x,
+                                                )
+                                                    as i8,
+                                                styles::token_to_px(
+                                                    styles::spacing::input_padding_y,
+                                                )
+                                                    as i8,
+                                            ),
+                                        ))
+                                        .desired_width(f32::INFINITY),
+                                );
+                                styles::paint_focus_ring(ui, &response);
+                            });
+                        });
+
+                        if is_logging_in {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label("Authenticating...");
+                            });
+                        } else {
+                            ui.add_space(styles::token_to_px(styles::spacing::form_field_gap));
+                            ui.add_space(styles::token_to_px(styles::spacing::button_margin_top));
+                            ui.vertical_centered(|ui| {
+                                let login_btn = action_button("Sign in", ui)
+                                    .min_size(egui::vec2(ui.available_width(), 0.0));
+                                let response = ui.add(login_btn);
+                                styles::paint_focus_ring(ui, &response);
+                                if response.clicked() {
+                                    self.login_error = None;
+                                    let req = LoginRequest {
+                                        credentials: Credentials {
+                                            username: self.username.clone(),
+                                            password: self.password.clone(),
+                                        },
+                                    };
+                                    let ctx = ui.ctx().clone();
+                                    self.login_task.spawn(move || req.execute(), ctx);
+                                }
+                            });
+                        }
+                    });
+                });
             });
-        } else {
-            let login_btn = action_button("Login");
-            if ui.add(login_btn).clicked() {
-                let req = LoginRequest {
-                    credentials: Credentials {
-                        username: self.username.clone(),
-                        password: self.password.clone(),
-                    },
-                };
-                let ctx = ui.ctx().clone();
-                self.login_task.spawn(move || req.execute(), ctx);
-            }
-        }
 
         Action::None
     }
@@ -88,7 +214,7 @@ impl PageLogin {
             match res {
                 Ok(creds) => return Action::LoginSuccess { creds },
                 Err(_err) => {
-                    // Stay on login page on failure
+                    self.login_error = Some(_err);
                 }
             }
         }
