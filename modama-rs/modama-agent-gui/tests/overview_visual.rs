@@ -25,6 +25,7 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
             app.app_state.session = Some(ActiveSession {
                 project: "representative-project".to_string(),
                 session: "2026-07-29-ingest".to_string(),
+                mount_path: None,
             });
         }
         app

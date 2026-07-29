@@ -66,6 +66,10 @@ impl AgentGuiApp {
                 self.app_state.session = None;
                 self.page = Page::Overview(PageOverview::new());
             }
+            Action::Connected { identity } => {
+                self.page = Page::Overview(PageOverview::new());
+                self.app_state.identity = Some(identity);
+            }
         }
     }
 }
@@ -156,6 +160,7 @@ mod tests {
         app.app_state.session = Some(crate::state::ActiveSession {
             project: "project".to_string(),
             session: "session".to_string(),
+            mount_path: None,
         });
 
         app.handle_action(Action::LogoutSuccess);

@@ -11,10 +11,6 @@ path = "src/bin/modama-agent.rs"
 name = "test-ws-server"
 path = "src/bin/test-ws-server.rs"
 
-[[bin]]
-name = "testnetuse"
-path = "src/bin/testnetuse.rs"
-
 [lib]
 name = "modama_agent"
 path = "src/lib/lib.rs"

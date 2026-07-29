@@ -1,8 +1,9 @@
-use crate::state::{ActiveSession, Credentials};
+use crate::state::{ActiveSession, AgentIdentity, Credentials};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     None,
+    Connected { identity: AgentIdentity },
     GoToLogin,
     CreateSession,
     LoginSuccess { creds: Credentials },

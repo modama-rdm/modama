@@ -2,6 +2,21 @@
 pub struct ActiveSession {
     pub session: String,
     pub project: String,
+    pub mount_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentIdentity {
+    Anonymous {
+        hostname: String,
+    },
+    AgentId {
+        /// A user-readable short description of the data producer, like "DLD"
+        agent_name: String,
+
+        /// A short name of the resouce this agent belongs to, for example "Holo"
+        resource_name: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +35,9 @@ pub struct AgentAppState {
     /// currently active ingest session, None if
     /// there isn't one (or we don't know about it)
     pub session: Option<ActiveSession>,
+
+    /// Agent mTLS identity, should be set once we are connected
+    pub identity: Option<AgentIdentity>,
 }
 
 impl AgentAppState {

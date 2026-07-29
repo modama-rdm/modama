@@ -22,11 +22,30 @@ impl FetchSessionsRequest {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct CreateIngestRequest {
+    pub project: String,
+    pub session: String,
+}
+
+impl CreateIngestRequest {
+    pub fn execute(&self) -> ActiveSession {
+        std::thread::sleep(Duration::from_millis(500));
+
+        ActiveSession {
+            project: self.project.clone(),
+            session: self.session.clone(),
+            mount_path: Some(format!("/todo/{}/{}/", self.project, self.session)),
+        }
+    }
+}
+
 pub struct PageSelectCreateSession {
     pub project: String,
     pub selected_session: Option<String>,
     pub new_session_input: String,
     pub sessions_task: AsyncState<Vec<String>>,
+    pub create_ingest_task: AsyncState<ActiveSession>,
     pub available_sessions: Vec<String>,
 }
 
@@ -38,6 +57,7 @@ impl PageSelectCreateSession {
             new_session_input: String::new(),
             sessions_task: AsyncState::Idle,
             available_sessions: Vec::new(),
+            create_ingest_task: AsyncState::Idle,
         }
     }
 
@@ -89,12 +109,12 @@ impl PageSelectCreateSession {
                 .clicked()
             {
                 if let Some(session_name) = &self.selected_session {
-                    return Action::SelectSession {
-                        session: ActiveSession {
-                            project: self.project.clone(),
-                            session: session_name.clone(),
-                        },
+                    let task = CreateIngestRequest {
+                        project: self.project.clone(),
+                        session: session_name.clone(),
                     };
+                    self.create_ingest_task
+                        .spawn(move || task.execute(), ui.ctx().clone());
                 }
             }
         }
@@ -106,11 +126,17 @@ impl PageSelectCreateSession {
         if let Some(sessions) = self.sessions_task.poll().take_ready() {
             self.available_sessions = sessions;
         }
+        if let Some(active_ingest) = self.create_ingest_task.poll().take_ready() {
+            return Action::SelectSession {
+                session: active_ingest,
+            };
+        }
         Action::None
     }
 
     pub fn is_busy(&self) -> bool {
         self.sessions_task.is_pending()
+            || self.create_ingest_task.is_pending()
             || (matches!(self.sessions_task, AsyncState::Idle)
                 && self.available_sessions.is_empty())
     }
