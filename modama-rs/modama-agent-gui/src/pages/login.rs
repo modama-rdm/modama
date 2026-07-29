@@ -51,7 +51,8 @@ impl PageLogin {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         egui::Area::new(egui::Id::new("login-card"))
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .fixed_pos(ui.max_rect().center())
+            .pivot(egui::Align2::CENTER_CENTER)
             .show(ui.ctx(), |ui| self.show_login_card(ui));
 
         Action::None
@@ -135,6 +136,10 @@ impl PageLogin {
             }
         }
         Action::None
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.login_task.is_pending()
     }
 }
 

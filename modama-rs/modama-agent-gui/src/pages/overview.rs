@@ -26,25 +26,21 @@ impl PageOverview {
         ));
 
         if let Some(session) = session {
+            let prose_format = TextFormat {
+                font_id: styles::typography::body::font_id(),
+                color: styles::color::fg_muted::VALUE.resolve_egui(ui.visuals()),
+                ..Default::default()
+            };
+            let value_format = TextFormat {
+                font_id: styles::typography::mono_medium::font_id(),
+                color: styles::color::fg::VALUE.resolve_egui(ui.visuals()),
+                ..Default::default()
+            };
             let mut job = LayoutJob::default();
-            job.append("Active session ", 0.0, TextFormat::default());
-            job.append(
-                &session.session,
-                0.0,
-                TextFormat {
-                    font_id: styles::typography::mono_medium::font_id(),
-                    ..Default::default()
-                },
-            );
-            job.append(" in project ", 0.0, TextFormat::default());
-            job.append(
-                &session.project,
-                0.0,
-                TextFormat {
-                    font_id: styles::typography::mono_medium::font_id(),
-                    ..Default::default()
-                },
-            );
+            job.append("Active session ", 0.0, prose_format.clone());
+            job.append(&session.session, 0.0, value_format.clone());
+            job.append(" in project ", 0.0, prose_format);
+            job.append(&session.project, 0.0, value_format);
             ui.add(Label::new(job));
         }
 
@@ -57,6 +53,10 @@ impl PageOverview {
 
     pub fn poll(&mut self) -> Action {
         Action::None
+    }
+
+    pub fn is_busy(&self) -> bool {
+        false
     }
 }
 

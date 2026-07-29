@@ -16,6 +16,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
 egui_extras = { version = "0.34.3", features = ["svg"] }
+egui-phosphor = "0.12"
 modama-common = { path = "../modama-common" }
 url = { workspace = true }
 thiserror = { workspace = true }
@@ -32,6 +33,16 @@ csscolorparser = "0.8.3"
 [[test]]
 name = "login_visual"
 path = "tests/login_visual.rs"
+required-features = ["visual-tests"]
+
+[[test]]
+name = "overview_visual"
+path = "tests/overview_visual.rs"
+required-features = ["visual-tests"]
+
+[[test]]
+name = "selection_visual"
+path = "tests/selection_visual.rs"
 required-features = ["visual-tests"]
 
 [lints]

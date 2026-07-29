@@ -108,6 +108,12 @@ impl PageSelectCreateSession {
         }
         Action::None
     }
+
+    pub fn is_busy(&self) -> bool {
+        self.sessions_task.is_pending()
+            || (matches!(self.sessions_task, AsyncState::Idle)
+                && self.available_sessions.is_empty())
+    }
 }
 
 #[cfg(test)]

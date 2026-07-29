@@ -71,6 +71,7 @@ pub mod font {
                 .families
                 .insert(family(family_name), vec![name.to_owned()]);
         }
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         ctx.set_fonts(fonts);
         ctx.all_styles_mut(|style| {
             style

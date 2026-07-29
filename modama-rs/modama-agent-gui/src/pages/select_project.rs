@@ -97,6 +97,12 @@ impl PageSelectProject {
         }
         Action::None
     }
+
+    pub fn is_busy(&self) -> bool {
+        self.projects_task.is_pending()
+            || (matches!(self.projects_task, AsyncState::Idle)
+                && self.available_projects.is_empty())
+    }
 }
 
 #[cfg(test)]

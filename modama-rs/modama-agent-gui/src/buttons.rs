@@ -131,4 +131,21 @@ mod tests {
             ui.add(danger_outline_button("Danger outline", ui));
         });
     }
+
+    #[test]
+    fn primary_button_uses_design_token_padding() {
+        let ctx = egui::Context::default();
+        styles::theme::install(&ctx);
+        let size = std::cell::Cell::new(egui::Vec2::ZERO);
+
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            size.set(ui.add(primary_button("Action", ui)).rect.size());
+        });
+
+        let minimum_height = styles::typography::button::FONT_SIZE
+            + 2.0 * styles::spacing::button_padding_y::EGUI_POINTS
+            - 2.0;
+        assert!(size.get().y >= minimum_height);
+        assert!(size.get().x > 2.0 * styles::spacing::button_padding_x::EGUI_POINTS);
+    }
 }

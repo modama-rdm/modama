@@ -6,6 +6,7 @@ pub(crate) mod components;
 pub mod pages;
 pub mod state;
 pub mod styles;
+mod top_bar;
 
 #[cfg(test)]
 mod color_parser;
@@ -83,5 +84,10 @@ mod style_tests {
         ] {
             ctx.fonts_mut(|fonts| assert!(fonts.fonts.font(&font_id.family).has_glyphs("A")));
         }
+        ctx.fonts_mut(|fonts| {
+            let mut proportional = fonts.fonts.font(&egui::FontFamily::Proportional);
+            assert!(proportional.has_glyphs(egui_phosphor::regular::SUN));
+            assert!(proportional.has_glyphs(egui_phosphor::regular::MOON));
+        });
     }
 }
