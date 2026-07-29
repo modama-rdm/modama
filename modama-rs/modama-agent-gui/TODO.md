@@ -52,3 +52,4 @@
 - [ ] do a focus round on design token usage
     - [ ] check if design tokens are "abused" and need either to be copied to a different name (component-specific maybe?) or might need to be renamed to be more generic
 - [ ] add a little decorating bottom bar like in react?
+- [ ] BUG: logging out does not close the ingest share. in logged out state, the active ingest share must be shown anyways
