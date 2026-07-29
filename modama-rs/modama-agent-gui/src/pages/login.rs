@@ -81,24 +81,13 @@ impl PageLogin {
                             ui.add_space(styles::token_to_px(styles::spacing::header_title_gap));
                             ui.label(
                                 RichText::new("Data Management")
-                                    .size(
-                                        styles::typography::login_title
-                                            .font_size
-                                            .map(styles::token_to_px)
-                                            .unwrap_or_default(),
-                                    )
-                                    .strong()
+                                    .font(styles::font::login_title())
                                     .color(styles::color::fg.resolve_egui(ui.visuals())),
                             );
                             ui.add_space(styles::token_to_px(styles::spacing::header_subtitle_gap));
                             ui.label(
                                 RichText::new("Ingest Agent")
-                                    .size(
-                                        styles::typography::login_subtitle
-                                            .font_size
-                                            .map(styles::token_to_px)
-                                            .unwrap_or_default(),
-                                    )
+                                    .font(styles::font::login_subtitle())
                                     .color(styles::color::fg_subtle.resolve_egui(ui.visuals())),
                             );
                         });
@@ -109,7 +98,7 @@ impl PageLogin {
                                 ui.set_width(ui.available_width());
                                 ui.colored_label(
                                     styles::color::danger.resolve_egui(ui.visuals()),
-                                    error,
+                                    RichText::new(error).font(styles::font::body()),
                                 );
                             });
                             ui.add_space(styles::spacing(7));
@@ -121,12 +110,13 @@ impl PageLogin {
                             ui.vertical(|ui| {
                                 ui.label(
                                     RichText::new("Username")
-                                        .strong()
+                                        .font(styles::font::label())
                                         .color(styles::color::fg_muted.resolve_egui(ui.visuals())),
                                 );
                                 ui.add_space(styles::token_to_px(styles::spacing::field_label_gap));
                                 let response = ui.add(
                                     TextEdit::singleline(&mut self.username)
+                                        .font(styles::font::body())
                                         .frame(styles::input_frame(
                                             ui.visuals(),
                                             egui::Margin::symmetric(
@@ -150,12 +140,13 @@ impl PageLogin {
                             ui.vertical(|ui| {
                                 ui.label(
                                     RichText::new("Password")
-                                        .strong()
+                                        .font(styles::font::label())
                                         .color(styles::color::fg_muted.resolve_egui(ui.visuals())),
                                 );
                                 ui.add_space(styles::token_to_px(styles::spacing::field_label_gap));
                                 let response = ui.add(
                                     TextEdit::singleline(&mut self.password)
+                                        .font(styles::font::body())
                                         .password(true)
                                         .frame(styles::input_frame(
                                             ui.visuals(),
@@ -179,7 +170,9 @@ impl PageLogin {
                         if is_logging_in {
                             ui.horizontal(|ui| {
                                 ui.spinner();
-                                ui.label("Authenticating...");
+                                ui.label(
+                                    RichText::new("Authenticating...").font(styles::font::body()),
+                                );
                             });
                         } else {
                             ui.add_space(styles::token_to_px(styles::spacing::form_field_gap));

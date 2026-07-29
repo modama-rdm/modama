@@ -2,7 +2,7 @@ use eframe::egui::{self, Label, RichText};
 use std::time::Duration;
 
 use crate::{
-    actions::Action, async_state::AsyncState, buttons::action_button, state::ActiveSession,
+    actions::Action, async_state::AsyncState, buttons::action_button, state::ActiveSession, styles,
 };
 
 #[derive(Debug, Clone)]
@@ -55,19 +55,21 @@ impl PageSelectCreateSession {
                 "Select or create a session in project '{}'",
                 self.project
             ))
-            .size(25.0)
-            .strong(),
+            .font(styles::font::heading()),
         ));
 
         if self.sessions_task.is_pending() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("Fetching sessions...");
+                ui.label(RichText::new("Fetching sessions...").font(styles::font::body()));
             });
         } else {
             for name in &self.available_sessions {
                 let is_selected = Some(name.as_str()) == self.selected_session.as_deref();
-                if ui.selectable_label(is_selected, name).clicked() {
+                if ui
+                    .selectable_label(is_selected, RichText::new(name).font(styles::font::mono()))
+                    .clicked()
+                {
                     if is_selected {
                         self.selected_session = None;
                     } else {

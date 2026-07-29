@@ -1,6 +1,6 @@
-use eframe::egui::{self, text::LayoutJob, FontFamily, FontId, Label, RichText, TextFormat};
+use eframe::egui::{self, text::LayoutJob, Label, RichText, TextFormat};
 
-use crate::{actions::Action, buttons::action_button, state::ActiveSession};
+use crate::{actions::Action, buttons::action_button, state::ActiveSession, styles};
 
 pub struct PageOverview;
 
@@ -21,7 +21,9 @@ impl PageOverview {
         _frame: &mut eframe::Frame,
         session: &Option<ActiveSession>,
     ) -> Action {
-        ui.add(Label::new(RichText::new("Overview").size(25.0).strong()));
+        ui.add(Label::new(
+            RichText::new("Overview").font(styles::font::heading()),
+        ));
 
         if let Some(session) = session {
             let mut job = LayoutJob::default();
@@ -30,8 +32,7 @@ impl PageOverview {
                 &session.session,
                 0.0,
                 TextFormat {
-                    font_id: FontId::new(14.0, FontFamily::Proportional),
-                    italics: true,
+                    font_id: styles::font::mono_medium(),
                     ..Default::default()
                 },
             );
@@ -40,8 +41,7 @@ impl PageOverview {
                 &session.project,
                 0.0,
                 TextFormat {
-                    font_id: FontId::new(14.0, FontFamily::Proportional),
-                    italics: true,
+                    font_id: styles::font::mono_medium(),
                     ..Default::default()
                 },
             );

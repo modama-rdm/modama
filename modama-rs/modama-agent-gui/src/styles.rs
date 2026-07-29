@@ -1,6 +1,117 @@
-use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, Shadow, Stroke};
+use eframe::egui::{
+    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame, Margin,
+    Shadow, Stroke, TextStyle,
+};
+use std::sync::Arc;
 
 include!(concat!(env!("OUT_DIR"), "/design_styles.rs"));
+
+/// Runtime font families and semantic text roles shared by every GUI screen.
+pub mod font {
+    use super::*;
+
+    const SANS_REGULAR: &str = "plus-jakarta-sans-regular";
+    const SANS_MEDIUM: &str = "plus-jakarta-sans-medium";
+    const SANS_SEMIBOLD: &str = "plus-jakarta-sans-semibold";
+    const SANS_BOLD: &str = "plus-jakarta-sans-bold";
+    const MONO_REGULAR: &str = "jetbrains-mono-regular";
+    const MONO_MEDIUM: &str = "jetbrains-mono-medium";
+
+    const SANS_REGULAR_FAMILY: &str = "Plus Jakarta Sans Regular";
+    const SANS_MEDIUM_FAMILY: &str = "Plus Jakarta Sans Medium";
+    const SANS_SEMIBOLD_FAMILY: &str = "Plus Jakarta Sans SemiBold";
+    const SANS_BOLD_FAMILY: &str = "Plus Jakarta Sans Bold";
+    const MONO_REGULAR_FAMILY: &str = "JetBrains Mono Regular";
+    const MONO_MEDIUM_FAMILY: &str = "JetBrains Mono Medium";
+
+    fn family(name: &str) -> FontFamily {
+        FontFamily::Name(name.into())
+    }
+
+    pub fn body() -> FontId {
+        FontId::new(14.0, family(SANS_REGULAR_FAMILY))
+    }
+
+    pub fn label() -> FontId {
+        FontId::new(14.0, family(SANS_SEMIBOLD_FAMILY))
+    }
+
+    pub fn button() -> FontId {
+        FontId::new(14.0, family(SANS_SEMIBOLD_FAMILY))
+    }
+
+    pub fn heading() -> FontId {
+        FontId::new(22.0, family(SANS_BOLD_FAMILY))
+    }
+
+    pub fn login_title() -> FontId {
+        FontId::new(18.0, family(SANS_BOLD_FAMILY))
+    }
+
+    pub fn login_subtitle() -> FontId {
+        FontId::new(13.0, family(SANS_REGULAR_FAMILY))
+    }
+
+    pub fn mono() -> FontId {
+        FontId::new(14.0, family(MONO_REGULAR_FAMILY))
+    }
+
+    pub fn mono_medium() -> FontId {
+        FontId::new(14.0, family(MONO_MEDIUM_FAMILY))
+    }
+
+    /// Install the static design-spec font faces and map egui's default text
+    /// roles to their React UI equivalents.
+    pub fn install(ctx: &egui::Context) {
+        let mut fonts = FontDefinitions::default();
+        for (name, bytes, family_name) in [
+            (
+                SANS_REGULAR,
+                include_bytes!("../assets/fonts/PlusJakartaSans-Regular.ttf").as_slice(),
+                SANS_REGULAR_FAMILY,
+            ),
+            (
+                SANS_MEDIUM,
+                include_bytes!("../assets/fonts/PlusJakartaSans-Medium.ttf").as_slice(),
+                SANS_MEDIUM_FAMILY,
+            ),
+            (
+                SANS_SEMIBOLD,
+                include_bytes!("../assets/fonts/PlusJakartaSans-SemiBold.ttf").as_slice(),
+                SANS_SEMIBOLD_FAMILY,
+            ),
+            (
+                SANS_BOLD,
+                include_bytes!("../assets/fonts/PlusJakartaSans-Bold.ttf").as_slice(),
+                SANS_BOLD_FAMILY,
+            ),
+            (
+                MONO_REGULAR,
+                include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf").as_slice(),
+                MONO_REGULAR_FAMILY,
+            ),
+            (
+                MONO_MEDIUM,
+                include_bytes!("../assets/fonts/JetBrainsMono-Medium.ttf").as_slice(),
+                MONO_MEDIUM_FAMILY,
+            ),
+        ] {
+            fonts
+                .font_data
+                .insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
+            fonts
+                .families
+                .insert(family(family_name), vec![name.to_owned()]);
+        }
+        ctx.set_fonts(fonts);
+        ctx.all_styles_mut(|style| {
+            style.text_styles.insert(TextStyle::Body, body());
+            style.text_styles.insert(TextStyle::Button, button());
+            style.text_styles.insert(TextStyle::Heading, heading());
+            style.text_styles.insert(TextStyle::Monospace, mono());
+        });
+    }
+}
 
 pub mod theme {
     use super::*;
@@ -10,6 +121,7 @@ pub mod theme {
     /// The application starts in light mode. Call `Context::set_theme` later
     /// to switch modes without changing any component code.
     pub fn install(ctx: &egui::Context) {
+        font::install(ctx);
         let light = visuals(false);
         let dark = visuals(true);
         ctx.set_visuals_of(egui::Theme::Light, light);

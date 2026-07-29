@@ -77,6 +77,44 @@ mod style_tests {
     }
 
     #[test]
+    fn typography_uses_the_bundled_design_fonts() {
+        let ctx = egui::Context::default();
+        styles::theme::install(&ctx);
+
+        let style = ctx.global_style();
+        assert_eq!(
+            style.text_styles[&egui::TextStyle::Body],
+            styles::font::body()
+        );
+        assert_eq!(
+            style.text_styles[&egui::TextStyle::Button],
+            styles::font::button()
+        );
+        assert_eq!(
+            style.text_styles[&egui::TextStyle::Heading],
+            styles::font::heading()
+        );
+        assert_eq!(
+            style.text_styles[&egui::TextStyle::Monospace],
+            styles::font::mono()
+        );
+
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+        for font_id in [
+            styles::font::body(),
+            styles::font::label(),
+            styles::font::button(),
+            styles::font::heading(),
+            styles::font::login_title(),
+            styles::font::login_subtitle(),
+            styles::font::mono(),
+            styles::font::mono_medium(),
+        ] {
+            ctx.fonts_mut(|fonts| assert!(fonts.fonts.font(&font_id.family).has_glyphs("A")));
+        }
+    }
+
+    #[test]
     fn component_radii_match_design_spec() {
         assert_eq!(styles::token_to_px(styles::shapes::radius_lg), 8.0);
         assert_eq!(styles::token_to_px(styles::shapes::radius_2xl), 16.0);

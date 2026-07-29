@@ -1,7 +1,7 @@
 use eframe::egui::{self, Label, RichText};
 use std::time::Duration;
 
-use crate::{actions::Action, async_state::AsyncState, buttons::action_button};
+use crate::{actions::Action, async_state::AsyncState, buttons::action_button, styles};
 
 #[derive(Debug, Clone)]
 pub struct FetchProjectsRequest;
@@ -47,18 +47,21 @@ impl PageSelectProject {
         }
 
         ui.add(Label::new(
-            RichText::new("Select a project").size(25.0).strong(),
+            RichText::new("Select a project").font(styles::font::heading()),
         ));
 
         if self.projects_task.is_pending() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("Fetching projects...");
+                ui.label(RichText::new("Fetching projects...").font(styles::font::body()));
             });
         } else {
             for name in &self.available_projects {
                 let checked = Some(name.as_str()) == self.selected_project.as_deref();
-                if ui.selectable_label(checked, name).clicked() {
+                if ui
+                    .selectable_label(checked, RichText::new(name).font(styles::font::mono()))
+                    .clicked()
+                {
                     if checked {
                         self.selected_project = None;
                     } else {
