@@ -210,6 +210,25 @@ pub fn radius(points: f32) -> CornerRadius {
     CornerRadius::same(points.clamp(0.0, 255.0) as u8)
 }
 
+/// Horizontal distance from a card's outer edge to its content guide.
+pub fn card_content_inset() -> f32 {
+    components::standard_border::width::EGUI_POINTS + spacing::card_padding_x::EGUI_POINTS
+}
+
+/// Horizontal position of the shared content guide relative to the window.
+pub fn content_guide_from_window_left() -> f32 {
+    spacing::app_window_margin_x::EGUI_POINTS
+        + components::app_shell::padding::EGUI_POINTS
+        + card_content_inset()
+}
+
+/// Additional leading space needed inside the padded top bar to reach the guide.
+pub fn top_bar_content_guide_offset() -> f32 {
+    let offset = content_guide_from_window_left() - components::top_bar::padding::EGUI_POINTS;
+    debug_assert!(offset >= 0.0, "top-bar padding exceeds the content guide");
+    offset
+}
+
 pub fn card_frame(visuals: &egui::Visuals) -> Frame {
     card_frame_with_padding(
         visuals,

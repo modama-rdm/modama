@@ -89,6 +89,17 @@ mod style_tests {
     }
 
     #[test]
+    fn shared_content_guide_is_derived_from_layout_tokens() {
+        assert_eq!(
+            styles::components::top_bar::padding::EGUI_POINTS
+                + styles::top_bar_content_guide_offset(),
+            styles::spacing::app_window_margin_x::EGUI_POINTS
+                + styles::components::app_shell::padding::EGUI_POINTS
+                + styles::card_content_inset()
+        );
+    }
+
+    #[test]
     fn typography_uses_the_bundled_design_fonts() {
         let ctx = egui::Context::default();
         styles::theme::install(&ctx);
@@ -103,8 +114,8 @@ mod style_tests {
             styles::typography::label::font_id(),
             styles::typography::button::font_id(),
             styles::typography::heading::font_id(),
-            styles::typography::login_title::font_id(),
-            styles::typography::login_subtitle::font_id(),
+            styles::typography::section_heading::font_id(),
+            styles::typography::supporting_text::font_id(),
             styles::typography::mono::font_id(),
             styles::typography::mono_medium::font_id(),
         ] {

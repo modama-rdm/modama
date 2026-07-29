@@ -115,19 +115,26 @@ impl eframe::App for AgentGuiApp {
         );
         self.handle_action(action);
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            if matches!(self.page, Page::Login(_)) {
-                let ui_action = self.page.ui(ui, frame, &self.app_state.session);
-                self.handle_action(ui_action);
-            } else {
-                egui::Frame::default()
-                    .inner_margin(styles::components::app_shell::padding::EGUI_POINTS)
-                    .show(ui, |ui| {
-                        let ui_action = self.page.ui(ui, frame, &self.app_state.session);
-                        self.handle_action(ui_action);
-                    });
-            }
-        });
+        let central_panel_frame =
+            egui::Frame::central_panel(ui.style()).inner_margin(Margin::symmetric(
+                styles::spacing::app_window_margin_x::EGUI_POINTS as i8,
+                styles::spacing::app_window_margin_y::EGUI_POINTS as i8,
+            ));
+        egui::CentralPanel::default()
+            .frame(central_panel_frame)
+            .show_inside(ui, |ui| {
+                if matches!(self.page, Page::Login(_)) {
+                    let ui_action = self.page.ui(ui, frame, &self.app_state.session);
+                    self.handle_action(ui_action);
+                } else {
+                    egui::Frame::default()
+                        .inner_margin(styles::components::app_shell::padding::EGUI_POINTS)
+                        .show(ui, |ui| {
+                            let ui_action = self.page.ui(ui, frame, &self.app_state.session);
+                            self.handle_action(ui_action);
+                        });
+                }
+            });
     }
 }
 

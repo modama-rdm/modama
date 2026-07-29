@@ -63,11 +63,11 @@ typography:
     fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
     fontSize: 1.375rem
     fontWeight: 700
-  login-title:
+  section-heading:
     fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
     fontSize: 1.125rem
     fontWeight: 700
-  login-subtitle:
+  supporting-text:
     fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
     fontSize: 0.8125rem
     fontWeight: 400

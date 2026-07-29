@@ -84,6 +84,7 @@ impl TopBar {
         let is_logging_out = self.logout_task.is_pending();
         let navigation_busy = page_busy || is_logging_out;
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+            ui.add_space(styles::top_bar_content_guide_offset());
             let logo_response = ui
                 .scope(|ui| {
                     compact_button_spacing(ui);
@@ -116,7 +117,7 @@ impl TopBar {
                         .map(|i| i.format())
                         .unwrap_or_else(|| "Ingest Agent".to_owned()),
                 )
-                .font(styles::typography::login_subtitle::font_id())
+                .font(styles::typography::supporting_text::font_id())
                 .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
             );
 

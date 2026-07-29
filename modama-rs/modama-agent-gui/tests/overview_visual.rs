@@ -25,7 +25,9 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
             app.app_state.session = Some(ActiveSession {
                 project: "representative-project".to_string(),
                 session: "2026-07-29-ingest".to_string(),
-                mount_path: None,
+                mount_path: Some(
+                    "/mnt/modama/representative-project/2026-07-29-ingest".to_string(),
+                ),
             });
         }
         app
@@ -98,6 +100,46 @@ fn overview_actions_are_mutually_exclusive() {
     let inactive = overview_harness(false, false);
     assert!(inactive.query_by_label("Create Session").is_some());
     assert!(inactive.query_by_label("Close Session").is_none());
+}
+
+#[test]
+fn active_session_details_include_the_agent_mount_path() {
+    let active = overview_harness(false, true);
+
+    assert!(active.query_by_label("representative-project").is_some());
+    assert!(active.query_by_label("2026-07-29-ingest").is_some());
+    assert!(active
+        .query_by_label("/mnt/modama/representative-project/2026-07-29-ingest")
+        .is_some());
+}
+
+#[test]
+fn overview_logo_heading_and_card_content_share_a_left_guide() {
+    let active = overview_harness(false, true);
+    let logo_x = active.get_by_label("go to Overview").rect().left();
+    let heading_x = active.get_by_label("Overview").rect().left();
+    let card_content_x = active.get_by_label("Active ingest session").rect().left();
+    let tolerance = styles::components::standard_border::width::EGUI_POINTS;
+
+    assert!((logo_x - heading_x).abs() <= tolerance);
+    assert!((heading_x - card_content_x).abs() <= tolerance);
+}
+
+#[test]
+fn missing_agent_mount_path_is_explained() {
+    let mut active = overview_harness(false, true);
+    active
+        .state_mut()
+        .app_state
+        .session
+        .as_mut()
+        .expect("the harness should have an active session")
+        .mount_path = None;
+    active.run_steps(1);
+
+    assert!(active
+        .query_by_label("Not available on this agent")
+        .is_some());
 }
 
 #[test]

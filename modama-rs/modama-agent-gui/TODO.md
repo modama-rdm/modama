@@ -3,7 +3,7 @@
 - [x] include agent information in the top bar
     - [x] agent name + resource
     - [x] or hostname for anonymous?
-- [ ] overview page
+- [x] overview page
     - [x] actions styling: card with a lil description plus button?
         - [x] similar to the react ui
     - [x] add "close session" action
@@ -11,8 +11,12 @@
             - create session button not visible when we have active ingest share
         - [x] only visible if there is a current ingest share
         - [x] similar to the react ui
-    - [ ] put information about current ingest share into card
-        - [ ] include mount path for the current agent
+    - [x] put information about current ingest share into card
+        - [x] include mount path for the current agent
+- [ ] general design fixes
+    - [ ] generally, vertical and horizontal rythm
+    - [ ] ensure horizontal alignment on the left side
+        - example: overview: modama logo, main headline, card content should all be aligned on the left side
 - [ ] select project page
     - [ ] more realistic test data for project list: 20+ projects
     - [ ] design; show more info

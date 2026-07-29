@@ -5,7 +5,7 @@ use crate::{
     actions::Action,
     async_state::AsyncState,
     buttons::{danger_outline_button, loading_button, primary_button, ButtonVariant},
-    components::{destructive_confirmation_dialog, ConfirmationDialogAction},
+    components::{destructive_confirmation_dialog, page_heading, ConfirmationDialogAction},
     state::ActiveSession,
     styles,
 };
@@ -48,17 +48,10 @@ impl PageOverview {
         _frame: &mut eframe::Frame,
         session: &Option<ActiveSession>,
     ) -> Action {
-        ui.add(Label::new(
-            RichText::new("Overview").font(styles::typography::heading::font_id()),
-        ));
+        page_heading(ui, "Overview");
 
         if let Some(session) = session {
-            ui.add(Label::new(format!(
-                "Active session '{}' in project '{}'",
-                session.session, session.project
-            )));
-
-            self.show_close_card(ui);
+            self.show_active_session_card(ui, session);
             if self.close_confirmation_open {
                 self.show_close_confirmation(ui, session);
             }
@@ -100,10 +93,27 @@ impl PageOverview {
         clicked
     }
 
-    fn show_close_card(&mut self, ui: &mut egui::Ui) {
+    fn show_active_session_card(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {
         let is_closing = self.close_task.is_pending();
         styles::card_frame(ui.visuals()).show(ui, |ui| {
             ui.set_width(ui.available_width());
+
+            card_heading(ui, "Active ingest session");
+            session_detail(ui, "Project", &session.project);
+            session_detail(ui, "Session", &session.session);
+            session_detail(
+                ui,
+                "Mount path on this agent",
+                session
+                    .mount_path
+                    .as_deref()
+                    .unwrap_or("Not available on this agent"),
+            );
+
+            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+            ui.separator();
+            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+
             card_heading(ui, "Close the ingest session");
             card_description(
                 ui,
@@ -161,7 +171,7 @@ impl PageOverview {
 
 fn card_heading(ui: &mut egui::Ui, text: &str) {
     ui.add(Label::new(
-        RichText::new(text).font(styles::typography::login_title::font_id()),
+        RichText::new(text).font(styles::typography::section_heading::font_id()),
     ));
 }
 
@@ -170,6 +180,18 @@ fn card_description(ui: &mut egui::Ui, text: &str) {
         RichText::new(text)
             .font(styles::typography::body::font_id())
             .color(styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals())),
+    ));
+}
+
+fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
+    ui.add(Label::new(
+        RichText::new(label)
+            .font(styles::typography::supporting_text::font_id())
+            .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
+    ));
+    ui.add(Label::new(
+        RichText::new(value).font(styles::typography::mono_medium::font_id()),
     ));
 }
 

@@ -158,13 +158,13 @@ fn show_login_header(ui: &mut egui::Ui) {
         ui.add_space(styles::spacing::header_title_gap::EGUI_POINTS);
         ui.label(
             RichText::new("Data Management")
-                .font(styles::typography::login_title::font_id())
+                .font(styles::typography::section_heading::font_id())
                 .color(styles::color::on_surface::VALUE.resolve_egui(ui.visuals())),
         );
         ui.add_space(styles::spacing::header_subtitle_gap::EGUI_POINTS);
         ui.label(
             RichText::new("Ingest Agent")
-                .font(styles::typography::login_subtitle::font_id())
+                .font(styles::typography::supporting_text::font_id())
                 .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
         );
     });

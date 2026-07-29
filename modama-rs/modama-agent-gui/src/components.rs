@@ -30,7 +30,7 @@ pub(crate) fn destructive_confirmation_dialog(
             ui.set_width(styles::components::login_card::width::EGUI_POINTS);
             ui.add(
                 egui::Label::new(
-                    RichText::new(title).font(styles::typography::login_title::font_id()),
+                    RichText::new(title).font(styles::typography::section_heading::font_id()),
                 )
                 .wrap(),
             );
@@ -72,6 +72,16 @@ pub(crate) fn display_error(ui: &mut egui::Ui, message: &str) {
             styles::color::error::VALUE.resolve_egui(ui.visuals()),
             RichText::new(message).font(styles::typography::body::font_id()),
         );
+    });
+}
+
+/// Render a page heading on the shared card-content guide.
+pub(crate) fn page_heading(ui: &mut egui::Ui, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add_space(styles::card_content_inset());
+        ui.add(egui::Label::new(
+            RichText::new(text).font(styles::typography::heading::font_id()),
+        ));
     });
 }
 
