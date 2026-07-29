@@ -5,7 +5,7 @@ use eframe::egui::{self, Align, Color32, FontFamily, FontId, Layout, RichText, S
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    buttons::{primary_button, secondary_button, DesignButton},
+    buttons::{loading_button, primary_button, secondary_button, ButtonVariant, DesignButton},
     state::AgentIdentity,
     styles,
 };
@@ -122,25 +122,21 @@ impl TopBar {
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if let Some(username) = username {
-                    let response = ui.add_enabled(
-                        !navigation_busy,
-                        secondary_button(
-                            if is_logging_out {
-                                "Logging out…"
-                            } else {
-                                "Log out"
-                            },
+                    let response = if is_logging_out {
+                        loading_button(
                             ui,
-                        ),
-                    );
+                            "Logging out…",
+                            egui::Vec2::ZERO,
+                            ButtonVariant::Secondary,
+                        )
+                    } else {
+                        ui.add_enabled(!navigation_busy, secondary_button("Log out", ui))
+                    };
                     if response.clicked() {
                         self.logout_task.spawn(
                             || std::thread::sleep(Duration::from_millis(500)),
                             ui.ctx().clone(),
                         );
-                    }
-                    if is_logging_out {
-                        ui.spinner();
                     }
 
                     ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);

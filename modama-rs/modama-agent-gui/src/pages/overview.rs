@@ -1,8 +1,31 @@
 use eframe::egui::{self, text::LayoutJob, Label, RichText, TextFormat};
+use std::time::Duration;
 
-use crate::{actions::Action, buttons::primary_button, state::ActiveSession, styles};
+use crate::{
+    actions::Action,
+    async_state::AsyncState,
+    buttons::{danger_outline_button, loading_button, primary_button, ButtonVariant},
+    components::{destructive_confirmation_dialog, ConfirmationDialogAction},
+    state::ActiveSession,
+    styles,
+};
 
-pub struct PageOverview;
+const CLOSE_CONFIRMATION_ID: &str = "close-session-confirmation";
+
+#[derive(Debug, Clone)]
+pub struct CloseSessionRequest;
+
+impl CloseSessionRequest {
+    pub fn execute(&self) {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+pub struct PageOverview {
+    pub close_task: AsyncState<()>,
+    close_confirmation_open: bool,
+    focus_confirmation_cancel: bool,
+}
 
 impl Default for PageOverview {
     fn default() -> Self {
@@ -12,7 +35,11 @@ impl Default for PageOverview {
 
 impl PageOverview {
     pub fn new() -> Self {
-        Self
+        Self {
+            close_task: AsyncState::Idle,
+            close_confirmation_open: false,
+            focus_confirmation_cancel: false,
+        }
     }
 
     pub fn ui(
@@ -42,46 +69,130 @@ impl PageOverview {
             job.append(" in project ", 0.0, prose_format);
             job.append(&session.project, 0.0, value_format);
             ui.add(Label::new(job));
-        }
 
-        let mut create_session_clicked = false;
-        styles::card_frame(ui.visuals()).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.add(Label::new(
-                RichText::new("Start an ingest session")
-                    .font(styles::typography::login_title::font_id()),
-            ));
-            ui.add(Label::new(
-                RichText::new(
-                    "Choose a project and session to open an ingest share for incoming data on \
-                     this agent.",
-                )
-                .font(styles::typography::body::font_id())
-                .color(styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals())),
-            ));
-            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-            create_session_clicked = ui.add(primary_button("Create Session", ui)).clicked();
-        });
-
-        if create_session_clicked {
-            return Action::CreateSession;
+            self.show_close_card(ui);
+            if self.close_confirmation_open {
+                self.show_close_confirmation(ui, session);
+            }
+        } else {
+            self.close_confirmation_open = false;
+            if self.show_create_card(ui) {
+                return Action::CreateSession;
+            }
         }
 
         Action::None
     }
 
     pub fn poll(&mut self) -> Action {
-        Action::None
+        if self.close_task.poll().take_ready().is_some() {
+            Action::CloseSessionSuccess
+        } else {
+            Action::None
+        }
     }
 
     pub fn is_busy(&self) -> bool {
-        false
+        self.close_task.is_pending()
     }
+
+    fn show_create_card(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut clicked = false;
+        styles::card_frame(ui.visuals()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            card_heading(ui, "Start an ingest session");
+            card_description(
+                ui,
+                "Choose a project and session to open an ingest share for incoming data on this \
+                 agent.",
+            );
+            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+            clicked = ui.add(primary_button("Create Session", ui)).clicked();
+        });
+        clicked
+    }
+
+    fn show_close_card(&mut self, ui: &mut egui::Ui) {
+        let is_closing = self.close_task.is_pending();
+        styles::card_frame(ui.visuals()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            card_heading(ui, "Close the ingest session");
+            card_description(
+                ui,
+                "Stop the ingest share when you are finished transferring data. Existing project \
+                 and session data will remain available.",
+            );
+            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+            let response = if is_closing {
+                loading_button(
+                    ui,
+                    "Closing…",
+                    egui::Vec2::ZERO,
+                    ButtonVariant::DangerOutline,
+                )
+            } else {
+                ui.add(danger_outline_button("Close Session", ui))
+            };
+            if response.clicked() {
+                self.close_confirmation_open = true;
+                self.focus_confirmation_cancel = true;
+            }
+        });
+    }
+
+    fn show_close_confirmation(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {
+        let message = format!(
+            "This will stop incoming data for session {} in project {}. Data already stored will \
+             not be deleted.",
+            session.session, session.project
+        );
+        let action = destructive_confirmation_dialog(
+            ui.ctx(),
+            ui.visuals(),
+            CLOSE_CONFIRMATION_ID,
+            "Close ingest session?",
+            &message,
+            "Close Session",
+            self.focus_confirmation_cancel,
+        );
+        self.focus_confirmation_cancel = false;
+
+        match action {
+            ConfirmationDialogAction::None => {}
+            ConfirmationDialogAction::Cancel => {
+                self.close_confirmation_open = false;
+            }
+            ConfirmationDialogAction::Confirm => {
+                self.close_confirmation_open = false;
+                self.close_task
+                    .spawn(move || CloseSessionRequest.execute(), ui.ctx().clone());
+            }
+        }
+    }
+}
+
+fn card_heading(ui: &mut egui::Ui, text: &str) {
+    ui.add(Label::new(
+        RichText::new(text).font(styles::typography::login_title::font_id()),
+    ));
+}
+
+fn card_description(ui: &mut egui::Ui, text: &str) {
+    ui.add(Label::new(
+        RichText::new(text)
+            .font(styles::typography::body::font_id())
+            .color(styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals())),
+    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_session_request_completes() {
+        CloseSessionRequest.execute();
+    }
 
     #[test]
     fn test_overview_poll_returns_none() {

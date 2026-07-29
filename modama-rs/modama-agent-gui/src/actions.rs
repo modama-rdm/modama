@@ -11,6 +11,7 @@ pub enum Action {
     SelectProject { project: String },
     SelectSession { session: ActiveSession },
     GoToOverview,
+    CloseSessionSuccess,
     LogoutSuccess,
 }
 

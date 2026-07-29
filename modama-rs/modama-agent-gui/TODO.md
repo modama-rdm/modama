@@ -4,13 +4,13 @@
     - [x] agent name + resource
     - [x] or hostname for anonymous?
 - [ ] overview page
-    - [ ] actions styling: card with a lil description plus button?
-        - [ ] similar to the react ui
-    - [ ] add "close session" action
-        - [ ] currently mutually exclusive to create session
+    - [x] actions styling: card with a lil description plus button?
+        - [x] similar to the react ui
+    - [x] add "close session" action
+        - [x] currently mutually exclusive to create session
             - create session button not visible when we have active ingest share
-        - [ ] only visible if there is a current ingest share
-        - [ ] similar to the react ui
+        - [x] only visible if there is a current ingest share
+        - [x] similar to the react ui
     - [ ] put information about current ingest share into card
         - [ ] include mount path for the current agent
 - [ ] select project page

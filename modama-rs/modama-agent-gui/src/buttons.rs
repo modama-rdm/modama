@@ -38,16 +38,20 @@ pub enum ButtonVariant {
     DangerOutline,
 }
 
-/// Construct a button using one of the semantic design-system variants.
-pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> DesignButton<'a> {
-    let visuals = ui.visuals();
-    let radius = styles::radius(styles::rounded::lg::EGUI_POINTS);
-    let text_color = match variant {
+fn button_text_color(visuals: &egui::Visuals, variant: ButtonVariant) -> Color32 {
+    match variant {
         ButtonVariant::Primary => styles::color::on_primary::VALUE.resolve_egui(visuals),
         ButtonVariant::Secondary => styles::color::on_surface_variant::VALUE.resolve_egui(visuals),
         ButtonVariant::Danger => Color32::WHITE,
         ButtonVariant::DangerOutline => styles::color::error::VALUE.resolve_egui(visuals),
-    };
+    }
+}
+
+/// Construct a button using one of the semantic design-system variants.
+pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> DesignButton<'a> {
+    let visuals = ui.visuals();
+    let radius = styles::radius(styles::rounded::lg::EGUI_POINTS);
+    let text_color = button_text_color(visuals, variant);
     let button = egui::Button::new(
         RichText::new(label)
             .font(styles::typography::button::font_id())
@@ -86,13 +90,13 @@ pub fn primary_button<'a>(label: &'a str, ui: &egui::Ui) -> DesignButton<'a> {
     button(label, ui, ButtonVariant::Primary)
 }
 
-/// Render a disabled primary button with an in-button loading indicator.
-pub fn primary_loading_button(
+/// Render a disabled button with an in-button loading indicator.
+pub fn loading_button(
     ui: &mut egui::Ui,
     label: &str,
     min_size: egui::Vec2,
+    variant: ButtonVariant,
 ) -> egui::Response {
-    let response = ui.add_enabled(false, primary_button(label, ui).min_size(min_size));
     let spinner_size = styles::typography::button::FONT_SIZE;
     let label_width = ui
         .painter()
@@ -104,19 +108,29 @@ pub fn primary_loading_button(
         .rect
         .width();
     let gap = styles::spacing::field_label_gap::EGUI_POINTS;
+    let content_width = spinner_size + gap + label_width;
+    let minimum_content_width =
+        content_width + 2.0 * styles::spacing::button_padding_x::EGUI_POINTS;
+    let min_size = egui::vec2(min_size.x.max(minimum_content_width), min_size.y);
+    let response = ui.add_enabled(false, button(label, ui, variant).min_size(min_size));
     let spinner_center =
         response.rect.center() - egui::vec2(label_width / 2.0 + gap + spinner_size / 2.0, 0.0);
     let spinner_rect =
         egui::Rect::from_center_size(spinner_center, egui::vec2(spinner_size, spinner_size));
     egui::Spinner::new()
         .size(spinner_size)
-        .color(
-            styles::color::on_primary::VALUE
-                .resolve_egui(ui.visuals())
-                .gamma_multiply(ui.visuals().disabled_alpha),
-        )
+        .color(button_text_color(ui.visuals(), variant).gamma_multiply(ui.visuals().disabled_alpha))
         .paint_at(ui, spinner_rect);
     response
+}
+
+/// Render a disabled primary button with an in-button loading indicator.
+pub fn primary_loading_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    min_size: egui::Vec2,
+) -> egui::Response {
+    loading_button(ui, label, min_size, ButtonVariant::Primary)
 }
 
 pub fn secondary_button<'a>(label: &'a str, ui: &egui::Ui) -> DesignButton<'a> {
@@ -150,7 +164,14 @@ mod tests {
                 ui.add(button("Button", ui, variant));
             }
             ui.add(primary_button("Primary", ui));
-            primary_loading_button(ui, "Loading", egui::vec2(160.0, 0.0));
+            for variant in [
+                ButtonVariant::Primary,
+                ButtonVariant::Secondary,
+                ButtonVariant::Danger,
+                ButtonVariant::DangerOutline,
+            ] {
+                loading_button(ui, "Loading", egui::vec2(160.0, 0.0), variant);
+            }
             ui.add(secondary_button("Secondary", ui));
             ui.add(danger_button("Danger", ui));
             ui.add(danger_outline_button("Danger outline", ui));

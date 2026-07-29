@@ -1,11 +1,11 @@
 use std::sync::{Arc, Barrier};
 
 use eframe::egui;
-use egui_kittest::{Harness, SnapshotResults};
+use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
     pages::{Page, PageSelectCreateSession, PageSelectProject},
-    state::Credentials,
+    state::{ActiveSession, Credentials},
     styles,
 };
 
@@ -124,5 +124,65 @@ fn session_selection_snapshots() {
     selected.snapshot("select_session_selected");
     results.extend_harness(&mut selected);
 
+    let release = Arc::new(Barrier::new(2));
+    let task_release = Arc::clone(&release);
+    let mut starting_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    starting_page.available_sessions = strings(&SESSIONS);
+    starting_page.selected_session = Some(SESSIONS[1].to_string());
+    let mut starting = selection_harness(Page::SelectCreateSession(starting_page));
+    let ctx = starting.ctx.clone();
+    if let Page::SelectCreateSession(page) = &mut starting.state_mut().page {
+        page.create_ingest_task.spawn(
+            move || {
+                task_release.wait();
+                ActiveSession {
+                    project: "Project Alpha".to_string(),
+                    session: SESSIONS[1].to_string(),
+                    mount_path: None,
+                }
+            },
+            ctx,
+        );
+    }
+    starting.run_steps(1);
+    starting.snapshot("select_session_starting");
+    release.wait();
+    results.extend_harness(&mut starting);
+
     results.unwrap();
+}
+
+#[test]
+fn session_choices_are_disabled_while_starting() {
+    let release = Arc::new(Barrier::new(2));
+    let task_release = Arc::clone(&release);
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.available_sessions = strings(&SESSIONS);
+    page.selected_session = Some(SESSIONS[1].to_string());
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    let ctx = harness.ctx.clone();
+    if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
+        page.create_ingest_task.spawn(
+            move || {
+                task_release.wait();
+                ActiveSession {
+                    project: "Project Alpha".to_string(),
+                    session: SESSIONS[1].to_string(),
+                    mount_path: None,
+                }
+            },
+            ctx,
+        );
+    }
+    harness.run_steps(1);
+
+    assert!(harness.query_by_label("Starting…").is_some());
+    harness.get_by_label(SESSIONS[2]).click();
+    harness.run_steps(2);
+
+    let Page::SelectCreateSession(page) = &harness.state().page else {
+        panic!("session selection page unexpectedly changed");
+    };
+    assert_eq!(page.selected_session.as_deref(), Some(SESSIONS[1]));
+    release.wait();
 }

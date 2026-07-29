@@ -61,6 +61,9 @@ impl AgentGuiApp {
             Action::GoToOverview => {
                 self.page = Page::Overview(PageOverview::new());
             }
+            Action::CloseSessionSuccess => {
+                self.app_state.session = None;
+            }
             Action::LogoutSuccess => {
                 self.app_state.creds = None;
                 self.app_state.session = None;
@@ -170,6 +173,22 @@ mod tests {
         app.handle_action(Action::LogoutSuccess);
 
         assert!(app.app_state.creds.is_none());
+        assert!(app.app_state.session.is_none());
+        assert!(matches!(app.page, Page::Overview(_)));
+    }
+
+    #[test]
+    fn test_close_session_clears_session_and_stays_on_overview() {
+        let mut app = AgentGuiApp::new();
+        app.page = Page::Overview(PageOverview::new());
+        app.app_state.session = Some(crate::state::ActiveSession {
+            project: "project".to_string(),
+            session: "session".to_string(),
+            mount_path: None,
+        });
+
+        app.handle_action(Action::CloseSessionSuccess);
+
         assert!(app.app_state.session.is_none());
         assert!(matches!(app.page, Page::Overview(_)));
     }

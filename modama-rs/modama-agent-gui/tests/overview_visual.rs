@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui_kittest::{Harness, SnapshotResults};
+use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
     pages::{Page, PageOverview},
@@ -56,7 +56,98 @@ fn overview_snapshots() {
     logged_out.snapshot("overview_logged_out");
     results.extend_harness(&mut logged_out);
 
+    let mut close_confirmation = overview_harness(false, true);
+    close_confirmation.get_by_label("Close Session").click();
+    close_confirmation.run();
+    close_confirmation.snapshot("overview_close_confirmation");
+    results.extend_harness(&mut close_confirmation);
+
+    let close_release = Arc::new(Barrier::new(2));
+    let task_release = Arc::clone(&close_release);
+    let mut close_pending = overview_harness(false, true);
+    let ctx = close_pending.ctx.clone();
+    if let Page::Overview(page) = &mut close_pending.state_mut().page {
+        page.close_task.spawn(
+            move || {
+                task_release.wait();
+            },
+            ctx,
+        );
+    }
+    close_pending.run_steps(1);
+    close_pending.snapshot("overview_close_pending");
+    close_release.wait();
+    results.extend_harness(&mut close_pending);
+
+    let mut logout_pending = overview_harness(false, true);
+    logout_pending.get_by_label("Log out").click();
+    logout_pending.run_steps(3);
+    assert!(logout_pending.query_by_label("Logging out…").is_some());
+    logout_pending.snapshot("overview_logout_pending");
+    results.extend_harness(&mut logout_pending);
+
     results.unwrap();
+}
+
+#[test]
+fn overview_actions_are_mutually_exclusive() {
+    let active = overview_harness(false, true);
+    assert!(active.query_by_label("Close Session").is_some());
+    assert!(active.query_by_label("Create Session").is_none());
+
+    let inactive = overview_harness(false, false);
+    assert!(inactive.query_by_label("Create Session").is_some());
+    assert!(inactive.query_by_label("Close Session").is_none());
+}
+
+#[test]
+fn closing_requires_confirmation_and_can_be_cancelled() {
+    let mut harness = overview_harness(false, true);
+    harness.get_by_label("Close Session").click();
+    harness.run();
+
+    assert!(harness.state().app_state.session.is_some());
+    assert!(harness.query_by_label("Close ingest session?").is_some());
+    harness.get_by_label("Cancel").click();
+    harness.run();
+
+    assert!(harness.state().app_state.session.is_some());
+    assert!(harness.query_by_label("Close ingest session?").is_none());
+}
+
+#[test]
+fn escape_dismisses_close_confirmation() {
+    let mut harness = overview_harness(false, true);
+    harness.get_by_label("Close Session").click();
+    harness.run();
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+
+    assert!(harness.state().app_state.session.is_some());
+    assert!(harness.query_by_label("Close ingest session?").is_none());
+}
+
+#[test]
+fn confirming_close_clears_the_active_session() {
+    let mut harness = overview_harness(false, true);
+    harness.get_by_label("Close Session").click();
+    harness.run();
+    harness
+        .get_all_by_label("Close Session")
+        .last()
+        .expect("confirmation button was not found")
+        .click();
+    harness.run_steps(3);
+
+    assert!(harness.state().page.is_busy());
+    assert!(harness.query_by_label("Closing…").is_some());
+
+    std::thread::sleep(std::time::Duration::from_millis(550));
+    harness.run_steps(2);
+
+    assert!(harness.state().app_state.session.is_none());
+    assert!(harness.query_by_label("Create Session").is_some());
+    assert!(harness.query_by_label("Close Session").is_none());
 }
 
 #[test]

@@ -2,7 +2,11 @@ use eframe::egui::{self, Label, RichText};
 use std::time::Duration;
 
 use crate::{
-    actions::Action, async_state::AsyncState, buttons::primary_button, state::ActiveSession, styles,
+    actions::Action,
+    async_state::AsyncState,
+    buttons::{loading_button, primary_button, ButtonVariant},
+    state::ActiveSession,
+    styles,
 };
 
 #[derive(Debug, Clone)]
@@ -86,28 +90,33 @@ impl PageSelectCreateSession {
                 );
             });
         } else {
-            for name in &self.available_sessions {
-                let is_selected = Some(name.as_str()) == self.selected_session.as_deref();
-                if ui
-                    .selectable_label(
-                        is_selected,
-                        RichText::new(name).font(styles::typography::mono::font_id()),
-                    )
-                    .clicked()
-                {
-                    if is_selected {
-                        self.selected_session = None;
-                    } else {
-                        self.selected_session = Some(name.clone());
+            let is_starting = self.create_ingest_task.is_pending();
+            ui.add_enabled_ui(!is_starting, |ui| {
+                for name in &self.available_sessions {
+                    let is_selected = Some(name.as_str()) == self.selected_session.as_deref();
+                    if ui
+                        .selectable_label(
+                            is_selected,
+                            RichText::new(name).font(styles::typography::mono::font_id()),
+                        )
+                        .clicked()
+                    {
+                        if is_selected {
+                            self.selected_session = None;
+                        } else {
+                            self.selected_session = Some(name.clone());
+                        }
                     }
                 }
-            }
+            });
 
             let enabled = self.selected_session.is_some();
-            if ui
-                .add_enabled(enabled, primary_button("Select Session", ui))
-                .clicked()
-            {
+            let response = if is_starting {
+                loading_button(ui, "Starting…", egui::Vec2::ZERO, ButtonVariant::Primary)
+            } else {
+                ui.add_enabled(enabled, primary_button("Select Session", ui))
+            };
+            if response.clicked() {
                 if let Some(session_name) = &self.selected_session {
                     let task = CreateIngestRequest {
                         project: self.project.clone(),
