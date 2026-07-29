@@ -122,6 +122,7 @@ impl TopBar {
             );
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(styles::top_bar_card_edge_offset());
                 if let Some(username) = username {
                     let response = if is_logging_out {
                         loading_button(

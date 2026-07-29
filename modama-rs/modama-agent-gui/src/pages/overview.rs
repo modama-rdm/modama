@@ -49,6 +49,7 @@ impl PageOverview {
         session: &Option<ActiveSession>,
     ) -> Action {
         page_heading(ui, "Overview");
+        ui.add_space(styles::content_card_top_margin_adjustment());
 
         if let Some(session) = session {
             self.show_active_session_card(ui, session);
@@ -79,7 +80,7 @@ impl PageOverview {
 
     fn show_create_card(&mut self, ui: &mut egui::Ui) -> bool {
         let mut clicked = false;
-        styles::card_frame(ui.visuals()).show(ui, |ui| {
+        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
             ui.set_width(ui.available_width());
             card_heading(ui, "Start an ingest session");
             card_description(
@@ -95,7 +96,7 @@ impl PageOverview {
 
     fn show_active_session_card(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {
         let is_closing = self.close_task.is_pending();
-        styles::card_frame(ui.visuals()).show(ui, |ui| {
+        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
             ui.set_width(ui.available_width());
 
             card_heading(ui, "Active ingest session");

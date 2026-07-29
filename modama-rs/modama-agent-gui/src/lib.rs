@@ -89,13 +89,37 @@ mod style_tests {
     }
 
     #[test]
+    fn content_card_frame_derives_padding_from_button_tokens() {
+        let frame = styles::content_card_frame(&egui::Visuals::light());
+
+        assert_eq!(
+            frame.inner_margin,
+            egui::Margin::symmetric(
+                styles::spacing::button_padding_x::EGUI_POINTS as i8,
+                (2.0 * styles::spacing::button_padding_y::EGUI_POINTS) as i8,
+            )
+        );
+    }
+
+    #[test]
+    fn content_card_top_gap_accounts_for_normal_item_spacing() {
+        assert_eq!(
+            styles::spacing::app_item_gap_y::EGUI_POINTS
+                + styles::content_card_top_margin_adjustment(),
+            styles::spacing::form_field_gap::EGUI_POINTS
+        );
+    }
+
+    #[test]
     fn shared_content_guide_is_derived_from_layout_tokens() {
         assert_eq!(
             styles::components::top_bar::padding::EGUI_POINTS
                 + styles::top_bar_content_guide_offset(),
-            styles::spacing::app_window_margin_x::EGUI_POINTS
-                + styles::components::app_shell::padding::EGUI_POINTS
-                + styles::card_content_inset()
+            styles::content_card_outer_inset_from_window() + styles::content_card_inset()
+        );
+        assert_eq!(
+            styles::components::top_bar::padding::EGUI_POINTS + styles::top_bar_card_edge_offset(),
+            styles::content_card_outer_inset_from_window()
         );
     }
 

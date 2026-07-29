@@ -126,6 +126,20 @@ fn overview_logo_heading_and_card_content_share_a_left_guide() {
 }
 
 #[test]
+fn top_bar_session_action_shares_the_card_right_guide() {
+    let expected_right = VIEWPORT.x - styles::content_card_outer_inset_from_window();
+    let tolerance = styles::components::standard_border::width::EGUI_POINTS;
+
+    let logged_out = overview_harness(false, false);
+    let login_right = logged_out.get_by_label("Log in").rect().right();
+    assert!((login_right - expected_right).abs() <= tolerance);
+
+    let logged_in = overview_harness(false, true);
+    let logout_right = logged_in.get_by_label("Log out").rect().right();
+    assert!((logout_right - expected_right).abs() <= tolerance);
+}
+
+#[test]
 fn missing_agent_mount_path_is_explained() {
     let mut active = overview_harness(false, true);
     active

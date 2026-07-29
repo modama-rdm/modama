@@ -15,7 +15,7 @@
         - [x] include mount path for the current agent
 - [ ] general design fixes
     - [ ] generally, vertical and horizontal rythm
-    - [ ] ensure horizontal alignment on the left side
+    - [x] ensure horizontal alignment on the left side
         - example: overview: modama logo, main headline, card content should all be aligned on the left side
 - [ ] select project page
     - [ ] more realistic test data for project list: 20+ projects
@@ -33,6 +33,7 @@
         - [ ] like login form, enter submits form, button submits form
     - [ ] add a decision "switch" UI to either pick existing session, or show a "create new session" form
         - [ ] have the first item in the session list be a placeholder "create new" item
+- [ ] ux: `cursor: pointer` for clickable elements (including the top bar logo and all buttons)
 - [ ] keyboard ux: logical "tab indexes" (top-left to bottom-right-ish)
     - [ ] shortcuts where they are missing
         - [ ] Ctrl+N (or platform's equivalent) for creating new items
@@ -45,3 +46,9 @@
         - [ ] login: first form input
         - [ ] overview: "create session" button, or "close session" if one is active
         - [ ] what else?
+- [ ] do a focus round on code quality
+    - [ ] check for complexity hot-spots
+    - [ ] check for spots that don't use the state machinery
+- [ ] do a focus round on design token usage
+    - [ ] check if design tokens are "abused" and need either to be copied to a different name (component-specific maybe?) or might need to be renamed to be more generic
+- [ ] add a little decorating bottom bar like in react?

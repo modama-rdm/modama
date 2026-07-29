@@ -210,16 +210,29 @@ pub fn radius(points: f32) -> CornerRadius {
     CornerRadius::same(points.clamp(0.0, 255.0) as u8)
 }
 
-/// Horizontal distance from a card's outer edge to its content guide.
-pub fn card_content_inset() -> f32 {
-    components::standard_border::width::EGUI_POINTS + spacing::card_padding_x::EGUI_POINTS
+/// Horizontal distance from a compact content card's outer edge to its content guide.
+pub fn content_card_inset() -> f32 {
+    components::standard_border::width::EGUI_POINTS + spacing::button_padding_x::EGUI_POINTS
+}
+
+/// Horizontal distance from the window edge to a content card's outer edge.
+pub fn content_card_outer_inset_from_window() -> f32 {
+    spacing::app_window_margin_x::EGUI_POINTS + components::app_shell::padding::EGUI_POINTS
 }
 
 /// Horizontal position of the shared content guide relative to the window.
 pub fn content_guide_from_window_left() -> f32 {
-    spacing::app_window_margin_x::EGUI_POINTS
-        + components::app_shell::padding::EGUI_POINTS
-        + card_content_inset()
+    content_card_outer_inset_from_window() + content_card_inset()
+}
+
+/// Extra space needed after normal item spacing to reach the content-card top gap.
+pub fn content_card_top_margin_adjustment() -> f32 {
+    let adjustment = spacing::form_field_gap::EGUI_POINTS - spacing::app_item_gap_y::EGUI_POINTS;
+    debug_assert!(
+        adjustment >= 0.0,
+        "normal item spacing exceeds the content-card top gap"
+    );
+    adjustment.max(0.0)
 }
 
 /// Additional leading space needed inside the padded top bar to reach the guide.
@@ -229,12 +242,29 @@ pub fn top_bar_content_guide_offset() -> f32 {
     offset
 }
 
+/// Additional trailing space needed inside the padded top bar to reach the card edge.
+pub fn top_bar_card_edge_offset() -> f32 {
+    let offset = content_card_outer_inset_from_window() - components::top_bar::padding::EGUI_POINTS;
+    debug_assert!(offset >= 0.0, "top-bar padding exceeds the card edge");
+    offset
+}
+
 pub fn card_frame(visuals: &egui::Visuals) -> Frame {
     card_frame_with_padding(
         visuals,
         Margin::symmetric(
             spacing::card_padding_x::EGUI_POINTS as i8,
             spacing::card_padding_y::EGUI_POINTS as i8,
+        ),
+    )
+}
+
+pub fn content_card_frame(visuals: &egui::Visuals) -> Frame {
+    card_frame_with_padding(
+        visuals,
+        Margin::symmetric(
+            spacing::button_padding_x::EGUI_POINTS as i8,
+            (2.0 * spacing::button_padding_y::EGUI_POINTS) as i8,
         ),
     )
 }
