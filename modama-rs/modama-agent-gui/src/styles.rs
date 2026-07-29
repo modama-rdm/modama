@@ -138,7 +138,8 @@ pub mod theme {
         visuals.panel_fill = bg;
         visuals.window_fill = surface;
         visuals.window_corner_radius = radius(shapes::radius_2xl::EGUI_POINTS);
-        visuals.window_stroke = Stroke::new(1.0_f32, border);
+        visuals.window_stroke =
+            Stroke::new(components::standard_border::width::EGUI_POINTS, border);
         visuals.window_shadow = card_shadow();
         visuals.popup_shadow = card_shadow();
         visuals.extreme_bg_color = surface;
@@ -151,7 +152,7 @@ pub mod theme {
         visuals.warn_fg_color = resolve(color::warning::VALUE);
         visuals.hyperlink_color = primary;
         visuals.button_frame = true;
-        visuals.disabled_alpha = 0.6;
+        visuals.disabled_alpha = components::interaction_disabled_alpha::size::VALUE;
 
         for widget in [
             &mut visuals.widgets.inactive,
@@ -160,23 +161,32 @@ pub mod theme {
             &mut visuals.widgets.open,
         ] {
             widget.corner_radius = radius(shapes::radius_lg::EGUI_POINTS);
-            widget.fg_stroke = Stroke::new(1.0_f32, fg);
+            widget.fg_stroke = Stroke::new(components::standard_border::width::EGUI_POINTS, fg);
         }
         visuals.widgets.inactive.weak_bg_fill = primary;
         visuals.widgets.inactive.bg_fill = primary;
-        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, primary);
+        visuals.widgets.inactive.bg_stroke =
+            Stroke::new(components::standard_border::width::EGUI_POINTS, primary);
         visuals.widgets.hovered.weak_bg_fill = primary_hover;
         visuals.widgets.hovered.bg_fill = primary_hover;
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, primary_hover);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(
+            components::standard_border::width::EGUI_POINTS,
+            primary_hover,
+        );
         visuals.widgets.active.weak_bg_fill = primary_hover;
         visuals.widgets.active.bg_fill = primary_hover;
-        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, primary_hover);
+        visuals.widgets.active.bg_stroke = Stroke::new(
+            components::standard_border::width::EGUI_POINTS,
+            primary_hover,
+        );
         visuals.widgets.open = visuals.widgets.hovered;
 
         // Text edits use the inactive state while idle and active while focused.
         visuals.widgets.noninteractive.bg_fill = surface;
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, fg);
+        visuals.widgets.noninteractive.bg_stroke =
+            Stroke::new(components::standard_border::width::EGUI_POINTS, border);
+        visuals.widgets.noninteractive.fg_stroke =
+            Stroke::new(components::standard_border::width::EGUI_POINTS, fg);
         visuals.widgets.noninteractive.corner_radius = radius(shapes::radius_lg::EGUI_POINTS);
         visuals
     }
@@ -200,7 +210,7 @@ fn card_frame_with_padding(visuals: &egui::Visuals, padding: Margin) -> Frame {
     Frame::new()
         .fill(color::surface::VALUE.resolve_egui(visuals))
         .stroke(Stroke::new(
-            1.0_f32,
+            components::standard_border::width::EGUI_POINTS,
             color::border::VALUE.resolve_egui(visuals),
         ))
         .corner_radius(radius(shapes::radius_2xl::EGUI_POINTS))
@@ -212,7 +222,7 @@ pub fn input_frame(visuals: &egui::Visuals, margin: Margin) -> Frame {
     Frame::new()
         .fill(color::surface::VALUE.resolve_egui(visuals))
         .stroke(Stroke::new(
-            1.0_f32,
+            components::standard_border::width::EGUI_POINTS,
             color::border::VALUE.resolve_egui(visuals),
         ))
         .corner_radius(radius(shapes::radius_lg::EGUI_POINTS))
@@ -221,10 +231,10 @@ pub fn input_frame(visuals: &egui::Visuals, margin: Margin) -> Frame {
 
 pub fn card_shadow() -> Shadow {
     Shadow {
-        offset: [0, 1],
-        blur: 4,
-        spread: 0,
-        color: Color32::from_black_alpha(20),
+        offset: [0, components::card_shadow_offset_y::size::EGUI_POINTS as i8],
+        blur: components::card_shadow_blur::size::EGUI_POINTS as u8,
+        spread: components::card_shadow_spread::size::EGUI_POINTS as u8,
+        color: Color32::from_black_alpha(components::card_shadow_alpha::size::VALUE as u8),
     }
 }
 
@@ -234,7 +244,10 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
         ui.painter().rect_stroke(
             response.rect,
             radius(shapes::radius_lg::EGUI_POINTS),
-            Stroke::new(1.0_f32, color::primary::VALUE.resolve_egui(ui.visuals())),
+            Stroke::new(
+                components::standard_border::width::EGUI_POINTS,
+                color::primary::VALUE.resolve_egui(ui.visuals()),
+            ),
             egui::StrokeKind::Inside,
         );
         ui.painter().rect_stroke(
@@ -249,8 +262,14 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
 pub fn danger_frame(visuals: &egui::Visuals) -> Frame {
     let danger = color::danger::VALUE.resolve_egui(visuals);
     Frame::new()
-        .fill(danger.gamma_multiply(0.05))
-        .stroke(Stroke::new(1.0_f32, danger.gamma_multiply(0.30)))
+        .fill(danger.gamma_multiply(components::danger_subtle_fill_alpha::size::VALUE))
+        .stroke(Stroke::new(
+            components::standard_border::width::EGUI_POINTS,
+            danger.gamma_multiply(components::danger_border_alpha::size::VALUE),
+        ))
         .corner_radius(radius(shapes::radius_xl::EGUI_POINTS))
-        .inner_margin(Margin::symmetric(14, 12))
+        .inner_margin(Margin::symmetric(
+            components::danger_alert_padding_x::padding::EGUI_POINTS as i8,
+            components::danger_alert_padding_y::padding::EGUI_POINTS as i8,
+        ))
 }

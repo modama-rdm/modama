@@ -37,22 +37,22 @@ pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> egui
         ButtonVariant::Secondary => button
             .fill(styles::color::surface::VALUE.resolve_egui(visuals))
             .stroke(Stroke::new(
-                1.0_f32,
+                styles::components::standard_border::width::EGUI_POINTS,
                 styles::color::border::VALUE.resolve_egui(visuals),
             )),
         ButtonVariant::Danger => button
             .fill(styles::color::danger::VALUE.resolve_egui(visuals))
             .stroke(Stroke::new(
-                1.0_f32,
+                styles::components::standard_border::width::EGUI_POINTS,
                 styles::color::danger::VALUE.resolve_egui(visuals),
             )),
         ButtonVariant::DangerOutline => button
             .fill(styles::color::surface::VALUE.resolve_egui(visuals))
             .stroke(Stroke::new(
-                1.0_f32,
+                styles::components::standard_border::width::EGUI_POINTS,
                 styles::color::danger::VALUE
                     .resolve_egui(visuals)
-                    .gamma_multiply(0.30),
+                    .gamma_multiply(styles::components::danger_border_alpha::size::VALUE),
             )),
     }
 }

@@ -59,7 +59,7 @@ impl PageLogin {
     }
 
     fn show_login_card(&mut self, ui: &mut egui::Ui) {
-        ui.set_max_width(styles::spacing::SCALE[12] * styles::spacing::UNIT_EGUI_POINTS * 10.0);
+        ui.set_max_width(styles::components::login_card::width::EGUI_POINTS);
         styles::card_frame(ui.visuals()).show(ui, |ui| {
             ui.style_mut().spacing.item_spacing.y = 0.0;
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {

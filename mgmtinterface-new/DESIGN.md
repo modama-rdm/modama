@@ -102,6 +102,55 @@ shapes:
   radius-2xl: 1rem
   radius-full: 9999px
   focus-ring-width: 3px
+
+components:
+  standard-border:
+    width: 1px
+  app-window-width:
+    width: 1024px
+  app-window-height:
+    height: 768px
+  app-shell:
+    padding: 27px
+  top-bar:
+    height: 56px
+    padding: 28px
+  top-bar-logo:
+    height: 26px
+  top-bar-brand-gap:
+    size: 6px
+  top-bar-brand-divider:
+    height: 22px
+  top-bar-control-gap:
+    size: 2px
+  top-bar-control:
+    size: 32px
+  top-bar-control-divider:
+    height: 18px
+  top-bar-icon:
+    size: 18px
+  avatar:
+    size: 32px
+  login-card:
+    width: 400px
+  card-shadow-offset-y:
+    size: 1px
+  card-shadow-blur:
+    size: 4px
+  card-shadow-spread:
+    size: 0px
+  card-shadow-alpha:
+    size: 20
+  interaction-disabled-alpha:
+    size: 0.6
+  danger-subtle-fill-alpha:
+    size: 0.05
+  danger-border-alpha:
+    size: 0.30
+  danger-alert-padding-x:
+    padding: 14px
+  danger-alert-padding-y:
+    padding: 12px
 ---
 
 # Design Specification: ER-C Data Management UI
@@ -131,6 +180,18 @@ Color variables are mapped directly to theme variables. Hex values must never be
 
 ## Components
 
+Component geometry is defined in the front matter so that the React and native
+implementations share the same dimensions. Single-purpose component entries
+use the standard `width`, `height`, `size`, and `padding` sub-tokens supported
+by the design.md schema. The application defaults to a 1024px × 768px window
+with 27px content padding. Standard outlines and dividers use the 1px
+`standard-border` component token.
+
+### Top Bar
+The persistent top bar is 56px high with 28px horizontal padding. Its logo,
+dividers, action controls, icons, avatar, and spacing use the corresponding
+`top-bar` component tokens.
+
 ### Button
 Supported variants:
 - **Primary**: Filled with `--primary` background, `--primary-fg` text. Transitions to `--primary-hover` on hover.
@@ -141,7 +202,7 @@ Supported variants:
 *Focus state: Outlined using `focus:shadow-[0_0_0_3px_var(--ring)]`.*
 
 ### Card
-Containers with `radius-2xl` (16px) corner rounding, a default border (`--border`), a white/dark surface background (`--surface`), and a subtle shadow (`shadow-sm`).
+Containers with `radius-2xl` (16px) corner rounding, a default border (`--border`), a white/dark surface background (`--surface`), and a subtle shadow using the `card` component tokens.
 
 ### Input (type=text)
 Full-width input field with:
@@ -156,3 +217,7 @@ Bottom-right notification popup using `radius-xl` (12px) corner rounding, left-s
 ### Avatar
 Deterministic categorical colored circles (`radius-full`) based on username hashing. Displays initials in bold uppercase. Used palette:
 `#2563eb`, `#7c3aed`, `#059669`, `#d97706`, `#dc2626`, `#0891b2`, `#be185d`, `#65a30d`.
+
+### Danger Treatment
+Subtle danger panels and danger-outline controls use the component alpha and
+padding tokens so that feedback treatments remain consistent across clients.

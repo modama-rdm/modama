@@ -109,10 +109,12 @@ impl eframe::App for AgentGuiApp {
                 let ui_action = self.page.ui(ui, frame, &self.app_state.session);
                 self.handle_action(ui_action);
             } else {
-                egui::Frame::default().inner_margin(27.0).show(ui, |ui| {
-                    let ui_action = self.page.ui(ui, frame, &self.app_state.session);
-                    self.handle_action(ui_action);
-                });
+                egui::Frame::default()
+                    .inner_margin(styles::components::app_shell::padding::EGUI_POINTS)
+                    .show(ui, |ui| {
+                        let ui_action = self.page.ui(ui, frame, &self.app_state.session);
+                        self.handle_action(ui_action);
+                    });
             }
         });
     }

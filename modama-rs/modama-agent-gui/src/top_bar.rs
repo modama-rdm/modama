@@ -9,10 +9,6 @@ use crate::{
     styles,
 };
 
-const HEIGHT: f32 = 56.0;
-const HORIZONTAL_PADDING: i8 = 28;
-const AVATAR_SIZE: f32 = 32.0;
-const ICON_SIZE: f32 = 18.0;
 const IDENTITY_COLORS: [Color32; 8] = [
     Color32::from_rgb(0x25, 0x63, 0xeb),
     Color32::from_rgb(0x7c, 0x3a, 0xed),
@@ -44,11 +40,16 @@ impl TopBar {
         page_busy: bool,
         show_login_action: bool,
     ) -> Action {
-        let panel = egui::Panel::top("agent-top-bar").exact_size(HEIGHT).frame(
-            egui::Frame::new()
-                .fill(styles::color::surface::VALUE.resolve_egui(parent.visuals()))
-                .inner_margin(egui::Margin::symmetric(HORIZONTAL_PADDING, 0)),
-        );
+        let panel = egui::Panel::top("agent-top-bar")
+            .exact_size(styles::components::top_bar::height::EGUI_POINTS)
+            .frame(
+                egui::Frame::new()
+                    .fill(styles::color::surface::VALUE.resolve_egui(parent.visuals()))
+                    .inner_margin(egui::Margin::symmetric(
+                        styles::components::top_bar::padding::EGUI_POINTS as i8,
+                        0,
+                    )),
+            );
 
         panel
             .show_inside(parent, |ui| {
@@ -56,8 +57,12 @@ impl TopBar {
                 let border = styles::color::border::VALUE.resolve_egui(ui.visuals());
                 ui.painter().hline(
                     ui.max_rect().x_range(),
-                    ui.max_rect().bottom() - 1.0,
-                    Stroke::new(1.0, border),
+                    ui.max_rect().bottom()
+                        - styles::components::standard_border::width::EGUI_POINTS,
+                    Stroke::new(
+                        styles::components::standard_border::width::EGUI_POINTS,
+                        border,
+                    ),
                 );
                 action
             })
@@ -82,7 +87,7 @@ impl TopBar {
                         egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
                             .tint(styles::color::fg::VALUE.resolve_egui(ui.visuals()))
                             .alt_text("modama — go to Overview")
-                            .max_height(26.0),
+                            .max_height(styles::components::top_bar_logo::height::EGUI_POINTS),
                     )
                     .frame(false)
                     .corner_radius(styles::radius(styles::shapes::radius_lg::EGUI_POINTS));
@@ -95,9 +100,12 @@ impl TopBar {
                 action = Action::GoToOverview;
             }
 
-            ui.add_space(6.0);
-            divider(ui, 22.0);
-            ui.add_space(6.0);
+            ui.add_space(styles::components::top_bar_brand_gap::size::EGUI_POINTS);
+            divider(
+                ui,
+                styles::components::top_bar_brand_divider::height::EGUI_POINTS,
+            );
+            ui.add_space(styles::components::top_bar_brand_gap::size::EGUI_POINTS);
             ui.label(
                 RichText::new("Data Management Ingest Agent")
                     .font(styles::typography::login_subtitle::font_id())
@@ -128,25 +136,31 @@ impl TopBar {
                         ui.spinner();
                     }
 
-                    ui.add_space(2.0);
-                    divider(ui, 18.0);
-                    ui.add_space(2.0);
+                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
+                    divider(
+                        ui,
+                        styles::components::top_bar_control_divider::height::EGUI_POINTS,
+                    );
+                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
                     ui.label(
                         RichText::new(username)
                             .font(styles::typography::navigation::font_id())
                             .color(styles::color::fg_muted::VALUE.resolve_egui(ui.visuals())),
                     );
                     avatar(ui, username);
-                    ui.add_space(2.0);
-                    divider(ui, 18.0);
-                    ui.add_space(2.0);
+                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
+                    divider(
+                        ui,
+                        styles::components::top_bar_control_divider::height::EGUI_POINTS,
+                    );
+                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
                 } else if show_login_action {
                     let response = ui.add_enabled(!navigation_busy, primary_button("Log in", ui));
                     styles::paint_focus_ring(ui, &response);
                     if response.clicked() {
                         action = Action::GoToLogin;
                     }
-                    ui.add_space(2.0);
+                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
                 }
 
                 theme_button(ui);
@@ -165,11 +179,20 @@ impl TopBar {
 }
 
 fn divider(ui: &mut egui::Ui, height: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, height), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(
+            styles::components::standard_border::width::EGUI_POINTS,
+            height,
+        ),
+        Sense::hover(),
+    );
     ui.painter().vline(
         rect.center().x,
         rect.y_range(),
-        Stroke::new(1.0, styles::color::border::VALUE.resolve_egui(ui.visuals())),
+        Stroke::new(
+            styles::components::standard_border::width::EGUI_POINTS,
+            styles::color::border::VALUE.resolve_egui(ui.visuals()),
+        ),
     );
 }
 
@@ -186,13 +209,18 @@ fn theme_button(ui: &mut egui::Ui) {
             ui.add(
                 egui::Button::new(
                     RichText::new(icon)
-                        .font(FontId::new(ICON_SIZE, FontFamily::Proportional))
+                        .font(FontId::new(
+                            styles::components::top_bar_icon::size::EGUI_POINTS,
+                            FontFamily::Proportional,
+                        ))
                         .color(styles::color::fg_subtle::VALUE.resolve_egui(ui.visuals())),
                 )
                 .fill(Color32::TRANSPARENT)
                 .stroke(Stroke::NONE)
                 .corner_radius(styles::radius(styles::shapes::radius_lg::EGUI_POINTS))
-                .min_size(egui::vec2(32.0, 32.0)),
+                .min_size(egui::Vec2::splat(
+                    styles::components::top_bar_control::size::EGUI_POINTS,
+                )),
             )
         })
         .inner
@@ -210,15 +238,16 @@ fn theme_button(ui: &mut egui::Ui) {
 
 fn compact_button_spacing(ui: &mut egui::Ui) {
     ui.spacing_mut().button_padding = egui::Vec2::ZERO;
-    ui.spacing_mut().interact_size = egui::vec2(32.0, 32.0);
+    ui.spacing_mut().interact_size =
+        egui::Vec2::splat(styles::components::top_bar_control::size::EGUI_POINTS);
 }
 
 fn avatar(ui: &mut egui::Ui, username: &str) {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(AVATAR_SIZE, AVATAR_SIZE), Sense::hover());
+    let avatar_size = styles::components::avatar::size::EGUI_POINTS;
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(avatar_size), Sense::hover());
     let color = IDENTITY_COLORS[username_hash(username) % IDENTITY_COLORS.len()];
     ui.painter()
-        .circle_filled(rect.center(), AVATAR_SIZE / 2.0, color);
+        .circle_filled(rect.center(), avatar_size / 2.0, color);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,

@@ -29,6 +29,8 @@ mod style_tests {
         assert_eq!(styles::typography::button::FONT_WEIGHT, 600);
         assert_eq!(styles::spacing::button_padding_x::EGUI_POINTS, 20.0);
         assert_eq!(styles::shapes::radius_2xl::EGUI_POINTS, 16.0);
+        assert_eq!(styles::components::top_bar::height::EGUI_POINTS, 56.0);
+        assert_eq!(styles::components::app_shell::padding::EGUI_POINTS, 27.0);
     }
 
     #[test]

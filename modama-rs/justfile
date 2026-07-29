@@ -1,14 +1,13 @@
 agent_gui_package := "modama-agent-gui"
-login_visual_test := "login_visual"
 snapshot_dir := "modama-agent-gui/tests/snapshots"
 
 # Run opt-in egui_kittest visual regression tests.
 visual-tests:
-    cargo test -p {{ agent_gui_package }} --features visual-tests --test {{ login_visual_test }}
+    cargo test -p {{ agent_gui_package }} --features visual-tests
 
 # Update committed visual-test golden PNGs.
 update-goldens:
-    UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests --test {{ login_visual_test }}
+    UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests
     oxipng -o max --strip safe {{ snapshot_dir }}/*.png
 
 # Remove generated visual-test review artifacts.
