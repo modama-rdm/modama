@@ -237,9 +237,9 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
             egui::StrokeKind::Inside,
         );
         ui.painter().rect_stroke(
-            response.rect.expand(width / 2.0),
+            response.rect,
             radius(shapes::radius_lg::EGUI_POINTS),
-            Stroke::new(1.0_f32, color::ring::VALUE.resolve_egui(ui.visuals())),
+            Stroke::new(width, color::ring::VALUE.resolve_egui(ui.visuals())),
             egui::StrokeKind::Outside,
         );
     }
