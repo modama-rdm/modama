@@ -13,18 +13,14 @@
         - [x] similar to the react ui
     - [x] put information about current ingest share into card
         - [x] include mount path for the current agent
-- [ ] general design fixes
-    - [ ] generally, vertical and horizontal rythm
-    - [x] ensure horizontal alignment on the left side
-        - example: overview: modama logo, main headline, card content should all be aligned on the left side
-- [ ] select project page
-    - [ ] more realistic test data for project list: 20+ projects
-    - [ ] design; show more info
-        - [ ] design similar to react ui
-        - [ ] show members (avatars?)
-        - [ ] show last modified
-    - [ ] search (prioritize substring, but switch to fuzzy if no match)
-    - [ ] scrollable?
+- [x] select project page
+    - [x] more realistic test data for project list: 20+ projects
+    - [x] design; show more info
+        - [x] design similar to react ui
+        - [x] show members (avatars?)
+        - [x] show last modified
+    - [x] search (prioritize substring, but switch to fuzzy if no match)
+    - [x] scrollable?
 - [ ] select or create session
     - [ ] styling for the session list
         - [ ] `ScrollArea.vertical().max_height(...)` maybe?
@@ -33,7 +29,11 @@
         - [ ] like login form, enter submits form, button submits form
     - [ ] add a decision "switch" UI to either pick existing session, or show a "create new session" form
         - [ ] have the first item in the session list be a placeholder "create new" item
+- [ ] general design fixes
+    - [ ] review vertical and horizontal flow of the design? are there elements that should be aligned which are not?
 - [ ] ux: `cursor: pointer` for clickable elements (including the top bar logo and all buttons)
+- [ ] breadcrumb navigation
+    - need to distinguist "login -> create session" and "just clicked the login button" flows
 - [ ] keyboard ux: logical "tab indexes" (top-left to bottom-right-ish)
     - [ ] shortcuts where they are missing
         - [ ] Ctrl+N (or platform's equivalent) for creating new items
@@ -51,8 +51,10 @@
     - [ ] check for spots that don't use the state machinery
 - [ ] do a focus round on design token usage
     - [ ] check if design tokens are "abused" and need either to be copied to a different name (component-specific maybe?) or might need to be renamed to be more generic
-- [ ] add a little decorating bottom bar like in react?
 - [ ] BUG: logging out does not close the ingest share. in logged out state, the active ingest share must be shown anyways
+- [ ] BUG: de-emphathized focus rings for disabled elements? instead of disabling completely
+- [ ] TEST: long project names? long ingest share session names?
+- [ ] add a little decorating bottom bar like in react?
 - [ ] once versioned axum is feasible, 
     - [ ] update modama-agent local API to have versioned endpoints and schemas
     - [ ] auto-generate a rust client for it

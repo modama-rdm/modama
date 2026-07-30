@@ -6,20 +6,10 @@ use crate::{
     actions::Action,
     async_state::AsyncState,
     buttons::{loading_button, primary_button, secondary_button, ButtonVariant, DesignButton},
+    components::avatar,
     state::AgentIdentity,
     styles,
 };
-
-const IDENTITY_COLORS: [Color32; 8] = [
-    Color32::from_rgb(0x25, 0x63, 0xeb),
-    Color32::from_rgb(0x7c, 0x3a, 0xed),
-    Color32::from_rgb(0x05, 0x96, 0x69),
-    Color32::from_rgb(0xd9, 0x77, 0x06),
-    Color32::from_rgb(0xdc, 0x26, 0x26),
-    Color32::from_rgb(0x08, 0x91, 0xb2),
-    Color32::from_rgb(0xbe, 0x18, 0x5d),
-    Color32::from_rgb(0x65, 0xa3, 0x0d),
-];
 
 pub(crate) struct TopBar {
     logout_task: AsyncState<()>,
@@ -154,7 +144,7 @@ impl TopBar {
                                 styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals()),
                             ),
                     );
-                    avatar(ui, username);
+                    avatar(ui, username, styles::components::avatar::size::EGUI_POINTS);
                     ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
                     divider(
                         ui,
@@ -245,46 +235,4 @@ fn compact_button_spacing(ui: &mut egui::Ui) {
     ui.spacing_mut().button_padding = egui::Vec2::ZERO;
     ui.spacing_mut().interact_size =
         egui::Vec2::splat(styles::components::top_bar_control::size::EGUI_POINTS);
-}
-
-fn avatar(ui: &mut egui::Ui, username: &str) {
-    let avatar_size = styles::components::avatar::size::EGUI_POINTS;
-    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(avatar_size), Sense::hover());
-    let color = IDENTITY_COLORS[username_hash(username) % IDENTITY_COLORS.len()];
-    ui.painter()
-        .circle_filled(rect.center(), avatar_size / 2.0, color);
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        initials(username),
-        styles::typography::button::font_id(),
-        Color32::WHITE,
-    );
-    response.on_hover_text(username);
-}
-
-fn username_hash(username: &str) -> usize {
-    username
-        .chars()
-        .fold(0_i32, |hash, character| {
-            hash.wrapping_mul(31)
-                .wrapping_add(i32::try_from(u32::from(character)).unwrap_or_default())
-        })
-        .unsigned_abs() as usize
-}
-
-fn initials(username: &str) -> String {
-    username.chars().take(2).collect::<String>().to_uppercase()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn avatar_identity_is_stable() {
-        assert_eq!(initials("alex"), "AL");
-        assert_eq!(username_hash("alex"), username_hash("alex"));
-        assert_ne!(username_hash("alex"), username_hash("sam"));
-    }
 }

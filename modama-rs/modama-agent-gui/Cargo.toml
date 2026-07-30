@@ -18,6 +18,8 @@ reqwest = { workspace = true }
 egui_extras = { version = "0.34.3", features = ["svg"] }
 egui-phosphor = "0.12"
 modama-common = { path = "../modama-common" }
+strsim = "0.11"
+time = "0.3.42"
 url = { workspace = true }
 thiserror = { workspace = true }
 egui_kittest = { version = "0.34.0", optional = true, features = ["eframe", "snapshot", "wgpu"] }

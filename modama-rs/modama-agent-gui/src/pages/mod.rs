@@ -81,7 +81,14 @@ mod tests {
         );
 
         let mut projects = PageSelectProject::new();
-        projects.available_projects.push("project".to_string());
+        projects
+            .available_projects
+            .push(select_project::ProjectSummary {
+                name: "project".to_string(),
+                owner: "owner".to_string(),
+                members: Vec::new(),
+                modified_at: 0,
+            });
         assert!(!Page::SelectProject(projects).is_busy());
 
         let mut sessions = PageSelectCreateSession::new("project".to_string());

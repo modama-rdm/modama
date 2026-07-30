@@ -4,18 +4,15 @@ use eframe::egui;
 use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
-    pages::{Page, PageSelectCreateSession, PageSelectProject},
+    pages::{
+        select_project::{representative_projects, ProjectSort},
+        Page, PageSelectCreateSession, PageSelectProject,
+    },
     state::{ActiveSession, Credentials},
     styles,
 };
 
 const VIEWPORT: egui::Vec2 = egui::vec2(1024.0, 768.0);
-const PROJECTS: [&str; 4] = [
-    "Project Alpha",
-    "Project Beta",
-    "Project Gamma",
-    "Project Delta",
-];
 const SESSIONS: [&str; 4] = [
     "2026-06-16-holo-stacks",
     "2026-06-18-holo-stacks",
@@ -24,6 +21,10 @@ const SESSIONS: [&str; 4] = [
 ];
 
 fn selection_harness(page: Page) -> Harness<'static, AgentGuiApp> {
+    selection_harness_with_theme(page, false)
+}
+
+fn selection_harness_with_theme(page: Page, dark: bool) -> Harness<'static, AgentGuiApp> {
     let mut harness = Harness::new_eframe(move |cc| {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         styles::theme::install(&cc.egui_ctx);
@@ -37,7 +38,11 @@ fn selection_harness(page: Page) -> Harness<'static, AgentGuiApp> {
         app
     });
     harness.set_size(VIEWPORT).set_pixels_per_point(1.0);
-    harness.ctx.set_theme(egui::Theme::Light);
+    harness.ctx.set_theme(if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    });
     harness
 }
 
@@ -57,7 +62,7 @@ fn project_selection_snapshots() {
         page.projects_task.spawn(
             move || {
                 task_release.wait();
-                strings(&PROJECTS)
+                representative_projects()
             },
             ctx,
         );
@@ -68,21 +73,105 @@ fn project_selection_snapshots() {
     results.extend_harness(&mut loading);
 
     let mut unselected_page = PageSelectProject::new();
-    unselected_page.available_projects = strings(&PROJECTS);
+    unselected_page.available_projects = representative_projects();
     let mut unselected = selection_harness(Page::SelectProject(unselected_page));
     unselected.run_steps(3);
     unselected.snapshot("select_project_unselected");
     results.extend_harness(&mut unselected);
 
     let mut selected_page = PageSelectProject::new();
-    selected_page.available_projects = strings(&PROJECTS);
-    selected_page.selected_project = Some(PROJECTS[1].to_string());
+    selected_page.available_projects = representative_projects();
+    selected_page.selected_project = Some("Holo Stacks".to_string());
     let mut selected = selection_harness(Page::SelectProject(selected_page));
     selected.run_steps(3);
     selected.snapshot("select_project_selected");
     results.extend_harness(&mut selected);
 
+    let mut substring_page = PageSelectProject::new();
+    substring_page.available_projects = representative_projects();
+    substring_page.search_query = "holo".to_string();
+    let mut substring = selection_harness(Page::SelectProject(substring_page));
+    substring.run_steps(3);
+    substring.snapshot("select_project_search_substring");
+    results.extend_harness(&mut substring);
+
+    let mut fuzzy_page = PageSelectProject::new();
+    fuzzy_page.available_projects = representative_projects();
+    fuzzy_page.search_query = "hollo staks".to_string();
+    let mut fuzzy = selection_harness(Page::SelectProject(fuzzy_page));
+    fuzzy.run_steps(3);
+    fuzzy.snapshot("select_project_search_fuzzy");
+    results.extend_harness(&mut fuzzy);
+
+    let mut empty_page = PageSelectProject::new();
+    empty_page.available_projects = representative_projects();
+    empty_page.search_query = "zzzzzz".to_string();
+    let mut empty = selection_harness(Page::SelectProject(empty_page));
+    empty.run_steps(3);
+    empty.snapshot("select_project_search_empty");
+    results.extend_harness(&mut empty);
+
+    let mut name_sorted_page = PageSelectProject::new();
+    name_sorted_page.available_projects = representative_projects();
+    name_sorted_page.sort = ProjectSort::Name;
+    let mut name_sorted = selection_harness(Page::SelectProject(name_sorted_page));
+    name_sorted.run_steps(3);
+    let first_project = name_sorted.get_by_label_contains("Adaptive Optics, owner");
+    for _ in 0..8 {
+        first_project.scroll_down();
+    }
+    name_sorted.run_steps(2);
+    name_sorted.snapshot("select_project_scrolled");
+    results.extend_harness(&mut name_sorted);
+
+    let mut dark_page = PageSelectProject::new();
+    dark_page.available_projects = representative_projects();
+    dark_page.selected_project = Some("Holo Stacks".to_string());
+    let mut dark = selection_harness_with_theme(Page::SelectProject(dark_page), true);
+    dark.run_steps(3);
+    dark.snapshot("select_project_selected_dark");
+    results.extend_harness(&mut dark);
+
     results.unwrap();
+}
+
+#[test]
+fn project_search_sort_and_selection_are_accessible() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    assert!(harness
+        .query_by_role_and_label(egui::accesskit::Role::TextInput, "Search")
+        .is_some());
+    assert!(harness
+        .query_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
+        .is_some());
+
+    harness.get_by_label_contains("Holo Stacks, owner").click();
+    harness.run_steps(2);
+    harness.get_by_label_contains("Holo Stacks, owner").click();
+    harness.run_steps(2);
+
+    let Page::SelectProject(page) = &harness.state().page else {
+        panic!("project selection page unexpectedly changed");
+    };
+    assert_eq!(page.selected_project.as_deref(), Some("Holo Stacks"));
+    assert!(harness.query_by_label("Select Project").is_some());
+}
+
+#[test]
+fn selected_project_must_be_visible_to_continue() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    page.selected_project = Some("Holo Stacks".to_string());
+    page.search_query = "aurora".to_string();
+    let harness = selection_harness(Page::SelectProject(page));
+
+    assert!(harness
+        .query_by(|node| node.label().as_deref() == Some("Select Project") && node.is_disabled())
+        .is_some());
 }
 
 #[test]
