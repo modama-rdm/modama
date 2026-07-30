@@ -54,7 +54,9 @@
 - [ ] BUG: logging out does not close the ingest share. in logged out state, the active ingest share must be shown anyways
 - [ ] BUG: de-emphathized focus rings for disabled elements? instead of disabling completely
 - [ ] TEST: long project names? long ingest share session names?
+- [ ] scroll overflow cues if more items are available above/below
 - [ ] add a little decorating bottom bar like in react?
+- [ ] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
 - [ ] once versioned axum is feasible, 
     - [ ] update modama-agent local API to have versioned endpoints and schemas
     - [ ] auto-generate a rust client for it
