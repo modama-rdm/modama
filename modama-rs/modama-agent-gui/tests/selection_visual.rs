@@ -135,6 +135,34 @@ fn project_selection_snapshots() {
     hovered.snapshot("select_project_hovered");
     results.extend_harness(&mut hovered);
 
+    let mut sort_open_page = PageSelectProject::new();
+    sort_open_page.available_projects = representative_projects();
+    let mut sort_open = selection_harness(Page::SelectProject(sort_open_page));
+    sort_open.run_steps(3);
+    sort_open
+        .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
+        .click();
+    sort_open.run_steps(2);
+    sort_open.remove_cursor();
+    sort_open.run_steps(1);
+    sort_open.snapshot("select_project_sort_open");
+    results.extend_harness(&mut sort_open);
+
+    let mut sort_hovered_page = PageSelectProject::new();
+    sort_hovered_page.available_projects = representative_projects();
+    let mut sort_hovered = selection_harness(Page::SelectProject(sort_hovered_page));
+    sort_hovered.run_steps(3);
+    sort_hovered
+        .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
+        .click();
+    sort_hovered.run_steps(2);
+    sort_hovered
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Name A–Z")
+        .hover();
+    sort_hovered.run_steps(2);
+    sort_hovered.snapshot("select_project_sort_item_hovered");
+    results.extend_harness(&mut sort_hovered);
+
     let mut selected_page = PageSelectProject::new();
     selected_page.available_projects = representative_projects();
     selected_page.selected_project = Some("Holo Stacks".to_string());
@@ -189,6 +217,49 @@ fn project_selection_snapshots() {
     results.extend_harness(&mut dark);
 
     results.unwrap();
+}
+
+#[test]
+fn project_sort_dropdown_options_are_accessible_and_selectable() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
+        .click();
+    harness.run_steps(2);
+
+    assert!(harness
+        .query_by(|node| {
+            node.role() == egui::accesskit::Role::Button
+                && node.label().as_deref() == Some("Last modified")
+                && node.toggled() == Some(egui::accesskit::Toggled::True)
+        })
+        .is_some());
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Name A–Z")
+        .click();
+    harness.run_steps(2);
+
+    let Page::SelectProject(page) = &harness.state().page else {
+        panic!("project selection page unexpectedly changed");
+    };
+    assert_eq!(page.sort, ProjectSort::Name);
+    assert!(harness
+        .query_by_role_and_label(egui::accesskit::Role::Button, "Name A–Z")
+        .is_none());
+    assert!(
+        harness
+            .get_by_label_contains("Adaptive Optics, owner")
+            .rect()
+            .top()
+            < harness
+                .get_by_label_contains("Holo Stacks, owner")
+                .rect()
+                .top()
+    );
 }
 
 #[test]

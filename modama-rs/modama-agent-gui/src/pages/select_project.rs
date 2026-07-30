@@ -168,28 +168,61 @@ impl PageSelectProject {
                     let surface_variant =
                         styles::color::surface_variant::VALUE.resolve_egui(ui.visuals());
                     let outline = styles::color::outline::VALUE.resolve_egui(ui.visuals());
+                    let primary_tint =
+                        styles::color::primary_tint::VALUE.resolve_egui(ui.visuals());
                     ui.visuals_mut().widgets.inactive.bg_fill = surface;
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = surface;
                     ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(
                         styles::components::standard_border::width::EGUI_POINTS,
                         outline,
                     );
-                    ui.visuals_mut().widgets.hovered.bg_fill = surface_variant;
-                    ui.visuals_mut().widgets.hovered.weak_bg_fill = surface_variant;
+                    let widgets = &mut ui.visuals_mut().widgets;
+                    for widget in [&mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
+                        widget.bg_fill = surface_variant;
+                        widget.weak_bg_fill = surface_variant;
+                        widget.bg_stroke = Stroke::new(
+                            styles::components::standard_border::width::EGUI_POINTS,
+                            outline,
+                        );
+                    }
                     let response = egui::ComboBox::from_id_salt("project-sort")
                         .width(ui.available_width())
                         .selected_text(self.sort.label())
+                        .popup_style(egui::style::StyleModifier::new(
+                            move |style: &mut egui::Style| {
+                                egui::containers::menu::menu_style(style);
+                                style.spacing.menu_margin.left = 0;
+                                style.spacing.menu_margin.right = 0;
+                                style.spacing.item_spacing.y = 0.0;
+                                style.spacing.button_padding = egui::vec2(
+                                    styles::spacing::input_padding_x::EGUI_POINTS,
+                                    styles::spacing::button_padding_y::EGUI_POINTS,
+                                );
+                                style.visuals.selection.bg_fill = primary_tint;
+                                for widget in [
+                                    &mut style.visuals.widgets.inactive,
+                                    &mut style.visuals.widgets.hovered,
+                                    &mut style.visuals.widgets.active,
+                                    &mut style.visuals.widgets.open,
+                                ] {
+                                    widget.corner_radius = egui::CornerRadius::ZERO;
+                                    widget.bg_stroke = Stroke::NONE;
+                                }
+                                style.visuals.widgets.inactive.bg_fill = surface;
+                                style.visuals.widgets.inactive.weak_bg_fill = surface;
+                                for widget in [
+                                    &mut style.visuals.widgets.hovered,
+                                    &mut style.visuals.widgets.active,
+                                    &mut style.visuals.widgets.open,
+                                ] {
+                                    widget.bg_fill = surface_variant;
+                                    widget.weak_bg_fill = surface_variant;
+                                }
+                            },
+                        ))
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.sort,
-                                ProjectSort::Modified,
-                                ProjectSort::Modified.label(),
-                            );
-                            ui.selectable_value(
-                                &mut self.sort,
-                                ProjectSort::Name,
-                                ProjectSort::Name.label(),
-                            );
+                            sort_option(ui, &mut self.sort, ProjectSort::Modified);
+                            sort_option(ui, &mut self.sort, ProjectSort::Name);
                         })
                         .response
                         .labelled_by(label.id);
@@ -340,6 +373,32 @@ enum ProjectListState {
     NoAccess,
     NoSearchMatches,
     Projects,
+}
+
+fn sort_option(
+    ui: &mut egui::Ui,
+    current_sort: &mut ProjectSort,
+    option: ProjectSort,
+) -> egui::Response {
+    let selected = *current_sort == option;
+    let mut response = ui.add(
+        egui::Button::selectable(selected, option.label())
+            .corner_radius(egui::CornerRadius::ZERO)
+            .min_size(egui::vec2(ui.available_width(), 0.0)),
+    );
+    if response.clicked() && !selected {
+        *current_sort = option;
+        response.mark_changed();
+    }
+    response.widget_info(|| {
+        WidgetInfo::selected(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            selected,
+            option.label(),
+        )
+    });
+    response
 }
 
 fn centered_list_state(
