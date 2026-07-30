@@ -4,6 +4,7 @@ use eframe::egui;
 use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
+    async_state::AsyncState,
     pages::{
         select_project::{representative_projects, ProjectSort},
         Page, PageSelectCreateSession, PageSelectProject,
@@ -25,6 +26,14 @@ fn selection_harness(page: Page) -> Harness<'static, AgentGuiApp> {
 }
 
 fn selection_harness_with_theme(page: Page, dark: bool) -> Harness<'static, AgentGuiApp> {
+    selection_harness_at_size(page, dark, VIEWPORT)
+}
+
+fn selection_harness_at_size(
+    page: Page,
+    dark: bool,
+    viewport: egui::Vec2,
+) -> Harness<'static, AgentGuiApp> {
     let mut harness = Harness::new_eframe(move |cc| {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         styles::theme::install(&cc.egui_ctx);
@@ -37,7 +46,7 @@ fn selection_harness_with_theme(page: Page, dark: bool) -> Harness<'static, Agen
         });
         app
     });
-    harness.set_size(VIEWPORT).set_pixels_per_point(1.0);
+    harness.set_size(viewport).set_pixels_per_point(1.0);
     harness.ctx.set_theme(if dark {
         egui::Theme::Dark
     } else {
@@ -68,9 +77,46 @@ fn project_selection_snapshots() {
         );
     }
     loading.run_steps(3);
+    assert!(loading
+        .query_by(|node| {
+            node.role() == egui::accesskit::Role::TextInput
+                && node.label().as_deref() == Some("Search")
+                && node.is_disabled()
+        })
+        .is_some());
+    assert!(loading
+        .query_by(|node| {
+            node.role() == egui::accesskit::Role::ComboBox
+                && node.label().as_deref() == Some("Sort by")
+                && node.is_disabled()
+        })
+        .is_some());
+    assert!(loading
+        .query_by_role(egui::accesskit::Role::ProgressIndicator)
+        .is_some());
+    let progress = loading
+        .get_by_role(egui::accesskit::Role::ProgressIndicator)
+        .rect();
+    let loading_label = loading.get_by_label("Fetching projects…").rect();
+    let loading_group = progress.union(loading_label);
+    let sort = loading
+        .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
+        .rect();
+    let action = loading.get_by_label("Select Project").rect();
+    assert!((loading_group.center().x - VIEWPORT.x / 2.0).abs() <= 1.0);
+    assert!((loading_group.center().y - (sort.bottom() + action.top()) / 2.0).abs() <= 3.0);
     loading.snapshot("select_project_loading");
     release.wait();
     results.extend_harness(&mut loading);
+
+    let mut no_access_page = PageSelectProject::new();
+    no_access_page.projects_task = AsyncState::Ready {
+        payload: Vec::new(),
+    };
+    let mut no_access = selection_harness(Page::SelectProject(no_access_page));
+    no_access.run_steps(3);
+    no_access.snapshot("select_project_no_access");
+    results.extend_harness(&mut no_access);
 
     let mut unselected_page = PageSelectProject::new();
     unselected_page.available_projects = representative_projects();
@@ -78,6 +124,16 @@ fn project_selection_snapshots() {
     unselected.run_steps(3);
     unselected.snapshot("select_project_unselected");
     results.extend_harness(&mut unselected);
+
+    let mut hovered_page = PageSelectProject::new();
+    hovered_page.available_projects = representative_projects();
+    let mut hovered = selection_harness(Page::SelectProject(hovered_page));
+    hovered.run_steps(3);
+    let hovered_row = hovered.get_by_label_contains("Holo Stacks, owner").rect();
+    hovered.hover_at(egui::pos2(hovered_row.left() + 2.0, hovered_row.center().y));
+    hovered.run_steps(2);
+    hovered.snapshot("select_project_hovered");
+    results.extend_harness(&mut hovered);
 
     let mut selected_page = PageSelectProject::new();
     selected_page.available_projects = representative_projects();
@@ -136,6 +192,31 @@ fn project_selection_snapshots() {
 }
 
 #[test]
+fn an_empty_project_fetch_stays_in_the_no_access_state() {
+    let mut page = PageSelectProject::new();
+    page.projects_task = AsyncState::Ready {
+        payload: Vec::new(),
+    };
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    assert!(harness.query_by_label("No projects available").is_some());
+    assert!(harness
+        .query_by_label("You don’t have access to any projects.")
+        .is_some());
+    assert!(harness
+        .query_by_role(egui::accesskit::Role::ProgressIndicator)
+        .is_none());
+
+    harness.run_steps(3);
+    let Page::SelectProject(page) = &harness.state().page else {
+        panic!("project selection page unexpectedly changed");
+    };
+    assert!(matches!(page.projects_task, AsyncState::Idle));
+    assert!(!page.is_busy());
+}
+
+#[test]
 fn project_search_sort_and_selection_are_accessible() {
     let mut page = PageSelectProject::new();
     page.available_projects = representative_projects();
@@ -149,7 +230,11 @@ fn project_search_sort_and_selection_are_accessible() {
         .query_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
         .is_some());
 
-    harness.get_by_label_contains("Holo Stacks, owner").click();
+    let holo_row = harness.get_by_label_contains("Holo Stacks, owner").rect();
+    let edge_click = egui::pos2(holo_row.left() + 2.0, holo_row.center().y);
+    harness.hover_at(edge_click);
+    harness.drag_at(edge_click);
+    harness.drop_at(edge_click);
     harness.run_steps(2);
     harness.get_by_label_contains("Holo Stacks, owner").click();
     harness.run_steps(2);
@@ -159,6 +244,24 @@ fn project_search_sort_and_selection_are_accessible() {
     };
     assert_eq!(page.selected_project.as_deref(), Some("Holo Stacks"));
     assert!(harness.query_by_label("Select Project").is_some());
+    assert!(harness
+        .query_by_role(egui::accesskit::Role::RadioButton)
+        .is_none());
+    assert!(harness
+        .query_by(|node| {
+            node.label()
+                .is_some_and(|label| label.starts_with("Holo Stacks, owner"))
+                && node.toggled() == Some(egui::accesskit::Toggled::True)
+        })
+        .is_some());
+    assert!(harness
+        .query_all_by_label("1 additional member")
+        .next()
+        .is_some());
+    assert!(harness
+        .query_all_by_label("2 additional members")
+        .next()
+        .is_some());
 }
 
 #[test]
@@ -172,6 +275,106 @@ fn selected_project_must_be_visible_to_continue() {
     assert!(harness
         .query_by(|node| node.label().as_deref() == Some("Select Project") && node.is_disabled())
         .is_some());
+}
+
+#[test]
+fn project_toolbar_and_dynamic_list_follow_available_geometry() {
+    let mut list_spans = Vec::new();
+    let mut bottom_margins = Vec::new();
+
+    for height in [600.0, 768.0, 900.0] {
+        let mut page = PageSelectProject::new();
+        page.available_projects = representative_projects();
+        let mut harness = selection_harness_at_size(
+            Page::SelectProject(page),
+            false,
+            egui::vec2(VIEWPORT.x, height),
+        );
+        harness.run_steps(3);
+
+        let search = harness
+            .get_by_role_and_label(egui::accesskit::Role::TextInput, "Search")
+            .rect();
+        let sort = harness
+            .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
+            .rect();
+        assert!((search.top() - sort.top()).abs() <= 1.0);
+        assert!((search.height() - sort.height()).abs() <= 1.0);
+
+        let search_label = harness
+            .get_by(|node| {
+                node.role() == egui::accesskit::Role::Label
+                    && node.value().as_deref() == Some("Search")
+            })
+            .rect();
+        let sort_label = harness
+            .get_by(|node| {
+                node.role() == egui::accesskit::Role::Label
+                    && node.value().as_deref() == Some("Sort by")
+            })
+            .rect();
+        assert!((search_label.top() - sort_label.top()).abs() <= 1.0);
+        let expected_label_gap = styles::spacing::field_label_gap::EGUI_POINTS;
+        assert!((search.top() - search_label.bottom() - expected_label_gap).abs() <= 1.0);
+        assert!((sort.top() - sort_label.bottom() - expected_label_gap).abs() <= 1.0);
+
+        let first_row = harness.get_by_label_contains("Holo Stacks, owner").rect();
+        let second_row = harness
+            .get_by_label_contains("Adaptive Optics, owner")
+            .rect();
+        assert!(
+            (second_row.top() - first_row.bottom()).abs() <= 1.0,
+            "consecutive project rows must meet at the separator: first={first_row:?}, second={second_row:?}"
+        );
+        let action = harness.get_by_label("Select Project").rect();
+        let guide = harness.get_by_label("go to Overview").rect().left();
+        let heading = harness.get_by_label("Select a project").rect();
+        let card_outer_left = styles::content_card_outer_inset_from_window();
+        let card_border = styles::components::standard_border::width::EGUI_POINTS;
+        assert!((heading.left() - guide).abs() <= 1.0);
+        assert!((search_label.left() - guide).abs() <= 1.0);
+        assert!((search.left() - card_outer_left).abs() <= 1.0);
+        assert!(
+            (search.left() + card_border + styles::spacing::button_padding_x::EGUI_POINTS - guide)
+                .abs()
+                <= 1.0
+        );
+        assert!(
+            (first_row.left() + styles::spacing::button_padding_x::EGUI_POINTS - guide).abs()
+                <= 1.0
+        );
+        assert!((first_row.left() - (card_outer_left + card_border)).abs() <= 1.0);
+        assert!((first_row.right() - (VIEWPORT.x - card_outer_left - card_border)).abs() <= 1.0);
+        assert!(
+            (action.left() + styles::spacing::button_padding_x::EGUI_POINTS - guide).abs() <= 1.0
+        );
+
+        let dust_row = harness
+            .get_by_label_contains("Dust Polarization, owner")
+            .rect();
+        let overflow = harness
+            .get_all_by_label("1 additional member")
+            .into_iter()
+            .find(|node| dust_row.contains(node.rect().center()))
+            .expect("Dust Polarization overflow avatar")
+            .rect();
+        assert!(
+            (overflow.right()
+                - (first_row.right() - styles::spacing::button_padding_x::EGUI_POINTS - 126.0))
+                .abs()
+                <= 1.0
+        );
+
+        list_spans.push(action.top() - first_row.top());
+        bottom_margins.push(height - action.bottom());
+    }
+
+    assert!(list_spans[0] < list_spans[1]);
+    assert!(list_spans[1] < list_spans[2]);
+    for margin in &bottom_margins {
+        assert!(*margin >= styles::spacing::form_field_gap::EGUI_POINTS);
+        assert!((*margin - bottom_margins[0]).abs() <= 1.0);
+    }
 }
 
 #[test]

@@ -102,12 +102,32 @@ pub(crate) fn labeled_text_input(
     label: &str,
     text_edit: TextEdit<'_>,
 ) -> egui::Response {
+    labeled_text_input_with_insets(
+        ui,
+        label,
+        text_edit,
+        0.0,
+        styles::spacing::input_padding_x::EGUI_POINTS,
+    )
+}
+
+/// Render a standard labeled text input with independent label and text insets.
+pub(crate) fn labeled_text_input_with_insets(
+    ui: &mut egui::Ui,
+    label: &str,
+    text_edit: TextEdit<'_>,
+    label_inset: f32,
+    input_padding_x: f32,
+) -> egui::Response {
     ui.vertical(|ui| {
-        let label_response = ui.label(
-            RichText::new(label)
-                .font(styles::typography::label::font_id())
-                .color(styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals())),
-        );
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let label_response = ui
+            .horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.add_space(label_inset);
+                field_label(ui, label)
+            })
+            .inner;
         ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
         let response = ui
             .add(
@@ -116,7 +136,7 @@ pub(crate) fn labeled_text_input(
                     .frame(styles::input_frame(
                         ui.visuals(),
                         egui::Margin::symmetric(
-                            styles::spacing::input_padding_x::EGUI_POINTS as i8,
+                            input_padding_x as i8,
                             styles::spacing::input_padding_y::EGUI_POINTS as i8,
                         ),
                     ))
@@ -127,6 +147,15 @@ pub(crate) fn labeled_text_input(
         response
     })
     .inner
+}
+
+/// Render the standard visual label used above form controls.
+pub(crate) fn field_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    ui.label(
+        RichText::new(label)
+            .font(styles::typography::label::font_id())
+            .color(styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals())),
+    )
 }
 
 /// Render a deterministic user avatar at an explicitly selected size.
