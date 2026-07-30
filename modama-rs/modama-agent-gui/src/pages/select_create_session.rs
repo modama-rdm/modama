@@ -1,13 +1,22 @@
-use eframe::egui::{self, Label, RichText};
 use std::time::Duration;
+
+use eframe::egui::{
+    self, Align, Layout, RichText, Sense, Stroke, TextEdit, WidgetInfo, WidgetType,
+};
+use time::{Date, OffsetDateTime};
 
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    buttons::{loading_button, primary_button, ButtonVariant},
+    buttons::{loading_button, primary_button, secondary_button, ButtonVariant},
+    components::{display_error, labeled_text_input, page_heading},
     state::ActiveSession,
     styles,
 };
+
+const SESSION_ROW_HEIGHT: f32 = 48.0;
+const ASYNC_REJECTION_SENTINEL: &str = "forbidden";
+const ASYNC_REJECTION_MESSAGE: &str = "Session name was rejected by the server.";
 
 #[derive(Debug, Clone)]
 pub struct FetchSessionsRequest {
@@ -44,13 +53,49 @@ impl CreateIngestRequest {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct CreateSessionAndIngestRequest {
+    pub project: String,
+    pub session: String,
+}
+
+impl CreateSessionAndIngestRequest {
+    pub fn execute(&self) -> Result<ActiveSession, String> {
+        std::thread::sleep(Duration::from_millis(500));
+        if self
+            .session
+            .to_lowercase()
+            .contains(ASYNC_REJECTION_SENTINEL)
+        {
+            return Err(ASYNC_REJECTION_MESSAGE.to_owned());
+        }
+
+        Ok(CreateIngestRequest {
+            project: self.project.clone(),
+            session: self.session.clone(),
+        }
+        .execute())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SessionPageMode {
+    #[default]
+    SelectExisting,
+    CreateNew,
+}
+
 pub struct PageSelectCreateSession {
     pub project: String,
     pub selected_session: Option<String>,
     pub new_session_input: String,
+    pub new_session_error: Option<String>,
     pub sessions_task: AsyncState<Vec<String>>,
     pub create_ingest_task: AsyncState<ActiveSession>,
+    pub create_session_task: AsyncState<Result<ActiveSession, String>>,
     pub available_sessions: Vec<String>,
+    mode: SessionPageMode,
+    initial_fetch_complete: bool,
 }
 
 impl PageSelectCreateSession {
@@ -58,15 +103,22 @@ impl PageSelectCreateSession {
         Self {
             project,
             selected_session: None,
-            new_session_input: String::new(),
+            new_session_input: session_name_prefix(today()),
+            new_session_error: None,
             sessions_task: AsyncState::Idle,
-            available_sessions: Vec::new(),
             create_ingest_task: AsyncState::Idle,
+            create_session_task: AsyncState::Idle,
+            available_sessions: Vec::new(),
+            mode: SessionPageMode::SelectExisting,
+            initial_fetch_complete: false,
         }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
-        if matches!(self.sessions_task, AsyncState::Idle) && self.available_sessions.is_empty() {
+        if !self.initial_fetch_complete
+            && matches!(self.sessions_task, AsyncState::Idle)
+            && self.available_sessions.is_empty()
+        {
             let req = FetchSessionsRequest {
                 project: self.project.clone(),
             };
@@ -74,71 +126,195 @@ impl PageSelectCreateSession {
             self.sessions_task.spawn(move || req.execute(), ctx);
         }
 
-        ui.add(Label::new(
-            RichText::new(format!(
-                "Select or create a session in project '{}'",
-                self.project
-            ))
-            .font(styles::typography::heading::font_id()),
-        ));
+        page_heading(
+            ui,
+            &format!("Select or create a session in project '{}'", self.project),
+        );
+        ui.add_space(styles::content_card_top_margin_adjustment());
 
-        if self.sessions_task.is_pending() {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(
-                    RichText::new("Fetching sessions...").font(styles::typography::body::font_id()),
-                );
-            });
-        } else {
-            let is_starting = self.create_ingest_task.is_pending();
-            ui.add_enabled_ui(!is_starting, |ui| {
-                for name in &self.available_sessions {
-                    let is_selected = Some(name.as_str()) == self.selected_session.as_deref();
-                    if ui
-                        .selectable_label(
-                            is_selected,
-                            RichText::new(name).font(styles::typography::mono::font_id()),
-                        )
-                        .clicked()
-                    {
-                        if is_selected {
-                            self.selected_session = None;
-                        } else {
-                            self.selected_session = Some(name.clone());
-                        }
-                    }
-                }
-            });
-
-            let enabled = self.selected_session.is_some();
-            let response = if is_starting {
-                loading_button(ui, "Starting…", egui::Vec2::ZERO, ButtonVariant::Primary)
-            } else {
-                ui.add_enabled(enabled, primary_button("Select Session", ui))
-            };
-            if response.clicked() {
-                if let Some(session_name) = &self.selected_session {
-                    let task = CreateIngestRequest {
-                        project: self.project.clone(),
-                        session: session_name.clone(),
-                    };
-                    self.create_ingest_task
-                        .spawn(move || task.execute(), ui.ctx().clone());
-                }
-            }
+        match self.mode {
+            SessionPageMode::SelectExisting => self.show_session_selection(ui),
+            SessionPageMode::CreateNew => self.show_create_form(ui),
         }
 
         Action::None
     }
 
+    fn show_session_selection(&mut self, ui: &mut egui::Ui) {
+        let is_loading = self.sessions_task.is_pending();
+        let is_starting = self.create_ingest_task.is_pending();
+
+        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+            ui.horizontal(|ui| {
+                ui.add_space(content_guide_widget_offset(
+                    styles::spacing::button_padding_x::EGUI_POINTS,
+                ));
+                let response = if is_starting {
+                    loading_button(ui, "Starting…", egui::Vec2::ZERO, ButtonVariant::Primary)
+                } else {
+                    ui.add_enabled(
+                        self.selected_session.is_some() && !is_loading,
+                        primary_button("Select Session", ui),
+                    )
+                };
+                if response.clicked() {
+                    self.start_existing_session(ui.ctx().clone());
+                }
+            });
+            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+
+            let list_outer_height = ui.available_height();
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), list_outer_height),
+                Layout::top_down(Align::Min),
+                |ui| self.show_session_list(ui, list_outer_height, is_loading, is_starting),
+            );
+        });
+    }
+
+    fn show_session_list(
+        &mut self,
+        ui: &mut egui::Ui,
+        outer_height: f32,
+        is_loading: bool,
+        is_starting: bool,
+    ) {
+        let frame_vertical_padding = 4.0 * styles::spacing::button_padding_y::EGUI_POINTS;
+        let frame_border = 2.0 * styles::components::standard_border::width::EGUI_POINTS;
+        let list_height =
+            (outer_height - frame_vertical_padding - frame_border).max(SESSION_ROW_HEIGHT);
+        let mut list_frame = styles::content_card_frame(ui.visuals());
+        list_frame.inner_margin.left = 0;
+        list_frame.inner_margin.right = 0;
+        list_frame.show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if is_loading {
+                centered_loading(ui, list_height);
+                return;
+            }
+
+            ui.add_enabled_ui(!is_starting, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("session-list")
+                    .auto_shrink([false, false])
+                    .max_height(list_height)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        let has_sessions = !self.available_sessions.is_empty();
+                        if create_session_row(ui, has_sessions).clicked() {
+                            self.new_session_error = None;
+                            self.mode = SessionPageMode::CreateNew;
+                        }
+                        for (index, name) in self.available_sessions.iter().enumerate() {
+                            let selected = self.selected_session.as_deref() == Some(name.as_str());
+                            let show_separator = index + 1 < self.available_sessions.len();
+                            if session_row(ui, name, selected, show_separator).clicked() {
+                                self.selected_session = Some(name.clone());
+                            }
+                        }
+                    });
+            });
+        });
+    }
+
+    fn show_create_form(&mut self, ui: &mut egui::Ui) {
+        let is_submitting = self.create_session_task.is_pending();
+        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 0.0;
+
+            if let Some(error) = self.new_session_error.as_deref() {
+                display_error(ui, error);
+                ui.add_space(styles::spacing::login_error_gap::EGUI_POINTS);
+            }
+
+            let submit_from_input = ui
+                .add_enabled_ui(!is_submitting, |ui| {
+                    let response = labeled_text_input(
+                        ui,
+                        "Session name",
+                        TextEdit::singleline(&mut self.new_session_input)
+                            .font(styles::typography::mono::font_id()),
+                    );
+                    response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                })
+                .inner;
+
+            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+            ui.horizontal(|ui| {
+                let submit = if is_submitting {
+                    loading_button(
+                        ui,
+                        "Creating and starting…",
+                        egui::Vec2::ZERO,
+                        ButtonVariant::Primary,
+                    )
+                } else {
+                    ui.add(primary_button("Create Session", ui))
+                };
+                let cancel = ui.add_enabled(!is_submitting, secondary_button("Cancel", ui));
+                if cancel.clicked() {
+                    self.new_session_error = None;
+                    self.mode = SessionPageMode::SelectExisting;
+                }
+                if submit.clicked() || submit_from_input {
+                    self.start_new_session(ui.ctx().clone());
+                }
+            });
+        });
+    }
+
+    fn start_existing_session(&mut self, ctx: egui::Context) {
+        if self.create_ingest_task.is_pending() {
+            return;
+        }
+        if let Some(session) = self.selected_session.clone() {
+            let task = CreateIngestRequest {
+                project: self.project.clone(),
+                session,
+            };
+            self.create_ingest_task.spawn(move || task.execute(), ctx);
+        }
+    }
+
+    fn start_new_session(&mut self, ctx: egui::Context) {
+        if self.create_session_task.is_pending() {
+            return;
+        }
+        self.new_session_error = None;
+        match validate_session_name(&self.new_session_input) {
+            Ok(session) => {
+                self.new_session_input.clone_from(&session);
+                let task = CreateSessionAndIngestRequest {
+                    project: self.project.clone(),
+                    session,
+                };
+                self.create_session_task.spawn(move || task.execute(), ctx);
+            }
+            Err(error) => self.new_session_error = Some(error),
+        }
+    }
+
     pub fn poll(&mut self) -> Action {
         if let Some(sessions) = self.sessions_task.poll().take_ready() {
             self.available_sessions = sessions;
+            self.initial_fetch_complete = true;
         }
         if let Some(active_ingest) = self.create_ingest_task.poll().take_ready() {
             return Action::SelectSession {
                 session: active_ingest,
             };
+        }
+        if let Some(result) = self.create_session_task.poll().take_ready() {
+            match result {
+                Ok(active_ingest) => {
+                    return Action::SelectSession {
+                        session: active_ingest,
+                    };
+                }
+                Err(error) => self.new_session_error = Some(error),
+            }
         }
         Action::None
     }
@@ -146,13 +322,172 @@ impl PageSelectCreateSession {
     pub fn is_busy(&self) -> bool {
         self.sessions_task.is_pending()
             || self.create_ingest_task.is_pending()
-            || (matches!(self.sessions_task, AsyncState::Idle)
+            || self.create_session_task.is_pending()
+            || (!self.initial_fetch_complete
+                && matches!(self.sessions_task, AsyncState::Idle)
                 && self.available_sessions.is_empty())
     }
 }
 
+fn create_session_row(ui: &mut egui::Ui, show_separator: bool) -> egui::Response {
+    interactive_row(
+        ui,
+        "Create a new session",
+        false,
+        show_separator,
+        styles::typography::button::font_id(),
+        true,
+    )
+}
+
+fn session_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    selected: bool,
+    show_separator: bool,
+) -> egui::Response {
+    interactive_row(
+        ui,
+        name,
+        selected,
+        show_separator,
+        styles::typography::mono::font_id(),
+        false,
+    )
+}
+
+fn interactive_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    selected: bool,
+    show_separator: bool,
+    font: egui::FontId,
+    show_plus: bool,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), SESSION_ROW_HEIGHT),
+        Sense::click(),
+    );
+    let visuals = ui.visuals();
+    let content_rect = rect.shrink2(egui::vec2(
+        styles::spacing::button_padding_x::EGUI_POINTS,
+        0.0,
+    ));
+    let fill = if selected {
+        styles::color::primary_tint::VALUE.resolve_egui(visuals)
+    } else if response.hovered() {
+        styles::color::surface_variant::VALUE.resolve_egui(visuals)
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 0.0, fill);
+    if show_separator {
+        ui.painter().hline(
+            content_rect.x_range(),
+            rect.bottom(),
+            Stroke::new(
+                styles::components::standard_border::width::EGUI_POINTS,
+                styles::color::outline::VALUE.resolve_egui(visuals),
+            ),
+        );
+    }
+
+    let mut text_left = content_rect.left();
+    if show_plus {
+        ui.painter().text(
+            egui::pos2(text_left, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "+",
+            styles::typography::section_heading::font_id(),
+            styles::color::primary::VALUE.resolve_egui(visuals),
+        );
+        text_left += 24.0;
+    }
+    ui.painter().text(
+        egui::pos2(text_left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font,
+        styles::color::on_surface::VALUE.resolve_egui(visuals),
+    );
+
+    response.widget_info(|| {
+        if show_plus {
+            WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label)
+        } else {
+            WidgetInfo::selected(
+                WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                selected,
+                label,
+            )
+        }
+    });
+    styles::paint_focus_ring(ui, &response);
+    response
+}
+
+fn centered_loading(ui: &mut egui::Ui, height: f32) {
+    let loading_text = "Fetching sessions…";
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(
+            loading_text.to_owned(),
+            styles::typography::body::font_id(),
+            ui.visuals().text_color(),
+        )
+        .size()
+        .x;
+    let content_width = ui.spacing().interact_size.y + ui.spacing().item_spacing.x + text_width;
+    let available = ui.available_rect_before_wrap();
+    let (_, reserved) = ui.allocate_space(egui::vec2(available.width(), height));
+    let content_rect = egui::Rect::from_center_size(
+        reserved.center(),
+        egui::vec2(content_width, ui.spacing().interact_size.y),
+    );
+    let mut content_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(content_rect)
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    content_ui.spinner();
+    content_ui.label(RichText::new(loading_text).font(styles::typography::body::font_id()));
+}
+
+fn validate_session_name(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        Err("Please enter a session name.".to_owned())
+    } else if trimmed.contains('/') {
+        Err("Session name cannot contain a \"/\".".to_owned())
+    } else {
+        Ok(trimmed.to_owned())
+    }
+}
+
+fn today() -> Date {
+    OffsetDateTime::now_local()
+        .unwrap_or_else(|_| OffsetDateTime::now_utc())
+        .date()
+}
+
+fn session_name_prefix(date: Date) -> String {
+    format!(
+        "{:04}-{:02}-{:02}-",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    )
+}
+
+fn content_guide_widget_offset(horizontal_padding: f32) -> f32 {
+    (styles::content_card_inset() - horizontal_padding).max(0.0)
+}
+
 #[cfg(test)]
 mod tests {
+    use time::{Date, Month};
+
     use super::*;
 
     #[test]
@@ -162,5 +497,49 @@ mod tests {
         };
         let res = req.execute();
         assert_eq!(res.len(), 4);
+    }
+
+    #[test]
+    fn formats_session_name_prefix() {
+        let date = Date::from_calendar_date(2026, Month::January, 3).unwrap();
+        assert_eq!(session_name_prefix(date), "2026-01-03-");
+    }
+
+    #[test]
+    fn validates_session_names() {
+        assert_eq!(
+            validate_session_name("  2026-07-30-run  "),
+            Ok("2026-07-30-run".to_owned())
+        );
+        assert_eq!(
+            validate_session_name("  "),
+            Err("Please enter a session name.".to_owned())
+        );
+        assert_eq!(
+            validate_session_name("2026-07-30/run"),
+            Err("Session name cannot contain a \"/\".".to_owned())
+        );
+    }
+
+    #[test]
+    fn create_request_can_simulate_an_api_rejection() {
+        let rejected = CreateSessionAndIngestRequest {
+            project: "test".to_owned(),
+            session: "2026-07-30-FORBIDDEN-run".to_owned(),
+        }
+        .execute();
+        assert_eq!(rejected, Err(ASYNC_REJECTION_MESSAGE.to_owned()));
+    }
+
+    #[test]
+    fn create_request_starts_ingest_after_success() {
+        let result = CreateSessionAndIngestRequest {
+            project: "test".to_owned(),
+            session: "2026-07-30-run".to_owned(),
+        }
+        .execute()
+        .unwrap();
+        assert_eq!(result.project, "test");
+        assert_eq!(result.session, "2026-07-30-run");
     }
 }

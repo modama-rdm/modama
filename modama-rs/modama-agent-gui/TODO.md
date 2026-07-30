@@ -21,17 +21,20 @@
         - [x] show last modified
     - [x] search (prioritize substring, but switch to fuzzy if no match)
     - [x] scrollable?
-- [ ] select or create session
-    - [ ] styling for the session list
-        - [ ] `ScrollArea.vertical().max_height(...)` maybe?
-    - [ ] implement the "create new session" form
-        - [ ] text input pre-filled with iso date prefix "YYYY-MM-DD-"
-        - [ ] like login form, enter submits form, button submits form
-    - [ ] add a decision "switch" UI to either pick existing session, or show a "create new session" form
-        - [ ] have the first item in the session list be a placeholder "create new" item
+- [x] select or create session
+    - [x] styling for the session list
+        - [x] `ScrollArea.vertical().max_height(...)` maybe?
+    - [x] implement the "create new session" form
+        - [x] text input pre-filled with iso date prefix "YYYY-MM-DD-"
+        - [x] like login form, enter submits form, button submits form
+    - [x] add a decision "switch" UI to either pick existing session, or show a "create new session" form
+        - [x] have the first item in the session list be a placeholder "create new" item
 - [ ] general design fixes
     - [ ] review vertical and horizontal flow of the design? are there elements that should be aligned which are not?
-- [ ] ux: `cursor: pointer` for clickable elements (including the top bar logo and all buttons)
+    - [ ] hovered card rows are subtle, thats ok, but they overlay the top border. that looks dumb on displays with too much contrast
+- [ ] eye candy
+    - [ ] focus ring of destructive actions should be red
+    - [ ] add a little decorating bottom bar like in react? or save the space? try it or add it behind a feature flag
 - [ ] breadcrumb navigation
     - need to distinguist "login -> create session" and "just clicked the login button" flows
 - [ ] keyboard ux: logical "tab indexes" (top-left to bottom-right-ish)
@@ -46,16 +49,20 @@
         - [ ] login: first form input
         - [ ] overview: "create session" button, or "close session" if one is active
         - [ ] what else?
+- [ ] mouse ux
+    - [ ] double click on items means selection (projects, sessions etc.)
+    - [ ] `cursor: pointer` for clickable elements (including the top bar logo and all buttons)
 - [ ] do a focus round on code quality
     - [ ] check for complexity hot-spots
     - [ ] check for spots that don't use the state machinery
 - [ ] do a focus round on design token usage
     - [ ] check if design tokens are "abused" and need either to be copied to a different name (component-specific maybe?) or might need to be renamed to be more generic
+    - [ ] any hardcoded pixel/point sizes that need to be design tokens?
+    - [ ] consistency: disabled element colors?
 - [ ] BUG: logging out does not close the ingest share. in logged out state, the active ingest share must be shown anyways
 - [ ] BUG: de-emphathized focus rings for disabled elements? instead of disabling completely
 - [ ] TEST: long project names? long ingest share session names?
 - [ ] scroll overflow cues if more items are available above/below
-- [ ] add a little decorating bottom bar like in react?
 - [ ] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
 - [ ] once versioned axum is feasible, 
     - [ ] update modama-agent local API to have versioned endpoints and schemas

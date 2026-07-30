@@ -472,12 +472,39 @@ fn session_selection_snapshots() {
     release.wait();
     results.extend_harness(&mut loading);
 
+    let mut empty_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    empty_page.sessions_task = AsyncState::Ready {
+        payload: Vec::new(),
+    };
+    let mut empty = selection_harness(Page::SelectCreateSession(empty_page));
+    empty.run_steps(3);
+    empty.snapshot("select_session_empty");
+    results.extend_harness(&mut empty);
+
     let mut unselected_page = PageSelectCreateSession::new("Project Alpha".to_string());
     unselected_page.available_sessions = strings(&SESSIONS);
     let mut unselected = selection_harness(Page::SelectCreateSession(unselected_page));
     unselected.run_steps(3);
     unselected.snapshot("select_session_unselected");
     results.extend_harness(&mut unselected);
+
+    let mut create_hovered_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    create_hovered_page.available_sessions = strings(&SESSIONS);
+    let mut create_hovered = selection_harness(Page::SelectCreateSession(create_hovered_page));
+    create_hovered.run_steps(3);
+    create_hovered.get_by_label("Create a new session").hover();
+    create_hovered.run_steps(2);
+    create_hovered.snapshot("select_session_create_hovered");
+    results.extend_harness(&mut create_hovered);
+
+    let mut existing_hovered_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    existing_hovered_page.available_sessions = strings(&SESSIONS);
+    let mut existing_hovered = selection_harness(Page::SelectCreateSession(existing_hovered_page));
+    existing_hovered.run_steps(3);
+    existing_hovered.get_by_label(SESSIONS[1]).hover();
+    existing_hovered.run_steps(2);
+    existing_hovered.snapshot("select_session_existing_hovered");
+    results.extend_harness(&mut existing_hovered);
 
     let mut selected_page = PageSelectCreateSession::new("Project Alpha".to_string());
     selected_page.available_sessions = strings(&SESSIONS);
@@ -486,6 +513,90 @@ fn session_selection_snapshots() {
     selected.run_steps(3);
     selected.snapshot("select_session_selected");
     results.extend_harness(&mut selected);
+
+    let mut dark_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    dark_page.available_sessions = strings(&SESSIONS);
+    dark_page.selected_session = Some(SESSIONS[1].to_string());
+    let mut dark = selection_harness_with_theme(Page::SelectCreateSession(dark_page), true);
+    dark.run_steps(3);
+    dark.snapshot("select_session_selected_dark");
+    results.extend_harness(&mut dark);
+
+    let mut form_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    form_page.available_sessions = strings(&SESSIONS);
+    form_page.new_session_input = "2026-07-30-".to_owned();
+    let mut form = selection_harness(Page::SelectCreateSession(form_page));
+    form.run_steps(3);
+    form.get_by_label("Create a new session").click();
+    form.run_steps(2);
+    form.snapshot("select_session_create_form");
+    results.extend_harness(&mut form);
+
+    let mut validation_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    validation_page.available_sessions = strings(&SESSIONS);
+    validation_page.new_session_input = "2026-07-30/invalid".to_owned();
+    let mut validation = selection_harness(Page::SelectCreateSession(validation_page));
+    validation.run_steps(3);
+    validation.get_by_label("Create a new session").click();
+    validation.run_steps(2);
+    validation.get_by_label("Create Session").click();
+    validation.run_steps(2);
+    validation.snapshot("select_session_create_validation");
+    results.extend_harness(&mut validation);
+
+    let mut rejected_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    rejected_page.available_sessions = strings(&SESSIONS);
+    rejected_page.new_session_input = "2026-07-30-forbidden-run".to_owned();
+    let mut rejected = selection_harness(Page::SelectCreateSession(rejected_page));
+    rejected.run_steps(3);
+    rejected.get_by_label("Create a new session").click();
+    rejected.run_steps(2);
+    if let Page::SelectCreateSession(page) = &mut rejected.state_mut().page {
+        page.create_session_task = AsyncState::Ready {
+            payload: Err("Session name was rejected by the server.".to_owned()),
+        };
+    }
+    rejected.run_steps(2);
+    rejected.snapshot("select_session_create_rejected");
+    results.extend_harness(&mut rejected);
+
+    let release = Arc::new(Barrier::new(2));
+    let task_release = Arc::clone(&release);
+    let mut creating_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    creating_page.available_sessions = strings(&SESSIONS);
+    creating_page.new_session_input = "2026-07-30-alignment-run".to_owned();
+    let mut creating = selection_harness(Page::SelectCreateSession(creating_page));
+    creating.run_steps(3);
+    creating.get_by_label("Create a new session").click();
+    creating.run_steps(2);
+    let ctx = creating.ctx.clone();
+    if let Page::SelectCreateSession(page) = &mut creating.state_mut().page {
+        page.create_session_task.spawn(
+            move || {
+                task_release.wait();
+                Err("pending create snapshot complete".to_owned())
+            },
+            ctx,
+        );
+    }
+    creating.run_steps(1);
+    creating.snapshot("select_session_creating");
+    release.wait();
+    results.extend_harness(&mut creating);
+
+    let mut scrolled_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    scrolled_page.available_sessions = (1..=24)
+        .map(|day| format!("2026-06-{day:02}-holo-stacks"))
+        .collect();
+    let mut scrolled = selection_harness(Page::SelectCreateSession(scrolled_page));
+    scrolled.run_steps(3);
+    let first_session = scrolled.get_by_label("2026-06-01-holo-stacks");
+    for _ in 0..8 {
+        first_session.scroll_down();
+    }
+    scrolled.run_steps(2);
+    scrolled.snapshot("select_session_scrolled");
+    results.extend_harness(&mut scrolled);
 
     let release = Arc::new(Barrier::new(2));
     let task_release = Arc::clone(&release);
@@ -547,5 +658,213 @@ fn session_choices_are_disabled_while_starting() {
         panic!("session selection page unexpectedly changed");
     };
     assert_eq!(page.selected_session.as_deref(), Some(SESSIONS[1]));
+    release.wait();
+}
+
+#[test]
+fn session_selection_and_creation_controls_are_accessible() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.available_sessions = strings(&SESSIONS);
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+
+    assert!(harness
+        .query_by_role_and_label(egui::accesskit::Role::Button, "Create a new session")
+        .is_some());
+    assert!(harness
+        .query_by_role(egui::accesskit::Role::RadioButton)
+        .is_none());
+
+    harness.get_by_label(SESSIONS[1]).click();
+    harness.run_steps(2);
+    assert!(harness
+        .query_by(|node| {
+            node.label().as_deref() == Some(SESSIONS[1])
+                && node.toggled() == Some(egui::accesskit::Toggled::True)
+        })
+        .is_some());
+
+    harness.get_by_label("Create a new session").click();
+    harness.run_steps(2);
+    assert!(harness
+        .query_by_role_and_label(egui::accesskit::Role::TextInput, "Session name")
+        .is_some());
+    harness.get_by_label("Cancel").click();
+    harness.run_steps(2);
+
+    let Page::SelectCreateSession(page) = &harness.state().page else {
+        panic!("session selection page unexpectedly changed");
+    };
+    assert_eq!(page.selected_session.as_deref(), Some(SESSIONS[1]));
+    assert!(harness.query_by_label("Create a new session").is_some());
+}
+
+#[test]
+fn enter_submits_the_create_session_form() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.available_sessions = strings(&SESSIONS);
+    page.new_session_input = "2026-07-30-enter-run".to_owned();
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+    harness.get_by_label("Create a new session").click();
+    harness.run_steps(2);
+
+    let input = harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Session name");
+    input.focus();
+    harness.run();
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(1);
+
+    let Page::SelectCreateSession(page) = &harness.state().page else {
+        panic!("session creation unexpectedly changed the page");
+    };
+    assert!(page.create_session_task.is_pending());
+}
+
+#[test]
+fn asynchronous_session_creation_errors_remain_on_the_form() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.available_sessions = strings(&SESSIONS);
+    page.new_session_input = "2026-07-30-forbidden-run".to_owned();
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+    harness.get_by_label("Create a new session").click();
+    harness.run_steps(2);
+
+    if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
+        page.create_session_task = AsyncState::Ready {
+            payload: Err("Session name was rejected by the server.".to_owned()),
+        };
+    }
+    harness.run_steps(2);
+
+    assert!(harness
+        .query_by_label("Session name was rejected by the server.")
+        .is_some());
+    assert!(harness.query_by_label("Create Session").is_some());
+    assert!(harness.query_by_label("Cancel").is_some());
+    assert!(harness
+        .query_by_role_and_label(egui::accesskit::Role::TextInput, "Session name")
+        .is_some());
+    let Page::SelectCreateSession(page) = &harness.state().page else {
+        panic!("session creation unexpectedly changed the page");
+    };
+    assert_eq!(page.new_session_input, "2026-07-30-forbidden-run");
+    assert!(!page.create_ingest_task.is_pending());
+}
+
+#[test]
+fn successful_session_creation_returns_to_overview_with_an_active_session() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.available_sessions = strings(&SESSIONS);
+    page.new_session_input = "2026-07-30-new-run".to_owned();
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+    harness.get_by_label("Create a new session").click();
+    harness.run_steps(2);
+
+    if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
+        page.create_session_task = AsyncState::Ready {
+            payload: Ok(ActiveSession {
+                project: "Project Alpha".to_owned(),
+                session: "2026-07-30-new-run".to_owned(),
+                mount_path: Some("/todo/Project Alpha/2026-07-30-new-run/".to_owned()),
+            }),
+        };
+    }
+    harness.run_steps(2);
+
+    assert!(matches!(harness.state().page, Page::Overview(_)));
+    let active = harness
+        .state()
+        .app_state
+        .session
+        .as_ref()
+        .expect("successful creation should activate the session");
+    assert_eq!(active.project, "Project Alpha");
+    assert_eq!(active.session, "2026-07-30-new-run");
+}
+
+#[test]
+fn session_list_follows_available_geometry_and_shared_guide() {
+    let mut list_spans = Vec::new();
+    let mut bottom_margins = Vec::new();
+
+    for height in [600.0, 768.0, 900.0] {
+        let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+        page.available_sessions = (1..=24)
+            .map(|day| format!("2026-06-{day:02}-holo-stacks"))
+            .collect();
+        let mut harness = selection_harness_at_size(
+            Page::SelectCreateSession(page),
+            false,
+            egui::vec2(VIEWPORT.x, height),
+        );
+        harness.run_steps(3);
+
+        let guide = harness.get_by_label("go to Overview").rect().left();
+        let heading = harness
+            .get_by_label("Select or create a session in project 'Project Alpha'")
+            .rect();
+        let create_row = harness.get_by_label("Create a new session").rect();
+        let first_session = harness.get_by_label("2026-06-01-holo-stacks").rect();
+        let action = harness.get_by_label("Select Session").rect();
+        let card_border = styles::components::standard_border::width::EGUI_POINTS;
+        let card_outer_left = styles::content_card_outer_inset_from_window();
+
+        assert!((heading.left() - guide).abs() <= 1.0);
+        assert!(
+            (create_row.left() + styles::spacing::button_padding_x::EGUI_POINTS - guide).abs()
+                <= 1.0
+        );
+        assert!((create_row.left() - (card_outer_left + card_border)).abs() <= 1.0);
+        assert!((create_row.right() - (VIEWPORT.x - card_outer_left - card_border)).abs() <= 1.0);
+        assert!((first_session.top() - create_row.bottom()).abs() <= 1.0);
+        assert!(
+            (action.left() + styles::spacing::button_padding_x::EGUI_POINTS - guide).abs() <= 1.0
+        );
+
+        list_spans.push(action.top() - create_row.top());
+        bottom_margins.push(height - action.bottom());
+    }
+
+    assert!(list_spans[0] < list_spans[1]);
+    assert!(list_spans[1] < list_spans[2]);
+    for margin in &bottom_margins {
+        assert!(*margin >= styles::spacing::form_field_gap::EGUI_POINTS);
+        assert!((*margin - bottom_margins[0]).abs() <= 1.0);
+    }
+}
+
+#[test]
+fn session_loading_is_centered_in_the_list_area() {
+    let release = Arc::new(Barrier::new(2));
+    let task_release = Arc::clone(&release);
+    let mut harness = selection_harness(Page::SelectCreateSession(PageSelectCreateSession::new(
+        "Project Alpha".to_owned(),
+    )));
+    let ctx = harness.ctx.clone();
+    if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
+        page.sessions_task.spawn(
+            move || {
+                task_release.wait();
+                strings(&SESSIONS)
+            },
+            ctx,
+        );
+    }
+    harness.run_steps(3);
+
+    let progress = harness
+        .get_by_role(egui::accesskit::Role::ProgressIndicator)
+        .rect();
+    let label = harness.get_by_label("Fetching sessions…").rect();
+    let group = progress.union(label);
+    let heading = harness
+        .get_by_label("Select or create a session in project 'Project Alpha'")
+        .rect();
+    let action = harness.get_by_label("Select Session").rect();
+    assert!((group.center().x - VIEWPORT.x / 2.0).abs() <= 1.0);
+    assert!(group.center().y > heading.bottom() && group.center().y < action.top());
     release.wait();
 }
