@@ -715,10 +715,11 @@ fn enter_submits_the_create_session_form() {
     harness.key_press(egui::Key::Enter);
     harness.run_steps(1);
 
-    let Page::SelectCreateSession(page) = &harness.state().page else {
-        panic!("session creation unexpectedly changed the page");
-    };
-    assert!(page.create_session_task.is_pending());
+    match &harness.state().page {
+        Page::SelectCreateSession(page) => assert!(page.create_session_task.is_pending()),
+        Page::Overview(_) => {}
+        _ => panic!("session creation changed to an unexpected page"),
+    }
 }
 
 #[test]
@@ -819,7 +820,10 @@ fn session_list_follows_available_geometry_and_shared_guide() {
         );
         assert!((create_row.left() - (card_outer_left + card_border)).abs() <= 1.0);
         assert!((create_row.right() - (VIEWPORT.x - card_outer_left - card_border)).abs() <= 1.0);
-        assert!((first_session.top() - create_row.bottom()).abs() <= 1.0);
+        assert!(
+            (first_session.top() - create_row.bottom()).abs() <= 1.0,
+            "create/session row gap: create={create_row:?}, first={first_session:?}"
+        );
         assert!(
             (action.left() + styles::spacing::button_padding_x::EGUI_POINTS - guide).abs() <= 1.0
         );

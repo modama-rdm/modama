@@ -4,6 +4,7 @@ pub mod async_state;
 pub mod buttons;
 pub(crate) mod components;
 pub mod pages;
+mod simulated_work;
 pub mod state;
 pub mod styles;
 mod top_bar;

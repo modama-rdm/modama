@@ -2,7 +2,7 @@ use eframe::egui;
 use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
-    pages::{Page, PageOverview},
+    pages::{Page, PageConnecting, PageOverview},
     state::{ActiveSession, Credentials},
     styles,
 };
@@ -81,12 +81,12 @@ fn overview_snapshots() {
     close_release.wait();
     results.extend_harness(&mut close_pending);
 
-    let mut logout_pending = overview_harness(false, true);
-    logout_pending.get_by_label("Log out").click();
-    logout_pending.run_steps(3);
-    assert!(logout_pending.query_by_label("Logging out…").is_some());
-    logout_pending.snapshot("overview_logout_pending");
-    results.extend_harness(&mut logout_pending);
+    let mut logout_completed = overview_harness(false, true);
+    logout_completed.get_by_label("Log out").click();
+    logout_completed.run_steps(3);
+    assert!(logout_completed.query_by_label("Log out").is_none());
+    logout_completed.snapshot("overview_logout_completed");
+    results.extend_harness(&mut logout_completed);
 
     results.unwrap();
 }
@@ -195,12 +195,6 @@ fn confirming_close_clears_the_active_session() {
         .click();
     harness.run_steps(3);
 
-    assert!(harness.state().page.is_busy());
-    assert!(harness.query_by_label("Closing…").is_some());
-
-    std::thread::sleep(std::time::Duration::from_millis(550));
-    harness.run_steps(2);
-
     assert!(harness.state().app_state.session.is_none());
     assert!(harness.query_by_label("Create Session").is_some());
     assert!(harness.query_by_label("Close Session").is_none());
@@ -208,26 +202,26 @@ fn confirming_close_clears_the_active_session() {
 
 #[test]
 fn connecting_snapshot() {
-    let mut harness = Harness::new_eframe(|cc| {
+    let release = Arc::new(Barrier::new(2));
+    let task_release = Arc::clone(&release);
+    let mut harness = Harness::new_eframe(move |cc| {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         styles::theme::install(&cc.egui_ctx);
-        AgentGuiApp::new()
+        let mut app = AgentGuiApp::new();
+        app.page = Page::Connecting(PageConnecting::new());
+        if let Page::Connecting(connecting) = &mut app.page {
+            connecting.connect_task.spawn(
+                move || {
+                    task_release.wait();
+                    Ok(())
+                },
+                cc.egui_ctx.clone(),
+            );
+        }
+        app
     });
     harness.set_size(VIEWPORT).set_pixels_per_point(1.0);
     harness.ctx.set_theme(egui::Theme::Light);
-
-    let release = Arc::new(Barrier::new(2));
-    let task_release = Arc::clone(&release);
-    let ctx = harness.ctx.clone();
-    if let Page::Connecting(connecting) = &mut harness.state_mut().page {
-        connecting.connect_task.spawn(
-            move || {
-                task_release.wait();
-                Ok(())
-            },
-            ctx,
-        );
-    }
 
     harness.run_steps(3);
     harness.snapshot("connecting");

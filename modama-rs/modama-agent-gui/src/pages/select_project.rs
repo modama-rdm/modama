@@ -45,7 +45,7 @@ pub struct FetchProjectsRequest;
 
 impl FetchProjectsRequest {
     pub fn execute(&self) -> Vec<ProjectSummary> {
-        std::thread::sleep(Duration::from_millis(500));
+        crate::simulated_work::sleep(Duration::from_millis(500));
         representative_projects()
     }
 }

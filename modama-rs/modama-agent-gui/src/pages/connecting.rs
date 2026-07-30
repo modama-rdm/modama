@@ -25,7 +25,7 @@ impl PageConnecting {
             let ctx = ui.ctx().clone();
             self.connect_task.spawn(
                 move || {
-                    std::thread::sleep(Duration::from_millis(1500));
+                    crate::simulated_work::sleep(Duration::from_millis(1500));
                     Ok(())
                 },
                 ctx,

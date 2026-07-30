@@ -126,7 +126,7 @@ impl TopBar {
                     };
                     if response.clicked() {
                         self.logout_task.spawn(
-                            || std::thread::sleep(Duration::from_millis(500)),
+                            || crate::simulated_work::sleep(Duration::from_millis(500)),
                             ui.ctx().clone(),
                         );
                     }

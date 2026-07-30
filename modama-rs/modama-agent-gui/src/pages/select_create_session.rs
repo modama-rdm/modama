@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use eframe::egui::{
-    self, Align, Layout, RichText, Sense, Stroke, TextEdit, WidgetInfo, WidgetType,
+    self, Align, FontFamily, FontId, Layout, Rect, Response, RichText, Sense, Stroke, TextEdit,
+    WidgetInfo, WidgetType,
 };
 use time::{Date, OffsetDateTime};
 
@@ -25,7 +26,7 @@ pub struct FetchSessionsRequest {
 
 impl FetchSessionsRequest {
     pub fn execute(&self) -> Vec<String> {
-        std::thread::sleep(Duration::from_millis(500));
+        crate::simulated_work::sleep(Duration::from_millis(500));
         vec![
             format!("{}-holo-stacks", "2026-06-16"),
             format!("{}-holo-stacks", "2026-06-18"),
@@ -43,7 +44,7 @@ pub struct CreateIngestRequest {
 
 impl CreateIngestRequest {
     pub fn execute(&self) -> ActiveSession {
-        std::thread::sleep(Duration::from_millis(500));
+        crate::simulated_work::sleep(Duration::from_millis(500));
 
         ActiveSession {
             project: self.project.clone(),
@@ -61,7 +62,7 @@ pub struct CreateSessionAndIngestRequest {
 
 impl CreateSessionAndIngestRequest {
     pub fn execute(&self) -> Result<ActiveSession, String> {
-        std::thread::sleep(Duration::from_millis(500));
+        crate::simulated_work::sleep(Duration::from_millis(500));
         if self
             .session
             .to_lowercase()
@@ -194,27 +195,31 @@ impl PageSelectCreateSession {
                 return;
             }
 
-            ui.add_enabled_ui(!is_starting, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("session-list")
-                    .auto_shrink([false, false])
-                    .max_height(list_height)
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        let has_sessions = !self.available_sessions.is_empty();
-                        if create_session_row(ui, has_sessions).clicked() {
-                            self.new_session_error = None;
-                            self.mode = SessionPageMode::CreateNew;
+            if is_starting {
+                ui.disable();
+            }
+            ui.style_mut().spacing.item_spacing.y =
+                1.0 - styles::spacing::app_item_gap_y::EGUI_POINTS;
+            egui::ScrollArea::vertical()
+                .id_salt("session-list")
+                .auto_shrink([false, false])
+                .max_height(list_height)
+                .show(ui, |ui| {
+                    ui.style_mut().spacing.item_spacing.y =
+                        1.0 - styles::spacing::app_item_gap_y::EGUI_POINTS;
+                    let has_sessions = !self.available_sessions.is_empty();
+                    if create_session_row(ui, has_sessions).clicked() {
+                        self.new_session_error = None;
+                        self.mode = SessionPageMode::CreateNew;
+                    }
+                    for (index, name) in self.available_sessions.iter().enumerate() {
+                        let selected = self.selected_session.as_deref() == Some(name.as_str());
+                        let show_separator = index + 1 < self.available_sessions.len();
+                        if session_row(ui, name, selected, show_separator).clicked() {
+                            self.selected_session = Some(name.clone());
                         }
-                        for (index, name) in self.available_sessions.iter().enumerate() {
-                            let selected = self.selected_session.as_deref() == Some(name.as_str());
-                            let show_separator = index + 1 < self.available_sessions.len();
-                            if session_row(ui, name, selected, show_separator).clicked() {
-                                self.selected_session = Some(name.clone());
-                            }
-                        }
-                    });
-            });
+                    }
+                });
         });
     }
 
@@ -332,11 +337,29 @@ impl PageSelectCreateSession {
 fn create_session_row(ui: &mut egui::Ui, show_separator: bool) -> egui::Response {
     interactive_row(
         ui,
-        "Create a new session",
         false,
         show_separator,
-        styles::typography::button::font_id(),
-        true,
+        //styles::typography::button::font_id(),
+        |content_rect, response, ui, _selected| {
+            let label = "Create a new session";
+            ui.add(egui::Label::new(
+                RichText::new(egui_phosphor::regular::PLUS)
+                    .font(FontId::new(
+                        styles::typography::body::FONT_SIZE,
+                        FontFamily::Proportional,
+                    ))
+                    .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
+            ));
+            ui.painter().text(
+                egui::pos2(content_rect.left(), content_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                styles::typography::button::font_id(),
+                styles::color::on_surface::VALUE.resolve_egui(ui.visuals()),
+            );
+            response
+                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
+        },
     )
 }
 
@@ -348,21 +371,28 @@ fn session_row(
 ) -> egui::Response {
     interactive_row(
         ui,
-        name,
         selected,
         show_separator,
-        styles::typography::mono::font_id(),
-        false,
+        |content_rect, response, ui, selected| {
+            ui.painter().text(
+                egui::pos2(content_rect.left(), content_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                name,
+                styles::typography::mono::font_id(),
+                styles::color::on_surface::VALUE.resolve_egui(ui.visuals()),
+            );
+            response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), selected, name)
+            });
+        },
     )
 }
 
 fn interactive_row(
     ui: &mut egui::Ui,
-    label: &str,
     selected: bool,
     show_separator: bool,
-    font: egui::FontId,
-    show_plus: bool,
+    content: impl Fn(&Rect, &Response, &mut egui::Ui, bool),
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), SESSION_ROW_HEIGHT),
@@ -392,37 +422,8 @@ fn interactive_row(
         );
     }
 
-    let mut text_left = content_rect.left();
-    if show_plus {
-        ui.painter().text(
-            egui::pos2(text_left, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            "+",
-            styles::typography::section_heading::font_id(),
-            styles::color::primary::VALUE.resolve_egui(visuals),
-        );
-        text_left += 24.0;
-    }
-    ui.painter().text(
-        egui::pos2(text_left, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        font,
-        styles::color::on_surface::VALUE.resolve_egui(visuals),
-    );
+    content(&content_rect, &response, ui, selected);
 
-    response.widget_info(|| {
-        if show_plus {
-            WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label)
-        } else {
-            WidgetInfo::selected(
-                WidgetType::SelectableLabel,
-                ui.is_enabled(),
-                selected,
-                label,
-            )
-        }
-    });
     styles::paint_focus_ring(ui, &response);
     response
 }

@@ -17,7 +17,7 @@ pub struct LoginRequest {
 
 impl LoginRequest {
     pub fn execute(&self) -> Result<Credentials, String> {
-        std::thread::sleep(Duration::from_millis(500));
+        crate::simulated_work::sleep(Duration::from_millis(500));
         if self.credentials.username.trim().is_empty() {
             Err("Username cannot be empty".to_string())
         } else {

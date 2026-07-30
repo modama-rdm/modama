@@ -17,7 +17,7 @@ pub struct CloseSessionRequest;
 
 impl CloseSessionRequest {
     pub fn execute(&self) {
-        std::thread::sleep(Duration::from_millis(500));
+        crate::simulated_work::sleep(Duration::from_millis(500));
     }
 }
 

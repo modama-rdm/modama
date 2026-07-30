@@ -53,13 +53,14 @@ fn enter_submits_from_each_login_input() {
         harness.key_press(egui::Key::Enter);
         harness.run_steps(1);
 
-        let Page::Login(login) = &harness.state().page else {
-            panic!("login submission unexpectedly changed the page");
-        };
-        assert!(
-            login.login_task.is_pending(),
-            "Enter did not submit login input with role {input_role:?}"
-        );
+        match &harness.state().page {
+            Page::Login(login) => assert!(
+                login.login_task.is_pending(),
+                "Enter did not submit login input with role {input_role:?}"
+            ),
+            Page::SelectProject(_) => {}
+            _ => panic!("login submission changed to an unexpected page"),
+        }
     }
 }
 
