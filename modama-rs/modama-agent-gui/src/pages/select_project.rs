@@ -2,6 +2,7 @@ use crate::components::{avatar::avatar, dropdown};
 use std::{cmp::Ordering, fmt::Display, time::Duration};
 
 use eframe::egui::{self, Align, Layout, RichText, Sense, Stroke, TextEdit, WidgetInfo};
+use egui_extras::{Size, StripBuilder};
 use time::OffsetDateTime;
 
 use crate::{
@@ -15,6 +16,7 @@ const PROJECT_ROW_HEIGHT: f32 = 64.0;
 const MEMBER_AVATAR_SIZE: f32 = 24.0;
 const MAX_VISIBLE_AVATARS: usize = 5;
 const MEMBER_AVATAR_OVERLAP: f32 = 5.0;
+const MODIFIED_COLUMN_WIDTH: f32 = 126.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectSummary {
@@ -441,53 +443,81 @@ fn project_row(
             ),
         );
     }
-
-    let text_left = content_rect.left();
-    ui.painter().text(
-        egui::pos2(text_left, rect.top() + 12.0),
-        egui::Align2::LEFT_TOP,
-        &project.name,
-        styles::typography::mono_medium::font_id(),
-        styles::color::on_surface::VALUE.resolve(visuals),
-    );
-    ui.painter().text(
-        egui::pos2(text_left, rect.bottom() - 12.0),
-        egui::Align2::LEFT_BOTTOM,
-        format!(
-            "Owner: {}  ·  {}",
-            project.owner,
-            member_count_label(project.members.len())
-        ),
-        styles::typography::supporting_text::font_id(),
-        styles::color::on_surface_dim::VALUE.resolve(visuals),
-    );
-
-    let modified = format_modified_date(project.modified_at);
+    let name_color = styles::color::on_surface::VALUE.resolve(visuals);
+    let details_color = styles::color::on_surface_dim::VALUE.resolve(visuals);
+    let modified_color = styles::color::on_surface_variant::VALUE.resolve(visuals);
     ui.painter().text(
         egui::pos2(content_rect.right() - 8.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
-        modified,
+        format_modified_date(project.modified_at),
         styles::typography::supporting_text::font_id(),
-        styles::color::on_surface_variant::VALUE.resolve(visuals),
+        modified_color,
     );
 
     let people = std::iter::once(project.owner.as_str())
         .chain(project.members.iter().map(String::as_str))
         .collect::<Vec<_>>();
     let overflow_count = people.len().saturating_sub(MAX_VISIBLE_AVATARS);
-    let avatars_rect = member_avatars_rect(content_rect, people.len());
-    let mut avatars_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(avatars_rect)
-            .layout(Layout::right_to_left(Align::Center)),
-    );
-    avatars_ui.spacing_mut().item_spacing.x = -MEMBER_AVATAR_OVERLAP;
-    if overflow_count > 0 {
-        additional_members_avatar(&mut avatars_ui, overflow_count);
-    }
-    for username in people.iter().take(MAX_VISIBLE_AVATARS).rev() {
-        avatar(&mut avatars_ui, username, MEMBER_AVATAR_SIZE);
-    }
+    let avatars_width = member_avatars_width(people.len());
+    let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect));
+    content_ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+    StripBuilder::new(&mut content_ui)
+        .size(Size::remainder())
+        .size(Size::exact(avatars_width))
+        .size(Size::exact(MODIFIED_COLUMN_WIDTH))
+        .horizontal(|mut strip| {
+            strip.cell(|ui| {
+                StripBuilder::new(ui)
+                    .size(Size::exact(
+                        styles::components::project_row::padding_y::EGUI_POINTS,
+                    ))
+                    .size(Size::remainder())
+                    .size(Size::remainder())
+                    .size(Size::exact(
+                        styles::components::project_row::padding_y::EGUI_POINTS,
+                    ))
+                    .vertical(|mut strip| {
+                        strip.empty();
+                        strip.cell(|ui| {
+                            ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+                                ui.label(
+                                    RichText::new(&project.name)
+                                        .font(styles::typography::mono_medium::font_id())
+                                        .color(name_color),
+                                );
+                            });
+                        });
+                        strip.cell(|ui| {
+                            ui.with_layout(Layout::left_to_right(Align::Max), |ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Owner: {}  ·  {}",
+                                        project.owner,
+                                        member_count_label(project.members.len())
+                                    ))
+                                    .font(styles::typography::supporting_text::font_id())
+                                    .color(details_color),
+                                );
+                            });
+                        });
+                        strip.empty();
+                    });
+            });
+            strip.cell(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = -MEMBER_AVATAR_OVERLAP;
+                    if overflow_count > 0 {
+                        additional_members_avatar(ui, overflow_count);
+                    }
+                    for username in people.iter().take(MAX_VISIBLE_AVATARS).rev() {
+                        avatar(ui, username, MEMBER_AVATAR_SIZE);
+                    }
+                });
+            });
+            strip.cell(|ui| {
+                ui.allocate_space(ui.available_size());
+            });
+        });
 
     response.widget_info(|| {
         WidgetInfo::selected(
@@ -507,20 +537,11 @@ fn project_row(
     response
 }
 
-fn member_avatars_rect(row_rect: egui::Rect, people_count: usize) -> egui::Rect {
+fn member_avatars_width(people_count: usize) -> f32 {
     let avatar_count = people_count.min(MAX_VISIBLE_AVATARS);
     let displayed_avatar_count = avatar_count + usize::from(people_count > MAX_VISIBLE_AVATARS);
-    let avatars_width = displayed_avatar_count as f32
-        * (MEMBER_AVATAR_SIZE - MEMBER_AVATAR_OVERLAP)
-        + MEMBER_AVATAR_OVERLAP;
-    let avatars_right = row_rect.right() - 126.0;
-    egui::Rect::from_min_size(
-        egui::pos2(
-            avatars_right - avatars_width,
-            row_rect.center().y - MEMBER_AVATAR_SIZE / 2.0,
-        ),
-        egui::vec2(avatars_width, MEMBER_AVATAR_SIZE),
-    )
+    displayed_avatar_count as f32 * (MEMBER_AVATAR_SIZE - MEMBER_AVATAR_OVERLAP)
+        + MEMBER_AVATAR_OVERLAP
 }
 
 fn member_count_label(member_count: usize) -> String {
@@ -667,16 +688,11 @@ mod tests {
     }
 
     #[test]
-    fn avatar_stacks_keep_their_right_edge_when_overflow_is_present() {
-        let row = egui::Rect::from_min_size(egui::pos2(40.0, 20.0), egui::vec2(900.0, 64.0));
-        let expected_right = row.right() - 126.0;
-
-        for people_count in [1, 3, 6, 12] {
-            assert_eq!(
-                member_avatars_rect(row, people_count).right(),
-                expected_right
-            );
-        }
+    fn avatar_stack_width_accounts_for_overlap_and_overflow() {
+        assert_eq!(member_avatars_width(1), MEMBER_AVATAR_SIZE);
+        assert_eq!(member_avatars_width(3), 62.0);
+        assert_eq!(member_avatars_width(6), 119.0);
+        assert_eq!(member_avatars_width(12), 119.0);
     }
 
     #[test]

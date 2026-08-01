@@ -139,6 +139,8 @@ components:
     size: 18px
   avatar:
     size: 32px
+  project-row:
+    padding-y: 12px
   login-card:
     width: 400px
   card-shadow-offset-y:
