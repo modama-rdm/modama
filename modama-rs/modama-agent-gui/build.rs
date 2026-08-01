@@ -85,11 +85,11 @@ impl ThemeColor {
         Self { light, dark, light_egui, dark_egui }
     }
 
-    pub const fn resolve(self, visuals: &eframe::egui::Visuals) -> &'static str {
+    pub const fn resolve_str(self, visuals: &eframe::egui::Visuals) -> &'static str {
         if visuals.dark_mode { self.dark } else { self.light }
     }
 
-    pub const fn resolve_egui(
+    pub const fn resolve(
         self,
         visuals: &eframe::egui::Visuals,
     ) -> eframe::egui::Color32 {

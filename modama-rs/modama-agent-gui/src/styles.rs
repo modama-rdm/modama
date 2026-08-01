@@ -175,23 +175,25 @@ pub mod theme {
             &mut visuals.widgets.open,
         ] {
             widget.corner_radius = radius(rounded::lg::EGUI_POINTS);
-            widget.fg_stroke = Stroke::new(components::standard_border::width::EGUI_POINTS, fg);
+            widget.fg_stroke = Stroke::new(components::standard_border::width::EGUI_POINTS, border);
         }
         visuals.widgets.inactive.weak_bg_fill = primary;
         visuals.widgets.inactive.bg_fill = primary;
-        visuals.widgets.inactive.bg_stroke =
-            Stroke::new(components::standard_border::width::EGUI_POINTS, primary);
+        visuals.widgets.inactive.bg_stroke = Stroke::new(
+            components::standard_border::width::EGUI_POINTS,
+            border,
+        );
         visuals.widgets.hovered.weak_bg_fill = primary_hover;
         visuals.widgets.hovered.bg_fill = primary_hover;
         visuals.widgets.hovered.bg_stroke = Stroke::new(
             components::standard_border::width::EGUI_POINTS,
-            primary_hover,
+            border,
         );
         visuals.widgets.active.weak_bg_fill = primary_hover;
         visuals.widgets.active.bg_fill = primary_hover;
         visuals.widgets.active.bg_stroke = Stroke::new(
             components::standard_border::width::EGUI_POINTS,
-            primary_hover,
+            border,
         );
         visuals.widgets.open = visuals.widgets.hovered;
 
@@ -200,7 +202,7 @@ pub mod theme {
         visuals.widgets.noninteractive.bg_stroke =
             Stroke::new(components::standard_border::width::EGUI_POINTS, border);
         visuals.widgets.noninteractive.fg_stroke =
-            Stroke::new(components::standard_border::width::EGUI_POINTS, fg);
+            Stroke::new(components::standard_border::width::EGUI_POINTS, border);
         visuals.widgets.noninteractive.corner_radius = radius(rounded::lg::EGUI_POINTS);
         visuals
     }
@@ -271,29 +273,18 @@ pub fn content_card_frame(visuals: &egui::Visuals) -> Frame {
 
 fn card_frame_with_padding(visuals: &egui::Visuals, padding: Margin) -> Frame {
     Frame::new()
-        .fill(color::surface::VALUE.resolve_egui(visuals))
+        .fill(color::surface::VALUE.resolve(visuals))
         .stroke(Stroke::new(
             components::standard_border::width::EGUI_POINTS,
-            color::outline::VALUE.resolve_egui(visuals),
+            color::outline::VALUE.resolve(visuals),
         ))
         .corner_radius(radius(rounded::_2xl::EGUI_POINTS))
         .inner_margin(padding)
         .shadow(card_shadow(visuals))
 }
 
-pub fn input_frame(visuals: &egui::Visuals, margin: Margin) -> Frame {
-    Frame::new()
-        .fill(color::surface::VALUE.resolve_egui(visuals))
-        .stroke(Stroke::new(
-            components::standard_border::width::EGUI_POINTS,
-            color::outline::VALUE.resolve_egui(visuals),
-        ))
-        .corner_radius(radius(rounded::lg::EGUI_POINTS))
-        .inner_margin(margin)
-}
-
 pub fn card_shadow(visuals: &egui::Visuals) -> Shadow {
-    card_shadow_with_color(color::shadow::VALUE.resolve_egui(visuals))
+    card_shadow_with_color(color::shadow::VALUE.resolve(visuals))
 }
 
 fn card_shadow_with_color(color: Color32) -> Shadow {
@@ -313,14 +304,14 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
             radius(rounded::lg::EGUI_POINTS),
             Stroke::new(
                 components::standard_border::width::EGUI_POINTS,
-                color::primary::VALUE.resolve_egui(ui.visuals()),
+                color::primary::VALUE.resolve(ui.visuals()),
             ),
             egui::StrokeKind::Inside,
         );
         ui.painter().rect_stroke(
             response.rect,
             radius(rounded::lg::EGUI_POINTS),
-            Stroke::new(width, color::primary_tint::VALUE.resolve_egui(ui.visuals())),
+            Stroke::new(width, color::primary_tint::VALUE.resolve(ui.visuals())),
             egui::StrokeKind::Outside,
         );
     }
@@ -328,10 +319,10 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
 
 pub fn danger_frame(visuals: &egui::Visuals) -> Frame {
     Frame::new()
-        .fill(color::error_container::VALUE.resolve_egui(visuals))
+        .fill(color::error_container::VALUE.resolve(visuals))
         .stroke(Stroke::new(
             components::standard_border::width::EGUI_POINTS,
-            color::error_variant::VALUE.resolve_egui(visuals),
+            color::error_variant::VALUE.resolve(visuals),
         ))
         .corner_radius(radius(rounded::xl::EGUI_POINTS))
         .inner_margin(Margin::symmetric(

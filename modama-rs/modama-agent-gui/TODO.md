@@ -69,3 +69,6 @@
     - [ ] auto-generate a rust client for it
     - [ ] have the GUI use that client
     - [ ] mock the API for the GUI tests? 
+- [ ] "start an ingest session" should be centered
+    - why? then it is easy to click on the sign in button on the next page
+    - => this is a general concept that should be explored

@@ -1,8 +1,7 @@
 pub mod actions;
 pub mod app;
 pub mod async_state;
-pub mod buttons;
-pub(crate) mod components;
+pub mod components;
 pub mod pages;
 mod simulated_work;
 pub mod state;
@@ -20,11 +19,11 @@ mod style_tests {
     #[test]
     fn generated_tokens_are_typed_and_available() {
         assert_eq!(
-            styles::color::background::VALUE.resolve(&egui::Visuals::light()),
+            styles::color::background::VALUE.resolve_str(&egui::Visuals::light()),
             "#f1f5fd"
         );
         assert_eq!(
-            styles::color::background::VALUE.resolve(&egui::Visuals::dark()),
+            styles::color::background::VALUE.resolve_str(&egui::Visuals::dark()),
             "#0b1120"
         );
         assert_eq!(styles::typography::button::FONT_WEIGHT, 600);

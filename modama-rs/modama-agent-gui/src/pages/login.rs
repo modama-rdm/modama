@@ -4,8 +4,10 @@ use std::time::Duration;
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    buttons::{primary_button, primary_loading_button},
-    components::{display_error, labeled_text_input},
+    components::{
+        buttons::{primary_button, primary_loading_button},
+        display_error, forms::labeled_text_input,
+    },
     state::Credentials,
     styles,
 };
@@ -18,8 +20,8 @@ pub struct LoginRequest {
 impl LoginRequest {
     pub fn execute(&self) -> Result<Credentials, String> {
         crate::simulated_work::sleep(Duration::from_millis(500));
-        if self.credentials.username.trim().is_empty() {
-            Err("Username cannot be empty".to_string())
+        if self.credentials.username.trim() == "stupid" {
+            Err("Username is stupid".to_string())
         } else {
             Ok(self.credentials.clone())
         }
@@ -152,20 +154,20 @@ fn show_login_header(ui: &mut egui::Ui) {
     ui.vertical_centered(|ui| {
         ui.add(
             egui::Image::new(egui::include_image!("../../assets/modama-tint.svg"))
-                .tint(styles::color::on_surface::VALUE.resolve_egui(ui.visuals()))
+                .tint(styles::color::on_surface::VALUE.resolve(ui.visuals()))
                 .max_height(styles::typography::login_logo::FONT_SIZE),
         );
         ui.add_space(styles::spacing::header_title_gap::EGUI_POINTS);
         ui.label(
             RichText::new("Data Management")
                 .font(styles::typography::section_heading::font_id())
-                .color(styles::color::on_surface::VALUE.resolve_egui(ui.visuals())),
+                .color(styles::color::on_surface::VALUE.resolve(ui.visuals())),
         );
         ui.add_space(styles::spacing::header_subtitle_gap::EGUI_POINTS);
         ui.label(
             RichText::new("Ingest Agent")
                 .font(styles::typography::supporting_text::font_id())
-                .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
+                .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
         );
     });
 }
@@ -188,10 +190,10 @@ mod tests {
     }
 
     #[test]
-    fn test_login_request_empty_username() {
+    fn test_login_request_invalid_username() {
         let req = LoginRequest {
             credentials: Credentials {
-                username: "   ".to_string(),
+                username: "stupid".to_string(),
                 password: "pass".to_string(),
             },
         };

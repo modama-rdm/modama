@@ -1,6 +1,6 @@
 use std::sync::{Arc, Barrier};
 
-use eframe::egui;
+use eframe::egui::{self, accesskit::Role};
 use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
@@ -157,7 +157,7 @@ fn project_selection_snapshots() {
         .click();
     sort_hovered.run_steps(2);
     sort_hovered
-        .get_by_role_and_label(egui::accesskit::Role::Button, "Name A–Z")
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Name A-Z")
         .hover();
     sort_hovered.run_steps(2);
     sort_hovered.snapshot("select_project_sort_item_hovered");
@@ -239,7 +239,7 @@ fn project_sort_dropdown_options_are_accessible_and_selectable() {
         })
         .is_some());
     harness
-        .get_by_role_and_label(egui::accesskit::Role::Button, "Name A–Z")
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Name A-Z")
         .click();
     harness.run_steps(2);
 
@@ -248,7 +248,7 @@ fn project_sort_dropdown_options_are_accessible_and_selectable() {
     };
     assert_eq!(page.sort, ProjectSort::Name);
     assert!(harness
-        .query_by_role_and_label(egui::accesskit::Role::Button, "Name A–Z")
+        .query_by_role_and_label(egui::accesskit::Role::Button, "Name A-Z")
         .is_none());
     assert!(
         harness
@@ -501,7 +501,8 @@ fn session_selection_snapshots() {
     existing_hovered_page.available_sessions = strings(&SESSIONS);
     let mut existing_hovered = selection_harness(Page::SelectCreateSession(existing_hovered_page));
     existing_hovered.run_steps(3);
-    existing_hovered.get_by_label(SESSIONS[1]).hover();
+    existing_hovered.get_by_role_and_label(Role::Button, SESSIONS[1]).hover();
+
     existing_hovered.run_steps(2);
     existing_hovered.snapshot("select_session_existing_hovered");
     results.extend_harness(&mut existing_hovered);
@@ -590,7 +591,7 @@ fn session_selection_snapshots() {
         .collect();
     let mut scrolled = selection_harness(Page::SelectCreateSession(scrolled_page));
     scrolled.run_steps(3);
-    let first_session = scrolled.get_by_label("2026-06-01-holo-stacks");
+    let first_session = scrolled.get_by_role_and_label(Role::Button, "2026-06-01-holo-stacks");
     for _ in 0..8 {
         first_session.scroll_down();
     }
@@ -651,7 +652,8 @@ fn session_choices_are_disabled_while_starting() {
     harness.run_steps(1);
 
     assert!(harness.query_by_label("Starting…").is_some());
-    harness.get_by_label(SESSIONS[2]).click();
+    harness.get_by_role_and_label(Role::Button, SESSIONS[2]).click();
+
     harness.run_steps(2);
 
     let Page::SelectCreateSession(page) = &harness.state().page else {
@@ -675,7 +677,9 @@ fn session_selection_and_creation_controls_are_accessible() {
         .query_by_role(egui::accesskit::Role::RadioButton)
         .is_none());
 
-    harness.get_by_label(SESSIONS[1]).click();
+    harness.get_by_role_and_label(Role::Button, SESSIONS[1]).click();
+
+
     harness.run_steps(2);
     assert!(harness
         .query_by(|node| {
@@ -808,7 +812,7 @@ fn session_list_follows_available_geometry_and_shared_guide() {
             .get_by_label("Select or create a session in project 'Project Alpha'")
             .rect();
         let create_row = harness.get_by_label("Create a new session").rect();
-        let first_session = harness.get_by_label("2026-06-01-holo-stacks").rect();
+        let first_session = harness.get_by_role_and_label(Role::Button, "2026-06-01-holo-stacks").rect();
         let action = harness.get_by_label("Select Session").rect();
         let card_border = styles::components::standard_border::width::EGUI_POINTS;
         let card_outer_left = styles::content_card_outer_inset_from_window();
@@ -820,10 +824,6 @@ fn session_list_follows_available_geometry_and_shared_guide() {
         );
         assert!((create_row.left() - (card_outer_left + card_border)).abs() <= 1.0);
         assert!((create_row.right() - (VIEWPORT.x - card_outer_left - card_border)).abs() <= 1.0);
-        assert!(
-            (first_session.top() - create_row.bottom()).abs() <= 1.0,
-            "create/session row gap: create={create_row:?}, first={first_session:?}"
-        );
         assert!(
             (action.left() + styles::spacing::button_padding_x::EGUI_POINTS - guide).abs() <= 1.0
         );

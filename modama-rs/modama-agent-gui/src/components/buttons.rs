@@ -40,10 +40,10 @@ pub enum ButtonVariant {
 
 fn button_text_color(visuals: &egui::Visuals, variant: ButtonVariant) -> Color32 {
     match variant {
-        ButtonVariant::Primary => styles::color::on_primary::VALUE.resolve_egui(visuals),
-        ButtonVariant::Secondary => styles::color::on_surface_variant::VALUE.resolve_egui(visuals),
+        ButtonVariant::Primary => styles::color::on_primary::VALUE.resolve(visuals),
+        ButtonVariant::Secondary => styles::color::on_surface_variant::VALUE.resolve(visuals),
         ButtonVariant::Danger => Color32::WHITE,
-        ButtonVariant::DangerOutline => styles::color::error::VALUE.resolve_egui(visuals),
+        ButtonVariant::DangerOutline => styles::color::error::VALUE.resolve(visuals),
     }
 }
 
@@ -71,22 +71,22 @@ fn button_inner<'a>(
         // documented primary-to-primary-hover transition.
         ButtonVariant::Primary => button,
         ButtonVariant::Secondary => button
-            .fill(styles::color::surface::VALUE.resolve_egui(visuals))
+            .fill(styles::color::surface::VALUE.resolve(visuals))
             .stroke(Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
-                styles::color::outline::VALUE.resolve_egui(visuals),
+                styles::color::outline::VALUE.resolve(visuals),
             )),
         ButtonVariant::Danger => button
-            .fill(styles::color::error::VALUE.resolve_egui(visuals))
+            .fill(styles::color::error::VALUE.resolve(visuals))
             .stroke(Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
-                styles::color::error::VALUE.resolve_egui(visuals),
+                styles::color::error::VALUE.resolve(visuals),
             )),
         ButtonVariant::DangerOutline => button
-            .fill(styles::color::surface::VALUE.resolve_egui(visuals))
+            .fill(styles::color::surface::VALUE.resolve(visuals))
             .stroke(Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
-                styles::color::error_variant::VALUE.resolve_egui(visuals),
+                styles::color::error_variant::VALUE.resolve(visuals),
             )),
     }
 }

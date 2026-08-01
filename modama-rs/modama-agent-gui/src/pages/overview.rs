@@ -4,8 +4,11 @@ use std::time::Duration;
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    buttons::{danger_outline_button, loading_button, primary_button, ButtonVariant},
-    components::{destructive_confirmation_dialog, page_heading, ConfirmationDialogAction},
+    components::{
+        buttons::{danger_outline_button, loading_button, primary_button, ButtonVariant},
+        dialogs::{destructive_confirmation_dialog, ConfirmationDialogAction},
+        page_heading,
+    },
     state::ActiveSession,
     styles,
 };
@@ -180,7 +183,7 @@ fn card_description(ui: &mut egui::Ui, text: &str) {
     ui.add(Label::new(
         RichText::new(text)
             .font(styles::typography::body::font_id())
-            .color(styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals())),
+            .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),
     ));
 }
 
@@ -189,7 +192,7 @@ fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.add(Label::new(
         RichText::new(label)
             .font(styles::typography::supporting_text::font_id())
-            .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
+            .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
     ));
     ui.add(Label::new(
         RichText::new(value).font(styles::typography::mono_medium::font_id()),

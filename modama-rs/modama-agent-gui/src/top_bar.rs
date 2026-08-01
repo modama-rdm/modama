@@ -1,3 +1,4 @@
+use crate::top_bar::avatar::avatar;
 use std::time::Duration;
 
 use eframe::egui::{self, Align, Color32, FontFamily, FontId, Layout, RichText, Sense, Stroke};
@@ -5,7 +6,7 @@ use eframe::egui::{self, Align, Color32, FontFamily, FontId, Layout, RichText, S
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    buttons::{loading_button, primary_button, secondary_button, ButtonVariant, DesignButton},
+    components::buttons::{loading_button, primary_button, secondary_button, ButtonVariant, DesignButton},
     components::avatar,
     state::AgentIdentity,
     styles,
@@ -36,7 +37,7 @@ impl TopBar {
             .exact_size(styles::components::top_bar::height::EGUI_POINTS)
             .frame(
                 egui::Frame::new()
-                    .fill(styles::color::surface::VALUE.resolve_egui(parent.visuals()))
+                    .fill(styles::color::surface::VALUE.resolve(parent.visuals()))
                     .inner_margin(egui::Margin::symmetric(
                         styles::components::top_bar::padding::EGUI_POINTS as i8,
                         0,
@@ -47,7 +48,7 @@ impl TopBar {
             .show_inside(parent, |ui| {
                 let action =
                     self.content(ui, username, agent_identity, page_busy, show_login_action);
-                let border = styles::color::outline::VALUE.resolve_egui(ui.visuals());
+                let border = styles::color::outline::VALUE.resolve(ui.visuals());
                 ui.painter().hline(
                     ui.max_rect().x_range(),
                     ui.max_rect().bottom()
@@ -80,7 +81,7 @@ impl TopBar {
                     compact_button_spacing(ui);
                     let logo = egui::Button::image(
                         egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
-                            .tint(styles::color::on_surface::VALUE.resolve_egui(ui.visuals()))
+                            .tint(styles::color::on_surface::VALUE.resolve(ui.visuals()))
                             .alt_text("go to Overview")
                             .max_height(styles::components::top_bar_logo::height::EGUI_POINTS),
                     )
@@ -108,7 +109,7 @@ impl TopBar {
                         .unwrap_or_else(|| "Ingest Agent".to_owned()),
                 )
                 .font(styles::typography::supporting_text::font_id())
-                .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
+                .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
             );
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -141,7 +142,7 @@ impl TopBar {
                         RichText::new(username)
                             .font(styles::typography::navigation::font_id())
                             .color(
-                                styles::color::on_surface_variant::VALUE.resolve_egui(ui.visuals()),
+                                styles::color::on_surface_variant::VALUE.resolve(ui.visuals()),
                             ),
                     );
                     avatar(ui, username, styles::components::avatar::size::EGUI_POINTS);
@@ -187,7 +188,7 @@ fn divider(ui: &mut egui::Ui, height: f32) {
         rect.y_range(),
         Stroke::new(
             styles::components::standard_border::width::EGUI_POINTS,
-            styles::color::outline::VALUE.resolve_egui(ui.visuals()),
+            styles::color::outline::VALUE.resolve(ui.visuals()),
         ),
     );
 }
@@ -209,7 +210,7 @@ fn theme_button(ui: &mut egui::Ui) {
                             styles::components::top_bar_icon::size::EGUI_POINTS,
                             FontFamily::Proportional,
                         ))
-                        .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
+                        .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
                 )
                 .fill(Color32::TRANSPARENT)
                 .stroke(Stroke::NONE)

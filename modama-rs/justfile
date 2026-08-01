@@ -12,11 +12,10 @@ validate-design:
 visual-tests:
     cargo test -p {{ agent_gui_package }} --features visual-tests
 
-# Update committed visual-test golden PNGs.
-update-goldens:
+update-snapshots:
     UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests
     oxipng -o max --strip safe {{ snapshot_dir }}/*.png
 
 # Remove generated visual-test review artifacts.
-clean-clutter:
+clean:
     find {{ snapshot_dir }} -maxdepth 1 -type f \( -name '*.new.png' -o -name '*.diff.png' -o -name '*.old.png' \) -delete

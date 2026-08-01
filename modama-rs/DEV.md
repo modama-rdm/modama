@@ -9,5 +9,5 @@
 Check the `justfile`:
 
 - `just visual-tests`
-- `just update-goldens`
-- `just clean-clutter`
+- `just update-snapshots`
+- `just clean`

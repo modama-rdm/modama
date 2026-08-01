@@ -1,4 +1,5 @@
-use std::{cmp::Ordering, time::Duration};
+use crate::components::{avatar::avatar, dropdown};
+use std::{cmp::Ordering, fmt::Display, time::Duration};
 
 use eframe::egui::{self, Align, Layout, RichText, Sense, Stroke, TextEdit, WidgetInfo};
 use time::OffsetDateTime;
@@ -6,8 +7,7 @@ use time::OffsetDateTime;
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    buttons::primary_button,
-    components::{avatar, field_label, labeled_text_input_with_insets, page_heading},
+    components::{buttons::primary_button, forms::labeled_text_input_with_insets, page_heading},
     styles,
 };
 
@@ -31,11 +31,11 @@ pub enum ProjectSort {
     Name,
 }
 
-impl ProjectSort {
-    fn label(self) -> &'static str {
+impl Display for ProjectSort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Modified => "Last modified",
-            Self::Name => "Name A–Z",
+            ProjectSort::Modified => write!(f, "Last modified"),
+            ProjectSort::Name => write!(f, "Name A-Z"),
         }
     }
 }
@@ -91,144 +91,107 @@ impl PageSelectProject {
         ui.add_space(styles::content_card_top_margin_adjustment());
 
         let is_loading = self.projects_task.is_pending();
-        ui.add_enabled_ui(!is_loading, |ui| self.show_toolbar(ui));
-        ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-
-        let visible_projects =
-            filter_and_sort_projects(&self.available_projects, &self.search_query, self.sort);
-        let list_state = if is_loading {
-            ProjectListState::Loading
-        } else if self.available_projects.is_empty() {
-            ProjectListState::NoAccess
-        } else if visible_projects.is_empty() {
-            ProjectListState::NoSearchMatches
-        } else {
-            ProjectListState::Projects
-        };
-        let selected_is_visible = self.selected_project.as_ref().is_some_and(|selected| {
-            visible_projects
-                .iter()
-                .any(|project| project.name == *selected)
-        });
-        let mut action = Action::None;
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+        ui.vertical(|ui| {
+            ui.add_enabled_ui(!is_loading, |ui| self.show_toolbar(ui));
             ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-            ui.horizontal(|ui| {
-                ui.add_space(content_guide_widget_offset(
-                    styles::spacing::button_padding_x::EGUI_POINTS,
-                ));
-                if ui
-                    .add_enabled(selected_is_visible, primary_button("Select Project", ui))
-                    .clicked()
-                {
-                    if let Some(project) = &self.selected_project {
-                        action = Action::SelectProject {
-                            project: project.clone(),
-                        };
+
+            let visible_projects =
+                filter_and_sort_projects(&self.available_projects, &self.search_query, self.sort);
+            let list_state = if is_loading {
+                ProjectListState::Loading
+            } else if self.available_projects.is_empty() {
+                ProjectListState::NoAccess
+            } else if visible_projects.is_empty() {
+                ProjectListState::NoSearchMatches
+            } else {
+                ProjectListState::Projects
+            };
+            let selected_is_visible = self.selected_project.as_ref().is_some_and(|selected| {
+                visible_projects
+                    .iter()
+                    .any(|project| project.name == *selected)
+            });
+            let mut action = Action::None;
+            ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+                ui.horizontal(|ui| {
+                    ui.add_space(content_guide_widget_offset(
+                        styles::spacing::button_padding_x::EGUI_POINTS,
+                    ));
+                    if ui
+                        .add_enabled(selected_is_visible, primary_button("Select Project", ui))
+                        .clicked()
+                    {
+                        if let Some(project) = &self.selected_project {
+                            action = Action::SelectProject {
+                                project: project.clone(),
+                            };
+                        }
                     }
+                });
+                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+
+                let list_outer_height = ui.available_height();
+                if let Some(project_list_action) = ui
+                    .allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), list_outer_height),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            self.show_project_list(
+                                ui,
+                                &visible_projects,
+                                list_outer_height,
+                                list_state,
+                            )
+                        },
+                    )
+                    .inner
+                {
+                    action = project_list_action;
                 }
             });
-            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-
-            let list_outer_height = ui.available_height();
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), list_outer_height),
-                Layout::top_down(Align::Min),
-                |ui| self.show_project_list(ui, &visible_projects, list_outer_height, list_state),
-            );
-        });
-        action
+            action
+        })
+        .inner
     }
 
     fn show_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_top(|ui| {
             let sort_width = 172.0;
-            let search_width =
-                (ui.available_width() - sort_width - styles::spacing::app_item_gap_x::EGUI_POINTS)
-                    .max(180.0);
 
-            let search = ui
-                .allocate_ui(egui::vec2(search_width, 0.0), |ui| {
-                    labeled_text_input_with_insets(
-                        ui,
-                        "Search",
-                        TextEdit::singleline(&mut self.search_query).hint_text("Search projects…"),
-                        styles::content_card_inset(),
-                        styles::spacing::button_padding_x::EGUI_POINTS,
-                    )
-                })
-                .inner;
-            ui.allocate_ui(egui::vec2(sort_width, 0.0), |ui| {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.spacing_mut().interact_size.y = search.rect.height();
-                    let label = field_label(ui, "Sort by");
-                    ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
-                    let surface = styles::color::surface::VALUE.resolve_egui(ui.visuals());
-                    let surface_variant =
-                        styles::color::surface_variant::VALUE.resolve_egui(ui.visuals());
-                    let outline = styles::color::outline::VALUE.resolve_egui(ui.visuals());
-                    let primary_tint =
-                        styles::color::primary_tint::VALUE.resolve_egui(ui.visuals());
-                    ui.visuals_mut().widgets.inactive.bg_fill = surface;
-                    ui.visuals_mut().widgets.inactive.weak_bg_fill = surface;
-                    ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(
-                        styles::components::standard_border::width::EGUI_POINTS,
-                        outline,
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), ui.available_height()),
+                egui::Layout::right_to_left(Align::Min),
+                |ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(sort_width, ui.available_height()),
+                        egui::Layout::top_down(Align::Min),
+                        |ui| {
+                            dropdown::dropdown(
+                                ui,
+                                [ProjectSort::Modified, ProjectSort::Name].iter(),
+                                &mut self.sort,
+                                "Sort by",
+                                "sort-projects",
+                            );
+                        },
                     );
-                    let widgets = &mut ui.visuals_mut().widgets;
-                    for widget in [&mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
-                        widget.bg_fill = surface_variant;
-                        widget.weak_bg_fill = surface_variant;
-                        widget.bg_stroke = Stroke::new(
-                            styles::components::standard_border::width::EGUI_POINTS,
-                            outline,
-                        );
-                    }
-                    let response = egui::ComboBox::from_id_salt("project-sort")
-                        .width(ui.available_width())
-                        .selected_text(self.sort.label())
-                        .popup_style(egui::style::StyleModifier::new(
-                            move |style: &mut egui::Style| {
-                                egui::containers::menu::menu_style(style);
-                                style.spacing.menu_margin.left = 0;
-                                style.spacing.menu_margin.right = 0;
-                                style.spacing.item_spacing.y = 0.0;
-                                style.spacing.button_padding = egui::vec2(
-                                    styles::spacing::input_padding_x::EGUI_POINTS,
-                                    styles::spacing::button_padding_y::EGUI_POINTS,
-                                );
-                                style.visuals.selection.bg_fill = primary_tint;
-                                for widget in [
-                                    &mut style.visuals.widgets.inactive,
-                                    &mut style.visuals.widgets.hovered,
-                                    &mut style.visuals.widgets.active,
-                                    &mut style.visuals.widgets.open,
-                                ] {
-                                    widget.corner_radius = egui::CornerRadius::ZERO;
-                                    widget.bg_stroke = Stroke::NONE;
-                                }
-                                style.visuals.widgets.inactive.bg_fill = surface;
-                                style.visuals.widgets.inactive.weak_bg_fill = surface;
-                                for widget in [
-                                    &mut style.visuals.widgets.hovered,
-                                    &mut style.visuals.widgets.active,
-                                    &mut style.visuals.widgets.open,
-                                ] {
-                                    widget.bg_fill = surface_variant;
-                                    widget.weak_bg_fill = surface_variant;
-                                }
-                            },
-                        ))
-                        .show_ui(ui, |ui| {
-                            sort_option(ui, &mut self.sort, ProjectSort::Modified);
-                            sort_option(ui, &mut self.sort, ProjectSort::Name);
-                        })
-                        .response
-                        .labelled_by(label.id);
-                    styles::paint_focus_ring(ui, &response);
-                });
-            });
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), ui.available_height()),
+                        egui::Layout::top_down(Align::Min),
+                        |ui| {
+                            labeled_text_input_with_insets(
+                                ui,
+                                "Search",
+                                TextEdit::singleline(&mut self.search_query)
+                                    .hint_text("Search projects…"),
+                                styles::content_card_inset(),
+                                styles::spacing::button_padding_x::EGUI_POINTS,
+                            );
+                        },
+                    );
+                },
+            );
         });
     }
 
@@ -238,7 +201,7 @@ impl PageSelectProject {
         projects: &[ProjectSummary],
         outer_height: f32,
         state: ProjectListState,
-    ) {
+    ) -> Option<Action> {
         let frame_vertical_padding = 4.0 * styles::spacing::button_padding_y::EGUI_POINTS;
         let frame_border = 2.0 * styles::components::standard_border::width::EGUI_POINTS;
         let list_height =
@@ -246,109 +209,120 @@ impl PageSelectProject {
         let mut list_frame = styles::content_card_frame(ui.visuals());
         list_frame.inner_margin.left = 0;
         list_frame.inner_margin.right = 0;
-        list_frame.show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            match state {
-                ProjectListState::Loading => {
-                    let loading_text = "Fetching projects…";
-                    let loading_text_width = ui
-                        .painter()
-                        .layout_no_wrap(
-                            loading_text.to_owned(),
-                            styles::typography::body::font_id(),
-                            ui.visuals().text_color(),
-                        )
-                        .size()
-                        .x;
-                    let loading_width = ui.spacing().interact_size.y
-                        + ui.spacing().item_spacing.x
-                        + loading_text_width;
-                    centered_list_state(
-                        ui,
-                        list_height,
-                        loading_width,
-                        24.0,
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.spinner();
-                            ui.label(
-                                RichText::new(loading_text)
-                                    .font(styles::typography::body::font_id()),
-                            );
-                        },
-                    );
-                    return;
-                }
-                ProjectListState::NoAccess => {
-                    centered_list_state(
-                        ui,
-                        list_height,
-                        ui.available_width(),
-                        62.0,
-                        Layout::top_down(Align::Center),
-                        |ui| {
-                            ui.label(
-                                RichText::new("No projects available")
-                                    .font(styles::typography::section_heading::font_id()),
-                            );
-                            ui.label(
-                                RichText::new("You don’t have access to any projects.")
+        list_frame
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                match state {
+                    ProjectListState::Loading => {
+                        let loading_text = "Fetching projects…";
+                        let loading_text_width = ui
+                            .painter()
+                            .layout_no_wrap(
+                                loading_text.to_owned(),
+                                styles::typography::body::font_id(),
+                                ui.visuals().text_color(),
+                            )
+                            .size()
+                            .x;
+                        let loading_width = ui.spacing().interact_size.y
+                            + ui.spacing().item_spacing.x
+                            + loading_text_width;
+                        centered_list_state(
+                            ui,
+                            list_height,
+                            loading_width,
+                            24.0,
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.spinner();
+                                ui.label(
+                                    RichText::new(loading_text)
+                                        .font(styles::typography::body::font_id()),
+                                );
+                            },
+                        );
+                        return None;
+                    }
+                    ProjectListState::NoAccess => {
+                        centered_list_state(
+                            ui,
+                            list_height,
+                            ui.available_width(),
+                            62.0,
+                            Layout::top_down(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    RichText::new("No projects available")
+                                        .font(styles::typography::section_heading::font_id()),
+                                );
+                                ui.label(
+                                    RichText::new("You don’t have access to any projects.")
+                                        .font(styles::typography::body::font_id())
+                                        .color(
+                                            styles::color::on_surface_variant::VALUE
+                                                .resolve(ui.visuals()),
+                                        ),
+                                );
+                            },
+                        );
+                        return None;
+                    }
+                    ProjectListState::NoSearchMatches => {
+                        centered_list_state(
+                            ui,
+                            list_height,
+                            ui.available_width(),
+                            62.0,
+                            Layout::top_down(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    RichText::new("No projects found")
+                                        .font(styles::typography::section_heading::font_id()),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Nothing matches “{}”.",
+                                        self.search_query.trim()
+                                    ))
                                     .font(styles::typography::body::font_id())
                                     .color(
                                         styles::color::on_surface_variant::VALUE
-                                            .resolve_egui(ui.visuals()),
+                                            .resolve(ui.visuals()),
                                     ),
-                            );
-                        },
-                    );
-                    return;
-                }
-                ProjectListState::NoSearchMatches => {
-                    centered_list_state(
-                        ui,
-                        list_height,
-                        ui.available_width(),
-                        62.0,
-                        Layout::top_down(Align::Center),
-                        |ui| {
-                            ui.label(
-                                RichText::new("No projects found")
-                                    .font(styles::typography::section_heading::font_id()),
-                            );
-                            ui.label(
-                                RichText::new(format!(
-                                    "Nothing matches “{}”.",
-                                    self.search_query.trim()
-                                ))
-                                .font(styles::typography::body::font_id())
-                                .color(
-                                    styles::color::on_surface_variant::VALUE
-                                        .resolve_egui(ui.visuals()),
-                                ),
-                            );
-                        },
-                    );
-                    return;
-                }
-                ProjectListState::Projects => {}
-            }
-
-            egui::ScrollArea::vertical()
-                .id_salt("project-list")
-                .auto_shrink([false, false])
-                .max_height(list_height)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    for (index, project) in projects.iter().enumerate() {
-                        let selected =
-                            self.selected_project.as_deref() == Some(project.name.as_str());
-                        if project_row(ui, project, selected, index + 1 < projects.len()).clicked()
-                        {
-                            self.selected_project = Some(project.name.clone());
-                        }
+                                );
+                            },
+                        );
+                        return None;
                     }
-                });
-        });
+                    ProjectListState::Projects => {}
+                }
+
+                egui::ScrollArea::vertical()
+                    .id_salt("project-list")
+                    .auto_shrink([false, false])
+                    .max_height(list_height)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        for (index, project) in projects.iter().enumerate() {
+                            let selected =
+                                self.selected_project.as_deref() == Some(project.name.as_str());
+                            let proj_resp =
+                                project_row(ui, project, selected, index + 1 < projects.len());
+                            if proj_resp.clicked() {
+                                self.selected_project = Some(project.name.clone());
+                            }
+                            if proj_resp.double_clicked() {
+                                self.selected_project = Some(project.name.clone());
+                                return Some(Action::SelectProject {
+                                    project: project.name.clone(),
+                                });
+                            }
+                        }
+                        None
+                    })
+                    .inner
+            })
+            .inner
     }
 
     pub fn poll(&mut self) -> Action {
@@ -373,32 +347,6 @@ enum ProjectListState {
     NoAccess,
     NoSearchMatches,
     Projects,
-}
-
-fn sort_option(
-    ui: &mut egui::Ui,
-    current_sort: &mut ProjectSort,
-    option: ProjectSort,
-) -> egui::Response {
-    let selected = *current_sort == option;
-    let mut response = ui.add(
-        egui::Button::selectable(selected, option.label())
-            .corner_radius(egui::CornerRadius::ZERO)
-            .min_size(egui::vec2(ui.available_width(), 0.0)),
-    );
-    if response.clicked() && !selected {
-        *current_sort = option;
-        response.mark_changed();
-    }
-    response.widget_info(|| {
-        WidgetInfo::selected(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            selected,
-            option.label(),
-        )
-    });
-    response
 }
 
 fn centered_list_state(
@@ -433,14 +381,14 @@ fn additional_members_avatar(ui: &mut egui::Ui, count: usize) -> egui::Response 
     ui.painter().circle_filled(
         rect.center(),
         MEMBER_AVATAR_SIZE / 2.0,
-        styles::color::surface_variant::VALUE.resolve_egui(visuals),
+        styles::color::surface_variant::VALUE.resolve(visuals),
     );
     ui.painter().circle_stroke(
         rect.center(),
         MEMBER_AVATAR_SIZE / 2.0,
         Stroke::new(
             styles::components::standard_border::width::EGUI_POINTS,
-            styles::color::outline::VALUE.resolve_egui(visuals),
+            styles::color::outline::VALUE.resolve(visuals),
         ),
     );
     ui.painter().text(
@@ -448,7 +396,7 @@ fn additional_members_avatar(ui: &mut egui::Ui, count: usize) -> egui::Response 
         egui::Align2::CENTER_CENTER,
         format!("+{count}"),
         styles::typography::supporting_text::font_id(),
-        styles::color::on_surface_variant::VALUE.resolve_egui(visuals),
+        styles::color::on_surface_variant::VALUE.resolve(visuals),
     );
     let description = match count {
         1 => "1 additional member".to_owned(),
@@ -476,9 +424,9 @@ fn project_row(
         0.0,
     ));
     let fill = if selected {
-        styles::color::primary_tint::VALUE.resolve_egui(visuals)
+        styles::color::primary_tint::VALUE.resolve(visuals)
     } else if response.hovered() {
-        styles::color::surface_variant::VALUE.resolve_egui(visuals)
+        styles::color::surface_variant::VALUE.resolve(visuals)
     } else {
         egui::Color32::TRANSPARENT
     };
@@ -489,7 +437,7 @@ fn project_row(
             rect.bottom(),
             Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
-                styles::color::outline::VALUE.resolve_egui(visuals),
+                styles::color::outline::VALUE.resolve(visuals),
             ),
         );
     }
@@ -500,7 +448,7 @@ fn project_row(
         egui::Align2::LEFT_TOP,
         &project.name,
         styles::typography::mono_medium::font_id(),
-        styles::color::on_surface::VALUE.resolve_egui(visuals),
+        styles::color::on_surface::VALUE.resolve(visuals),
     );
     ui.painter().text(
         egui::pos2(text_left, rect.bottom() - 12.0),
@@ -511,7 +459,7 @@ fn project_row(
             member_count_label(project.members.len())
         ),
         styles::typography::supporting_text::font_id(),
-        styles::color::on_surface_dim::VALUE.resolve_egui(visuals),
+        styles::color::on_surface_dim::VALUE.resolve(visuals),
     );
 
     let modified = format_modified_date(project.modified_at);
@@ -520,7 +468,7 @@ fn project_row(
         egui::Align2::RIGHT_CENTER,
         modified,
         styles::typography::supporting_text::font_id(),
-        styles::color::on_surface_variant::VALUE.resolve_egui(visuals),
+        styles::color::on_surface_variant::VALUE.resolve(visuals),
     );
 
     let people = std::iter::once(project.owner.as_str())

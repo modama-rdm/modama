@@ -1,16 +1,20 @@
 use std::time::Duration;
 
 use eframe::egui::{
-    self, Align, FontFamily, FontId, Layout, Rect, Response, RichText, Sense, Stroke, TextEdit,
-    WidgetInfo, WidgetType,
+    self, text::LayoutJob, Align, FontFamily, FontId, Label, Layout, Response, RichText,
+    Sense, Stroke, TextEdit, WidgetInfo, WidgetType,
 };
 use time::{Date, OffsetDateTime};
 
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    buttons::{loading_button, primary_button, secondary_button, ButtonVariant},
-    components::{display_error, labeled_text_input, page_heading},
+    components::{
+        buttons::{loading_button, primary_button, secondary_button, ButtonVariant},
+        display_error,
+        forms::labeled_text_input,
+        page_heading,
+    },
     state::ActiveSession,
     styles,
 };
@@ -205,19 +209,27 @@ impl PageSelectCreateSession {
                 .auto_shrink([false, false])
                 .max_height(list_height)
                 .show(ui, |ui| {
-                    ui.style_mut().spacing.item_spacing.y =
-                        1.0 - styles::spacing::app_item_gap_y::EGUI_POINTS;
+                    ui.style_mut().spacing.item_spacing.y = 0.0;
                     let has_sessions = !self.available_sessions.is_empty();
                     if create_session_row(ui, has_sessions).clicked() {
                         self.new_session_error = None;
                         self.mode = SessionPageMode::CreateNew;
                     }
+                    let mut start = false;
                     for (index, name) in self.available_sessions.iter().enumerate() {
                         let selected = self.selected_session.as_deref() == Some(name.as_str());
                         let show_separator = index + 1 < self.available_sessions.len();
-                        if session_row(ui, name, selected, show_separator).clicked() {
+                        let session_resp = session_row(ui, name, selected, show_separator);
+                        if session_resp.clicked() {
                             self.selected_session = Some(name.clone());
                         }
+                        if session_resp.double_clicked() {
+                            self.selected_session = Some(name.clone());
+                            start = true;
+                        }
+                    }
+                    if start {
+                        self.start_existing_session(ui.ctx().clone());
                     }
                 });
         });
@@ -335,32 +347,42 @@ impl PageSelectCreateSession {
 }
 
 fn create_session_row(ui: &mut egui::Ui, show_separator: bool) -> egui::Response {
-    interactive_row(
-        ui,
-        false,
-        show_separator,
-        //styles::typography::button::font_id(),
-        |content_rect, response, ui, _selected| {
-            let label = "Create a new session";
-            ui.add(egui::Label::new(
-                RichText::new(egui_phosphor::regular::PLUS)
-                    .font(FontId::new(
-                        styles::typography::body::FONT_SIZE,
-                        FontFamily::Proportional,
-                    ))
-                    .color(styles::color::on_surface_dim::VALUE.resolve_egui(ui.visuals())),
-            ));
-            ui.painter().text(
-                egui::pos2(content_rect.left(), content_rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                label,
-                styles::typography::button::font_id(),
-                styles::color::on_surface::VALUE.resolve_egui(ui.visuals()),
-            );
-            response
-                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
-        },
-    )
+    interactive_row(ui, false, show_separator, |response, ui, _selected| {
+        let label = "Create a new session";
+        let mut job = LayoutJob::default();
+        job.append(
+            egui_phosphor::regular::PLUS,
+            0.0,
+            egui::TextFormat {
+                font_id: FontId::new(
+                    styles::typography::body::FONT_SIZE,
+                    FontFamily::Proportional,
+                ),
+                color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
+                ..Default::default()
+            },
+        );
+        job.append(
+            label,
+            4.0,
+            egui::TextFormat {
+                font_id: styles::typography::body::font_id(),
+                color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
+                ..Default::default()
+            },
+        );
+
+        let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::body::font_id()));
+        let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
+
+        ui.vertical(|ui| {
+            ui.add_space(padding);
+            ui.add(Label::new(job).sense(Sense::empty()).selectable(false));
+            ui.add_space(padding);
+        });
+
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
+    })
 }
 
 fn session_row(
@@ -369,60 +391,60 @@ fn session_row(
     selected: bool,
     show_separator: bool,
 ) -> egui::Response {
-    interactive_row(
-        ui,
-        selected,
-        show_separator,
-        |content_rect, response, ui, selected| {
-            ui.painter().text(
-                egui::pos2(content_rect.left(), content_rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                name,
-                styles::typography::mono::font_id(),
-                styles::color::on_surface::VALUE.resolve_egui(ui.visuals()),
-            );
-            response.widget_info(|| {
-                WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), selected, name)
-            });
-        },
-    )
+    interactive_row(ui, selected, show_separator, |response, ui, selected| {
+        let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::mono::font_id()));
+        let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
+
+        ui.vertical(|ui| {
+            ui.add_space(padding);
+            ui.add(Label::new(name).sense(Sense::empty()).selectable(false));
+            ui.add_space(padding);
+        });
+
+        response.widget_info(|| {
+            WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), selected, name)
+        });
+    })
 }
 
 fn interactive_row(
     ui: &mut egui::Ui,
     selected: bool,
     show_separator: bool,
-    content: impl Fn(&Rect, &Response, &mut egui::Ui, bool),
+    content: impl Fn(&Response, &mut egui::Ui, bool),
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), SESSION_ROW_HEIGHT),
-        Sense::click(),
-    );
-    let visuals = ui.visuals();
+    let row_size = egui::vec2(ui.available_width(), SESSION_ROW_HEIGHT);
+
+    let (rect, response) = ui.allocate_exact_size(row_size, Sense::click());
     let content_rect = rect.shrink2(egui::vec2(
         styles::spacing::button_padding_x::EGUI_POINTS,
         0.0,
     ));
+
+    let visuals = ui.visuals();
     let fill = if selected {
-        styles::color::primary_tint::VALUE.resolve_egui(visuals)
+        styles::color::primary_tint::VALUE.resolve(visuals)
     } else if response.hovered() {
-        styles::color::surface_variant::VALUE.resolve_egui(visuals)
+        styles::color::surface_variant::VALUE.resolve(visuals)
     } else {
         egui::Color32::TRANSPARENT
     };
     ui.painter().rect_filled(rect, 0.0, fill);
     if show_separator {
+        let sep_rect = &content_rect;
         ui.painter().hline(
-            content_rect.x_range(),
-            rect.bottom(),
+            sep_rect.x_range(),
+            sep_rect.bottom() - 1.0,
             Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
-                styles::color::outline::VALUE.resolve_egui(visuals),
+                styles::color::outline::VALUE.resolve(visuals),
             ),
         );
     }
 
-    content(&content_rect, &response, ui, selected);
+    let mut row_ui = ui.new_child(egui::UiBuilder::default().max_rect(content_rect));
+
+    content(&response, &mut row_ui, selected);
 
     styles::paint_focus_ring(ui, &response);
     response
