@@ -623,23 +623,31 @@ fn project_row(
                         strip.empty();
                         strip.cell(|ui| {
                             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
-                                ui.label(
-                                    RichText::new(&project.name)
-                                        .font(styles::typography::mono_medium::font_id())
-                                        .color(name_color),
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&project.name)
+                                            .font(styles::typography::mono_medium::font_id())
+                                            .color(name_color),
+                                    )
+                                    .selectable(false)
+                                    .sense(Sense::empty()),
                                 );
                             });
                         });
                         strip.cell(|ui| {
                             ui.with_layout(Layout::left_to_right(Align::Max), |ui| {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "Owner: {}  ·  {}",
-                                        project.owner,
-                                        member_count_label(project.members.len())
-                                    ))
-                                    .font(styles::typography::supporting_text::font_id())
-                                    .color(details_color),
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!(
+                                            "Owner: {}  ·  {}",
+                                            project.owner,
+                                            member_count_label(project.members.len())
+                                        ))
+                                        .font(styles::typography::supporting_text::font_id())
+                                        .color(details_color),
+                                    )
+                                    .selectable(false)
+                                    .sense(Sense::empty()),
                                 );
                             });
                         });

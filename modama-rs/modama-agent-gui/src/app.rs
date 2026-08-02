@@ -66,7 +66,6 @@ impl AgentGuiApp {
             }
             Action::LogoutSuccess => {
                 self.app_state.creds = None;
-                self.app_state.session = None;
                 self.page = Page::Overview(PageOverview::new());
             }
             Action::Connected { identity } => {
@@ -165,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn test_logout_clears_state_and_returns_to_overview() {
+    fn test_logout_clears_credentials_and_returns_to_overview_without_closing_session() {
         let mut app = AgentGuiApp::new();
         app.app_state.creds = Some(Credentials {
             username: "user".to_string(),
@@ -180,7 +179,7 @@ mod tests {
         app.handle_action(Action::LogoutSuccess);
 
         assert!(app.app_state.creds.is_none());
-        assert!(app.app_state.session.is_none());
+        assert!(app.app_state.session.is_some());
         assert!(matches!(app.page, Page::Overview(_)));
     }
 

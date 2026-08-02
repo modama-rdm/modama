@@ -60,25 +60,20 @@
     - [ ] check if design tokens are "abused" and need either to be copied to a different name (component-specific maybe?) or might need to be renamed to be more generic
     - [ ] any hardcoded pixel/point sizes that need to be design tokens?
     - [ ] consistency: disabled element colors?
-- [ ] BUG: logging out should not close the ingest share. in logged out state, the active ingest share must be shown anyways
-- [ ] BUG: de-emphathized focus rings for disabled elements? instead of disabling completely
 - [ ] TEST: long project names? long ingest share session names?
     - check with backend API how long they can be
-- [ ] BUG: labels on project should not be selectable, and should not "steal" the hover from the row
-- [ ] BUG: project list should scroll if we use keyboard navigation to select items
+- [x] BUG: logging out should not close the ingest share. in logged out state, the active ingest share must be shown anyways
+- [x] BUG: labels on project should not be selectable, and should not "steal" the hover from the row
+- [x] BUG: project list should scroll if we use keyboard navigation to select items
 - [ ] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
 - [ ] once versioned axum is feasible, 
     - [ ] update modama-agent local API to have versioned endpoints and schemas
     - [ ] auto-generate a rust client for it
     - [ ] have the GUI use that client
     - [ ] mock the API for the GUI tests? 
-- [ ] "start an ingest session" should be centered
-    - why? then it is easy to click on the sign in button on the next page
-    - => this is a general concept that should be explored
 - [ ] general design fixes
     - [ ] review vertical and horizontal flow of the design? are there elements that should be aligned which are not?
     - [ ] hovered card rows are subtle, thats ok, but they overlay the top border. that looks dumb on displays with too much contrast
 - [ ] eye candy
     - [ ] focus ring of destructive actions should be red
-    - [ ] add a little decorating bottom bar like in react? or save the space? try it or add it behind a feature flag
 - [ ] update to latest egui
