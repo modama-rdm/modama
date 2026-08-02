@@ -60,7 +60,7 @@
     - [ ] check if design tokens are "abused" and need either to be copied to a different name (component-specific maybe?) or might need to be renamed to be more generic
     - [ ] any hardcoded pixel/point sizes that need to be design tokens?
     - [ ] consistency: disabled element colors?
-- [ ] BUG: logging out does not close the ingest share. in logged out state, the active ingest share must be shown anyways
+- [ ] BUG: logging out should not close the ingest share. in logged out state, the active ingest share must be shown anyways
 - [ ] BUG: de-emphathized focus rings for disabled elements? instead of disabling completely
 - [ ] TEST: long project names? long ingest share session names?
     - check with backend API how long they can be

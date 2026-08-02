@@ -434,20 +434,20 @@ fn project_list_keeps_focus_after_scrolling_selected_archive_into_view() {
     harness.run_steps(3);
 
     harness.get_by_label("Search").type_text("archive");
-    harness.run_steps(2);
+    harness.run_steps(4);
     press_tab(&mut harness, false);
     press_tab(&mut harness, false);
     harness.key_press(egui::Key::Space);
-    harness.run_steps(2);
+    harness.run_steps(4);
 
     harness.get_by_label("Search").focus();
     harness.run();
     harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::A);
     harness.key_press(egui::Key::Backspace);
-    harness.run_steps(2);
+    harness.run_steps(4);
     press_tab(&mut harness, false);
     press_tab(&mut harness, false);
-    harness.run_steps(2);
+    harness.run_steps(4);
 
     for _ in 0..5 {
         assert!(harness
