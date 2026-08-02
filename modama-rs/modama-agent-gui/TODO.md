@@ -35,7 +35,7 @@
     - [ ] logical "tab indexes" (top-left to bottom-right-ish)
         - [x] top bar
         - [x] select project page (sort-by after search)
-        - [ ] select session page ("select session" button must come after the list)
+        - [x] select session page ("select session" button must come after the list)
     - [ ] roving focus for list widgets (pressing tab doesn't navigate between items in a list, but goes to the next widget; up/down navigates within the list)
     - [ ] shortcuts where they are missing
         - [ ] Ctrl+N (or platform's equivalent) for creating new items
