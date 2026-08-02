@@ -426,6 +426,49 @@ fn project_list_arrows_wrap_and_move_selection() {
 }
 
 #[test]
+fn project_list_arrows_move_down_and_back_up_with_focus() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    let names = [
+        "Holo Stacks",
+        "Adaptive Optics",
+        "Neutrino Runs",
+        "Exoplanet Atmospheres",
+    ];
+    harness.get_by_label_contains("Holo Stacks, owner").focus();
+    harness.run();
+
+    for name in &names[1..] {
+        harness.key_press(egui::Key::ArrowDown);
+        harness.run_steps(2);
+        let label = format!("{name}, owner");
+        assert!(
+            harness.get_by_label_contains(&label).is_focused(),
+            "expected {name:?} to retain focus after ArrowDown"
+        );
+        if let Page::SelectProject(page) = &harness.state().page {
+            assert_eq!(page.selected_project.as_deref(), Some(*name));
+        }
+    }
+
+    for name in names[..3].iter().rev() {
+        harness.key_press(egui::Key::ArrowUp);
+        harness.run_steps(2);
+        let label = format!("{name}, owner");
+        assert!(
+            harness.get_by_label_contains(&label).is_focused(),
+            "expected {name:?} to regain focus after ArrowUp"
+        );
+        if let Page::SelectProject(page) = &harness.state().page {
+            assert_eq!(page.selected_project.as_deref(), Some(*name));
+        }
+    }
+}
+
+#[test]
 fn session_list_arrows_wrap_and_move_selection() {
     let mut page = PageSelectCreateSession::new("Project Alpha".to_owned());
     page.available_sessions = strings(&SESSIONS);

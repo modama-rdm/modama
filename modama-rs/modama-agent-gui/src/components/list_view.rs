@@ -3,6 +3,7 @@ use eframe::egui::{self, Align, Id, Response, Ui};
 #[derive(Default)]
 pub(crate) struct RovingListState {
     pub focused_index: Option<usize>,
+    pending_focus: Option<usize>,
 }
 
 #[derive(Default)]
@@ -28,6 +29,7 @@ pub(crate) fn show_roving_list<T>(
     let mut output = RovingListOutput::default();
     if items.is_empty() {
         state.focused_index = None;
+        state.pending_focus = None;
         return output;
     }
 
@@ -50,9 +52,12 @@ pub(crate) fn show_roving_list<T>(
                 )
             })
             .inner;
-        if focus_on_entry && index == active_index && response.enabled() {
+        let should_request_focus =
+            (focus_on_entry || state.pending_focus == Some(index)) && index == active_index;
+        if should_request_focus && response.enabled() {
             response.request_focus();
             output.focus_requested = true;
+            state.pending_focus = None;
         }
         responses.push(response);
     }
@@ -84,6 +89,7 @@ pub(crate) fn show_roving_list<T>(
 
         if let Some(next_index) = next_index {
             state.focused_index = Some(next_index);
+            state.pending_focus = Some(next_index);
             output.selection_changed = Some(next_index);
             responses[next_index].request_focus();
             responses[next_index].scroll_to_me(Some(Align::Center));
