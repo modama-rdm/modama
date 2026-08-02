@@ -31,23 +31,25 @@
         - [x] have the first item in the session list be a placeholder "create new" item
 - [ ] breadcrumb navigation
     - need to distinguist "login -> create session" and "just clicked the login button" flows
+    - might need to be a "wizard" style navigation, that displays all the steps in the flow
 - [ ] keyboard ux
-    - [ ] logical "tab indexes" (top-left to bottom-right-ish)
+    - [x] logical "tab indexes" (top-left to bottom-right-ish)
         - [x] top bar
         - [x] select project page (sort-by after search)
         - [x] select session page ("select session" button must come after the list)
-    - [ ] roving focus for list widgets (pressing tab doesn't navigate between items in a list, but goes to the next widget; up/down navigates within the list)
-    - [ ] shortcuts where they are missing
-        - [ ] Ctrl+N (or platform's equivalent) for creating new items
-        - [ ] escape to cancel?
+    - [x] roving focus for list widgets (pressing tab doesn't navigate between items in a list, but goes to the next widget; up/down navigates within the list)
+    - [x] contextual shortcuts where they are missing
+        - [x] Ctrl+N (or platform's equivalent) for creating a new session
+        - [x] escape to cancel transient UI
             - [ ] login -> overview
             - [ ] select project -> overview
-            - [ ] select/create session -> maybe go back to project selection?
-            - [ ] any missing combinations/states?
-    - [ ] after navigation, focus on the most likely element
-        - [ ] login: first form input
-        - [ ] overview: "create session" button, or "close session" if one is active
-        - [ ] what else?
+            - [ ] select/create session -> go back to project selection (intentionally deferred)
+            - [x] confirmation dialogs and create-session form
+    - [x] after navigation, focus on the most likely element
+        - [x] login: first form input
+        - [x] overview: "create session" button, or "close session" if one is active
+        - [x] select project: search input
+        - [x] select/create session: selected/first item or session-name input
 - [ ] mouse ux
     - [x] double click on items means selection (projects, sessions etc.)
     - [ ] `cursor: pointer` for clickable elements (including the top bar logo and all buttons)

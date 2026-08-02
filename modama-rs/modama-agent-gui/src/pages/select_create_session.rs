@@ -107,6 +107,9 @@ pub struct PageSelectCreateSession {
     pub create_session_task: AsyncState<Result<ActiveSession, String>>,
     pub available_sessions: Vec<String>,
     mode: SessionPageMode,
+    focused_session: Option<usize>,
+    focus_on_entry: bool,
+    focus_session_input_on_entry: bool,
     initial_fetch_complete: bool,
 }
 
@@ -122,11 +125,15 @@ impl PageSelectCreateSession {
             create_session_task: AsyncState::Idle,
             available_sessions: Vec::new(),
             mode: SessionPageMode::SelectExisting,
+            focused_session: None,
+            focus_on_entry: true,
+            focus_session_input_on_entry: false,
             initial_fetch_complete: false,
         }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
+        self.handle_keyboard_shortcuts(ui);
         if !self.initial_fetch_complete
             && matches!(self.sessions_task, AsyncState::Idle)
             && self.available_sessions.is_empty()
@@ -150,6 +157,32 @@ impl PageSelectCreateSession {
         }
 
         Action::None
+    }
+
+    fn handle_keyboard_shortcuts(&mut self, ui: &mut egui::Ui) {
+        let command_n =
+            ui.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::N));
+        if self.mode == SessionPageMode::SelectExisting
+            && command_n
+            && !self.sessions_task.is_pending()
+            && !self.create_ingest_task.is_pending()
+        {
+            self.new_session_error = None;
+            self.mode = SessionPageMode::CreateNew;
+            self.focus_on_entry = false;
+            self.focus_session_input_on_entry = true;
+            return;
+        }
+
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            && self.mode == SessionPageMode::CreateNew
+            && !self.create_session_task.is_pending()
+        {
+            self.new_session_error = None;
+            self.mode = SessionPageMode::SelectExisting;
+            self.focus_session_input_on_entry = false;
+            self.focus_on_entry = true;
+        }
     }
 
     fn show_session_selection(&mut self, ui: &mut egui::Ui) {
@@ -253,22 +286,101 @@ impl PageSelectCreateSession {
                 .show(ui, |ui| {
                     ui.style_mut().spacing.item_spacing.y = 0.0;
                     let has_sessions = !self.available_sessions.is_empty();
-                    if create_session_row(ui, has_sessions).clicked() {
+                    let row_count = self.available_sessions.len() + 1;
+                    let selected_index = self.selected_session.as_ref().and_then(|selected| {
+                        self.available_sessions
+                            .iter()
+                            .position(|session| session == selected)
+                            .map(|index| index + 1)
+                    });
+                    let active_index = self
+                        .focused_session
+                        .or(selected_index)
+                        .unwrap_or(0)
+                        .min(row_count - 1);
+                    let mut row_ids = Vec::with_capacity(row_count);
+                    let mut row_rects = Vec::with_capacity(row_count);
+                    let mut next_focus = None;
+                    let create_response = create_session_row(ui, has_sessions, active_index == 0);
+                    row_ids.push(create_response.id);
+                    row_rects.push(create_response.rect);
+                    if self.focus_on_entry && active_index == 0 && create_response.enabled() {
+                        create_response.request_focus();
+                        self.focus_on_entry = false;
+                    }
+                    if create_response.clicked()
+                        || (create_response.has_focus()
+                            && (consume_session_list_key(ui, egui::Key::Enter)
+                                || consume_session_list_key(ui, egui::Key::Space)))
+                    {
                         self.new_session_error = None;
                         self.mode = SessionPageMode::CreateNew;
+                        self.focus_session_input_on_entry = true;
+                        self.focus_on_entry = false;
+                    } else if create_response.has_focus() {
+                        if consume_session_list_key(ui, egui::Key::ArrowUp) {
+                            next_focus = Some(row_count - 1);
+                        } else if consume_session_list_key(ui, egui::Key::ArrowDown) {
+                            next_focus = Some(1 % row_count);
+                        }
                     }
                     let mut start = false;
                     for (index, name) in self.available_sessions.iter().enumerate() {
+                        let row_index = index + 1;
                         let selected = self.selected_session.as_deref() == Some(name.as_str());
                         let show_separator = index + 1 < self.available_sessions.len();
-                        let session_resp = session_row(ui, name, selected, show_separator);
+                        let session_resp = session_row(
+                            ui,
+                            name,
+                            selected,
+                            show_separator,
+                            row_index == active_index,
+                        );
+                        row_ids.push(session_resp.id);
+                        row_rects.push(session_resp.rect);
+                        if self.focus_on_entry
+                            && row_index == active_index
+                            && session_resp.enabled()
+                        {
+                            session_resp.request_focus();
+                            self.focus_on_entry = false;
+                        }
                         if session_resp.clicked() {
                             self.selected_session = Some(name.clone());
+                            self.focused_session = Some(row_index);
                         }
                         if session_resp.double_clicked() {
                             self.selected_session = Some(name.clone());
+                            self.focused_session = Some(row_index);
                             start = true;
                         }
+                        if session_resp.has_focus() {
+                            if consume_session_list_key(ui, egui::Key::ArrowUp) {
+                                next_focus = Some(if row_index == 0 {
+                                    row_count - 1
+                                } else {
+                                    row_index - 1
+                                });
+                            } else if consume_session_list_key(ui, egui::Key::ArrowDown) {
+                                next_focus = Some((row_index + 1) % row_count);
+                            } else if consume_session_list_key(ui, egui::Key::Enter)
+                                || consume_session_list_key(ui, egui::Key::Space)
+                            {
+                                self.selected_session = Some(name.clone());
+                                self.focused_session = Some(row_index);
+                            }
+                        }
+                    }
+                    if let Some(next_index) = next_focus {
+                        self.focused_session = Some(next_index);
+                        if next_index > 0 {
+                            self.selected_session =
+                                Some(self.available_sessions[next_index - 1].clone());
+                        }
+                        ui.ctx().memory_mut(|memory| {
+                            memory.request_focus(row_ids[next_index]);
+                        });
+                        ui.scroll_to_rect(row_rects[next_index], Some(Align::Center));
                     }
                     if start {
                         self.start_existing_session(ui.ctx().clone());
@@ -296,6 +408,10 @@ impl PageSelectCreateSession {
                         TextEdit::singleline(&mut self.new_session_input)
                             .font(styles::typography::mono::font_id()),
                     );
+                    if self.focus_session_input_on_entry && response.enabled() {
+                        response.request_focus();
+                        self.focus_session_input_on_entry = false;
+                    }
                     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
                 })
                 .inner;
@@ -388,43 +504,50 @@ impl PageSelectCreateSession {
     }
 }
 
-fn create_session_row(ui: &mut egui::Ui, show_separator: bool) -> egui::Response {
-    interactive_row(ui, false, show_separator, |response, ui, _selected| {
-        let label = "Create a new session";
-        let mut job = LayoutJob::default();
-        job.append(
-            egui_phosphor::regular::PLUS,
-            0.0,
-            egui::TextFormat {
-                font_id: FontId::new(
-                    styles::typography::body::FONT_SIZE,
-                    FontFamily::Proportional,
-                ),
-                color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
-                ..Default::default()
-            },
-        );
-        job.append(
-            label,
-            4.0,
-            egui::TextFormat {
-                font_id: styles::typography::body::font_id(),
-                color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
-                ..Default::default()
-            },
-        );
+fn create_session_row(ui: &mut egui::Ui, show_separator: bool, focusable: bool) -> egui::Response {
+    interactive_row(
+        ui,
+        false,
+        show_separator,
+        focusable,
+        |response, ui, _selected| {
+            let label = "Create a new session";
+            let mut job = LayoutJob::default();
+            job.append(
+                egui_phosphor::regular::PLUS,
+                0.0,
+                egui::TextFormat {
+                    font_id: FontId::new(
+                        styles::typography::body::FONT_SIZE,
+                        FontFamily::Proportional,
+                    ),
+                    color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
+                    ..Default::default()
+                },
+            );
+            job.append(
+                label,
+                4.0,
+                egui::TextFormat {
+                    font_id: styles::typography::body::font_id(),
+                    color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
+                    ..Default::default()
+                },
+            );
 
-        let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::body::font_id()));
-        let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
+            let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::body::font_id()));
+            let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
 
-        ui.vertical(|ui| {
-            ui.add_space(padding);
-            ui.add(Label::new(job).sense(Sense::empty()).selectable(false));
-            ui.add_space(padding);
-        });
+            ui.vertical(|ui| {
+                ui.add_space(padding);
+                ui.add(Label::new(job).sense(Sense::empty()).selectable(false));
+                ui.add_space(padding);
+            });
 
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
-    })
+            response
+                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
+        },
+    )
 }
 
 fn session_row(
@@ -432,32 +555,47 @@ fn session_row(
     name: &str,
     selected: bool,
     show_separator: bool,
+    focusable: bool,
 ) -> egui::Response {
-    interactive_row(ui, selected, show_separator, |response, ui, selected| {
-        let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::mono::font_id()));
-        let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
+    interactive_row(
+        ui,
+        selected,
+        show_separator,
+        focusable,
+        |response, ui, selected| {
+            let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::mono::font_id()));
+            let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
 
-        ui.vertical(|ui| {
-            ui.add_space(padding);
-            ui.add(Label::new(name).sense(Sense::empty()).selectable(false));
-            ui.add_space(padding);
-        });
+            ui.vertical(|ui| {
+                ui.add_space(padding);
+                ui.add(Label::new(name).sense(Sense::empty()).selectable(false));
+                ui.add_space(padding);
+            });
 
-        response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), selected, name)
-        });
-    })
+            response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), selected, name)
+            });
+        },
+    )
 }
 
 fn interactive_row(
     ui: &mut egui::Ui,
     selected: bool,
     show_separator: bool,
+    focusable: bool,
     content: impl Fn(&Response, &mut egui::Ui, bool),
 ) -> egui::Response {
     let row_size = egui::vec2(ui.available_width(), SESSION_ROW_HEIGHT);
 
-    let (rect, response) = ui.allocate_exact_size(row_size, Sense::click());
+    let (rect, response) = ui.allocate_exact_size(
+        row_size,
+        if focusable {
+            Sense::click()
+        } else {
+            Sense::CLICK
+        },
+    );
     let content_rect = rect.shrink2(egui::vec2(
         styles::spacing::button_padding_x::EGUI_POINTS,
         0.0,
@@ -608,6 +746,10 @@ fn session_name_prefix(date: Date) -> String {
 
 fn content_guide_widget_offset(horizontal_padding: f32) -> f32 {
     (styles::content_card_inset() - horizontal_padding).max(0.0)
+}
+
+fn consume_session_list_key(ui: &mut egui::Ui, key: egui::Key) -> bool {
+    ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
 }
 
 #[cfg(test)]

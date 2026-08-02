@@ -6,7 +6,8 @@ use crate::{
     async_state::AsyncState,
     components::{
         buttons::{primary_button, primary_loading_button},
-        display_error, forms::labeled_text_input,
+        display_error,
+        forms::labeled_text_input,
     },
     state::Credentials,
     styles,
@@ -33,6 +34,7 @@ pub struct PageLogin {
     pub password: String,
     pub login_error: Option<String>,
     pub login_task: AsyncState<Result<Credentials, String>>,
+    focus_username_on_entry: bool,
 }
 
 impl Default for PageLogin {
@@ -48,6 +50,7 @@ impl PageLogin {
             password: String::new(),
             login_error: None,
             login_task: AsyncState::Idle,
+            focus_username_on_entry: true,
         }
     }
 
@@ -89,9 +92,13 @@ impl PageLogin {
         let lost_focus = ui
             .add_enabled_ui(!is_logging_in, |ui| {
                 ui.style_mut().spacing.item_spacing.y = 0.0;
-                let user_lost_focus =
-                    labeled_text_input(ui, "Username", TextEdit::singleline(&mut self.username))
-                        .lost_focus();
+                let username_response =
+                    labeled_text_input(ui, "Username", TextEdit::singleline(&mut self.username));
+                if self.focus_username_on_entry && username_response.enabled() {
+                    username_response.request_focus();
+                    self.focus_username_on_entry = false;
+                }
+                let user_lost_focus = username_response.lost_focus();
                 ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
                 let pw_lost_focus = labeled_text_input(
                     ui,

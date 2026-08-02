@@ -92,6 +92,15 @@ fn overview_snapshots() {
 }
 
 #[test]
+fn overview_entry_focuses_primary_session_action() {
+    let logged_out = overview_harness(false, false);
+    assert!(logged_out.get_by_label("Create Session").is_focused());
+
+    let logged_in = overview_harness(false, true);
+    assert!(logged_in.get_by_label("Close Session").is_focused());
+}
+
+#[test]
 fn overview_actions_are_mutually_exclusive() {
     let active = overview_harness(false, true);
     assert!(active.query_by_label("Close Session").is_some());

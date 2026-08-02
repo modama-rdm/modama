@@ -66,6 +66,8 @@ pub struct PageSelectProject {
     pub available_projects: Vec<ProjectSummary>,
     pub search_query: String,
     pub sort: ProjectSort,
+    focused_project: Option<usize>,
+    focus_search_on_entry: bool,
     initial_fetch_complete: bool,
 }
 
@@ -83,6 +85,8 @@ impl PageSelectProject {
             available_projects: Vec::new(),
             search_query: String::new(),
             sort: ProjectSort::Modified,
+            focused_project: None,
+            focus_search_on_entry: true,
             initial_fetch_complete: false,
         }
     }
@@ -150,7 +154,7 @@ impl PageSelectProject {
                         ..Default::default()
                     })
                     .ui(|ui| {
-                        labeled_text_input_with_insets(
+                        let response = labeled_text_input_with_insets(
                             ui,
                             "Search",
                             TextEdit::singleline(&mut self.search_query)
@@ -158,6 +162,10 @@ impl PageSelectProject {
                             styles::content_card_inset(),
                             styles::spacing::button_padding_x::EGUI_POINTS,
                         );
+                        if self.focus_search_on_entry && response.enabled() {
+                            response.request_focus();
+                            self.focus_search_on_entry = false;
+                        }
                     });
                 tui.id("project-sort")
                     .style(Style {
@@ -292,20 +300,66 @@ impl PageSelectProject {
                     .max_height(list_height)
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
+                        let selected_index = self.selected_project.as_ref().and_then(|selected| {
+                            projects
+                                .iter()
+                                .position(|project| project.name == *selected)
+                        });
+                        let active_index = self
+                            .focused_project
+                            .or(selected_index)
+                            .unwrap_or(0)
+                            .min(projects.len().saturating_sub(1));
+                        let mut row_ids = Vec::with_capacity(projects.len());
+                        let mut row_rects = Vec::with_capacity(projects.len());
+                        let mut next_focus = None;
                         for (index, project) in projects.iter().enumerate() {
                             let selected =
                                 self.selected_project.as_deref() == Some(project.name.as_str());
-                            let proj_resp =
-                                project_row(ui, project, selected, index + 1 < projects.len());
+                            let proj_resp = project_row(
+                                ui,
+                                project,
+                                selected,
+                                index + 1 < projects.len(),
+                                index == active_index,
+                            );
+                            row_ids.push(proj_resp.id);
+                            row_rects.push(proj_resp.rect);
                             if proj_resp.clicked() {
                                 self.selected_project = Some(project.name.clone());
+                                self.focused_project = Some(index);
                             }
                             if proj_resp.double_clicked() {
                                 self.selected_project = Some(project.name.clone());
+                                self.focused_project = Some(index);
                                 return Some(Action::SelectProject {
                                     project: project.name.clone(),
                                 });
                             }
+                            if proj_resp.has_focus() {
+                                if consume_list_key(ui, egui::Key::ArrowUp) {
+                                    next_focus = Some(if index == 0 {
+                                        projects.len() - 1
+                                    } else {
+                                        index - 1
+                                    });
+                                } else if consume_list_key(ui, egui::Key::ArrowDown) {
+                                    next_focus = Some((index + 1) % projects.len());
+                                } else if consume_list_key(ui, egui::Key::Enter)
+                                    || consume_list_key(ui, egui::Key::Space)
+                                {
+                                    self.selected_project = Some(project.name.clone());
+                                    self.focused_project = Some(index);
+                                }
+                            }
+                        }
+                        if let Some(next_index) = next_focus {
+                            self.focused_project = Some(next_index);
+                            self.selected_project = Some(projects[next_index].name.clone());
+                            ui.ctx().memory_mut(|memory| {
+                                memory.request_focus(row_ids[next_index]);
+                            });
+                            ui.scroll_to_rect(row_rects[next_index], Some(Align::Center));
                         }
                         None
                     })
@@ -486,6 +540,10 @@ fn content_guide_widget_offset(horizontal_padding: f32) -> f32 {
     (styles::content_card_inset() - horizontal_padding).max(0.0)
 }
 
+fn consume_list_key(ui: &mut egui::Ui, key: egui::Key) -> bool {
+    ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
+}
+
 fn additional_members_avatar(ui: &mut egui::Ui, count: usize) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::Vec2::splat(MEMBER_AVATAR_SIZE), Sense::hover());
@@ -525,10 +583,15 @@ fn project_row(
     project: &ProjectSummary,
     selected: bool,
     show_separator: bool,
+    focusable: bool,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PROJECT_ROW_HEIGHT),
-        Sense::click(),
+        if focusable {
+            Sense::click()
+        } else {
+            Sense::CLICK
+        },
     );
     let visuals = ui.visuals();
     let content_rect = rect.shrink2(egui::vec2(

@@ -65,6 +65,14 @@ fn enter_submits_from_each_login_input() {
 }
 
 #[test]
+fn login_entry_focuses_username() {
+    let harness = login_harness(false);
+    assert!(harness
+        .get_by_role_and_label(egui::accesskit::Role::TextInput, "Username")
+        .is_focused());
+}
+
+#[test]
 fn enter_does_not_replace_a_pending_login() {
     let mut harness = login_harness(false);
     let release = Arc::new(Barrier::new(2));

@@ -28,6 +28,7 @@ pub struct PageOverview {
     pub close_task: AsyncState<()>,
     close_confirmation_open: bool,
     focus_confirmation_cancel: bool,
+    focus_on_entry: bool,
 }
 
 impl Default for PageOverview {
@@ -42,6 +43,7 @@ impl PageOverview {
             close_task: AsyncState::Idle,
             close_confirmation_open: false,
             focus_confirmation_cancel: false,
+            focus_on_entry: true,
         }
     }
 
@@ -92,7 +94,12 @@ impl PageOverview {
                  agent.",
             );
             ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-            clicked = ui.add(primary_button("Create Session", ui)).clicked();
+            let response = ui.add(primary_button("Create Session", ui));
+            if self.focus_on_entry && response.enabled() {
+                response.request_focus();
+                self.focus_on_entry = false;
+            }
+            clicked = response.clicked();
         });
         clicked
     }
@@ -135,6 +142,10 @@ impl PageOverview {
             } else {
                 ui.add(danger_outline_button("Close Session", ui))
             };
+            if self.focus_on_entry && response.enabled() {
+                response.request_focus();
+                self.focus_on_entry = false;
+            }
             if response.clicked() {
                 self.close_confirmation_open = true;
                 self.focus_confirmation_cancel = true;

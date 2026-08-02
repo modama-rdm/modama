@@ -358,19 +358,9 @@ fn project_page_tab_order_follows_visual_order() {
     let mut harness = selection_harness(Page::SelectProject(page));
     harness.run_steps(3);
 
-    for label in [
-        "go to Overview",
-        "Switch to dark theme",
-        "Log out",
-        "Search",
-        "Sort by",
-    ] {
-        press_tab(&mut harness, false);
-        assert!(
-            harness.get_by_label(label).is_focused(),
-            "expected {label:?} to receive focus"
-        );
-    }
+    assert!(harness.get_by_label("Search").is_focused());
+    press_tab(&mut harness, false);
+    assert!(harness.get_by_label("Sort by").is_focused());
 
     press_tab(&mut harness, false);
     assert!(harness
@@ -378,9 +368,7 @@ fn project_page_tab_order_follows_visual_order() {
         .is_focused());
 
     press_tab(&mut harness, true);
-    assert!(harness
-        .get_by_role_and_label(Role::ComboBox, "Sort by")
-        .is_focused());
+    assert!(harness.get_by_label("Sort by").is_focused());
 }
 
 #[test]
@@ -391,27 +379,76 @@ fn session_page_tab_order_follows_visual_order() {
     let mut harness = selection_harness(Page::SelectCreateSession(page));
     harness.run_steps(3);
 
-    harness.get_by_label("Create a new session").focus();
-    harness.run_steps(1);
-    assert!(harness.get_by_label("Create a new session").is_focused());
-
-    for session in SESSIONS {
-        press_tab(&mut harness, false);
-        assert!(
-            harness
-                .get_by_role_and_label(Role::Button, session)
-                .is_focused(),
-            "expected {session:?} to receive focus"
-        );
-    }
-
+    assert!(harness
+        .get_by_role_and_label(Role::Button, SESSIONS[0])
+        .is_focused());
     press_tab(&mut harness, false);
     assert!(harness.get_by_label("Select Session").is_focused());
 
     press_tab(&mut harness, true);
     assert!(harness
-        .get_by_role_and_label(Role::Button, SESSIONS[3])
+        .get_by_role_and_label(Role::Button, SESSIONS[0])
         .is_focused());
+}
+
+#[test]
+fn project_list_arrows_wrap_and_move_selection() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    harness.get_by_label_contains("Holo Stacks, owner").focus();
+    harness.run();
+    harness.key_press(egui::Key::ArrowUp);
+    harness.run_steps(2);
+
+    let last = harness.get_by_label_contains("Holo Stacks Archive, owner");
+    assert!(last.is_focused());
+    if let Page::SelectProject(page) = &harness.state().page {
+        assert_eq!(
+            page.selected_project.as_deref(),
+            Some("Holo Stacks Archive")
+        );
+    }
+}
+
+#[test]
+fn session_list_arrows_wrap_and_move_selection() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_owned());
+    page.available_sessions = strings(&SESSIONS);
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+
+    let first = harness.get_by_role_and_label(Role::Button, SESSIONS[0]);
+    first.focus();
+    harness.run();
+    harness.key_press(egui::Key::ArrowUp);
+    harness.run_steps(2);
+
+    let last = harness.get_by_role_and_label(Role::Button, SESSIONS[3]);
+    assert!(last.is_focused());
+    if let Page::SelectCreateSession(page) = &harness.state().page {
+        assert_eq!(page.selected_session.as_deref(), Some(SESSIONS[3]));
+    }
+}
+
+#[test]
+fn session_command_n_enters_create_mode_and_escape_returns_to_list() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_owned());
+    page.available_sessions = strings(&SESSIONS);
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::N);
+    harness.run_steps(2);
+    assert!(harness
+        .get_by_role_and_label(Role::TextInput, "Session name")
+        .is_focused());
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    assert!(harness.get_by_label("Create a new session").is_focused());
 }
 
 #[test]
@@ -580,7 +617,9 @@ fn session_selection_snapshots() {
     existing_hovered_page.available_sessions = strings(&SESSIONS);
     let mut existing_hovered = selection_harness(Page::SelectCreateSession(existing_hovered_page));
     existing_hovered.run_steps(3);
-    existing_hovered.get_by_role_and_label(Role::Button, SESSIONS[1]).hover();
+    existing_hovered
+        .get_by_role_and_label(Role::Button, SESSIONS[1])
+        .hover();
 
     existing_hovered.run_steps(2);
     existing_hovered.snapshot("select_session_existing_hovered");
@@ -731,7 +770,9 @@ fn session_choices_are_disabled_while_starting() {
     harness.run_steps(1);
 
     assert!(harness.query_by_label("Starting…").is_some());
-    harness.get_by_role_and_label(Role::Button, SESSIONS[2]).click();
+    harness
+        .get_by_role_and_label(Role::Button, SESSIONS[2])
+        .click();
 
     harness.run_steps(2);
 
@@ -756,8 +797,9 @@ fn session_selection_and_creation_controls_are_accessible() {
         .query_by_role(egui::accesskit::Role::RadioButton)
         .is_none());
 
-    harness.get_by_role_and_label(Role::Button, SESSIONS[1]).click();
-
+    harness
+        .get_by_role_and_label(Role::Button, SESSIONS[1])
+        .click();
 
     harness.run_steps(2);
     assert!(harness
@@ -891,7 +933,9 @@ fn session_list_follows_available_geometry_and_shared_guide() {
             .get_by_label("Select or create a session in project 'Project Alpha'")
             .rect();
         let create_row = harness.get_by_label("Create a new session").rect();
-        let first_session = harness.get_by_role_and_label(Role::Button, "2026-06-01-holo-stacks").rect();
+        let first_session = harness
+            .get_by_role_and_label(Role::Button, "2026-06-01-holo-stacks")
+            .rect();
         let action = harness.get_by_label("Select Session").rect();
         let card_border = styles::components::standard_border::width::EGUI_POINTS;
         let card_outer_left = styles::content_card_outer_inset_from_window();
