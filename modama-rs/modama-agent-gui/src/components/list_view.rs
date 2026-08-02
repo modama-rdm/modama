@@ -1,4 +1,4 @@
-use eframe::egui::{self, Align, Id, Response, Ui};
+use eframe::egui::{self, Align, EventFilter, Id, Response, Ui};
 
 #[derive(Default)]
 pub(crate) struct RovingListState {
@@ -84,6 +84,15 @@ pub(crate) fn show_roving_list<T>(
             continue;
         }
 
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                EventFilter {
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
         state.focused_index = Some(index);
         if response.gained_focus() {
             response.scroll_to_me(Some(Align::Center));

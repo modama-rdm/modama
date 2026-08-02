@@ -572,6 +572,26 @@ fn project_list_arrows_move_down_and_back_up_with_focus() {
 }
 
 #[test]
+fn project_list_arrow_down_keeps_focus_while_scrolling() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    harness.get_by_label_contains("Holo Stacks, owner").focus();
+    harness.run();
+    for _ in 0..12 {
+        harness.key_press(egui::Key::ArrowDown);
+        harness.run_steps(2);
+        assert!(harness
+            .query_by(|node| {
+                node.is_focused() && node.label().is_some_and(|label| label.contains(", owner"))
+            })
+            .is_some());
+    }
+}
+
+#[test]
 fn session_list_arrows_wrap_and_move_selection() {
     let mut page = PageSelectCreateSession::new("Project Alpha".to_owned());
     page.available_sessions = strings(&SESSIONS);
