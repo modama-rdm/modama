@@ -3,6 +3,13 @@ use std::{cmp::Ordering, fmt::Display, time::Duration};
 
 use eframe::egui::{self, Align, Layout, RichText, Sense, Stroke, TextEdit, WidgetInfo};
 use egui_extras::{Size, StripBuilder};
+use egui_taffy::{
+    taffy::{
+        self,
+        prelude::{auto, length, percent, AlignItems, FlexDirection, FlexWrap, Position, Style},
+    },
+    tui, TuiBuilderLogic, TuiContainerResponse,
+};
 use time::OffsetDateTime;
 
 use crate::{
@@ -17,6 +24,7 @@ const MEMBER_AVATAR_SIZE: f32 = 24.0;
 const MAX_VISIBLE_AVATARS: usize = 5;
 const MEMBER_AVATAR_OVERLAP: f32 = 5.0;
 const MODIFIED_COLUMN_WIDTH: f32 = 126.0;
+const SORT_CONTROL_WIDTH: f32 = 172.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectSummary {
@@ -80,6 +88,14 @@ impl PageSelectProject {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
+        self.start_initial_fetch(ui);
+
+        page_heading(ui, "Select a project");
+        ui.add_space(styles::content_card_top_margin_adjustment());
+        self.show_page_content(ui)
+    }
+
+    fn start_initial_fetch(&mut self, ui: &egui::Ui) {
         if !self.initial_fetch_complete
             && matches!(self.projects_task, AsyncState::Idle)
             && self.available_projects.is_empty()
@@ -88,10 +104,9 @@ impl PageSelectProject {
             self.projects_task
                 .spawn(move || FetchProjectsRequest.execute(), ctx);
         }
+    }
 
-        page_heading(ui, "Select a project");
-        ui.add_space(styles::content_card_top_margin_adjustment());
-
+    fn show_page_content(&mut self, ui: &mut egui::Ui) -> Action {
         let is_loading = self.projects_task.is_pending();
         ui.vertical(|ui| {
             ui.add_enabled_ui(!is_loading, |ui| self.show_toolbar(ui));
@@ -113,88 +128,119 @@ impl PageSelectProject {
                     .iter()
                     .any(|project| project.name == *selected)
             });
-            let mut action = Action::None;
-            ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-                ui.horizontal(|ui| {
-                    ui.add_space(content_guide_widget_offset(
-                        styles::spacing::button_padding_x::EGUI_POINTS,
-                    ));
-                    if ui
-                        .add_enabled(selected_is_visible, primary_button("Select Project", ui))
-                        .clicked()
-                    {
-                        if let Some(project) = &self.selected_project {
-                            action = Action::SelectProject {
-                                project: project.clone(),
-                            };
-                        }
-                    }
-                });
-                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-
-                let list_outer_height = ui.available_height();
-                if let Some(project_list_action) = ui
-                    .allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), list_outer_height),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            self.show_project_list(
-                                ui,
-                                &visible_projects,
-                                list_outer_height,
-                                list_state,
-                            )
-                        },
-                    )
-                    .inner
-                {
-                    action = project_list_action;
-                }
-            });
-            action
+            self.show_results_and_action(ui, &visible_projects, list_state, selected_is_visible)
         })
         .inner
     }
 
     fn show_toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_top(|ui| {
-            let sort_width = 172.0;
+        tui(ui, ui.id().with("project-toolbar"))
+            .reserve_available_width()
+            .style(toolbar_layout_style())
+            .show(|tui| {
+                tui.id("project-search")
+                    .style(Style {
+                        flex_grow: 1.0,
+                        flex_shrink: 1.0,
+                        flex_basis: length(0.0_f32),
+                        min_size: taffy::Size {
+                            width: length(0.0_f32),
+                            height: auto(),
+                        },
+                        ..Default::default()
+                    })
+                    .ui(|ui| {
+                        labeled_text_input_with_insets(
+                            ui,
+                            "Search",
+                            TextEdit::singleline(&mut self.search_query)
+                                .hint_text("Search projects…"),
+                            styles::content_card_inset(),
+                            styles::spacing::button_padding_x::EGUI_POINTS,
+                        );
+                    });
+                tui.id("project-sort")
+                    .style(Style {
+                        flex_shrink: 0.0,
+                        size: taffy::Size {
+                            width: length(SORT_CONTROL_WIDTH),
+                            height: auto(),
+                        },
+                        ..Default::default()
+                    })
+                    .ui(|ui| {
+                        dropdown::dropdown(
+                            ui,
+                            [ProjectSort::Modified, ProjectSort::Name].iter(),
+                            &mut self.sort,
+                            "Sort by",
+                            "sort-projects",
+                        );
+                    });
+            });
+    }
 
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), ui.available_height()),
-                egui::Layout::right_to_left(Align::Min),
-                |ui| {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(sort_width, ui.available_height()),
-                        egui::Layout::top_down(Align::Min),
-                        |ui| {
-                            dropdown::dropdown(
-                                ui,
-                                [ProjectSort::Modified, ProjectSort::Name].iter(),
-                                &mut self.sort,
-                                "Sort by",
-                                "sort-projects",
-                            );
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), ui.available_height()),
-                        egui::Layout::top_down(Align::Min),
-                        |ui| {
-                            labeled_text_input_with_insets(
-                                ui,
-                                "Search",
-                                TextEdit::singleline(&mut self.search_query)
-                                    .hint_text("Search projects…"),
-                                styles::content_card_inset(),
+    fn show_results_and_action(
+        &mut self,
+        ui: &mut egui::Ui,
+        projects: &[ProjectSummary],
+        state: ProjectListState,
+        selected_is_visible: bool,
+    ) -> Action {
+        let mut action = Action::None;
+        let mut available_rect = ui.available_rect_before_wrap();
+        // The former bottom-up layout included the surrounding vertical item gaps in its extent.
+        // Keep those token-derived bounds while letting Taffy control widget creation order.
+        available_rect.max.y += 2.0 * styles::spacing::app_item_gap_y::EGUI_POINTS;
+        tui(ui, ui.id().with("project-results-and-action"))
+            .with_allocated_rect(available_rect)
+            .style(results_layout_style())
+            .show(|tui| {
+                tui.id("project-results")
+                    .style(project_list_layout_style())
+                    .ui_manual(|ui, container| {
+                        if let Some(list_action) = self.show_project_list(
+                            ui,
+                            projects,
+                            container.full_container().height()
+                                - styles::spacing::form_field_gap::EGUI_POINTS
+                                + styles::components::standard_border::width::EGUI_POINTS,
+                            state,
+                        ) {
+                            action = list_action;
+                        }
+                        TuiContainerResponse {
+                            inner: (),
+                            min_size: ui.min_size(),
+                            intrinsic_size: None,
+                            max_size: ui.min_size(),
+                            infinite: egui::Vec2b::TRUE,
+                        }
+                    });
+                tui.id("project-action")
+                    .style(project_action_layout_style())
+                    .ui(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.add_space(content_guide_widget_offset(
                                 styles::spacing::button_padding_x::EGUI_POINTS,
-                            );
-                        },
-                    );
-                },
-            );
-        });
+                            ));
+                            if ui
+                                .add_enabled(
+                                    selected_is_visible,
+                                    primary_button("Select Project", ui),
+                                )
+                                .clicked()
+                            {
+                                if let Some(project) = &self.selected_project {
+                                    action = Action::SelectProject {
+                                        project: project.clone(),
+                                    };
+                                }
+                            }
+                        });
+                    });
+            });
+        action
     }
 
     fn show_project_list(
@@ -216,83 +262,24 @@ impl PageSelectProject {
                 ui.set_width(ui.available_width());
                 match state {
                     ProjectListState::Loading => {
-                        let loading_text = "Fetching projects…";
-                        let loading_text_width = ui
-                            .painter()
-                            .layout_no_wrap(
-                                loading_text.to_owned(),
-                                styles::typography::body::font_id(),
-                                ui.visuals().text_color(),
-                            )
-                            .size()
-                            .x;
-                        let loading_width = ui.spacing().interact_size.y
-                            + ui.spacing().item_spacing.x
-                            + loading_text_width;
-                        centered_list_state(
-                            ui,
-                            list_height,
-                            loading_width,
-                            24.0,
-                            Layout::left_to_right(Align::Center),
-                            |ui| {
-                                ui.spinner();
-                                ui.label(
-                                    RichText::new(loading_text)
-                                        .font(styles::typography::body::font_id()),
-                                );
-                            },
-                        );
+                        show_loading_state(ui, list_height);
                         return None;
                     }
                     ProjectListState::NoAccess => {
-                        centered_list_state(
+                        show_empty_state(
                             ui,
                             list_height,
-                            ui.available_width(),
-                            62.0,
-                            Layout::top_down(Align::Center),
-                            |ui| {
-                                ui.label(
-                                    RichText::new("No projects available")
-                                        .font(styles::typography::section_heading::font_id()),
-                                );
-                                ui.label(
-                                    RichText::new("You don’t have access to any projects.")
-                                        .font(styles::typography::body::font_id())
-                                        .color(
-                                            styles::color::on_surface_variant::VALUE
-                                                .resolve(ui.visuals()),
-                                        ),
-                                );
-                            },
+                            "No projects available",
+                            "You don’t have access to any projects.".to_owned(),
                         );
                         return None;
                     }
                     ProjectListState::NoSearchMatches => {
-                        centered_list_state(
+                        show_empty_state(
                             ui,
                             list_height,
-                            ui.available_width(),
-                            62.0,
-                            Layout::top_down(Align::Center),
-                            |ui| {
-                                ui.label(
-                                    RichText::new("No projects found")
-                                        .font(styles::typography::section_heading::font_id()),
-                                );
-                                ui.label(
-                                    RichText::new(format!(
-                                        "Nothing matches “{}”.",
-                                        self.search_query.trim()
-                                    ))
-                                    .font(styles::typography::body::font_id())
-                                    .color(
-                                        styles::color::on_surface_variant::VALUE
-                                            .resolve(ui.visuals()),
-                                    ),
-                                );
-                            },
+                            "No projects found",
+                            format!("Nothing matches “{}”.", self.search_query.trim()),
                         );
                         return None;
                     }
@@ -349,6 +336,129 @@ enum ProjectListState {
     NoAccess,
     NoSearchMatches,
     Projects,
+}
+
+fn toolbar_layout_style() -> Style {
+    Style {
+        display: taffy::Display::Flex,
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::NoWrap,
+        align_items: Some(AlignItems::Start),
+        size: taffy::Size {
+            width: percent(1.0_f32),
+            height: auto(),
+        },
+        gap: taffy::Size {
+            width: length(styles::spacing::app_item_gap_x::EGUI_POINTS),
+            height: length(0.0_f32),
+        },
+        ..Default::default()
+    }
+}
+
+fn results_layout_style() -> Style {
+    Style {
+        display: taffy::Display::Flex,
+        flex_direction: FlexDirection::Column,
+        flex_wrap: FlexWrap::NoWrap,
+        align_items: Some(AlignItems::Stretch),
+        size: taffy::Size {
+            width: percent(1.0_f32),
+            height: percent(1.0_f32),
+        },
+        gap: taffy::Size {
+            width: length(0.0_f32),
+            height: length(styles::spacing::form_field_gap::EGUI_POINTS),
+        },
+        padding: taffy::Rect {
+            left: length(0.0_f32),
+            right: length(0.0_f32),
+            top: length(0.0_f32),
+            bottom: length(styles::spacing::form_field_gap::EGUI_POINTS),
+        },
+        ..Default::default()
+    }
+}
+
+fn project_list_layout_style() -> Style {
+    let frame_vertical_padding = 4.0 * styles::spacing::button_padding_y::EGUI_POINTS;
+    let frame_border = 2.0 * styles::components::standard_border::width::EGUI_POINTS;
+    Style {
+        flex_grow: 1.0,
+        flex_shrink: 1.0,
+        flex_basis: length(0.0_f32),
+        min_size: taffy::Size {
+            width: auto(),
+            height: length(PROJECT_ROW_HEIGHT + frame_vertical_padding + frame_border),
+        },
+        ..Default::default()
+    }
+}
+
+fn project_action_layout_style() -> Style {
+    Style {
+        // Match the button's legacy bottom-up baseline within the token-sized action row.
+        position: Position::Relative,
+        inset: taffy::Rect {
+            left: auto(),
+            right: auto(),
+            top: length(-4.0 * styles::components::standard_border::width::EGUI_POINTS),
+            bottom: auto(),
+        },
+        flex_shrink: 0.0,
+        size: taffy::Size {
+            width: auto(),
+            height: length(
+                styles::typography::button::FONT_SIZE
+                    + 2.0 * styles::spacing::button_padding_y::EGUI_POINTS,
+            ),
+        },
+        ..Default::default()
+    }
+}
+
+fn show_loading_state(ui: &mut egui::Ui, list_height: f32) {
+    let loading_text = "Fetching projects…";
+    let loading_text_width = ui
+        .painter()
+        .layout_no_wrap(
+            loading_text.to_owned(),
+            styles::typography::body::font_id(),
+            ui.visuals().text_color(),
+        )
+        .size()
+        .x;
+    let loading_width =
+        ui.spacing().interact_size.y + ui.spacing().item_spacing.x + loading_text_width;
+    centered_list_state(
+        ui,
+        list_height,
+        loading_width,
+        24.0,
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spinner();
+            ui.label(RichText::new(loading_text).font(styles::typography::body::font_id()));
+        },
+    );
+}
+
+fn show_empty_state(ui: &mut egui::Ui, list_height: f32, title: &str, description: String) {
+    centered_list_state(
+        ui,
+        list_height,
+        ui.available_width(),
+        62.0,
+        Layout::top_down(Align::Center),
+        |ui| {
+            ui.label(RichText::new(title).font(styles::typography::section_heading::font_id()));
+            ui.label(
+                RichText::new(description)
+                    .font(styles::typography::body::font_id())
+                    .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),
+            );
+        },
+    );
 }
 
 fn centered_list_state(

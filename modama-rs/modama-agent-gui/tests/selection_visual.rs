@@ -59,6 +59,15 @@ fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }
 
+fn press_tab(harness: &mut Harness<'static, AgentGuiApp>, reverse: bool) {
+    if reverse {
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    } else {
+        harness.key_press(egui::Key::Tab);
+    }
+    harness.run_steps(1);
+}
+
 #[test]
 fn project_selection_snapshots() {
     let mut results = SnapshotResults::new();
@@ -104,7 +113,14 @@ fn project_selection_snapshots() {
         .rect();
     let action = loading.get_by_label("Select Project").rect();
     assert!((loading_group.center().x - VIEWPORT.x / 2.0).abs() <= 1.0);
-    assert!((loading_group.center().y - (sort.bottom() + action.top()) / 2.0).abs() <= 3.0);
+    assert!(
+        (loading_group.center().y - (sort.bottom() + action.top()) / 2.0).abs() <= 3.0,
+        "loading center {}, content center {}, sort bottom {}, action top {}",
+        loading_group.center().y,
+        (sort.bottom() + action.top()) / 2.0,
+        sort.bottom(),
+        action.top(),
+    );
     loading.snapshot("select_project_loading");
     release.wait();
     results.extend_harness(&mut loading);
@@ -333,6 +349,38 @@ fn project_search_sort_and_selection_are_accessible() {
         .query_all_by_label("2 additional members")
         .next()
         .is_some());
+}
+
+#[test]
+fn project_page_tab_order_follows_visual_order() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    for label in [
+        "go to Overview",
+        "Switch to dark theme",
+        "Log out",
+        "Search",
+        "Sort by",
+    ] {
+        press_tab(&mut harness, false);
+        assert!(
+            harness.get_by_label(label).is_focused(),
+            "expected {label:?} to receive focus"
+        );
+    }
+
+    press_tab(&mut harness, false);
+    assert!(harness
+        .get_by_label_contains("Holo Stacks, owner")
+        .is_focused());
+
+    press_tab(&mut harness, true);
+    assert!(harness
+        .get_by_role_and_label(Role::ComboBox, "Sort by")
+        .is_focused());
 }
 
 #[test]

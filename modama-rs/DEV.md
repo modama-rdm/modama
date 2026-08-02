@@ -8,6 +8,6 @@
 
 Check the `justfile`:
 
-- `just visual-tests`
-- `just update-snapshots`
-- `just clean`
+- `just visual-tests`      # runs visual tests and compares to snapshots
+- `just update-snapshots`  # updates snapshots and compresses PNGs via oxipng
+- `just clean`             # remove .old.png .new.png .diff.png snapshot files
