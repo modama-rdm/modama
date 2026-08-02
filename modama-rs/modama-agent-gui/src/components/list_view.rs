@@ -35,11 +35,13 @@ pub(crate) fn show_roving_list<T>(
         return output;
     }
 
-    let active_index = state
-        .focused_index
-        .or(selected_index)
-        .unwrap_or(0)
-        .min(items.len() - 1);
+    let active_index = if state.last_focused_index.is_none() {
+        selected_index.or(state.focused_index)
+    } else {
+        state.focused_index.or(selected_index)
+    }
+    .unwrap_or(0)
+    .min(items.len() - 1);
     let mut responses = Vec::with_capacity(items.len());
 
     for (index, item) in items.iter().enumerate() {

@@ -396,6 +396,37 @@ fn project_list_focus_scrolls_to_selected_offscreen_item() {
 }
 
 #[test]
+fn project_list_focus_tracks_selection_after_clearing_search() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    harness.get_by_label("Search").type_text("wideband");
+    harness.run_steps(2);
+    press_tab(&mut harness, false);
+    press_tab(&mut harness, false);
+    harness.key_press(egui::Key::Space);
+    harness.run_steps(2);
+
+    assert!(harness
+        .get_by_label_contains("Wideband Receiver, owner")
+        .is_focused());
+    harness.get_by_label("Search").focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::A);
+    harness.key_press(egui::Key::Backspace);
+    harness.run_steps(2);
+    press_tab(&mut harness, false);
+    press_tab(&mut harness, false);
+    harness.run_steps(2);
+
+    assert!(harness
+        .get_by_label_contains("Wideband Receiver, owner")
+        .is_focused());
+}
+
+#[test]
 fn session_page_tab_order_follows_visual_order() {
     let mut page = PageSelectCreateSession::new("Project Alpha".to_owned());
     page.available_sessions = strings(&SESSIONS);
