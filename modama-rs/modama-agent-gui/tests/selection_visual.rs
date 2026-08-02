@@ -461,6 +461,17 @@ fn project_list_keeps_focus_after_scrolling_selected_archive_into_view() {
     assert!(harness
         .get_by_label_contains("Holo Stacks Archive, owner")
         .is_focused());
+
+    harness.get_by_label("Search").focus();
+    harness.run();
+    press_tab(&mut harness, false);
+    press_tab(&mut harness, false);
+    harness.run_steps(5);
+    assert!(harness
+        .get_by_label_contains("Holo Stacks Archive, owner")
+        .is_focused());
+    press_tab(&mut harness, false);
+    assert!(harness.get_by_label("Select Project").is_focused());
 }
 
 #[test]

@@ -84,6 +84,7 @@ pub(crate) fn show_roving_list<T>(
             continue;
         }
 
+        state.focused_index = Some(index);
         if response.gained_focus() {
             response.scroll_to_me(Some(Align::Center));
         }
