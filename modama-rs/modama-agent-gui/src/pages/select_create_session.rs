@@ -1,8 +1,15 @@
 use std::time::Duration;
 
 use eframe::egui::{
-    self, text::LayoutJob, Align, FontFamily, FontId, Label, Layout, Response, RichText,
-    Sense, Stroke, TextEdit, WidgetInfo, WidgetType,
+    self, text::LayoutJob, Align, FontFamily, FontId, Label, Layout, Response, RichText, Sense,
+    Stroke, TextEdit, WidgetInfo, WidgetType,
+};
+use egui_taffy::{
+    taffy::{
+        self,
+        prelude::{auto, length, percent, AlignItems, FlexDirection, FlexWrap, Position, Style},
+    },
+    tui, TuiBuilderLogic, TuiContainerResponse,
 };
 use time::{Date, OffsetDateTime};
 
@@ -149,33 +156,68 @@ impl PageSelectCreateSession {
         let is_loading = self.sessions_task.is_pending();
         let is_starting = self.create_ingest_task.is_pending();
 
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-            ui.horizontal(|ui| {
-                ui.add_space(content_guide_widget_offset(
-                    styles::spacing::button_padding_x::EGUI_POINTS,
-                ));
-                let response = if is_starting {
-                    loading_button(ui, "Starting…", egui::Vec2::ZERO, ButtonVariant::Primary)
-                } else {
-                    ui.add_enabled(
-                        self.selected_session.is_some() && !is_loading,
-                        primary_button("Select Session", ui),
-                    )
-                };
-                if response.clicked() {
-                    self.start_existing_session(ui.ctx().clone());
-                }
-            });
-            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+        self.show_session_results_and_action(ui, is_loading, is_starting);
+    }
 
-            let list_outer_height = ui.available_height();
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), list_outer_height),
-                Layout::top_down(Align::Min),
-                |ui| self.show_session_list(ui, list_outer_height, is_loading, is_starting),
-            );
-        });
+    fn show_session_results_and_action(
+        &mut self,
+        ui: &mut egui::Ui,
+        is_loading: bool,
+        is_starting: bool,
+    ) {
+        let mut available_rect = ui.available_rect_before_wrap();
+        // Preserve the extent previously provided by the bottom-up layout while
+        // declaring the list before the action for keyboard navigation.
+        available_rect.max.y += 2.0 * styles::spacing::app_item_gap_y::EGUI_POINTS;
+        tui(ui, ui.id().with("session-results-and-action"))
+            .with_allocated_rect(available_rect)
+            .style(session_results_layout_style())
+            .show(|tui| {
+                tui.id("session-results")
+                    .style(session_list_layout_style())
+                    .ui_manual(|ui, container| {
+                        self.show_session_list(
+                            ui,
+                            container.full_container().height()
+                                - styles::spacing::form_field_gap::EGUI_POINTS
+                                + styles::components::standard_border::width::EGUI_POINTS,
+                            is_loading,
+                            is_starting,
+                        );
+                        TuiContainerResponse {
+                            inner: (),
+                            min_size: ui.min_size(),
+                            intrinsic_size: None,
+                            max_size: ui.min_size(),
+                            infinite: egui::Vec2b::TRUE,
+                        }
+                    });
+                tui.id("session-action")
+                    .style(session_action_layout_style())
+                    .ui(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.add_space(content_guide_widget_offset(
+                                styles::spacing::button_padding_x::EGUI_POINTS,
+                            ));
+                            let response = if is_starting {
+                                loading_button(
+                                    ui,
+                                    "Starting…",
+                                    egui::Vec2::ZERO,
+                                    ButtonVariant::Primary,
+                                )
+                            } else {
+                                ui.add_enabled(
+                                    self.selected_session.is_some() && !is_loading,
+                                    primary_button("Select Session", ui),
+                                )
+                            };
+                            if response.clicked() {
+                                self.start_existing_session(ui.ctx().clone());
+                            }
+                        });
+                    });
+            });
     }
 
     fn show_session_list(
@@ -448,6 +490,67 @@ fn interactive_row(
 
     styles::paint_focus_ring(ui, &response);
     response
+}
+
+fn session_results_layout_style() -> Style {
+    Style {
+        display: taffy::Display::Flex,
+        flex_direction: FlexDirection::Column,
+        flex_wrap: FlexWrap::NoWrap,
+        align_items: Some(AlignItems::Stretch),
+        size: taffy::Size {
+            width: percent(1.0_f32),
+            height: percent(1.0_f32),
+        },
+        gap: taffy::Size {
+            width: length(0.0_f32),
+            height: length(styles::spacing::form_field_gap::EGUI_POINTS),
+        },
+        padding: taffy::Rect {
+            left: length(0.0_f32),
+            right: length(0.0_f32),
+            top: length(0.0_f32),
+            bottom: length(styles::spacing::form_field_gap::EGUI_POINTS),
+        },
+        ..Default::default()
+    }
+}
+
+fn session_list_layout_style() -> Style {
+    let frame_vertical_padding = 4.0 * styles::spacing::button_padding_y::EGUI_POINTS;
+    let frame_border = 2.0 * styles::components::standard_border::width::EGUI_POINTS;
+    Style {
+        flex_grow: 1.0,
+        flex_shrink: 1.0,
+        flex_basis: length(0.0_f32),
+        min_size: taffy::Size {
+            width: auto(),
+            height: length(SESSION_ROW_HEIGHT + frame_vertical_padding + frame_border),
+        },
+        ..Default::default()
+    }
+}
+
+fn session_action_layout_style() -> Style {
+    Style {
+        // Match the button's legacy bottom-up baseline within the token-sized action row.
+        position: Position::Relative,
+        inset: taffy::Rect {
+            left: auto(),
+            right: auto(),
+            top: length(-4.0 * styles::components::standard_border::width::EGUI_POINTS),
+            bottom: auto(),
+        },
+        flex_shrink: 0.0,
+        size: taffy::Size {
+            width: auto(),
+            height: length(
+                styles::typography::button::FONT_SIZE
+                    + 2.0 * styles::spacing::button_padding_y::EGUI_POINTS,
+            ),
+        },
+        ..Default::default()
+    }
 }
 
 fn centered_loading(ui: &mut egui::Ui, height: f32) {

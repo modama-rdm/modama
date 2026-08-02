@@ -384,6 +384,37 @@ fn project_page_tab_order_follows_visual_order() {
 }
 
 #[test]
+fn session_page_tab_order_follows_visual_order() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_owned());
+    page.available_sessions = strings(&SESSIONS);
+    page.selected_session = Some(SESSIONS[0].to_owned());
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+
+    harness.get_by_label("Create a new session").focus();
+    harness.run_steps(1);
+    assert!(harness.get_by_label("Create a new session").is_focused());
+
+    for session in SESSIONS {
+        press_tab(&mut harness, false);
+        assert!(
+            harness
+                .get_by_role_and_label(Role::Button, session)
+                .is_focused(),
+            "expected {session:?} to receive focus"
+        );
+    }
+
+    press_tab(&mut harness, false);
+    assert!(harness.get_by_label("Select Session").is_focused());
+
+    press_tab(&mut harness, true);
+    assert!(harness
+        .get_by_role_and_label(Role::Button, SESSIONS[3])
+        .is_focused());
+}
+
+#[test]
 fn selected_project_must_be_visible_to_continue() {
     let mut page = PageSelectProject::new();
     page.available_projects = representative_projects();
