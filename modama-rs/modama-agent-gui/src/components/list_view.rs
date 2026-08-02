@@ -83,6 +83,7 @@ pub(crate) fn show_roving_list<T>(
 
         if state.last_focused_index != Some(index) {
             response.scroll_to_me(Some(Align::Center));
+            response.request_focus();
         }
         state.last_focused_index = Some(index);
 
