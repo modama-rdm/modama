@@ -6,7 +6,6 @@ pub(crate) struct RovingListState {
     pending_focus: Option<usize>,
     last_focused_index: Option<usize>,
     last_focused_id: Option<Id>,
-    was_focused: bool,
 }
 
 #[derive(Default)]
@@ -35,14 +34,16 @@ pub(crate) fn show_roving_list<T>(
         state.pending_focus = None;
         state.last_focused_index = None;
         state.last_focused_id = None;
-        state.was_focused = false;
         return output;
     }
 
-    let active_index = if !state.was_focused {
-        selected_index.or(state.focused_index)
-    } else {
+    let list_has_focus = state
+        .last_focused_id
+        .is_some_and(|id| ui.memory(|memory| memory.focused() == Some(id)));
+    let active_index = if list_has_focus {
         state.focused_index.or(selected_index)
+    } else {
+        selected_index.or(state.focused_index)
     }
     .unwrap_or(0)
     .min(items.len() - 1);
@@ -62,7 +63,7 @@ pub(crate) fn show_roving_list<T>(
             .inner;
         let should_request_focus =
             (focus_on_entry || state.pending_focus == Some(index)) && index == active_index;
-        if should_request_focus && response.enabled() {
+        if should_request_focus && response.enabled() && !response.has_focus() {
             response.request_focus();
             output.focus_requested = true;
             state.pending_focus = None;
@@ -70,7 +71,6 @@ pub(crate) fn show_roving_list<T>(
         responses.push(response);
     }
 
-    let mut list_has_focus = false;
     for (index, response) in responses.iter().enumerate() {
         if response.clicked() {
             state.focused_index = Some(index);
@@ -83,14 +83,15 @@ pub(crate) fn show_roving_list<T>(
         if !response.has_focus() {
             continue;
         }
-        list_has_focus = true;
-        state.was_focused = true;
 
-        if state.last_focused_index != Some(index) {
+        if response.gained_focus() {
             response.scroll_to_me(Some(Align::Center));
         }
         state.last_focused_index = Some(index);
         state.last_focused_id = Some(response.id);
+        if state.pending_focus == Some(index) {
+            state.pending_focus = None;
+        }
 
         let next_index = if consume_key(ui, egui::Key::ArrowUp) {
             Some(if index == 0 {
@@ -114,19 +115,6 @@ pub(crate) fn show_roving_list<T>(
             state.focused_index = Some(index);
             output.selection_changed = Some(index);
         }
-    }
-
-    if !list_has_focus {
-        let focused_id = ui.memory(|memory| memory.focused());
-        let focus_is_elsewhere =
-            focused_id.is_some_and(|focused_id| state.last_focused_id != Some(focused_id));
-        let tab_pressed = ui.input(|input| input.key_pressed(egui::Key::Tab));
-        state.pending_focus = if state.was_focused && !focus_is_elsewhere && !tab_pressed {
-            state.last_focused_index
-        } else {
-            None
-        };
-        state.was_focused = false;
     }
 
     output
