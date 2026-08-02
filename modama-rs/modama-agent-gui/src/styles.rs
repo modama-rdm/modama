@@ -307,20 +307,20 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
 fn paint_focus_indicator(ui: &egui::Ui, response: &egui::Response, rounded: bool) {
     if response.has_focus() {
         let width = components::focus_ring::width::EGUI_POINTS;
+        let corner_radius = if rounded { 
+            radius(rounded::lg::EGUI_POINTS)
+        } else {
+            radius(0.0)
+        };
         ui.painter().rect_stroke(
             response.rect,
-            radius(rounded::lg::EGUI_POINTS),
+            corner_radius,
             Stroke::new(
                 components::standard_border::width::EGUI_POINTS,
                 color::primary::VALUE.resolve(ui.visuals()),
             ),
             egui::StrokeKind::Inside,
         );
-        let corner_radius = if rounded { 
-            radius(rounded::lg::EGUI_POINTS)
-        } else {
-            radius(0.0)
-        };
         ui.painter().rect_stroke(
             response.rect,
             corner_radius,
