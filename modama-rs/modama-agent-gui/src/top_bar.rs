@@ -2,12 +2,21 @@ use crate::top_bar::avatar::avatar;
 use std::time::Duration;
 
 use eframe::egui::{self, Align, Color32, FontFamily, FontId, Layout, RichText, Sense, Stroke};
+use egui_taffy::{
+    taffy::{
+        self,
+        prelude::{length, percent, AlignItems, FlexDirection, FlexWrap, JustifyContent, Style},
+    },
+    tui, TuiBuilderLogic,
+};
 
 use crate::{
     actions::Action,
     async_state::AsyncState,
-    components::buttons::{loading_button, primary_button, secondary_button, ButtonVariant, DesignButton},
     components::avatar,
+    components::buttons::{
+        loading_button, primary_button, secondary_button, ButtonVariant, DesignButton,
+    },
     state::AgentIdentity,
     styles,
 };
@@ -74,96 +83,104 @@ impl TopBar {
         let mut action = Action::None;
         let is_logging_out = self.logout_task.is_pending();
         let navigation_busy = page_busy || is_logging_out;
+        let layout_state = (username.is_some(), show_login_action);
+        tui(ui, ui.id().with(("top-bar-content", layout_state)))
+            .reserve_available_space()
+            .style(content_layout_style(username.is_some()))
+            .show(|tui| {
+                tui.id("top-bar-brand").ui(|ui| {
+                    if let Some(next_action) =
+                        show_brand(ui, agent_identity.as_ref(), !navigation_busy)
+                    {
+                        action = next_action;
+                    }
+                });
+
+                tui.id(controls_id(username, show_login_action)).ui(|ui| {
+                    if let Some(next_action) = self.show_controls(
+                        ui,
+                        username,
+                        navigation_busy,
+                        is_logging_out,
+                        show_login_action,
+                    ) {
+                        action = next_action;
+                    }
+                });
+            });
+        action
+    }
+
+    fn show_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        username: Option<&str>,
+        navigation_busy: bool,
+        is_logging_out: bool,
+        show_login_action: bool,
+    ) -> Option<Action> {
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            ui.add_space(styles::top_bar_content_guide_offset());
-            let logo_response = ui
-                .scope(|ui| {
-                    compact_button_spacing(ui);
-                    let logo = egui::Button::image(
-                        egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
-                            .tint(styles::color::on_surface::VALUE.resolve(ui.visuals()))
-                            .alt_text("go to Overview")
-                            .max_height(styles::components::top_bar_logo::height::EGUI_POINTS),
-                    )
-                    .frame(false)
-                    .corner_radius(styles::radius(styles::rounded::lg::EGUI_POINTS));
-                    ui.add_enabled(!navigation_busy, DesignButton::new(logo))
-                })
-                .inner
-                .on_hover_text("Go to Overview");
-            if logo_response.clicked() {
-                action = Action::GoToOverview;
+            theme_button(ui);
+
+            if username.is_some() || show_login_action {
+                control_gap(ui);
             }
 
-            ui.add_space(styles::components::top_bar_brand_gap::size::EGUI_POINTS);
-            divider(
+            if let Some(username) = username {
+                self.show_authenticated_controls(ui, username, navigation_busy, is_logging_out);
+                None
+            } else if show_login_action {
+                ui.add_enabled(!navigation_busy, primary_button("Log in", ui))
+                    .clicked()
+                    .then_some(Action::GoToLogin)
+            } else {
+                None
+            }
+        })
+        .inner
+    }
+
+    fn show_authenticated_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        username: &str,
+        navigation_busy: bool,
+        is_logging_out: bool,
+    ) {
+        divider(
+            ui,
+            styles::components::top_bar_control_divider::height::EGUI_POINTS,
+        );
+        control_gap(ui);
+        avatar(ui, username, styles::components::avatar::size::EGUI_POINTS);
+        ui.label(
+            RichText::new(username)
+                .font(styles::typography::navigation::font_id())
+                .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),
+        );
+        control_gap(ui);
+        divider(
+            ui,
+            styles::components::top_bar_control_divider::height::EGUI_POINTS,
+        );
+        control_gap(ui);
+
+        let response = if is_logging_out {
+            loading_button(
                 ui,
-                styles::components::top_bar_brand_divider::height::EGUI_POINTS,
+                "Logging out…",
+                egui::Vec2::ZERO,
+                ButtonVariant::Secondary,
+            )
+        } else {
+            ui.add_enabled(!navigation_busy, secondary_button("Log out", ui))
+        };
+        if response.clicked() {
+            self.logout_task.spawn(
+                || crate::simulated_work::sleep(Duration::from_millis(500)),
+                ui.ctx().clone(),
             );
-            ui.add_space(styles::components::top_bar_brand_gap::size::EGUI_POINTS);
-            ui.label(
-                RichText::new(
-                    agent_identity
-                        .as_ref()
-                        .map(|i| i.format())
-                        .unwrap_or_else(|| "Ingest Agent".to_owned()),
-                )
-                .font(styles::typography::supporting_text::font_id())
-                .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
-            );
-
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_space(styles::top_bar_card_edge_offset());
-                if let Some(username) = username {
-                    let response = if is_logging_out {
-                        loading_button(
-                            ui,
-                            "Logging out…",
-                            egui::Vec2::ZERO,
-                            ButtonVariant::Secondary,
-                        )
-                    } else {
-                        ui.add_enabled(!navigation_busy, secondary_button("Log out", ui))
-                    };
-                    if response.clicked() {
-                        self.logout_task.spawn(
-                            || crate::simulated_work::sleep(Duration::from_millis(500)),
-                            ui.ctx().clone(),
-                        );
-                    }
-
-                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
-                    divider(
-                        ui,
-                        styles::components::top_bar_control_divider::height::EGUI_POINTS,
-                    );
-                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
-                    ui.label(
-                        RichText::new(username)
-                            .font(styles::typography::navigation::font_id())
-                            .color(
-                                styles::color::on_surface_variant::VALUE.resolve(ui.visuals()),
-                            ),
-                    );
-                    avatar(ui, username, styles::components::avatar::size::EGUI_POINTS);
-                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
-                    divider(
-                        ui,
-                        styles::components::top_bar_control_divider::height::EGUI_POINTS,
-                    );
-                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
-                } else if show_login_action {
-                    let response = ui.add_enabled(!navigation_busy, primary_button("Log in", ui));
-                    if response.clicked() {
-                        action = Action::GoToLogin;
-                    }
-                    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
-                }
-
-                theme_button(ui);
-            });
-        });
-        action
+        }
     }
 
     pub(crate) fn poll(&mut self) -> Action {
@@ -173,6 +190,93 @@ impl TopBar {
             Action::None
         }
     }
+}
+
+fn content_layout_style(authenticated: bool) -> Style {
+    // Taffy snaps the authenticated compound row to whole points. Account for that
+    // one-point expansion so its trailing edge stays on the existing content guide.
+    let trailing_inset = styles::top_bar_card_edge_offset()
+        - if authenticated {
+            styles::components::standard_border::width::EGUI_POINTS
+        } else {
+            0.0
+        };
+
+    Style {
+        display: taffy::Display::Flex,
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::NoWrap,
+        align_items: Some(AlignItems::Center),
+        justify_content: Some(JustifyContent::SpaceBetween),
+        size: taffy::Size {
+            width: percent(1.0_f32),
+            height: percent(1.0_f32),
+        },
+        padding: taffy::Rect {
+            left: length(styles::top_bar_content_guide_offset()),
+            right: length(trailing_inset),
+            top: length(0.0_f32),
+            bottom: length(0.0_f32),
+        },
+        ..Default::default()
+    }
+}
+
+fn controls_id(username: Option<&str>, show_login_action: bool) -> &'static str {
+    if username.is_some() {
+        "top-bar-controls-authenticated"
+    } else if show_login_action {
+        "top-bar-controls-login-action"
+    } else {
+        "top-bar-controls-theme-only"
+    }
+}
+
+fn show_brand(
+    ui: &mut egui::Ui,
+    agent_identity: Option<&AgentIdentity>,
+    navigation_enabled: bool,
+) -> Option<Action> {
+    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+        let logo_response = ui
+            .scope(|ui| {
+                compact_button_spacing(ui);
+                let logo = egui::Button::image(
+                    egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
+                        .tint(styles::color::on_surface::VALUE.resolve(ui.visuals()))
+                        .alt_text("go to Overview")
+                        .max_height(styles::components::top_bar_logo::height::EGUI_POINTS),
+                )
+                .frame(false)
+                .corner_radius(styles::radius(styles::rounded::lg::EGUI_POINTS));
+                ui.add_enabled(navigation_enabled, DesignButton::new(logo))
+            })
+            .inner
+            .on_hover_text("Go to Overview");
+
+        ui.add_space(styles::components::top_bar_brand_gap::size::EGUI_POINTS);
+        divider(
+            ui,
+            styles::components::top_bar_brand_divider::height::EGUI_POINTS,
+        );
+        ui.add_space(styles::components::top_bar_brand_gap::size::EGUI_POINTS);
+        ui.label(
+            RichText::new(
+                agent_identity
+                    .map(AgentIdentity::format)
+                    .unwrap_or_else(|| "Ingest Agent".to_owned()),
+            )
+            .font(styles::typography::supporting_text::font_id())
+            .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+        );
+
+        logo_response.clicked().then_some(Action::GoToOverview)
+    })
+    .inner
+}
+
+fn control_gap(ui: &mut egui::Ui) {
+    ui.add_space(styles::components::top_bar_control_gap::size::EGUI_POINTS);
 }
 
 fn divider(ui: &mut egui::Ui, height: f32) {

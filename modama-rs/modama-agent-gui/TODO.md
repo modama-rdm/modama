@@ -29,15 +29,11 @@
         - [x] like login form, enter submits form, button submits form
     - [x] add a decision "switch" UI to either pick existing session, or show a "create new session" form
         - [x] have the first item in the session list be a placeholder "create new" item
-- [ ] general design fixes
-    - [ ] review vertical and horizontal flow of the design? are there elements that should be aligned which are not?
-    - [ ] hovered card rows are subtle, thats ok, but they overlay the top border. that looks dumb on displays with too much contrast
-- [ ] eye candy
-    - [ ] focus ring of destructive actions should be red
-    - [ ] add a little decorating bottom bar like in react? or save the space? try it or add it behind a feature flag
 - [ ] breadcrumb navigation
     - need to distinguist "login -> create session" and "just clicked the login button" flows
-- [ ] keyboard ux: logical "tab indexes" (top-left to bottom-right-ish)
+- [ ] keyboard ux
+    - [ ] logical "tab indexes" (top-left to bottom-right-ish)
+        - [x] top bar
     - [ ] shortcuts where they are missing
         - [ ] Ctrl+N (or platform's equivalent) for creating new items
         - [ ] escape to cancel?
@@ -45,12 +41,12 @@
             - [ ] select project -> overview
             - [ ] select/create session -> maybe go back to project selection?
             - [ ] any missing combinations/states?
-    - [ ] focus on the most likely element
+    - [ ] after navigation, focus on the most likely element
         - [ ] login: first form input
         - [ ] overview: "create session" button, or "close session" if one is active
         - [ ] what else?
 - [ ] mouse ux
-    - [ ] double click on items means selection (projects, sessions etc.)
+    - [x] double click on items means selection (projects, sessions etc.)
     - [ ] `cursor: pointer` for clickable elements (including the top bar logo and all buttons)
 - [ ] do a focus round on code quality
     - [ ] check for complexity hot-spots
@@ -62,7 +58,8 @@
 - [ ] BUG: logging out does not close the ingest share. in logged out state, the active ingest share must be shown anyways
 - [ ] BUG: de-emphathized focus rings for disabled elements? instead of disabling completely
 - [ ] TEST: long project names? long ingest share session names?
-- [ ] scroll overflow cues if more items are available above/below
+- [ ] BUG: labels on project should not be selectable, and should not "steal" the hover from the row
+- [ ] BUG: project list should scroll if we use keyboard navigation to select items
 - [ ] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
 - [ ] once versioned axum is feasible, 
     - [ ] update modama-agent local API to have versioned endpoints and schemas
@@ -72,3 +69,11 @@
 - [ ] "start an ingest session" should be centered
     - why? then it is easy to click on the sign in button on the next page
     - => this is a general concept that should be explored
+- [ ] general design fixes
+    - [ ] review vertical and horizontal flow of the design? are there elements that should be aligned which are not?
+    - [ ] hovered card rows are subtle, thats ok, but they overlay the top border. that looks dumb on displays with too much contrast
+- [ ] eye candy
+    - [ ] focus ring of destructive actions should be red
+    - [ ] add a little decorating bottom bar like in react? or save the space? try it or add it behind a feature flag
+- [ ] update to latest egui
+- [ ] roving focus for list widgets (pressing tab doesn't navigate between items in a list, but goes to the next widget; up/down navigates within the list)

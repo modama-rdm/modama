@@ -132,11 +132,54 @@ fn top_bar_session_action_shares_the_card_right_guide() {
 
     let logged_out = overview_harness(false, false);
     let login_right = logged_out.get_by_label("Log in").rect().right();
-    assert!((login_right - expected_right).abs() <= tolerance);
+    assert!(
+        (login_right - expected_right).abs() <= tolerance,
+        "login right edge {login_right} does not match guide {expected_right}"
+    );
 
     let logged_in = overview_harness(false, true);
-    let logout_right = logged_in.get_by_label("Log out").rect().right();
-    assert!((logout_right - expected_right).abs() <= tolerance);
+    let logout_rect = logged_in.get_by_label("Log out").rect();
+    let logout_right = logout_rect.right();
+    assert!(
+        (logout_right - expected_right).abs() <= tolerance,
+        "logout right edge {logout_right} does not match guide {expected_right}"
+    );
+    let username_rect = logged_in.get_by_label("representative.user").rect();
+    assert!(
+        (username_rect.center().y - logout_rect.center().y).abs() <= tolerance,
+        "username and logout must remain vertically centered on the same text line"
+    );
+}
+
+fn press_tab(harness: &mut Harness<'static, AgentGuiApp>, reverse: bool) {
+    if reverse {
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    } else {
+        harness.key_press(egui::Key::Tab);
+    }
+    harness.run_steps(1);
+}
+
+#[test]
+fn top_bar_tab_order_follows_its_visual_order() {
+    for (logged_in, account_action) in [(false, "Log in"), (true, "Log out")] {
+        let mut harness = overview_harness(false, logged_in);
+
+        press_tab(&mut harness, false);
+        assert!(harness.get_by_label("go to Overview").is_focused());
+
+        press_tab(&mut harness, false);
+        assert!(harness.get_by_label("Switch to dark theme").is_focused());
+
+        press_tab(&mut harness, false);
+        assert!(harness.get_by_label(account_action).is_focused());
+
+        press_tab(&mut harness, true);
+        assert!(harness.get_by_label("Switch to dark theme").is_focused());
+
+        press_tab(&mut harness, true);
+        assert!(harness.get_by_label("go to Overview").is_focused());
+    }
 }
 
 #[test]
