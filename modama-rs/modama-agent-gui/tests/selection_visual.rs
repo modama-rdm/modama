@@ -372,6 +372,30 @@ fn project_page_tab_order_follows_visual_order() {
 }
 
 #[test]
+fn project_list_focus_scrolls_to_selected_offscreen_item() {
+    let mut page = PageSelectProject::new();
+    page.available_projects = representative_projects();
+    page.selected_project = Some("Holo Stacks Archive".to_owned());
+    let mut harness = selection_harness(Page::SelectProject(page));
+    harness.run_steps(3);
+
+    assert!(harness.get_by_label("Search").is_focused());
+    press_tab(&mut harness, false);
+    press_tab(&mut harness, false);
+    harness.run_steps(2);
+
+    let selected = harness.get_by_label_contains("Holo Stacks Archive, owner");
+    assert!(selected.is_focused());
+    let selected_rect = selected.rect();
+    let toolbar_bottom = harness.get_by_label("Sort by").rect().bottom();
+    let action_top = harness.get_by_label("Select Project").rect().top();
+    assert!(
+        selected_rect.top() >= toolbar_bottom && selected_rect.bottom() <= action_top,
+        "selected project should be scrolled into the list viewport: {selected_rect:?}, toolbar bottom {toolbar_bottom}, action top {action_top}"
+    );
+}
+
+#[test]
 fn session_page_tab_order_follows_visual_order() {
     let mut page = PageSelectCreateSession::new("Project Alpha".to_owned());
     page.available_sessions = strings(&SESSIONS);
