@@ -379,6 +379,18 @@ fn session_page_tab_order_follows_visual_order() {
     let mut harness = selection_harness(Page::SelectCreateSession(page));
     harness.run_steps(3);
 
+    harness.get_by_label("Create a new session").focus();
+    harness.run();
+    assert!(harness.get_by_label("Create a new session").is_focused());
+    press_tab(&mut harness, false);
+    assert!(harness
+        .get_by_role_and_label(Role::Button, SESSIONS[0])
+        .is_focused());
+
+    harness
+        .get_by_role_and_label(Role::Button, SESSIONS[0])
+        .focus();
+    harness.run();
     assert!(harness
         .get_by_role_and_label(Role::Button, SESSIONS[0])
         .is_focused());

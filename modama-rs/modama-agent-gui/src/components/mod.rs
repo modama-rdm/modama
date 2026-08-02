@@ -2,6 +2,7 @@ pub mod avatar;
 pub mod buttons;
 pub mod dialogs;
 pub mod forms;
+pub mod list_view;
 pub mod dropdown;
 
 use eframe::egui::{self, RichText};
@@ -28,4 +29,3 @@ pub(crate) fn page_heading(ui: &mut egui::Ui, text: &str) {
         ));
     });
 }
-

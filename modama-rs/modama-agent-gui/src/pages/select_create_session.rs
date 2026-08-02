@@ -20,6 +20,7 @@ use crate::{
         buttons::{loading_button, primary_button, secondary_button, ButtonVariant},
         display_error,
         forms::labeled_text_input,
+        list_view::{show_roving_list, RovingListState},
         page_heading,
     },
     state::ActiveSession,
@@ -107,8 +108,9 @@ pub struct PageSelectCreateSession {
     pub create_session_task: AsyncState<Result<ActiveSession, String>>,
     pub available_sessions: Vec<String>,
     mode: SessionPageMode,
-    focused_session: Option<usize>,
+    focused_session: RovingListState,
     focus_on_entry: bool,
+    focus_create_on_entry: bool,
     focus_session_input_on_entry: bool,
     initial_fetch_complete: bool,
 }
@@ -125,8 +127,9 @@ impl PageSelectCreateSession {
             create_session_task: AsyncState::Idle,
             available_sessions: Vec::new(),
             mode: SessionPageMode::SelectExisting,
-            focused_session: None,
+            focused_session: RovingListState::default(),
             focus_on_entry: true,
+            focus_create_on_entry: false,
             focus_session_input_on_entry: false,
             initial_fetch_complete: false,
         }
@@ -182,6 +185,7 @@ impl PageSelectCreateSession {
             self.mode = SessionPageMode::SelectExisting;
             self.focus_session_input_on_entry = false;
             self.focus_on_entry = true;
+            self.focus_create_on_entry = true;
         }
     }
 
@@ -286,101 +290,55 @@ impl PageSelectCreateSession {
                 .show(ui, |ui| {
                     ui.style_mut().spacing.item_spacing.y = 0.0;
                     let has_sessions = !self.available_sessions.is_empty();
-                    let row_count = self.available_sessions.len() + 1;
                     let selected_index = self.selected_session.as_ref().and_then(|selected| {
                         self.available_sessions
                             .iter()
                             .position(|session| session == selected)
-                            .map(|index| index + 1)
                     });
-                    let active_index = self
-                        .focused_session
-                        .or(selected_index)
-                        .unwrap_or(0)
-                        .min(row_count - 1);
-                    let mut row_ids = Vec::with_capacity(row_count);
-                    let mut row_rects = Vec::with_capacity(row_count);
-                    let mut next_focus = None;
-                    let create_response = create_session_row(ui, has_sessions, active_index == 0);
-                    row_ids.push(create_response.id);
-                    row_rects.push(create_response.rect);
-                    if self.focus_on_entry && active_index == 0 && create_response.enabled() {
+                    let create_response = create_session_row(ui, has_sessions, true);
+                    if ((self.focus_on_entry && self.available_sessions.is_empty())
+                        || self.focus_create_on_entry)
+                        && create_response.enabled()
+                    {
                         create_response.request_focus();
                         self.focus_on_entry = false;
+                        self.focus_create_on_entry = false;
                     }
-                    if create_response.clicked()
-                        || (create_response.has_focus()
-                            && (consume_session_list_key(ui, egui::Key::Enter)
-                                || consume_session_list_key(ui, egui::Key::Space)))
-                    {
+                    if create_response.clicked() {
                         self.new_session_error = None;
                         self.mode = SessionPageMode::CreateNew;
                         self.focus_session_input_on_entry = true;
                         self.focus_on_entry = false;
-                    } else if create_response.has_focus() {
-                        if consume_session_list_key(ui, egui::Key::ArrowUp) {
-                            next_focus = Some(row_count - 1);
-                        } else if consume_session_list_key(ui, egui::Key::ArrowDown) {
-                            next_focus = Some(1 % row_count);
-                        }
+                        self.focus_create_on_entry = false;
                     }
                     let mut start = false;
-                    for (index, name) in self.available_sessions.iter().enumerate() {
-                        let row_index = index + 1;
-                        let selected = self.selected_session.as_deref() == Some(name.as_str());
-                        let show_separator = index + 1 < self.available_sessions.len();
-                        let session_resp = session_row(
-                            ui,
-                            name,
-                            selected,
-                            show_separator,
-                            row_index == active_index,
-                        );
-                        row_ids.push(session_resp.id);
-                        row_rects.push(session_resp.rect);
-                        if self.focus_on_entry
-                            && row_index == active_index
-                            && session_resp.enabled()
-                        {
-                            session_resp.request_focus();
-                            self.focus_on_entry = false;
-                        }
-                        if session_resp.clicked() {
-                            self.selected_session = Some(name.clone());
-                            self.focused_session = Some(row_index);
-                        }
-                        if session_resp.double_clicked() {
-                            self.selected_session = Some(name.clone());
-                            self.focused_session = Some(row_index);
-                            start = true;
-                        }
-                        if session_resp.has_focus() {
-                            if consume_session_list_key(ui, egui::Key::ArrowUp) {
-                                next_focus = Some(if row_index == 0 {
-                                    row_count - 1
-                                } else {
-                                    row_index - 1
-                                });
-                            } else if consume_session_list_key(ui, egui::Key::ArrowDown) {
-                                next_focus = Some((row_index + 1) % row_count);
-                            } else if consume_session_list_key(ui, egui::Key::Enter)
-                                || consume_session_list_key(ui, egui::Key::Space)
-                            {
-                                self.selected_session = Some(name.clone());
-                                self.focused_session = Some(row_index);
-                            }
-                        }
+                    let list_output = show_roving_list(
+                        ui,
+                        ui.id().with("session-rows"),
+                        &self.available_sessions,
+                        selected_index,
+                        &mut self.focused_session,
+                        self.focus_on_entry,
+                        |ui, _index, name, selected, focusable| {
+                            session_row(
+                                ui,
+                                name,
+                                selected,
+                                _index + 1 < self.available_sessions.len(),
+                                focusable,
+                            )
+                        },
+                    );
+                    if list_output.focus_requested {
+                        self.focus_on_entry = false;
                     }
-                    if let Some(next_index) = next_focus {
-                        self.focused_session = Some(next_index);
-                        if next_index > 0 {
-                            self.selected_session =
-                                Some(self.available_sessions[next_index - 1].clone());
-                        }
-                        ui.ctx().memory_mut(|memory| {
-                            memory.request_focus(row_ids[next_index]);
-                        });
-                        ui.scroll_to_rect(row_rects[next_index], Some(Align::Center));
+                    if let Some(index) = list_output.selection_changed {
+                        self.selected_session = Some(self.available_sessions[index].clone());
+                    }
+                    if let Some(index) = list_output.activated {
+                        self.selected_session = Some(self.available_sessions[index].clone());
+                        self.focused_session.focused_index = Some(index);
+                        start = true;
                     }
                     if start {
                         self.start_existing_session(ui.ctx().clone());
@@ -746,10 +704,6 @@ fn session_name_prefix(date: Date) -> String {
 
 fn content_guide_widget_offset(horizontal_padding: f32) -> f32 {
     (styles::content_card_inset() - horizontal_padding).max(0.0)
-}
-
-fn consume_session_list_key(ui: &mut egui::Ui, key: egui::Key) -> bool {
-    ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
 }
 
 #[cfg(test)]

@@ -63,6 +63,7 @@
 - [ ] BUG: logging out does not close the ingest share. in logged out state, the active ingest share must be shown anyways
 - [ ] BUG: de-emphathized focus rings for disabled elements? instead of disabling completely
 - [ ] TEST: long project names? long ingest share session names?
+    - check with backend API how long they can be
 - [ ] BUG: labels on project should not be selectable, and should not "steal" the hover from the row
 - [ ] BUG: project list should scroll if we use keyboard navigation to select items
 - [ ] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
