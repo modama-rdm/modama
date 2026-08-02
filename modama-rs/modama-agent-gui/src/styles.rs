@@ -296,7 +296,15 @@ fn card_shadow_with_color(color: Color32) -> Shadow {
     }
 }
 
+pub fn paint_focus_rect(ui: &egui::Ui, response: &egui::Response) {
+    paint_focus_indicator(ui, response, false);
+}
+
 pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
+    paint_focus_indicator(ui, response, true);
+}
+
+fn paint_focus_indicator(ui: &egui::Ui, response: &egui::Response, rounded: bool) {
     if response.has_focus() {
         let width = components::focus_ring::width::EGUI_POINTS;
         ui.painter().rect_stroke(
@@ -308,9 +316,14 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
             ),
             egui::StrokeKind::Inside,
         );
+        let corner_radius = if rounded { 
+            radius(rounded::lg::EGUI_POINTS)
+        } else {
+            radius(0.0)
+        };
         ui.painter().rect_stroke(
             response.rect,
-            radius(rounded::lg::EGUI_POINTS),
+            corner_radius,
             Stroke::new(width, color::primary_tint::VALUE.resolve(ui.visuals())),
             egui::StrokeKind::Outside,
         );

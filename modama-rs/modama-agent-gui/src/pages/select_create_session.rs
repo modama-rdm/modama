@@ -584,7 +584,7 @@ fn interactive_row(
 
     content(&response, &mut row_ui, selected);
 
-    styles::paint_focus_ring(ui, &response);
+    styles::paint_focus_rect(ui, &response);
     response
 }
 
