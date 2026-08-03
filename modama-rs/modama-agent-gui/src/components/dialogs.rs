@@ -14,7 +14,7 @@ pub enum ConfirmationDialogAction {
 pub fn destructive_confirmation_dialog(
     ctx: &egui::Context,
     visuals: &egui::Visuals,
-    id: impl std::hash::Hash,
+    id: impl std::hash::Hash + std::fmt::Debug,
     title: &str,
     message: &str,
     confirm_label: &str,

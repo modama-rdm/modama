@@ -7,7 +7,7 @@ edition.workspace = true
 visual-tests = ["dep:egui_kittest"]
 
 [dependencies]
-eframe = "0.34.3"
+eframe = "0.35.0"
 anyhow = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }
@@ -15,15 +15,15 @@ clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
-egui_extras = { version = "0.34.3", features = ["svg"] }
-egui_taffy = "0.12"
-egui-phosphor = "0.12"
+egui_extras = { version = "0.35.0", features = ["svg"] }
+egui_taffy = "0.13"
+egui-phosphor = "0.13"
 modama-common = { path = "../modama-common" }
 strsim = "0.11"
 time = { version = "0.3.42", features = ["local-offset"] }
 url = { workspace = true }
 thiserror = { workspace = true }
-egui_kittest = { version = "0.34.0", optional = true, features = ["eframe", "snapshot", "wgpu"] }
+egui_kittest = { version = "0.35.0", optional = true, features = ["eframe", "snapshot", "wgpu"] }
 
 [build-dependencies]
 serde = { workspace = true, features = ["derive"] }

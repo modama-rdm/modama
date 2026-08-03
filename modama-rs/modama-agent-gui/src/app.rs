@@ -181,7 +181,7 @@ impl eframe::App for AgentGuiApp {
             ));
         egui::CentralPanel::default()
             .frame(central_panel_frame)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 if matches!(self.page, Page::Login(_)) {
                     let ui_action = self.page.ui(ui, frame, &self.app_state.session);
                     self.handle_action(ui_action);

@@ -54,7 +54,7 @@ impl TopBar {
             );
 
         panel
-            .show_inside(parent, |ui| {
+            .show(parent, |ui| {
                 let action =
                     self.content(ui, username, agent_identity, page_busy, show_login_action);
                 let border = styles::color::outline::VALUE.resolve(ui.visuals());

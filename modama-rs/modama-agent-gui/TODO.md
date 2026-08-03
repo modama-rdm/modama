@@ -78,7 +78,7 @@
     - [ ] hovered card rows are subtle, thats ok, but they overlay the top border. that looks dumb on displays with too much contrast
     - [ ] eye candy
         - [ ] focus ring of destructive actions should be red
-- [ ] update to latest egui
+- [x] update to latest egui
 - [x] code quality: replace `matches!(async_task, AsyncState::SomeVariant)` with short helpers (`is_idle` etc.)
 - [x] code quality: remove the `AsyncState` unwrap/panic path
 - [x] select_create_session: create mode; validation should be part of the background task; consolidate error state

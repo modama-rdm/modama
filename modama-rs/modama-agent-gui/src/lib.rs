@@ -169,20 +169,35 @@ mod style_tests {
             styles::typography::body::font_id()
         );
 
-        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
-        for font_id in [
-            styles::typography::body::font_id(),
-            styles::typography::label::font_id(),
-            styles::typography::button::font_id(),
-            styles::typography::heading::font_id(),
-            styles::typography::section_heading::font_id(),
-            styles::typography::supporting_text::font_id(),
-            styles::typography::mono::font_id(),
-            styles::typography::mono_medium::font_id(),
-        ] {
-            ctx.fonts_mut(|fonts| assert!(fonts.fonts.font(&font_id.family).has_glyphs("A")));
-        }
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            for font_id in [
+                styles::typography::body::font_id(),
+                styles::typography::label::font_id(),
+                styles::typography::button::font_id(),
+                styles::typography::heading::font_id(),
+                styles::typography::section_heading::font_id(),
+                styles::typography::supporting_text::font_id(),
+                styles::typography::mono::font_id(),
+                styles::typography::mono_medium::font_id(),
+            ] {
+                ui.label(egui::RichText::new("A").font(font_id));
+            }
+        });
+
         ctx.fonts_mut(|fonts| {
+            for font_id in [
+                styles::typography::body::font_id(),
+                styles::typography::label::font_id(),
+                styles::typography::button::font_id(),
+                styles::typography::heading::font_id(),
+                styles::typography::section_heading::font_id(),
+                styles::typography::supporting_text::font_id(),
+                styles::typography::mono::font_id(),
+                styles::typography::mono_medium::font_id(),
+            ] {
+                let mut font = fonts.fonts.font(&font_id.family);
+                assert!(font.has_glyphs("A"));
+            }
             let mut proportional = fonts.fonts.font(&egui::FontFamily::Proportional);
             assert!(proportional.has_glyphs(egui_phosphor::regular::SUN));
             assert!(proportional.has_glyphs(egui_phosphor::regular::MOON));

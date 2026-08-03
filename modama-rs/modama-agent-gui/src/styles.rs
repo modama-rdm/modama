@@ -45,6 +45,17 @@ pub mod font {
     /// roles to their React UI equivalents.
     pub fn install(ctx: &egui::Context) {
         let mut fonts = FontDefinitions::default();
+        let proportional_fallbacks = fonts
+            .families
+            .get(&FontFamily::Proportional)
+            .cloned()
+            .unwrap_or_default();
+        let monospace_fallbacks = fonts
+            .families
+            .get(&FontFamily::Monospace)
+            .cloned()
+            .unwrap_or_default();
+
         for (name, bytes, family_name) in [
             (
                 SANS_REGULAR,
@@ -80,9 +91,17 @@ pub mod font {
             fonts
                 .font_data
                 .insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
+
+            let fallbacks = if family_name.contains("Mono") {
+                &monospace_fallbacks
+            } else {
+                &proportional_fallbacks
+            };
+            let mut family_chain = vec![name.to_owned()];
+            family_chain.extend(fallbacks.iter().cloned());
             fonts
                 .families
-                .insert(family(family_name), vec![name.to_owned()]);
+                .insert(family(family_name), family_chain);
         }
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         ctx.set_fonts(fonts);
