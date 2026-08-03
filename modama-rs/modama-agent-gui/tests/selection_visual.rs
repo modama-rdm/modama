@@ -379,6 +379,9 @@ fn project_search_sort_and_selection_are_accessible() {
         panic!("project selection page unexpectedly changed");
     };
     assert_eq!(page.selected_project.as_deref(), Some("Holo Stacks"));
+    assert!(harness
+        .get_by_label_contains("Holo Stacks, owner")
+        .is_focused());
     assert!(harness.query_by_label("Select Project").is_some());
     assert!(harness
         .query_by_role(egui::accesskit::Role::RadioButton)
@@ -1035,6 +1038,9 @@ fn session_selection_and_creation_controls_are_accessible() {
                 && node.toggled() == Some(egui::accesskit::Toggled::True)
         })
         .is_some());
+    assert!(harness
+        .get_by_role_and_label(Role::Button, SESSIONS[1])
+        .is_focused());
 
     harness.get_by_label("Create a new session").click();
     harness.run_steps(2);

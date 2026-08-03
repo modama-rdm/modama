@@ -65,6 +65,8 @@
 - [x] BUG: logging out should not close the ingest share. in logged out state, the active ingest share must be shown anyways
 - [x] BUG: labels on project should not be selectable, and should not "steal" the hover from the row
 - [x] BUG: project list should scroll if we use keyboard navigation to select items
+- [x] BUG: when clicking on a project or session in the list, the item should also have keyboard focus
+    - right now, the item is only selected and doesn't get focus
 - [ ] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
 - [ ] once versioned axum is feasible, 
     - [ ] update modama-agent local API to have versioned endpoints and schemas

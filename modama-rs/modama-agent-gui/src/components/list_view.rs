@@ -73,6 +73,7 @@ pub(crate) fn show_roving_list<T>(
 
     for (index, response) in responses.iter().enumerate() {
         if response.clicked() {
+            response.request_focus();
             state.focused_index = Some(index);
             output.selection_changed = Some(index);
             if response.double_clicked() {
