@@ -49,6 +49,14 @@ mod style_tests {
                 styles::spacing::button_padding_y::EGUI_POINTS,
             )
         );
+        assert_eq!(
+            ctx.style_of(egui::Theme::Light).visuals.interact_cursor,
+            Some(egui::CursorIcon::PointingHand)
+        );
+        assert_eq!(
+            ctx.style_of(egui::Theme::Dark).visuals.interact_cursor,
+            Some(egui::CursorIcon::PointingHand)
+        );
     }
 
     #[test]

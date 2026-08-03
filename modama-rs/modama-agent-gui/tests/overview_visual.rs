@@ -10,6 +10,28 @@ use std::sync::{Arc, Barrier};
 
 const VIEWPORT: egui::Vec2 = egui::vec2(1024.0, 768.0);
 
+#[test]
+fn enabled_top_bar_controls_use_pointing_hand_cursor() {
+    let mut harness = overview_harness(false, false);
+    harness.run_steps(3);
+
+    harness.get_by_label("go to Overview").hover();
+    harness.run_steps(1);
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand
+    );
+
+    harness.remove_cursor();
+    harness.run_steps(1);
+    harness.get_by_label("Create Session").hover();
+    harness.run_steps(1);
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand
+    );
+}
+
 fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp> {
     let mut harness = Harness::new_eframe(move |cc| {
         egui_extras::install_image_loaders(&cc.egui_ctx);

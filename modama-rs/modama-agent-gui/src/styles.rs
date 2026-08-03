@@ -148,6 +148,7 @@ pub mod theme {
         let primary_hover = resolve(color::primary_variant::VALUE);
 
         let mut visuals = base;
+        visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
         visuals.panel_fill = bg;
         visuals.window_fill = surface;
         visuals.window_corner_radius = radius(rounded::_2xl::EGUI_POINTS);
@@ -210,6 +211,15 @@ pub mod theme {
 
 pub fn radius(points: f32) -> CornerRadius {
     CornerRadius::same(points.clamp(0.0, 255.0) as u8)
+}
+
+/// Use the pointer cursor for enabled custom clickable responses.
+pub fn pointer_cursor(response: egui::Response) -> egui::Response {
+    if response.enabled() {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
 /// Horizontal distance from a compact content card's outer edge to its content guide.

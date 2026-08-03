@@ -585,7 +585,7 @@ fn interactive_row(
     content(&response, &mut row_ui, selected);
 
     styles::paint_focus_rect(ui, &response);
-    response
+    styles::pointer_cursor(response)
 }
 
 fn session_results_layout_style() -> Style {

@@ -50,9 +50,9 @@
         - [x] overview: "create session" button, or "close session" if one is active
         - [x] select project: search input
         - [x] select/create session: selected/first item or session-name input
-- [ ] mouse ux
+- [x] mouse ux
     - [x] double click on items means selection (projects, sessions etc.)
-    - [ ] `cursor: pointer` for clickable elements (including the top bar logo and all buttons)
+    - [x] `cursor: pointer` for clickable elements (including the top bar logo and all buttons)
 - [ ] do a focus round on code quality
     - [ ] check for complexity hot-spots
     - [ ] check for spots that don't use the state machinery

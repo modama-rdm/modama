@@ -670,6 +670,7 @@ fn project_row(
             });
         });
 
+    let response = styles::pointer_cursor(response);
     response.widget_info(|| {
         WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,

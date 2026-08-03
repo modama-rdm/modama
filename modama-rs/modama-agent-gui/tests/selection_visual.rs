@@ -59,6 +59,55 @@ fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }
 
+#[test]
+fn enabled_custom_rows_use_pointing_hand_cursor_and_disabled_actions_do_not() {
+    let mut project_page = PageSelectProject::new();
+    project_page.available_projects = representative_projects();
+    let mut projects = selection_harness(Page::SelectProject(project_page));
+    projects.run_steps(3);
+
+    projects
+        .get_by_label_contains("Holo Stacks, owner")
+        .hover();
+    projects.run_steps(1);
+    assert_eq!(
+        projects.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand
+    );
+
+    projects.remove_cursor();
+    projects.run_steps(1);
+    projects.get_by_label("Select Project").hover();
+    projects.run_steps(1);
+    assert_eq!(
+        projects.output().platform_output.cursor_icon,
+        egui::CursorIcon::Default
+    );
+
+    let mut session_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    session_page.available_sessions = strings(&SESSIONS);
+    let mut sessions = selection_harness(Page::SelectCreateSession(session_page));
+    sessions.run_steps(3);
+
+    sessions.get_by_label("Create a new session").hover();
+    sessions.run_steps(1);
+    assert_eq!(
+        sessions.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand
+    );
+
+    sessions.remove_cursor();
+    sessions.run_steps(1);
+    sessions
+        .get_by_role_and_label(egui::accesskit::Role::Button, SESSIONS[0])
+        .hover();
+    sessions.run_steps(1);
+    assert_eq!(
+        sessions.output().platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand
+    );
+}
+
 fn press_tab(harness: &mut Harness<'static, AgentGuiApp>, reverse: bool) {
     if reverse {
         harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
