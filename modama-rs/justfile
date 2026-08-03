@@ -10,10 +10,10 @@ validate-design:
 
 # Run opt-in egui_kittest visual regression tests.
 visual-tests:
-    cargo test -p {{ agent_gui_package }} --features visual-tests
+    cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
 
 update-snapshots:
-    UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests
+    UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
     oxipng -o max --strip safe {{ snapshot_dir }}/*.png
 
 # Remove generated visual-test review artifacts.
