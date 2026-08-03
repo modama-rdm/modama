@@ -73,20 +73,32 @@ pub struct CreateSessionAndIngestRequest {
     pub session: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum CreateSessionError {
+    #[error("Please enter a session name.")]
+    EmptyName,
+    #[error("Session name cannot contain a \"/\".")]
+    ContainsSlash,
+    #[error("{0}")]
+    Server(String),
+}
+
 impl CreateSessionAndIngestRequest {
-    pub fn execute(&self) -> Result<ActiveSession, String> {
+    pub fn execute(&self) -> Result<ActiveSession, CreateSessionError> {
         crate::simulated_work::sleep(Duration::from_millis(500));
-        if self
-            .session
+        let session = validate_session_name(&self.session)?;
+        if session
             .to_lowercase()
             .contains(ASYNC_REJECTION_SENTINEL)
         {
-            return Err(ASYNC_REJECTION_MESSAGE.to_owned());
+            return Err(CreateSessionError::Server(
+                ASYNC_REJECTION_MESSAGE.to_owned(),
+            ));
         }
 
         Ok(CreateIngestRequest {
             project: self.project.clone(),
-            session: self.session.clone(),
+            session,
         }
         .execute())
     }
@@ -112,10 +124,10 @@ pub struct PageSelectCreateSession {
     pub project: String,
     pub selected_session: Option<String>,
     pub new_session_input: String,
-    pub new_session_error: Option<String>,
+    pub create_session_error: Option<CreateSessionError>,
     pub sessions_task: AsyncState<Vec<String>>,
     pub create_ingest_task: AsyncState<ActiveSession>,
-    pub create_session_task: AsyncState<Result<ActiveSession, String>>,
+    pub create_session_task: AsyncState<Result<ActiveSession, CreateSessionError>>,
     pub available_sessions: Vec<String>,
     mode: SessionPageMode,
     focused_session: RovingListState,
@@ -128,7 +140,7 @@ impl PageSelectCreateSession {
             project,
             selected_session: None,
             new_session_input: session_name_prefix(today()),
-            new_session_error: None,
+            create_session_error: None,
             sessions_task: AsyncState::Idle,
             create_ingest_task: AsyncState::Idle,
             create_session_task: AsyncState::Idle,
@@ -192,13 +204,13 @@ impl PageSelectCreateSession {
     }
 
     fn enter_create_mode(&mut self) {
-        self.new_session_error = None;
+        self.create_session_error = None;
         self.mode = SessionPageMode::CreateNew;
         self.focus_target = SessionFocusTarget::SessionName;
     }
 
     fn return_to_selection(&mut self, focus_create_row: bool) {
-        self.new_session_error = None;
+        self.create_session_error = None;
         self.mode = SessionPageMode::SelectExisting;
         self.focus_target = if focus_create_row {
             SessionFocusTarget::CreateRow
@@ -371,8 +383,8 @@ impl PageSelectCreateSession {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 0.0;
 
-            if let Some(error) = self.new_session_error.as_deref() {
-                display_error(ui, error);
+            if let Some(error) = self.create_session_error.as_ref() {
+                display_error(ui, &error.to_string());
                 ui.add_space(styles::spacing::login_error_gap::EGUI_POINTS);
             }
 
@@ -432,18 +444,7 @@ impl PageSelectCreateSession {
         if self.create_session_task.is_pending() {
             return;
         }
-        self.new_session_error = None;
-        match validate_session_name(&self.new_session_input) {
-            Ok(session) => {
-                self.new_session_input.clone_from(&session);
-                let task = CreateSessionAndIngestRequest {
-                    project: self.project.clone(),
-                    session,
-                };
-                self.create_session_task.spawn(move || task.execute(), ctx);
-            }
-            Err(error) => self.new_session_error = Some(error),
-        }
+        self.spawn_create_session_task(self.new_session_input.clone(), ctx);
     }
 
     pub fn poll(&mut self) -> Action {
@@ -500,7 +501,7 @@ impl PageSelectCreateSession {
                                 session: active_ingest,
                             };
                         }
-                        Err(error) => self.new_session_error = Some(error),
+                        Err(error) => self.create_session_error = Some(error),
                     }
                 }
             }
@@ -529,6 +530,20 @@ impl PageSelectCreateSession {
 
     pub fn retry_create_session(&mut self, project: String, session: String, ctx: egui::Context) {
         self.new_session_input = session.clone();
+        self.spawn_create_session_task_for_project(project, session, ctx);
+    }
+
+    fn spawn_create_session_task(&mut self, session: String, ctx: egui::Context) {
+        self.spawn_create_session_task_for_project(self.project.clone(), session, ctx);
+    }
+
+    fn spawn_create_session_task_for_project(
+        &mut self,
+        project: String,
+        session: String,
+        ctx: egui::Context,
+    ) {
+        self.create_session_error = None;
         self.create_session_task.reset();
         self.create_session_task.spawn(
             move || CreateSessionAndIngestRequest { project, session }.execute(),
@@ -758,12 +773,12 @@ fn centered_loading(ui: &mut egui::Ui, height: f32) {
     content_ui.label(RichText::new(loading_text).font(styles::typography::body::font_id()));
 }
 
-fn validate_session_name(input: &str) -> Result<String, String> {
+fn validate_session_name(input: &str) -> Result<String, CreateSessionError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        Err("Please enter a session name.".to_owned())
+        Err(CreateSessionError::EmptyName)
     } else if trimmed.contains('/') {
-        Err("Session name cannot contain a \"/\".".to_owned())
+        Err(CreateSessionError::ContainsSlash)
     } else {
         Ok(trimmed.to_owned())
     }
@@ -817,11 +832,11 @@ mod tests {
         );
         assert_eq!(
             validate_session_name("  "),
-            Err("Please enter a session name.".to_owned())
+            Err(CreateSessionError::EmptyName)
         );
         assert_eq!(
             validate_session_name("2026-07-30/run"),
-            Err("Session name cannot contain a \"/\".".to_owned())
+            Err(CreateSessionError::ContainsSlash)
         );
     }
 
@@ -832,14 +847,19 @@ mod tests {
             session: "2026-07-30-FORBIDDEN-run".to_owned(),
         }
         .execute();
-        assert_eq!(rejected, Err(ASYNC_REJECTION_MESSAGE.to_owned()));
+        assert_eq!(
+            rejected,
+            Err(CreateSessionError::Server(
+                ASYNC_REJECTION_MESSAGE.to_owned()
+            ))
+        );
     }
 
     #[test]
     fn create_request_starts_ingest_after_success() {
         let result = CreateSessionAndIngestRequest {
             project: "test".to_owned(),
-            session: "2026-07-30-run".to_owned(),
+            session: "  2026-07-30-run  ".to_owned(),
         }
         .execute()
         .unwrap();

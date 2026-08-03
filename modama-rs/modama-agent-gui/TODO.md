@@ -81,4 +81,4 @@
 - [ ] update to latest egui
 - [x] code quality: replace `matches!(async_task, AsyncState::SomeVariant)` with short helpers (`is_idle` etc.)
 - [x] code quality: remove the `AsyncState` unwrap/panic path
-- [ ] select_create_session: create mode; validation should be part of the background task; consolidate error state
+- [x] select_create_session: create mode; validation should be part of the background task; consolidate error state

@@ -7,7 +7,7 @@ use modama_agent_gui::{
     async_state::AsyncState,
     pages::{
         select_project::{representative_projects, ProjectSort},
-        Page, PageSelectCreateSession, PageSelectProject,
+        CreateSessionError, Page, PageSelectCreateSession, PageSelectProject,
     },
     state::{ActiveSession, Credentials},
     styles,
@@ -931,7 +931,9 @@ fn session_selection_snapshots() {
     rejected.run_steps(2);
     if let Page::SelectCreateSession(page) = &mut rejected.state_mut().page {
         page.create_session_task = AsyncState::Ready {
-            payload: Err("Session name was rejected by the server.".to_owned()),
+            payload: Err(CreateSessionError::Server(
+                "Session name was rejected by the server.".to_owned(),
+            )),
         };
     }
     rejected.run_steps(2);
@@ -952,7 +954,9 @@ fn session_selection_snapshots() {
         page.create_session_task.spawn(
             move || {
                 task_release.wait();
-                Err("pending create snapshot complete".to_owned())
+                Err(CreateSessionError::Server(
+                    "pending create snapshot complete".to_owned(),
+                ))
             },
             ctx,
         );
@@ -1121,7 +1125,9 @@ fn asynchronous_session_creation_errors_remain_on_the_form() {
 
     if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
         page.create_session_task = AsyncState::Ready {
-            payload: Err("Session name was rejected by the server.".to_owned()),
+            payload: Err(CreateSessionError::Server(
+                "Session name was rejected by the server.".to_owned(),
+            )),
         };
     }
     harness.run_steps(2);

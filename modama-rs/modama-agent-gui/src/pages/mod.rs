@@ -11,7 +11,7 @@ use crate::{actions::Action, state::ActiveSession};
 pub use connecting::PageConnecting;
 pub use login::PageLogin;
 pub use overview::PageOverview;
-pub use select_create_session::PageSelectCreateSession;
+pub use select_create_session::{CreateSessionError, PageSelectCreateSession};
 pub use select_project::PageSelectProject;
 
 pub enum Page {
