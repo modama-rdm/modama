@@ -9,8 +9,6 @@ use std::{
 
 use eframe::egui::Context;
 
-pub type RequestId = u64;
-
 #[derive(Debug, Default)]
 pub enum AsyncState<T> {
     #[default]
@@ -22,7 +20,7 @@ pub enum AsyncState<T> {
     Ready {
         payload: T,
     },
-    Error,
+    Completed,
 }
 
 impl<T: Clone + Send + 'static> AsyncState<T> {
@@ -67,7 +65,7 @@ impl<T: Clone + Send + 'static> AsyncState<T> {
                 }
             }
             AsyncState::Ready { payload: _ } => {}
-            AsyncState::Error => todo!("error handling"),
+            AsyncState::Completed => {}
         }
         self
     }
@@ -75,7 +73,7 @@ impl<T: Clone + Send + 'static> AsyncState<T> {
     pub fn take_ready(&mut self) -> Option<T> {
         if let Self::Ready { payload } = self {
             let result = payload.clone();
-            *self = Self::Idle;
+            *self = Self::Completed;
             Some(result)
         } else {
             None
@@ -98,7 +96,30 @@ impl<T> Drop for AsyncState<T> {
                 cancelled.store(true, Ordering::Relaxed);
             }
             AsyncState::Ready { payload: _ } => {}
-            AsyncState::Error => {}
+            AsyncState::Completed => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn taking_ready_payload_marks_request_completed() {
+        let mut state = AsyncState::Ready { payload: Vec::<u8>::new() };
+
+        assert_eq!(state.take_ready(), Some(Vec::new()));
+        assert!(matches!(state, AsyncState::Completed));
+    }
+
+    #[test]
+    fn fallible_payloads_are_handled_by_the_payload_type() {
+        let mut state = AsyncState::Ready {
+            payload: Result::<(), &str>::Err("request failed"),
+        };
+
+        assert_eq!(state.take_ready(), Some(Err("request failed")));
+        assert!(matches!(state, AsyncState::Completed));
     }
 }

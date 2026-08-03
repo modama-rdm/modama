@@ -348,7 +348,7 @@ fn an_empty_project_fetch_stays_in_the_no_access_state() {
     let Page::SelectProject(page) = &harness.state().page else {
         panic!("project selection page unexpectedly changed");
     };
-    assert!(matches!(page.projects_task, AsyncState::Idle));
+    assert!(matches!(page.projects_task, AsyncState::Completed));
     assert!(!page.is_busy());
 }
 
@@ -825,6 +825,13 @@ fn session_selection_snapshots() {
     let mut empty = selection_harness(Page::SelectCreateSession(empty_page));
     empty.run_steps(3);
     empty.snapshot("select_session_empty");
+    empty.run_steps(3);
+    if let Page::SelectCreateSession(page) = &empty.state().page {
+        assert!(matches!(page.sessions_task, AsyncState::Completed));
+        assert!(!page.is_busy());
+    } else {
+        panic!("session selection page unexpectedly changed");
+    }
     results.extend_harness(&mut empty);
 
     let mut unselected_page = PageSelectCreateSession::new("Project Alpha".to_string());
@@ -1166,7 +1173,7 @@ fn session_list_follows_available_geometry_and_shared_guide() {
             .get_by_label("Select or create a session in project 'Project Alpha'")
             .rect();
         let create_row = harness.get_by_label("Create a new session").rect();
-        let first_session = harness
+        harness
             .get_by_role_and_label(Role::Button, "2026-06-01-holo-stacks")
             .rect();
         let action = harness.get_by_label("Select Session").rect();

@@ -20,7 +20,7 @@ use crate::{
         buttons::{loading_button, primary_button, secondary_button, ButtonVariant},
         display_error,
         forms::labeled_text_input,
-        list_view::{show_roving_list, RovingListState},
+        list_view::{show_roving_list, RovingListOutput, RovingListState},
         page_heading,
     },
     state::ActiveSession,
@@ -98,6 +98,15 @@ enum SessionPageMode {
     CreateNew,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SessionFocusTarget {
+    #[default]
+    None,
+    ExistingList,
+    CreateRow,
+    SessionName,
+}
+
 pub struct PageSelectCreateSession {
     pub project: String,
     pub selected_session: Option<String>,
@@ -109,10 +118,7 @@ pub struct PageSelectCreateSession {
     pub available_sessions: Vec<String>,
     mode: SessionPageMode,
     focused_session: RovingListState,
-    focus_on_entry: bool,
-    focus_create_on_entry: bool,
-    focus_session_input_on_entry: bool,
-    initial_fetch_complete: bool,
+    focus_target: SessionFocusTarget,
 }
 
 impl PageSelectCreateSession {
@@ -128,17 +134,13 @@ impl PageSelectCreateSession {
             available_sessions: Vec::new(),
             mode: SessionPageMode::SelectExisting,
             focused_session: RovingListState::default(),
-            focus_on_entry: true,
-            focus_create_on_entry: false,
-            focus_session_input_on_entry: false,
-            initial_fetch_complete: false,
+            focus_target: SessionFocusTarget::ExistingList,
         }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         self.handle_keyboard_shortcuts(ui);
-        if !self.initial_fetch_complete
-            && matches!(self.sessions_task, AsyncState::Idle)
+        if matches!(self.sessions_task, AsyncState::Idle)
             && self.available_sessions.is_empty()
         {
             let req = FetchSessionsRequest {
@@ -170,10 +172,7 @@ impl PageSelectCreateSession {
             && !self.sessions_task.is_pending()
             && !self.create_ingest_task.is_pending()
         {
-            self.new_session_error = None;
-            self.mode = SessionPageMode::CreateNew;
-            self.focus_on_entry = false;
-            self.focus_session_input_on_entry = true;
+            self.enter_create_mode();
             return;
         }
 
@@ -181,12 +180,24 @@ impl PageSelectCreateSession {
             && self.mode == SessionPageMode::CreateNew
             && !self.create_session_task.is_pending()
         {
-            self.new_session_error = None;
-            self.mode = SessionPageMode::SelectExisting;
-            self.focus_session_input_on_entry = false;
-            self.focus_on_entry = true;
-            self.focus_create_on_entry = true;
+            self.return_to_selection(true);
         }
+    }
+
+    fn enter_create_mode(&mut self) {
+        self.new_session_error = None;
+        self.mode = SessionPageMode::CreateNew;
+        self.focus_target = SessionFocusTarget::SessionName;
+    }
+
+    fn return_to_selection(&mut self, focus_create_row: bool) {
+        self.new_session_error = None;
+        self.mode = SessionPageMode::SelectExisting;
+        self.focus_target = if focus_create_row {
+            SessionFocusTarget::CreateRow
+        } else {
+            SessionFocusTarget::None
+        };
     }
 
     fn show_session_selection(&mut self, ui: &mut egui::Ui) {
@@ -290,35 +301,26 @@ impl PageSelectCreateSession {
                 .show(ui, |ui| {
                     ui.style_mut().spacing.item_spacing.y = 0.0;
                     let has_sessions = !self.available_sessions.is_empty();
-                    let selected_index = self.selected_session.as_ref().and_then(|selected| {
-                        self.available_sessions
-                            .iter()
-                            .position(|session| session == selected)
-                    });
+                    let selected_index = self.selected_session_index();
                     let create_response = create_session_row(ui, has_sessions, true);
-                    if ((self.focus_on_entry && self.available_sessions.is_empty())
-                        || self.focus_create_on_entry)
+                    if ((self.focus_target == SessionFocusTarget::ExistingList
+                        && self.available_sessions.is_empty())
+                        || self.focus_target == SessionFocusTarget::CreateRow)
                         && create_response.enabled()
                     {
                         create_response.request_focus();
-                        self.focus_on_entry = false;
-                        self.focus_create_on_entry = false;
+                        self.focus_target = SessionFocusTarget::None;
                     }
                     if create_response.clicked() {
-                        self.new_session_error = None;
-                        self.mode = SessionPageMode::CreateNew;
-                        self.focus_session_input_on_entry = true;
-                        self.focus_on_entry = false;
-                        self.focus_create_on_entry = false;
+                        self.enter_create_mode();
                     }
-                    let mut start = false;
                     let list_output = show_roving_list(
                         ui,
                         ui.id().with("session-rows"),
                         &self.available_sessions,
                         selected_index,
                         &mut self.focused_session,
-                        self.focus_on_entry,
+                        self.focus_target == SessionFocusTarget::ExistingList,
                         |ui, _index, name, selected, focusable| {
                             session_row(
                                 ui,
@@ -329,22 +331,31 @@ impl PageSelectCreateSession {
                             )
                         },
                     );
-                    if list_output.focus_requested {
-                        self.focus_on_entry = false;
-                    }
-                    if let Some(index) = list_output.selection_changed {
-                        self.selected_session = Some(self.available_sessions[index].clone());
-                    }
-                    if let Some(index) = list_output.activated {
-                        self.selected_session = Some(self.available_sessions[index].clone());
-                        self.focused_session.focused_index = Some(index);
-                        start = true;
-                    }
-                    if start {
-                        self.start_existing_session(ui.ctx().clone());
-                    }
+                    self.apply_session_list_output(list_output, ui.ctx().clone());
                 });
         });
+    }
+
+    fn selected_session_index(&self) -> Option<usize> {
+        self.selected_session.as_ref().and_then(|selected| {
+            self.available_sessions
+                .iter()
+                .position(|session| session == selected)
+        })
+    }
+
+    fn apply_session_list_output(&mut self, output: RovingListOutput, ctx: egui::Context) {
+        if output.focus_requested {
+            self.focus_target = SessionFocusTarget::None;
+        }
+        if let Some(index) = output.selection_changed {
+            self.selected_session = Some(self.available_sessions[index].clone());
+        }
+        if let Some(index) = output.activated {
+            self.selected_session = Some(self.available_sessions[index].clone());
+            self.focused_session.focused_index = Some(index);
+            self.start_existing_session(ctx);
+        }
     }
 
     fn show_create_form(&mut self, ui: &mut egui::Ui) {
@@ -366,9 +377,9 @@ impl PageSelectCreateSession {
                         TextEdit::singleline(&mut self.new_session_input)
                             .font(styles::typography::mono::font_id()),
                     );
-                    if self.focus_session_input_on_entry && response.enabled() {
+                    if self.focus_target == SessionFocusTarget::SessionName && response.enabled() {
                         response.request_focus();
-                        self.focus_session_input_on_entry = false;
+                        self.focus_target = SessionFocusTarget::None;
                     }
                     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
                 })
@@ -388,8 +399,7 @@ impl PageSelectCreateSession {
                 };
                 let cancel = ui.add_enabled(!is_submitting, secondary_button("Cancel", ui));
                 if cancel.clicked() {
-                    self.new_session_error = None;
-                    self.mode = SessionPageMode::SelectExisting;
+                    self.return_to_selection(false);
                 }
                 if submit.clicked() || submit_from_input {
                     self.start_new_session(ui.ctx().clone());
@@ -432,7 +442,6 @@ impl PageSelectCreateSession {
     pub fn poll(&mut self) -> Action {
         if let Some(sessions) = self.sessions_task.poll().take_ready() {
             self.available_sessions = sessions;
-            self.initial_fetch_complete = true;
         }
         if let Some(active_ingest) = self.create_ingest_task.poll().take_ready() {
             return Action::SelectSession {
@@ -456,8 +465,7 @@ impl PageSelectCreateSession {
         self.sessions_task.is_pending()
             || self.create_ingest_task.is_pending()
             || self.create_session_task.is_pending()
-            || (!self.initial_fetch_complete
-                && matches!(self.sessions_task, AsyncState::Idle)
+            || (matches!(self.sessions_task, AsyncState::Idle)
                 && self.available_sessions.is_empty())
     }
 }

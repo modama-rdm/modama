@@ -14,9 +14,3 @@ pub enum Action {
     CloseSessionSuccess,
     LogoutSuccess,
 }
-
-impl Action {
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-}

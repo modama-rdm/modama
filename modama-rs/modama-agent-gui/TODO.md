@@ -53,9 +53,9 @@
 - [x] mouse ux
     - [x] double click on items means selection (projects, sessions etc.)
     - [x] `cursor: pointer` for clickable elements (including the top bar logo and all buttons)
-- [ ] do a focus round on code quality
-    - [ ] check for complexity hot-spots
-    - [ ] check for spots that don't use the state machinery
+- [x] do a focus round on code quality
+    - [x] check for complexity hot-spots
+    - [x] check for spots that don't use the state machinery
 - [ ] do a focus round on design token usage
     - [ ] check if design tokens are "abused" and need either to be copied to a different name (component-specific maybe?) or might need to be renamed to be more generic
     - [ ] any hardcoded pixel/point sizes that need to be design tokens?
@@ -67,7 +67,7 @@
 - [x] BUG: project list should scroll if we use keyboard navigation to select items
 - [x] BUG: when clicking on a project or session in the list, the item should also have keyboard focus
     - right now, the item is only selected and doesn't get focus
-- [ ] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
+- [x] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
 - [ ] once versioned axum is feasible, 
     - [ ] update modama-agent local API to have versioned endpoints and schemas
     - [ ] auto-generate a rust client for it

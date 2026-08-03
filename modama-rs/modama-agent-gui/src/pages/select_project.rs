@@ -73,7 +73,6 @@ pub struct PageSelectProject {
     pub sort: ProjectSort,
     focused_project: RovingListState,
     focus_search_on_entry: bool,
-    initial_fetch_complete: bool,
 }
 
 impl Default for PageSelectProject {
@@ -92,7 +91,6 @@ impl PageSelectProject {
             sort: ProjectSort::Modified,
             focused_project: RovingListState::default(),
             focus_search_on_entry: true,
-            initial_fetch_complete: false,
         }
     }
 
@@ -105,8 +103,7 @@ impl PageSelectProject {
     }
 
     fn start_initial_fetch(&mut self, ui: &egui::Ui) {
-        if !self.initial_fetch_complete
-            && matches!(self.projects_task, AsyncState::Idle)
+        if matches!(self.projects_task, AsyncState::Idle)
             && self.available_projects.is_empty()
         {
             let ctx = ui.ctx().clone();
@@ -117,29 +114,43 @@ impl PageSelectProject {
 
     fn show_page_content(&mut self, ui: &mut egui::Ui) -> Action {
         let is_loading = self.projects_task.is_pending();
+        let view_state = self.project_view_state(is_loading);
         ui.vertical(|ui| {
             ui.add_enabled_ui(!is_loading, |ui| self.show_toolbar(ui));
             ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-
-            let visible_projects =
-                filter_and_sort_projects(&self.available_projects, &self.search_query, self.sort);
-            let list_state = if is_loading {
-                ProjectListState::Loading
-            } else if self.available_projects.is_empty() {
-                ProjectListState::NoAccess
-            } else if visible_projects.is_empty() {
-                ProjectListState::NoSearchMatches
-            } else {
-                ProjectListState::Projects
-            };
-            let selected_is_visible = self.selected_project.as_ref().is_some_and(|selected| {
-                visible_projects
-                    .iter()
-                    .any(|project| project.name == *selected)
-            });
-            self.show_results_and_action(ui, &visible_projects, list_state, selected_is_visible)
+            self.show_results_and_action(
+                ui,
+                &view_state.visible_projects,
+                view_state.list_state,
+                view_state.selected_is_visible,
+            )
         })
         .inner
+    }
+
+    fn project_view_state(&self, is_loading: bool) -> ProjectViewState {
+        let visible_projects =
+            filter_and_sort_projects(&self.available_projects, &self.search_query, self.sort);
+        let list_state = if is_loading {
+            ProjectListState::Loading
+        } else if self.available_projects.is_empty() {
+            ProjectListState::NoAccess
+        } else if visible_projects.is_empty() {
+            ProjectListState::NoSearchMatches
+        } else {
+            ProjectListState::Projects
+        };
+        let selected_is_visible = self.selected_project.as_ref().is_some_and(|selected| {
+            visible_projects
+                .iter()
+                .any(|project| project.name == *selected)
+        });
+
+        ProjectViewState {
+            visible_projects,
+            list_state,
+            selected_is_visible,
+        }
     }
 
     fn show_toolbar(&mut self, ui: &mut egui::Ui) {
@@ -345,15 +356,13 @@ impl PageSelectProject {
     pub fn poll(&mut self) -> Action {
         if let Some(projects) = self.projects_task.poll().take_ready() {
             self.available_projects = projects;
-            self.initial_fetch_complete = true;
         }
         Action::None
     }
 
     pub fn is_busy(&self) -> bool {
         self.projects_task.is_pending()
-            || (!self.initial_fetch_complete
-                && matches!(self.projects_task, AsyncState::Idle)
+            || (matches!(self.projects_task, AsyncState::Idle)
                 && self.available_projects.is_empty())
     }
 }
@@ -364,6 +373,12 @@ enum ProjectListState {
     NoAccess,
     NoSearchMatches,
     Projects,
+}
+
+struct ProjectViewState {
+    visible_projects: Vec<ProjectSummary>,
+    list_state: ProjectListState,
+    selected_is_visible: bool,
 }
 
 fn toolbar_layout_style() -> Style {
