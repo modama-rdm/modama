@@ -5,6 +5,7 @@ edition.workspace = true
 
 [features]
 visual-tests = ["dep:egui_kittest"]
+inspection = ["eframe/inspection"]
 
 [dependencies]
 eframe = "0.35.0"

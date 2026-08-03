@@ -336,14 +336,54 @@ fn card_shadow_with_color(color: Color32) -> Shadow {
 }
 
 pub fn paint_focus_rect(ui: &egui::Ui, response: &egui::Response) {
-    paint_focus_indicator(ui, response, false);
+    paint_focus_indicator(
+        ui,
+        response,
+        false,
+        color::primary::VALUE.resolve(ui.visuals()),
+        color::primary_tint::VALUE.resolve(ui.visuals()),
+    );
 }
 
 pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response) {
-    paint_focus_indicator(ui, response, true);
+    paint_focus_indicator(
+        ui,
+        response,
+        true,
+        color::primary::VALUE.resolve(ui.visuals()),
+        color::primary_tint::VALUE.resolve(ui.visuals()),
+    );
 }
 
-fn paint_focus_indicator(ui: &egui::Ui, response: &egui::Response, rounded: bool) {
+pub fn paint_focus_ring_for_button(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    variant: crate::components::buttons::ButtonVariant,
+) {
+    let (inner_color, outer_color) = match variant {
+        crate::components::buttons::ButtonVariant::Danger
+        | crate::components::buttons::ButtonVariant::DangerOutline => {
+            let error = color::error::VALUE.resolve(ui.visuals());
+            // Match the blue focus ring's translucent outer halo while keeping
+            // the inner edge solid and clearly identifying the destructive action.
+            (error, error.gamma_multiply(0.35))
+        }
+        crate::components::buttons::ButtonVariant::Primary
+        | crate::components::buttons::ButtonVariant::Secondary => (
+            color::primary::VALUE.resolve(ui.visuals()),
+            color::primary_tint::VALUE.resolve(ui.visuals()),
+        ),
+    };
+    paint_focus_indicator(ui, response, true, inner_color, outer_color);
+}
+
+fn paint_focus_indicator(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    rounded: bool,
+    inner_color: Color32,
+    outer_color: Color32,
+) {
     if response.has_focus() {
         let width = components::focus_ring::width::EGUI_POINTS;
         let corner_radius = if rounded { 
@@ -356,14 +396,14 @@ fn paint_focus_indicator(ui: &egui::Ui, response: &egui::Response, rounded: bool
             corner_radius,
             Stroke::new(
                 components::standard_border::width::EGUI_POINTS,
-                color::primary::VALUE.resolve(ui.visuals()),
+                inner_color,
             ),
             egui::StrokeKind::Inside,
         );
         ui.painter().rect_stroke(
             response.rect,
             corner_radius,
-            Stroke::new(width, color::primary_tint::VALUE.resolve(ui.visuals())),
+            Stroke::new(width, outer_color),
             egui::StrokeKind::Outside,
         );
     }

@@ -5,11 +5,16 @@ use crate::styles;
 /// An application button that owns its focus-ring behavior.
 pub struct DesignButton<'a> {
     inner: egui::Button<'a>,
+    variant: ButtonVariant,
 }
 
 impl<'a> DesignButton<'a> {
     pub fn new(inner: egui::Button<'a>) -> Self {
-        Self { inner }
+        Self::with_variant(inner, ButtonVariant::Primary)
+    }
+
+    pub fn with_variant(inner: egui::Button<'a>, variant: ButtonVariant) -> Self {
+        Self { inner, variant }
     }
 
     pub fn min_size(mut self, min_size: egui::Vec2) -> Self {
@@ -22,7 +27,7 @@ impl egui::Widget for DesignButton<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let response = ui.add(self.inner);
         if response.enabled() {
-            styles::paint_focus_ring(ui, &response);
+            styles::paint_focus_ring_for_button(ui, &response, self.variant);
         }
         response
     }
@@ -52,7 +57,7 @@ pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> Desi
     let text = RichText::new(label)
         .font(styles::typography::button::font_id())
         .color(button_text_color(ui.visuals(), variant));
-    DesignButton::new(button_inner(text, ui, variant))
+    DesignButton::with_variant(button_inner(text, ui, variant), variant)
 }
 
 fn button_inner<'a>(

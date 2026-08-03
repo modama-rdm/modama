@@ -12,6 +12,10 @@ validate-design:
 visual-tests:
     cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
 
+# Run the GUI with egui inspection enabled for egui-mcp.
+inspect-gui:
+    EGUI_INSPECTION=1 xvfb-run --auto-servernum cargo run -p {{ agent_gui_package }} --bin {{ agent_gui_package }} --features inspection
+
 update-snapshots:
     UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
     oxipng -o max --strip safe {{ snapshot_dir }}/*.png
