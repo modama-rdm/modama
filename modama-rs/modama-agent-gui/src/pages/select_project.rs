@@ -103,9 +103,7 @@ impl PageSelectProject {
     }
 
     fn start_initial_fetch(&mut self, ui: &egui::Ui) {
-        if matches!(self.projects_task, AsyncState::Idle)
-            && self.available_projects.is_empty()
-        {
+        if self.projects_task.is_idle() && self.available_projects.is_empty() {
             let ctx = ui.ctx().clone();
             self.projects_task
                 .spawn(move || FetchProjectsRequest.execute(), ctx);
@@ -362,8 +360,7 @@ impl PageSelectProject {
 
     pub fn is_busy(&self) -> bool {
         self.projects_task.is_pending()
-            || (matches!(self.projects_task, AsyncState::Idle)
-                && self.available_projects.is_empty())
+            || (self.projects_task.is_idle() && self.available_projects.is_empty())
     }
 }
 

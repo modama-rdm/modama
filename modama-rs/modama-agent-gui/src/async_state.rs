@@ -83,6 +83,10 @@ impl<T: Clone + Send + 'static> AsyncState<T> {
     pub fn is_pending(&self) -> bool {
         matches!(self, Self::Pending { .. })
     }
+
+    pub fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
 }
 
 impl<T> Drop for AsyncState<T> {
@@ -106,8 +110,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn idle_helper_only_matches_idle_state() {
+        let idle = AsyncState::<u8>::Idle;
+        let ready = AsyncState::Ready { payload: 1 };
+        let completed = AsyncState::<u8>::Completed;
+
+        assert!(idle.is_idle());
+        assert!(!ready.is_idle());
+        assert!(!completed.is_idle());
+    }
+
+    #[test]
     fn taking_ready_payload_marks_request_completed() {
-        let mut state = AsyncState::Ready { payload: Vec::<u8>::new() };
+        let mut state = AsyncState::Ready {
+            payload: Vec::<u8>::new(),
+        };
 
         assert_eq!(state.take_ready(), Some(Vec::new()));
         assert!(matches!(state, AsyncState::Completed));

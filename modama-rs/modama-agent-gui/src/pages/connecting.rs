@@ -21,7 +21,7 @@ impl PageConnecting {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
-        if matches!(self.connect_task, AsyncState::Idle) {
+        if self.connect_task.is_idle() {
             let ctx = ui.ctx().clone();
             self.connect_task.spawn(
                 move || {
@@ -46,10 +46,7 @@ impl PageConnecting {
     }
 
     pub fn is_busy(&self) -> bool {
-        matches!(
-            self.connect_task,
-            AsyncState::Idle | AsyncState::Pending { .. }
-        )
+        self.connect_task.is_idle() || self.connect_task.is_pending()
     }
 
     pub fn poll(&mut self) -> Action {

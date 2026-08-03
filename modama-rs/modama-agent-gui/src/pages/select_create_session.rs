@@ -140,9 +140,7 @@ impl PageSelectCreateSession {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         self.handle_keyboard_shortcuts(ui);
-        if matches!(self.sessions_task, AsyncState::Idle)
-            && self.available_sessions.is_empty()
-        {
+        if self.sessions_task.is_idle() && self.available_sessions.is_empty() {
             let req = FetchSessionsRequest {
                 project: self.project.clone(),
             };
@@ -465,8 +463,7 @@ impl PageSelectCreateSession {
         self.sessions_task.is_pending()
             || self.create_ingest_task.is_pending()
             || self.create_session_task.is_pending()
-            || (matches!(self.sessions_task, AsyncState::Idle)
-                && self.available_sessions.is_empty())
+            || (self.sessions_task.is_idle() && self.available_sessions.is_empty())
     }
 }
 
