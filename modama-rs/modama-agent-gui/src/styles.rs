@@ -224,12 +224,22 @@ pub fn pointer_cursor(response: egui::Response) -> egui::Response {
 
 /// Horizontal distance from a compact content card's outer edge to its content guide.
 pub fn content_card_inset() -> f32 {
-    components::standard_border::width::EGUI_POINTS + spacing::button_padding_x::EGUI_POINTS
+    components::standard_border::width::EGUI_POINTS
+        + components::content_card::padding_x::EGUI_POINTS
 }
 
 /// Horizontal distance from the window edge to a content card's outer edge.
 pub fn content_card_outer_inset_from_window() -> f32 {
     spacing::app_window_margin_x::EGUI_POINTS + components::app_shell::padding::EGUI_POINTS
+}
+
+/// Horizontal and vertical insets used by overlays aligned to the app shell.
+pub fn toast_right_inset_from_window() -> f32 {
+    content_card_outer_inset_from_window()
+}
+
+pub fn toast_bottom_inset_from_window() -> f32 {
+    spacing::app_window_margin_y::EGUI_POINTS + components::app_shell::padding::EGUI_POINTS
 }
 
 /// Horizontal position of the shared content guide relative to the window.
@@ -275,8 +285,8 @@ pub fn content_card_frame(visuals: &egui::Visuals) -> Frame {
     card_frame_with_padding(
         visuals,
         Margin::symmetric(
-            spacing::button_padding_x::EGUI_POINTS as i8,
-            (2.0 * spacing::button_padding_y::EGUI_POINTS) as i8,
+            components::content_card::padding_x::EGUI_POINTS as i8,
+            components::content_card::padding_y::EGUI_POINTS as i8,
         ),
     )
 }
@@ -352,4 +362,19 @@ pub fn danger_frame(visuals: &egui::Visuals) -> Frame {
             components::danger_alert_padding_x::padding::EGUI_POINTS as i8,
             components::danger_alert_padding_y::padding::EGUI_POINTS as i8,
         ))
+}
+
+pub fn toast_frame(visuals: &egui::Visuals) -> Frame {
+    Frame::new()
+        .fill(color::surface::VALUE.resolve(visuals))
+        .stroke(Stroke::new(
+            components::standard_border::width::EGUI_POINTS,
+            color::error_variant::VALUE.resolve(visuals),
+        ))
+        .corner_radius(radius(rounded::xl::EGUI_POINTS))
+        .inner_margin(Margin::symmetric(
+            components::error_toast::padding_x::EGUI_POINTS as i8,
+            components::error_toast::padding_y::EGUI_POINTS as i8,
+        ))
+        .shadow(card_shadow(visuals))
 }

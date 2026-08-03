@@ -2,7 +2,7 @@ use eframe::egui::{self, RichText, TextEdit};
 use std::time::Duration;
 
 use crate::{
-    actions::Action,
+    actions::{Action, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
         buttons::{primary_button, primary_loading_button},
@@ -141,12 +141,21 @@ impl PageLogin {
     }
 
     pub fn poll(&mut self) -> Action {
-        if let Some(res) = self.login_task.poll().take_ready() {
-            match res {
-                Ok(creds) => return Action::LoginSuccess { creds },
-                Err(_err) => {
-                    self.login_error = Some(_err);
+        match self.login_task.poll() {
+            Ok(task) => {
+                if let Some(res) = task.take_ready() {
+                    match res {
+                        Ok(creds) => return Action::LoginSuccess { creds },
+                        Err(error) => self.login_error = Some(error),
+                    }
                 }
+            }
+            Err(error) => {
+                log::error!("login task failed: {error}");
+                return Action::TaskFailed(TaskFailure::Stay {
+                    message: "Login failed unexpectedly.".to_owned(),
+                    retry: RetryAction::Login,
+                });
             }
         }
         Action::None
@@ -154,6 +163,10 @@ impl PageLogin {
 
     pub fn is_busy(&self) -> bool {
         self.login_task.is_pending()
+    }
+
+    pub fn retry(&mut self, ctx: egui::Context) {
+        self.start_login(ctx);
     }
 }
 

@@ -1,7 +1,11 @@
 use eframe::egui;
 use std::time::Duration;
 
-use crate::{actions::Action, async_state::AsyncState, state::AgentIdentity};
+use crate::{
+    actions::{Action, RetryAction, TaskFailure},
+    async_state::AsyncState,
+    state::AgentIdentity,
+};
 
 pub struct PageConnecting {
     pub connect_task: AsyncState<Result<(), String>>,
@@ -50,17 +54,33 @@ impl PageConnecting {
     }
 
     pub fn poll(&mut self) -> Action {
-        if let Some(res) = self.connect_task.poll().take_ready() {
-            if res.is_ok() {
-                return Action::Connected {
-                    identity: AgentIdentity::AgentId {
-                        agent_name: "k2".to_owned(),
-                        resource_name: "Holo".to_owned(),
-                    },
-                };
+        match self.connect_task.poll() {
+            Ok(task) => {
+                if let Some(res) = task.take_ready() {
+                    if res.is_ok() {
+                        return Action::Connected {
+                            identity: AgentIdentity::AgentId {
+                                agent_name: "k2".to_owned(),
+                                resource_name: "Holo".to_owned(),
+                            },
+                        };
+                    }
+                }
+            }
+            Err(error) => {
+                log::error!("connecting task failed: {error}");
+                return Action::TaskFailed(TaskFailure::Stay {
+                    message: "Could not connect to the agent.".to_owned(),
+                    retry: RetryAction::Reconnect,
+                });
             }
         }
         Action::None
+    }
+
+    pub fn retry(&mut self, ctx: egui::Context) {
+        self.connect_task.reset();
+        ctx.request_repaint();
     }
 }
 

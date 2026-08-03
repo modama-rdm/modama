@@ -14,7 +14,7 @@ use egui_taffy::{
 use time::{Date, OffsetDateTime};
 
 use crate::{
-    actions::Action,
+    actions::{Action, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
         buttons::{loading_button, primary_button, secondary_button, ButtonVariant},
@@ -438,25 +438,93 @@ impl PageSelectCreateSession {
     }
 
     pub fn poll(&mut self) -> Action {
-        if let Some(sessions) = self.sessions_task.poll().take_ready() {
-            self.available_sessions = sessions;
+        match self.sessions_task.poll() {
+            Ok(task) => {
+                if let Some(sessions) = task.take_ready() {
+                    self.available_sessions = sessions;
+                }
+            }
+            Err(error) => {
+                log::error!("session-fetch task failed: {error}");
+                return Action::TaskFailed(TaskFailure::ReturnToOverview {
+                    message: "Could not load sessions.".to_owned(),
+                    retry: RetryAction::FetchSessions {
+                        project: self.project.clone(),
+                    },
+                });
+            }
         }
-        if let Some(active_ingest) = self.create_ingest_task.poll().take_ready() {
-            return Action::SelectSession {
-                session: active_ingest,
-            };
-        }
-        if let Some(result) = self.create_session_task.poll().take_ready() {
-            match result {
-                Ok(active_ingest) => {
+        match self.create_ingest_task.poll() {
+            Ok(task) => {
+                if let Some(active_ingest) = task.take_ready() {
                     return Action::SelectSession {
                         session: active_ingest,
                     };
                 }
-                Err(error) => self.new_session_error = Some(error),
+            }
+            Err(error) => {
+                log::error!("create-ingest task failed: {error}");
+                if let Some(session) = self.selected_session.clone() {
+                    return Action::TaskFailed(TaskFailure::Stay {
+                        message: "Could not start the ingest session.".to_owned(),
+                        retry: RetryAction::CreateIngest {
+                            project: self.project.clone(),
+                            session,
+                        },
+                    });
+                }
+                return Action::TaskFailed(TaskFailure::Stay {
+                    message: "Could not start the ingest session.".to_owned(),
+                    retry: RetryAction::CreateSession {
+                        project: self.project.clone(),
+                        session: self.new_session_input.clone(),
+                    },
+                });
+            }
+        }
+        match self.create_session_task.poll() {
+            Ok(task) => {
+                if let Some(result) = task.take_ready() {
+                    match result {
+                        Ok(active_ingest) => {
+                            return Action::SelectSession {
+                                session: active_ingest,
+                            };
+                        }
+                        Err(error) => self.new_session_error = Some(error),
+                    }
+                }
+            }
+            Err(error) => {
+                log::error!("create-session task failed: {error}");
+                return Action::TaskFailed(TaskFailure::Stay {
+                    message: "Could not create the ingest session.".to_owned(),
+                    retry: RetryAction::CreateSession {
+                        project: self.project.clone(),
+                        session: self.new_session_input.clone(),
+                    },
+                });
             }
         }
         Action::None
+    }
+
+    pub fn retry_create_ingest(&mut self, project: String, session: String, ctx: egui::Context) {
+        self.selected_session = Some(session.clone());
+        self.create_ingest_task.reset();
+        self.create_ingest_task.spawn(
+            move || CreateIngestRequest { project, session }.execute(),
+            ctx,
+        );
+    }
+
+    pub fn retry_create_session(&mut self, project: String, session: String, ctx: egui::Context) {
+        self.new_session_input = session.clone();
+        self.create_session_task.reset();
+        self.create_session_task.spawn(
+            move || CreateSessionAndIngestRequest { project, session }.execute(),
+            ctx,
+        );
     }
 
     pub fn is_busy(&self) -> bool {

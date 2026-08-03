@@ -80,5 +80,5 @@
     - [ ] focus ring of destructive actions should be red
 - [ ] update to latest egui
 - [x] code quality: replace `matches!(async_task, AsyncState::SomeVariant)` with short helpers (`is_idle` etc.)
-- [ ] code quality: remove the `AsyncState` unwrap/panic path
+- [x] code quality: remove the `AsyncState` unwrap/panic path
 - [ ] select_create_session: create mode; validation should be part of the background task; consolidate error state

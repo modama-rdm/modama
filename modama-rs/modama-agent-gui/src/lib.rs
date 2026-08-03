@@ -97,15 +97,44 @@ mod style_tests {
     }
 
     #[test]
-    fn content_card_frame_derives_padding_from_button_tokens() {
+    fn content_card_frame_uses_content_card_tokens() {
         let frame = styles::content_card_frame(&egui::Visuals::light());
 
         assert_eq!(
             frame.inner_margin,
             egui::Margin::symmetric(
-                styles::spacing::button_padding_x::EGUI_POINTS as i8,
-                (2.0 * styles::spacing::button_padding_y::EGUI_POINTS) as i8,
+                styles::components::content_card::padding_x::EGUI_POINTS as i8,
+                styles::components::content_card::padding_y::EGUI_POINTS as i8,
             )
+        );
+    }
+
+    #[test]
+    fn toast_frame_uses_error_tokens_and_error_toast_spacing() {
+        let frame = styles::toast_frame(&egui::Visuals::light());
+
+        assert_eq!(frame.fill, styles::color::surface::VALUE.light_egui);
+        assert_eq!(
+            frame.stroke.color,
+            styles::color::error_variant::VALUE.light_egui
+        );
+        assert_eq!(
+            frame.inner_margin,
+            egui::Margin::symmetric(
+                styles::components::error_toast::padding_x::EGUI_POINTS as i8,
+                styles::components::error_toast::padding_y::EGUI_POINTS as i8,
+            )
+        );
+        assert_eq!(frame.corner_radius, styles::rounded::xl::EGUI_POINTS.into());
+        assert_eq!(frame.shadow, styles::card_shadow(&egui::Visuals::light()));
+    }
+
+    #[test]
+    fn content_guide_uses_content_card_padding() {
+        assert_eq!(
+            styles::content_card_inset(),
+            styles::components::standard_border::width::EGUI_POINTS
+                + styles::components::content_card::padding_x::EGUI_POINTS
         );
     }
 

@@ -13,7 +13,7 @@ use egui_taffy::{
 use time::OffsetDateTime;
 
 use crate::{
-    actions::Action,
+    actions::{Action, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
         buttons::primary_button,
@@ -352,8 +352,19 @@ impl PageSelectProject {
     }
 
     pub fn poll(&mut self) -> Action {
-        if let Some(projects) = self.projects_task.poll().take_ready() {
-            self.available_projects = projects;
+        match self.projects_task.poll() {
+            Ok(task) => {
+                if let Some(projects) = task.take_ready() {
+                    self.available_projects = projects;
+                }
+            }
+            Err(error) => {
+                log::error!("project-fetch task failed: {error}");
+                return Action::TaskFailed(TaskFailure::ReturnToOverview {
+                    message: "Could not load projects.".to_owned(),
+                    retry: RetryAction::FetchProjects,
+                });
+            }
         }
         Action::None
     }

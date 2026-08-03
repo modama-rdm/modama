@@ -2,7 +2,7 @@ use eframe::egui::{self, Label, RichText};
 use std::time::Duration;
 
 use crate::{
-    actions::Action,
+    actions::{Action, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
         buttons::{danger_outline_button, loading_button, primary_button, ButtonVariant},
@@ -72,15 +72,32 @@ impl PageOverview {
     }
 
     pub fn poll(&mut self) -> Action {
-        if self.close_task.poll().take_ready().is_some() {
-            Action::CloseSessionSuccess
-        } else {
-            Action::None
+        match self.close_task.poll() {
+            Ok(task) => {
+                if task.take_ready().is_some() {
+                    Action::CloseSessionSuccess
+                } else {
+                    Action::None
+                }
+            }
+            Err(error) => {
+                log::error!("close-session task failed: {error}");
+                Action::TaskFailed(TaskFailure::Stay {
+                    message: "Could not close the ingest session.".to_owned(),
+                    retry: RetryAction::CloseSession,
+                })
+            }
         }
     }
 
     pub fn is_busy(&self) -> bool {
         self.close_task.is_pending()
+    }
+
+    pub fn retry_close_session(&mut self, ctx: egui::Context) {
+        self.close_task.reset();
+        self.close_task
+            .spawn(move || CloseSessionRequest.execute(), ctx);
     }
 
     fn show_create_card(&mut self, ui: &mut egui::Ui) -> bool {

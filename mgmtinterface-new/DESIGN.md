@@ -157,6 +157,12 @@ components:
     padding: 14px
   danger-alert-padding-y:
     padding: 12px
+  content-card:
+    padding-x: 20px
+    padding-y: 20px
+  error-toast:
+    padding-x: 20px
+    padding-y: 20px
 ---
 
 # Design Specification: ER-C Data Management UI

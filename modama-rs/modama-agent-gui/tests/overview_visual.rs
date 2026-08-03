@@ -110,6 +110,15 @@ fn overview_snapshots() {
     logout_completed.snapshot("overview_logout_completed");
     results.extend_harness(&mut logout_completed);
 
+    let mut error_toast = overview_harness(false, false);
+    error_toast.state_mut().toast.show_error(
+        "Could not load projects.".to_owned(),
+        modama_agent_gui::actions::RetryAction::FetchProjects,
+    );
+    error_toast.run_steps(2);
+    error_toast.snapshot("overview_error_toast");
+    results.extend_harness(&mut error_toast);
+
     results.unwrap();
 }
 
@@ -154,6 +163,62 @@ fn overview_logo_heading_and_card_content_share_a_left_guide() {
 
     assert!((logo_x - heading_x).abs() <= tolerance);
     assert!((heading_x - card_content_x).abs() <= tolerance);
+}
+
+#[test]
+fn error_toast_aligns_with_the_app_shell_geometry() {
+    let mut harness = overview_harness(false, false);
+    harness.state_mut().toast.show_error(
+        "Could not load projects.".to_owned(),
+        modama_agent_gui::actions::RetryAction::FetchProjects,
+    );
+    harness.run_steps(2);
+
+    let logo = harness.get_by_label("go to Overview").rect();
+    let heading = harness.get_by_label("Overview").rect();
+    let retry = harness.get_by_label("Retry").rect();
+    let dismiss = harness.get_by_label("Dismiss").rect();
+    let tolerance = styles::components::standard_border::width::EGUI_POINTS * 2.0;
+    let expected_right = VIEWPORT.x - styles::toast_right_inset_from_window();
+    let expected_bottom = VIEWPORT.y - styles::toast_bottom_inset_from_window();
+    let controls_right = retry.right().max(dismiss.right());
+
+    assert!((logo.left() - heading.left()).abs() <= tolerance);
+    assert!(
+        (controls_right + styles::components::error_toast::padding_x::EGUI_POINTS - expected_right)
+            .abs()
+            <= tolerance,
+        "controls right {}, expected outer right {}, expected inner right {}",
+        controls_right,
+        expected_right,
+        expected_right - styles::components::error_toast::padding_x::EGUI_POINTS
+    );
+    assert!(
+        (dismiss.bottom() + styles::components::error_toast::padding_y::EGUI_POINTS
+            - expected_bottom)
+            .abs()
+            <= tolerance,
+        "dismiss bottom {}, expected outer bottom {}, expected inner bottom {}",
+        dismiss.bottom(),
+        expected_bottom,
+        expected_bottom - styles::components::error_toast::padding_y::EGUI_POINTS
+    );
+    assert!(retry.top() > logo.bottom());
+}
+
+#[test]
+fn error_toast_retry_routes_back_to_the_failed_selection_page() {
+    let mut harness = overview_harness(false, false);
+    harness.state_mut().toast.show_error(
+        "Could not load projects.".to_owned(),
+        modama_agent_gui::actions::RetryAction::FetchProjects,
+    );
+    harness.run_steps(2);
+
+    harness.get_by_label("Retry").click();
+    harness.run_steps(1);
+
+    assert!(matches!(harness.state().page, Page::SelectProject(_)));
 }
 
 #[test]

@@ -1,7 +1,8 @@
 use eframe::egui::{self, vec2, Margin};
 
 use crate::{
-    actions::Action,
+    actions::{Action, RetryAction, TaskFailure},
+    components::toast::{ToastAction, ToastState},
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
     },
@@ -13,6 +14,7 @@ use crate::{
 pub struct AgentGuiApp {
     pub page: Page,
     pub app_state: AgentAppState,
+    pub toast: ToastState,
     top_bar: TopBar,
 }
 
@@ -27,6 +29,7 @@ impl AgentGuiApp {
         Self {
             page: Page::Connecting(PageConnecting::new()),
             app_state: AgentAppState::new(),
+            toast: ToastState::default(),
             top_bar: TopBar::default(),
         }
     }
@@ -35,9 +38,11 @@ impl AgentGuiApp {
         match action {
             Action::None => {}
             Action::GoToLogin => {
+                self.toast.clear();
                 self.page = Page::Login(PageLogin::new());
             }
             Action::CreateSession => {
+                self.toast.clear();
                 if self.app_state.creds.is_some() {
                     self.page = Page::SelectProject(PageSelectProject::new());
                 } else {
@@ -45,34 +50,89 @@ impl AgentGuiApp {
                 }
             }
             Action::LoginSuccess { creds } => {
+                self.toast.clear();
                 self.app_state.creds = Some(creds);
                 self.page = Page::SelectProject(PageSelectProject::new());
             }
             Action::GoToSelectProject => {
+                self.toast.clear();
                 self.page = Page::SelectProject(PageSelectProject::new());
             }
             Action::SelectProject { project } => {
+                self.toast.clear();
                 self.page = Page::SelectCreateSession(PageSelectCreateSession::new(project));
             }
             Action::SelectSession { session } => {
+                self.toast.clear();
                 self.app_state.session = Some(session);
                 self.page = Page::Overview(PageOverview::new());
             }
             Action::GoToOverview => {
+                self.toast.clear();
                 self.page = Page::Overview(PageOverview::new());
             }
             Action::CloseSessionSuccess => {
+                self.toast.clear();
                 self.app_state.session = None;
             }
             Action::LogoutSuccess => {
+                self.toast.clear();
                 self.app_state.creds = None;
                 self.page = Page::Overview(PageOverview::new());
             }
             Action::Connected { identity } => {
+                self.toast.clear();
                 self.page = Page::Overview(PageOverview::new());
                 self.app_state.identity = Some(identity);
             }
+            Action::TaskFailed(failure) => match failure {
+                TaskFailure::Stay { message, retry } => {
+                    self.toast.show_error(message, retry);
+                }
+                TaskFailure::ReturnToOverview { message, retry } => {
+                    self.page = Page::Overview(PageOverview::new());
+                    self.toast.show_error(message, retry);
+                }
+            },
         }
+    }
+
+    fn handle_retry(&mut self, retry: RetryAction, ctx: egui::Context) {
+        match retry {
+            RetryAction::Reconnect => {
+                if let Page::Connecting(page) = &mut self.page {
+                    page.retry(ctx);
+                }
+            }
+            RetryAction::Login => {
+                if let Page::Login(page) = &mut self.page {
+                    page.retry(ctx);
+                }
+            }
+            RetryAction::FetchProjects => {
+                self.page = Page::SelectProject(PageSelectProject::new());
+            }
+            RetryAction::FetchSessions { project } => {
+                self.page = Page::SelectCreateSession(PageSelectCreateSession::new(project));
+            }
+            RetryAction::CreateIngest { project, session } => {
+                if let Page::SelectCreateSession(page) = &mut self.page {
+                    page.retry_create_ingest(project, session, ctx);
+                }
+            }
+            RetryAction::CreateSession { project, session } => {
+                if let Page::SelectCreateSession(page) = &mut self.page {
+                    page.retry_create_session(project, session, ctx);
+                }
+            }
+            RetryAction::CloseSession => {
+                if let Page::Overview(page) = &mut self.page {
+                    page.retry_close_session(ctx);
+                }
+            }
+            RetryAction::Logout => self.top_bar.retry_logout(ctx),
+        }
+        self.toast.clear();
     }
 }
 
@@ -134,6 +194,13 @@ impl eframe::App for AgentGuiApp {
                         });
                 }
             });
+
+        if let Some(action) = self.toast.show(ui.ctx()) {
+            match action {
+                ToastAction::Retry(retry) => self.handle_retry(retry, ui.ctx().clone()),
+                ToastAction::Dismiss => self.toast.clear(),
+            }
+        }
     }
 }
 

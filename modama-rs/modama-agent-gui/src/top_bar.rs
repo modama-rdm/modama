@@ -11,7 +11,7 @@ use egui_taffy::{
 };
 
 use crate::{
-    actions::Action,
+    actions::{Action, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::avatar,
     components::buttons::{
@@ -184,11 +184,30 @@ impl TopBar {
     }
 
     pub(crate) fn poll(&mut self) -> Action {
-        if self.logout_task.poll().take_ready().is_some() {
-            Action::LogoutSuccess
-        } else {
-            Action::None
+        match self.logout_task.poll() {
+            Ok(task) => {
+                if task.take_ready().is_some() {
+                    Action::LogoutSuccess
+                } else {
+                    Action::None
+                }
+            }
+            Err(error) => {
+                log::error!("logout task failed: {error}");
+                Action::TaskFailed(TaskFailure::Stay {
+                    message: "Could not log out.".to_owned(),
+                    retry: RetryAction::Logout,
+                })
+            }
         }
+    }
+
+    pub(crate) fn retry_logout(&mut self, ctx: egui::Context) {
+        self.logout_task.reset();
+        self.logout_task.spawn(
+            || crate::simulated_work::sleep(Duration::from_millis(500)),
+            ctx,
+        );
     }
 }
 

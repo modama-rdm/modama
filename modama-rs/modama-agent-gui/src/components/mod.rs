@@ -4,6 +4,7 @@ pub mod dialogs;
 pub mod forms;
 pub mod list_view;
 pub mod dropdown;
+pub mod toast;
 
 use eframe::egui::{self, RichText};
 
