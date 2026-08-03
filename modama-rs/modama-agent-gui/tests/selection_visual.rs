@@ -108,6 +108,25 @@ fn enabled_custom_rows_use_pointing_hand_cursor_and_disabled_actions_do_not() {
     );
 }
 
+#[test]
+fn completed_flow_stages_navigate_back() {
+    let mut project_page = PageSelectProject::new();
+    project_page.available_projects = representative_projects();
+    let mut projects = selection_harness(Page::SelectProject(project_page));
+    projects.run_steps(3);
+    projects.get_by_label("Overview").click();
+    projects.run_steps(1);
+    assert!(matches!(projects.state().page, Page::Overview(_)));
+
+    let mut session_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    session_page.available_sessions = strings(&SESSIONS);
+    let mut sessions = selection_harness(Page::SelectCreateSession(session_page));
+    sessions.run_steps(3);
+    sessions.get_by_label("Project").click();
+    sessions.run_steps(1);
+    assert!(matches!(sessions.state().page, Page::SelectProject(_)));
+}
+
 fn press_tab(harness: &mut Harness<'static, AgentGuiApp>, reverse: bool) {
     if reverse {
         harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
@@ -745,10 +764,13 @@ fn project_toolbar_and_dynamic_list_follow_available_geometry() {
         );
         let action = harness.get_by_label("Select Project").rect();
         let guide = harness.get_by_label("go to Overview").rect().left();
+        let flow_overview = harness.get_by_label("Overview").rect();
         let heading = harness.get_by_label("Select a project").rect();
         let card_outer_left = styles::content_card_outer_inset_from_window();
         let card_border = styles::components::standard_border::width::EGUI_POINTS;
         assert!((heading.left() - guide).abs() <= 1.0);
+        assert!((flow_overview.left() - guide).abs() <= 1.0);
+        assert!(flow_overview.bottom() <= heading.top());
         assert!((search_label.left() - guide).abs() <= 1.0);
         assert!((search.left() - card_outer_left).abs() <= 1.0);
         assert!(
@@ -1169,6 +1191,7 @@ fn session_list_follows_available_geometry_and_shared_guide() {
         harness.run_steps(3);
 
         let guide = harness.get_by_label("go to Overview").rect().left();
+        let flow_overview = harness.get_by_label("Overview").rect();
         let heading = harness
             .get_by_label("Select or create a session in project 'Project Alpha'")
             .rect();
@@ -1181,6 +1204,8 @@ fn session_list_follows_available_geometry_and_shared_guide() {
         let card_outer_left = styles::content_card_outer_inset_from_window();
 
         assert!((heading.left() - guide).abs() <= 1.0);
+        assert!((flow_overview.left() - guide).abs() <= 1.0);
+        assert!(flow_overview.bottom() <= heading.top());
         assert!(
             (create_row.left() + styles::spacing::button_padding_x::EGUI_POINTS - guide).abs()
                 <= 1.0

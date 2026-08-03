@@ -29,9 +29,9 @@
         - [x] like login form, enter submits form, button submits form
     - [x] add a decision "switch" UI to either pick existing session, or show a "create new session" form
         - [x] have the first item in the session list be a placeholder "create new" item
-- [ ] breadcrumb navigation
-    - need to distinguist "login -> create session" and "just clicked the login button" flows
-    - might need to be a "wizard" style navigation, that displays all the steps in the flow
+- [x] compact wizard navigation (`Overview › Project › Session`)
+    - [x] completed stages navigate back using fresh page state
+    - [x] login has a visible Back button; login success flow remains unchanged
 - [ ] keyboard ux
     - [x] logical "tab indexes" (top-left to bottom-right-ish)
         - [x] top bar
@@ -76,8 +76,8 @@
 - [ ] general design fixes
     - [ ] review vertical and horizontal flow of the design? are there elements that should be aligned which are not?
     - [ ] hovered card rows are subtle, thats ok, but they overlay the top border. that looks dumb on displays with too much contrast
-- [ ] eye candy
-    - [ ] focus ring of destructive actions should be red
+    - [ ] eye candy
+        - [ ] focus ring of destructive actions should be red
 - [ ] update to latest egui
 - [x] code quality: replace `matches!(async_task, AsyncState::SomeVariant)` with short helpers (`is_idle` etc.)
 - [x] code quality: remove the `AsyncState` unwrap/panic path

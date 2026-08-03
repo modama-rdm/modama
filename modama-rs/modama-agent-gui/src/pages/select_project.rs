@@ -17,6 +17,7 @@ use crate::{
     async_state::AsyncState,
     components::{
         buttons::primary_button,
+        flow_navigation::{flow_navigation, FlowStage},
         forms::labeled_text_input_with_insets,
         list_view::{show_roving_list, RovingListState},
         page_heading,
@@ -97,6 +98,13 @@ impl PageSelectProject {
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         self.start_initial_fetch(ui);
 
+        if let Some(stage) = flow_navigation(ui, FlowStage::Project) {
+            return match stage {
+                FlowStage::Overview => Action::GoToOverview,
+                FlowStage::Project | FlowStage::Session => Action::None,
+            };
+        }
+        ui.add_space(styles::spacing::header_title_gap::EGUI_POINTS);
         page_heading(ui, "Select a project");
         ui.add_space(styles::content_card_top_margin_adjustment());
         self.show_page_content(ui)

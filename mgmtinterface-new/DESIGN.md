@@ -99,6 +99,8 @@ spacing:
   button-margin-top: 8px
   app-item-gap-x: 8px
   app-item-gap-y: 10px
+  flow-navigation-gap: 6px
+  login-back-link-gap: 20px
   app-window-margin-x: 8px
   app-window-margin-y: 10px
   login-error-gap: 16px
@@ -237,6 +239,12 @@ Full-width input field with:
 Bottom-right notification popup using `xl` (12px) corner rounding, left-side
 colored border-stripes (`tertiary` or `error` depending on state), and an
 elevation shadow.
+
+### Flow navigation
+Compact step navigation uses the supporting-text typography and a 6px inline
+gap. Completed steps use the primary color, the current step uses the muted
+foreground, and future steps use the disabled treatment. The native client
+uses this for the `Overview › Project › Session` flow.
 
 ### Avatar
 Deterministic categorical colored circles (`full`) based on username hashing. Displays initials in bold uppercase. Used palette:

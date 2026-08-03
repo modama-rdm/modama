@@ -53,5 +53,3 @@ mod tests {
         assert_ne!(username_hash("alex"), username_hash("sam"));
     }
 }
-
-

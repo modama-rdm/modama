@@ -1,6 +1,7 @@
 pub mod avatar;
 pub mod buttons;
 pub mod dialogs;
+pub mod flow_navigation;
 pub mod forms;
 pub mod list_view;
 pub mod dropdown;

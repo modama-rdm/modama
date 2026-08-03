@@ -58,19 +58,40 @@ impl PageLogin {
         egui::Area::new(egui::Id::new("login-card"))
             .fixed_pos(ui.max_rect().center())
             .pivot(egui::Align2::CENTER_CENTER)
-            .show(ui.ctx(), |ui| self.show_login_card(ui));
-
-        Action::None
+            .show(ui.ctx(), |ui| self.show_login_block(ui))
+            .inner
     }
 
-    fn show_login_card(&mut self, ui: &mut egui::Ui) {
-        ui.set_max_width(styles::components::login_card::width::EGUI_POINTS);
-        styles::card_frame(ui.visuals()).show(ui, |ui| {
-            ui.style_mut().spacing.item_spacing.y = 0.0;
-            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                self.show_card_content(ui);
+    fn show_login_block(&mut self, ui: &mut egui::Ui) -> Action {
+        let mut action = Action::None;
+        let is_logging_in = self.login_task.is_pending();
+        let card_width = styles::components::login_card::width::EGUI_POINTS;
+
+        ui.set_min_width(card_width);
+        ui.set_max_width(card_width);
+        ui.vertical_centered(|ui| {
+            styles::card_frame(ui.visuals()).show(ui, |ui| {
+                ui.style_mut().spacing.item_spacing.y = 0.0;
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    self.show_card_content(ui)
+                });
             });
+
+            ui.add_space(styles::spacing::login_back_link_gap::EGUI_POINTS);
+            let link = egui::Button::new(
+                egui::RichText::new("← Back to overview")
+                    .font(styles::typography::supporting_text::font_id())
+                    .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+            )
+            .frame(false);
+            let response = ui.add_enabled(!is_logging_in, link);
+            styles::paint_focus_ring(ui, &response);
+            if response.clicked() {
+                action = Action::GoToOverview;
+            }
         });
+
+        action
     }
 
     fn show_card_content(&mut self, ui: &mut egui::Ui) {

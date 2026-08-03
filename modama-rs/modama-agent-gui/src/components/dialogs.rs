@@ -60,4 +60,3 @@ pub fn destructive_confirmation_dialog(
         action
     }
 }
-

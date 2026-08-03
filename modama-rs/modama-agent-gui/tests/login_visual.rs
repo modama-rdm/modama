@@ -73,6 +73,50 @@ fn login_entry_focuses_username() {
 }
 
 #[test]
+fn login_back_returns_to_overview() {
+    let mut harness = login_harness(false);
+    harness.get_by_label("← Back to overview").click();
+    harness.run_steps(1);
+
+    assert!(matches!(harness.state().page, Page::Overview(_)));
+}
+
+#[test]
+fn login_back_link_is_centered_below_the_card() {
+    let harness = login_harness(false);
+    let link = harness.get_by_label("← Back to overview").rect();
+    let submit = harness.get_by_label("Sign in").rect();
+
+    assert!((link.center().x - VIEWPORT.x / 2.0).abs() <= 1.0);
+    assert!(link.top() - submit.bottom() >= styles::spacing::login_back_link_gap::EGUI_POINTS);
+}
+
+#[test]
+fn login_back_link_stays_visible_but_disabled_while_authenticating() {
+    let mut harness = login_harness(false);
+    let release = Arc::new(Barrier::new(2));
+    let task_release = Arc::clone(&release);
+    let ctx = harness.ctx.clone();
+    if let Page::Login(login) = &mut harness.state_mut().page {
+        login.login_task.spawn(
+            move || {
+                task_release.wait();
+                Err("pending login link test complete".to_string())
+            },
+            ctx,
+        );
+    }
+    harness.run_steps(1);
+
+    assert!(harness
+        .query_by(|node| {
+            node.label().as_deref() == Some("← Back to overview") && node.is_disabled()
+        })
+        .is_some());
+    release.wait();
+}
+
+#[test]
 fn enter_does_not_replace_a_pending_login() {
     let mut harness = login_harness(false);
     let release = Arc::new(Barrier::new(2));

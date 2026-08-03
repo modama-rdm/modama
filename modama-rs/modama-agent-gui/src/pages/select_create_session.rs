@@ -19,6 +19,7 @@ use crate::{
     components::{
         buttons::{loading_button, primary_button, secondary_button, ButtonVariant},
         display_error,
+        flow_navigation::{flow_navigation, FlowStage},
         forms::labeled_text_input,
         list_view::{show_roving_list, RovingListOutput, RovingListState},
         page_heading,
@@ -148,6 +149,14 @@ impl PageSelectCreateSession {
             self.sessions_task.spawn(move || req.execute(), ctx);
         }
 
+        if let Some(stage) = flow_navigation(ui, FlowStage::Session) {
+            return match stage {
+                FlowStage::Overview => Action::GoToOverview,
+                FlowStage::Project => Action::GoToSelectProject,
+                FlowStage::Session => Action::None,
+            };
+        }
+        ui.add_space(styles::spacing::header_title_gap::EGUI_POINTS);
         page_heading(
             ui,
             &format!("Select or create a session in project '{}'", self.project),
