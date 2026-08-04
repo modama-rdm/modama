@@ -44,6 +44,13 @@ where
                 outline,
             );
         }
+        let open_radius = styles::radius(styles::rounded::lg::EGUI_POINTS);
+        ui.visuals_mut().widgets.open.corner_radius = egui::CornerRadius {
+            nw: open_radius.nw,
+            ne: open_radius.ne,
+            sw: 0,
+            se: 0,
+        };
         let selected_text = RichText::new(format!("{}", selected_option))
             .font(styles::typography::body::font_id());
 
@@ -60,6 +67,13 @@ where
                         styles::spacing::input_padding_x::EGUI_POINTS,
                         styles::spacing::input_padding_y::EGUI_POINTS,
                     );
+                    let popup_radius = style.visuals.menu_corner_radius;
+                    style.visuals.menu_corner_radius = egui::CornerRadius {
+                        nw: 0,
+                        ne: 0,
+                        sw: popup_radius.sw,
+                        se: popup_radius.se,
+                    };
                     style.visuals.selection.bg_fill = primary_tint;
                     for widget in [
                         &mut style.visuals.widgets.inactive,
