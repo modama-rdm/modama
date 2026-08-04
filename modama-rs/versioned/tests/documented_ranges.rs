@@ -5,7 +5,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use tower::ServiceExt;
-use versioned::{VersionedRouterBuilder, openapi_from_handler, versions};
+use versioned::{VersionedRouterBuilder, versioned_route, versions};
 
 #[utoipa::path(get, path = "/greeting")]
 async fn greeting_v1() -> &'static str {
@@ -19,14 +19,10 @@ async fn greeting_v2() -> &'static str {
 
 async fn request(version: &str) -> (StatusCode, String) {
     let app = VersionedRouterBuilder::new()
-        .route(
-            versions!("1.0.0..2.0.0"),
-            openapi_from_handler!(greeting_v1),
-        )
-        .route(versions!("2.0.0.."), openapi_from_handler!(greeting_v2))
+        .route(versions!("1.0.0..2.0.0"), versioned_route!(greeting_v1))
+        .route(versions!("2.0.0.."), versioned_route!(greeting_v2))
         .build(())
-        .expect("documented routes should be valid")
-        .into_axum_router();
+        .expect("documented routes should be valid");
 
     let response = app
         .oneshot(

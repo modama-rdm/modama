@@ -1,4 +1,4 @@
-use api_versioning::{VersionedRouterBuilder, openapi_from_handler, versions};
+use api_versioning::{VersionedRouterBuilder, versioned_route, versions};
 
 #[utoipa::path(post, path = "/greeting")]
 async fn greeting() -> &'static str {
@@ -8,10 +8,10 @@ async fn greeting() -> &'static str {
 #[tokio::main]
 async fn main() {
     let router = VersionedRouterBuilder::new()
-        .route(versions!("1.0.0.."), openapi_from_handler!(greeting))
+        .route(versions!("1.0.0.."), versioned_route!(greeting))
         .build(())
         .expect("renamed-consumer route should be valid")
-        .into_axum_router();
+        ;
 
     let _: axum::Router = router;
 }

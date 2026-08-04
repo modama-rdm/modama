@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use versioned::{VersionedRouterBuilder, openapi_from_handler, versions};
+use versioned::{VersionedRouterBuilder, versioned_route, versions};
 
 #[derive(Serialize, Deserialize, ToSchema)]
 struct Greeting {
@@ -30,10 +30,8 @@ async fn greeting_handler(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build the versioned router
-    let builder = VersionedRouterBuilder::<()>::new().route(
-        versions!("1.0.0.."),
-        openapi_from_handler!(greeting_handler),
-    );
+    let builder = VersionedRouterBuilder::<()>::new()
+        .route(versions!("1.0.0.."), versioned_route!(greeting_handler));
 
     // Rebuild the info section with full customization
     use utoipa::openapi::{ContactBuilder, InfoBuilder, LicenseBuilder};

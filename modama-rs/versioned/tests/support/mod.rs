@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use axum::routing::MethodRouter;
-use versioned::{PathMetadata, VersionRange, VersionedRouterBuilder};
+use versioned::{VersionRange, VersionedRoute, VersionedRouterBuilder};
 
 pub trait TestRoutes<S> {
     fn route_get(
@@ -26,10 +26,9 @@ impl<S: Clone + Send + Sync + 'static> TestRoutes<S> for VersionedRouterBuilder<
         range: VersionRange,
         handler: MethodRouter<S>,
     ) -> Self {
-        self.route_with_openapi(
+        self.route(
             range,
-            handler,
-            metadata(path, utoipa::openapi::path::HttpMethod::Get),
+            route(path, utoipa::openapi::path::HttpMethod::Get, handler),
         )
     }
 
@@ -39,20 +38,24 @@ impl<S: Clone + Send + Sync + 'static> TestRoutes<S> for VersionedRouterBuilder<
         range: VersionRange,
         handler: MethodRouter<S>,
     ) -> Self {
-        self.route_with_openapi(
+        self.route(
             range,
-            handler,
-            metadata(path, utoipa::openapi::path::HttpMethod::Post),
+            route(path, utoipa::openapi::path::HttpMethod::Post, handler),
         )
     }
 }
 
-fn metadata(path: impl Into<String>, method: utoipa::openapi::path::HttpMethod) -> PathMetadata {
-    PathMetadata {
-        path: path.into(),
-        operation: utoipa::openapi::path::OperationBuilder::new().build(),
-        tags: vec![],
-        methods: vec![method],
-        schemas: vec![],
-    }
+fn route<S>(
+    path: impl Into<String>,
+    method: utoipa::openapi::path::HttpMethod,
+    handler: MethodRouter<S>,
+) -> VersionedRoute<S> {
+    VersionedRoute::__from_parts(
+        handler,
+        path.into(),
+        utoipa::openapi::path::OperationBuilder::new().build(),
+        vec![],
+        vec![method],
+        vec![],
+    )
 }

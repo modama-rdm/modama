@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
 use utoipa::ToSchema;
 use versioned::{
-    PathMetadata, RouteConfigError, VersionedRouterBuilder, openapi_from_handler, versions,
+    RouteConfigError, VersionedRoute, VersionedRouterBuilder, versioned_route, versions,
 };
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -62,12 +62,12 @@ async fn user_by_name() {}
 #[tokio::test]
 async fn test_duplicate_routes_returns_error() {
     // Two handlers for the same path with overlapping version ranges
-    let (meta1, handler1) = openapi_from_handler!(users_v1);
-    let (meta2, handler2) = openapi_from_handler!(users_v1_duplicate);
+    let handler1 = versioned_route!(users_v1);
+    let handler2 = versioned_route!(users_v1_duplicate);
 
     let builder = VersionedRouterBuilder::<()>::new()
-        .route_with_openapi(versions!("1.0.0.."), handler1, meta1)
-        .route_with_openapi(versions!("1.0.0.."), handler2, meta2);
+        .route(versions!("1.0.0.."), handler1)
+        .route(versions!("1.0.0.."), handler2);
 
     let expected = RouteConfigError::Conflict {
         first_path: "/users".to_owned(),
@@ -90,11 +90,10 @@ async fn test_duplicate_routes_returns_error() {
 #[tokio::test]
 async fn distinct_methods_on_the_same_path_share_runtime_and_openapi_identity() {
     let builder = VersionedRouterBuilder::<()>::new()
-        .route(versions!("1.0.0.."), openapi_from_handler!(users_v1))
-        .route(versions!("1.0.0.."), openapi_from_handler!(create_user));
+        .route(versions!("1.0.0.."), versioned_route!(users_v1))
+        .route(versions!("1.0.0.."), versioned_route!(create_user));
 
-    let cached = builder.clone().build(()).expect("GET and POST may coexist");
-    let runtime = cached.router_for_version(&Version::new(1, 0, 0)).await;
+    let runtime = builder.clone().build(()).expect("GET and POST may coexist");
     for method in ["GET", "POST"] {
         let response = runtime
             .clone()
@@ -102,6 +101,7 @@ async fn distinct_methods_on_the_same_path_share_runtime_and_openapi_identity() 
                 Request::builder()
                     .method(method)
                     .uri("/users")
+                    .header("X-API-Version", "1.0.0")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -121,11 +121,8 @@ async fn distinct_methods_on_the_same_path_share_runtime_and_openapi_identity() 
 #[test]
 fn multi_method_intersection_reports_the_intersecting_method() {
     let builder = VersionedRouterBuilder::<()>::new()
-        .route(
-            versions!("1.0.0.."),
-            openapi_from_handler!(read_or_create_user),
-        )
-        .route(versions!("1.0.0.."), openapi_from_handler!(create_user));
+        .route(versions!("1.0.0.."), versioned_route!(read_or_create_user))
+        .route(versions!("1.0.0.."), versioned_route!(create_user));
 
     match builder.build(()) {
         Err(RouteConfigError::Conflict { method, .. }) => {
@@ -138,8 +135,8 @@ fn multi_method_intersection_reports_the_intersecting_method() {
 #[test]
 fn equivalent_parameter_paths_conflict_regardless_of_method() {
     let builder = VersionedRouterBuilder::<()>::new()
-        .route(versions!("1.0.0.."), openapi_from_handler!(user_by_id))
-        .route(versions!("1.0.0.."), openapi_from_handler!(user_by_name));
+        .route(versions!("1.0.0.."), versioned_route!(user_by_id))
+        .route(versions!("1.0.0.."), versioned_route!(user_by_name));
 
     assert!(matches!(
         builder.build(()),
@@ -150,12 +147,9 @@ fn equivalent_parameter_paths_conflict_regardless_of_method() {
 #[test]
 fn touching_ranges_do_not_conflict() {
     let builder = VersionedRouterBuilder::<()>::new()
-        .route(versions!("1.0.0..2.0.0"), openapi_from_handler!(users_v1))
-        .route(
-            versions!("2.0.0.."),
-            openapi_from_handler!(users_v1_duplicate),
-        );
-    builder
+        .route(versions!("1.0.0..2.0.0"), versioned_route!(users_v1))
+        .route(versions!("2.0.0.."), versioned_route!(users_v1_duplicate));
+    let _ = builder
         .clone()
         .build(())
         .expect("half-open ranges that only touch are disjoint");
@@ -178,40 +172,34 @@ fn touching_ranges_do_not_conflict() {
 #[test]
 fn exact_versions_overlap_only_the_version_they_name() {
     let conflicting = VersionedRouterBuilder::<()>::new()
-        .route(versions!("1.5.0"), openapi_from_handler!(users_v1))
+        .route(versions!("1.5.0"), versioned_route!(users_v1))
         .route(
             versions!("1.0.0..2.0.0"),
-            openapi_from_handler!(users_v1_duplicate),
+            versioned_route!(users_v1_duplicate),
         );
     assert!(matches!(
         conflicting.build(()),
         Err(RouteConfigError::Conflict { .. })
     ));
 
-    VersionedRouterBuilder::<()>::new()
-        .route(versions!("1.5.0"), openapi_from_handler!(users_v1))
-        .route(
-            versions!("1.5.1"),
-            openapi_from_handler!(users_v1_duplicate),
-        )
+    let _ = VersionedRouterBuilder::<()>::new()
+        .route(versions!("1.5.0"), versioned_route!(users_v1))
+        .route(versions!("1.5.1"), versioned_route!(users_v1_duplicate))
         .build(())
         .expect("different exact versions are disjoint");
 }
 
 #[test]
 fn malformed_paths_are_structured_errors_for_build_and_openapi() {
-    let metadata = PathMetadata {
-        path: "users/:id".to_owned(),
-        operation: utoipa::openapi::path::OperationBuilder::new().build(),
-        tags: vec![],
-        methods: vec![utoipa::openapi::path::HttpMethod::Get],
-        schemas: vec![],
-    };
-    let builder = VersionedRouterBuilder::<()>::new().route_with_openapi(
-        versions!("1.0.0.."),
+    let route = VersionedRoute::__from_parts(
         axum::routing::get(users_v1),
-        metadata,
+        "users/:id".to_owned(),
+        utoipa::openapi::path::OperationBuilder::new().build(),
+        vec![],
+        vec![utoipa::openapi::path::HttpMethod::Get],
+        vec![],
     );
+    let builder = VersionedRouterBuilder::<()>::new().route(versions!("1.0.0.."), route);
 
     for error in [
         builder.clone().build(()).err(),

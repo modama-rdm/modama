@@ -13,14 +13,13 @@ use axum::{
     extract::Path,
     http::{Method, Request, StatusCode},
     response::IntoResponse,
-    routing::get,
 };
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower::ServiceExt;
 use utoipa::ToSchema;
-use versioned::{VersionedRouterBuilder, openapi_from_handler, versions};
+use versioned::{VersionedRouterBuilder, versioned_route, versions};
 
 // ============================================================================
 // Test Types
@@ -118,10 +117,10 @@ async fn get_or_create_item_v1(Path(id): Path<u32>) -> impl IntoResponse {
 
 #[tokio::test]
 async fn test_openapi_generation() {
-    let (metadata, handler) = openapi_from_handler!(get_user_v1);
+    let handler = versioned_route!(get_user_v1);
 
     let builder: VersionedRouterBuilder<()> =
-        VersionedRouterBuilder::new().route_with_openapi(versions!("1.0.0.."), handler, metadata);
+        VersionedRouterBuilder::new().route(versions!("1.0.0.."), handler);
 
     let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
     let json = serde_json::to_string_pretty(&openapi).unwrap();
@@ -150,19 +149,18 @@ async fn test_openapi_generation() {
 #[tokio::test]
 async fn test_multi_method_routing() {
     // Test that multi-method handlers work correctly
-    let (metadata, handler) = openapi_from_handler!(get_or_create_item_v1);
+    let handler = versioned_route!(get_or_create_item_v1);
 
     let builder: VersionedRouterBuilder<()> =
-        VersionedRouterBuilder::new().route_with_openapi(versions!("1.0.0.."), handler, metadata);
+        VersionedRouterBuilder::new().route(versions!("1.0.0.."), handler);
 
-    // Build the router using the cached builder pattern
-    let cached = builder.build(()).unwrap();
-    let router = cached.router_for_version(&Version::new(1, 0, 0)).await;
+    let router = builder.build(()).unwrap();
 
     // Test GET request
     let get_request = Request::builder()
         .method(Method::GET)
         .uri("/items/123")
+        .header("X-API-Version", "1.0.0")
         .body(Body::empty())
         .unwrap();
 
@@ -173,6 +171,7 @@ async fn test_multi_method_routing() {
     let post_request = Request::builder()
         .method(Method::POST)
         .uri("/items/123")
+        .header("X-API-Version", "1.0.0")
         .body(Body::empty())
         .unwrap();
 
@@ -182,10 +181,10 @@ async fn test_multi_method_routing() {
 
 #[tokio::test]
 async fn test_multi_method_openapi_generation() {
-    let (metadata, handler) = openapi_from_handler!(get_or_create_item_v1);
+    let handler = versioned_route!(get_or_create_item_v1);
 
     let builder: VersionedRouterBuilder<()> =
-        VersionedRouterBuilder::new().route_with_openapi(versions!("1.0.0.."), handler, metadata);
+        VersionedRouterBuilder::new().route(versions!("1.0.0.."), handler);
 
     let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
     let json = serde_json::to_string_pretty(&openapi).unwrap();
@@ -204,14 +203,14 @@ async fn test_multi_method_openapi_generation() {
 
 #[tokio::test]
 async fn test_magic_api_no_repetition() {
-    let (meta1, handler1) = openapi_from_handler!(get_user_v1);
-    let (meta2, handler2) = openapi_from_handler!(create_user_v1);
-    let (meta3, handler3) = openapi_from_handler!(get_user_v2);
+    let handler1 = versioned_route!(get_user_v1);
+    let handler2 = versioned_route!(create_user_v1);
+    let handler3 = versioned_route!(get_user_v2);
 
     let builder: VersionedRouterBuilder<()> = VersionedRouterBuilder::new()
-        .route_with_openapi(versions!("1.0.0..2.0.0"), handler1, meta1)
-        .route_with_openapi(versions!("1.0.0.."), handler2, meta2)
-        .route_with_openapi(versions!("2.0.0.."), handler3, meta3);
+        .route(versions!("1.0.0..2.0.0"), handler1)
+        .route(versions!("1.0.0.."), handler2)
+        .route(versions!("2.0.0.."), handler3);
 
     let openapi = builder.generate_openapi(Version::new(2, 0, 0)).unwrap();
     let json = serde_json::to_string_pretty(&openapi).unwrap();
@@ -233,40 +232,21 @@ async fn test_magic_api_no_repetition() {
 }
 
 #[tokio::test]
-async fn test_mixed_openapi_and_plain_routes() {
-    let (metadata, handler) = openapi_from_handler!(get_user_v1);
-
-    let builder: VersionedRouterBuilder<()> = VersionedRouterBuilder::new()
-        .route_with_openapi(versions!("1.0.0.."), handler, metadata)
-        .route_get("/health", versions!("1.0.0.."), get(|| async { "OK" }));
-
-    let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
-    let json = serde_json::to_string_pretty(&openapi).unwrap();
-    let spec: Value = serde_json::from_str(&json).unwrap();
-
-    let paths = spec.get("paths").and_then(|p| p.as_object()).unwrap();
-
-    // Both routes should be included
-    assert!(paths.contains_key("/users/{id}"));
-    assert!(paths.contains_key("/health"));
-}
-
-#[tokio::test]
 async fn test_method_not_allowed_with_allow_header() {
     // Test that calling an invalid method on a multi-method route returns 405
     // and includes the correct Allow header listing supported methods
-    let (metadata, handler) = openapi_from_handler!(get_or_create_item_v1);
+    let handler = versioned_route!(get_or_create_item_v1);
 
     let builder: VersionedRouterBuilder<()> =
-        VersionedRouterBuilder::new().route_with_openapi(versions!("1.0.0.."), handler, metadata);
+        VersionedRouterBuilder::new().route(versions!("1.0.0.."), handler);
 
-    let cached = builder.build(()).unwrap();
-    let router = cached.router_for_version(&Version::new(1, 0, 0)).await;
+    let router = builder.build(()).unwrap();
 
     // PUT is not supported on /items/{id} (only GET and POST)
     let put_request = Request::builder()
         .method(Method::PUT)
         .uri("/items/123")
+        .header("X-API-Version", "1.0.0")
         .body(Body::empty())
         .unwrap();
 
@@ -295,13 +275,10 @@ async fn test_method_not_allowed_with_allow_header() {
 
 #[tokio::test]
 async fn test_version_extensions_in_openapi() {
-    let (metadata, handler) = openapi_from_handler!(get_user_v1);
+    let handler = versioned_route!(get_user_v1);
 
-    let builder: VersionedRouterBuilder<()> = VersionedRouterBuilder::new().route_with_openapi(
-        versions!("1.0.0..2.0.0"),
-        handler,
-        metadata,
-    );
+    let builder: VersionedRouterBuilder<()> =
+        VersionedRouterBuilder::new().route(versions!("1.0.0..2.0.0"), handler);
 
     let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
     let json = serde_json::to_string_pretty(&openapi).unwrap();
@@ -331,10 +308,10 @@ async fn test_version_extensions_in_openapi() {
 
 #[tokio::test]
 async fn test_info_version_in_openapi() {
-    let (metadata, handler) = openapi_from_handler!(get_user_v1);
+    let handler = versioned_route!(get_user_v1);
 
     let builder: VersionedRouterBuilder<()> =
-        VersionedRouterBuilder::new().route_with_openapi(versions!("1.0.0.."), handler, metadata);
+        VersionedRouterBuilder::new().route(versions!("1.0.0.."), handler);
 
     let openapi = builder.generate_openapi(Version::new(2, 5, 3)).unwrap();
     let json = serde_json::to_string_pretty(&openapi).unwrap();
@@ -347,10 +324,10 @@ async fn test_info_version_in_openapi() {
 
 #[tokio::test]
 async fn test_version_extensions_unbounded_range() {
-    let (metadata, handler) = openapi_from_handler!(get_user_v1);
+    let handler = versioned_route!(get_user_v1);
 
     let builder: VersionedRouterBuilder<()> =
-        VersionedRouterBuilder::new().route_with_openapi(versions!("1.0.0.."), handler, metadata);
+        VersionedRouterBuilder::new().route(versions!("1.0.0.."), handler);
 
     let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
     let json = serde_json::to_string_pretty(&openapi).unwrap();
@@ -382,13 +359,10 @@ async fn test_schema_exclusion_for_excluded_versions() {
     // Test that routes outside the version range are NOT included in the schema
     // Route get_user_v1 is only available for 1.0.0..2.0.0
     // When generating for 2.0.0, it should be excluded (2.0.0 is the end, exclusive)
-    let (metadata, handler) = openapi_from_handler!(get_user_v1);
+    let handler = versioned_route!(get_user_v1);
 
-    let builder: VersionedRouterBuilder<()> = VersionedRouterBuilder::new().route_with_openapi(
-        versions!("1.0.0..2.0.0"),
-        handler,
-        metadata,
-    );
+    let builder: VersionedRouterBuilder<()> =
+        VersionedRouterBuilder::new().route(versions!("1.0.0..2.0.0"), handler);
 
     // Generate for version 2.0.0 - the route should NOT be included
     let openapi = builder.generate_openapi(Version::new(2, 0, 0)).unwrap();
@@ -409,13 +383,10 @@ async fn test_schema_inclusion_for_in_range_versions() {
     // Test that routes within the version range ARE included
     // Route get_user_v1 is available for 1.0.0..2.0.0
     // When generating for 1.5.0, it should be included
-    let (metadata, handler) = openapi_from_handler!(get_user_v1);
+    let handler = versioned_route!(get_user_v1);
 
-    let builder: VersionedRouterBuilder<()> = VersionedRouterBuilder::new().route_with_openapi(
-        versions!("1.0.0..2.0.0"),
-        handler,
-        metadata,
-    );
+    let builder: VersionedRouterBuilder<()> =
+        VersionedRouterBuilder::new().route(versions!("1.0.0..2.0.0"), handler);
 
     // Generate for version 1.5.0 - the route SHOULD be included
     let openapi = builder.generate_openapi(Version::new(1, 5, 0)).unwrap();
@@ -453,12 +424,12 @@ async fn test_schema_inclusion_for_in_range_versions() {
 #[tokio::test]
 async fn test_multiple_versions_schema_filtering() {
     // Test that when generating for a specific version, only routes in range are included
-    let (meta1, handler1) = openapi_from_handler!(get_user_v1);
-    let (meta2, handler2) = openapi_from_handler!(get_user_v2);
+    let handler1 = versioned_route!(get_user_v1);
+    let handler2 = versioned_route!(get_user_v2);
 
     let builder: VersionedRouterBuilder<()> = VersionedRouterBuilder::new()
-        .route_with_openapi(versions!("1.0.0..2.0.0"), handler1, meta1) // v1 only
-        .route_with_openapi(versions!("2.0.0.."), handler2, meta2); // v2+ only
+        .route(versions!("1.0.0..2.0.0"), handler1) // v1 only
+        .route(versions!("2.0.0.."), handler2); // v2+ only
 
     // Generate for 1.5.0 - only v1 route should be present
     let openapi_v15 = builder.generate_openapi(Version::new(1, 5, 0)).unwrap();
@@ -515,10 +486,10 @@ async fn test_multiple_versions_schema_filtering() {
 #[tokio::test]
 async fn test_request_body_schema_reference() {
     // Verify that request body schemas are correctly referenced in OpenAPI
-    let (metadata, handler) = openapi_from_handler!(create_user_v1);
+    let handler = versioned_route!(create_user_v1);
 
     let builder: VersionedRouterBuilder<()> =
-        VersionedRouterBuilder::new().route_with_openapi(versions!("1.0.0.."), handler, metadata);
+        VersionedRouterBuilder::new().route(versions!("1.0.0.."), handler);
 
     let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
     let spec: Value =
@@ -570,10 +541,10 @@ async fn test_request_body_schema_reference() {
 #[tokio::test]
 async fn test_error_response_schema_reference() {
     // Verify that VersioningError is referenced in 400 responses
-    let (metadata, handler) = openapi_from_handler!(get_user_v1);
+    let handler = versioned_route!(get_user_v1);
 
     let builder: VersionedRouterBuilder<()> =
-        VersionedRouterBuilder::new().route_with_openapi(versions!("1.0.0.."), handler, metadata);
+        VersionedRouterBuilder::new().route(versions!("1.0.0.."), handler);
 
     let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
     let spec: Value =
@@ -627,4 +598,3 @@ async fn test_error_response_schema_reference() {
     );
 }
 mod support;
-use support::TestRoutes;

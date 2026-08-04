@@ -9,7 +9,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use versioned::{VersionedRouterBuilder, versions, openapi_from_handler};
+//! use versioned::{VersionedRouterBuilder, versioned_route, versions};
 //!
 //! #[utoipa::path(get, path = "/greeting")]
 //! async fn greeting_v1() -> &'static str { "v1 greeting" }
@@ -17,18 +17,18 @@
 //! async fn greeting_v2() -> &'static str { "v2 greeting" }
 //!
 //! let builder = VersionedRouterBuilder::new()
-//!     .route(versions!("1.0.0..2.0.0"), openapi_from_handler!(greeting_v1))
-//!     .route(versions!("2.0.0.."), openapi_from_handler!(greeting_v2));
+//!     .route(versions!("1.0.0..2.0.0"), versioned_route!(greeting_v1))
+//!     .route(versions!("2.0.0.."), versioned_route!(greeting_v2));
 //!
-//! let router = builder.build(())?.into_axum_router();
+//! let router = builder.build(())?;
 //! # Ok::<(), versioned::RouteConfigError>(())
 //! ```
 
 pub mod error_response;
 pub mod router;
 
-pub use router::{CachedVersionedRouter, PathMetadata, VersionedRouterBuilder};
-// Macro openapi_from_handler is automatically available at crate root via #[macro_export]
+pub use router::{VersionedRoute, VersionedRouterBuilder};
+// Macro versioned_route is automatically available at crate root via #[macro_export]
 pub use version_range::VersionRange;
 
 pub use ::semver;

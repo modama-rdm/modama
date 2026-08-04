@@ -11,7 +11,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use versioned::{VersionedRouterBuilder, versions, openapi_from_handler};
+//! use versioned::{VersionedRouterBuilder, versioned_route, versions};
 //!
 //! #[utoipa::path(get, path = "/greeting")]
 //! async fn handler_v1() -> &'static str { "v1" }
@@ -19,10 +19,10 @@
 //! async fn handler_v2() -> &'static str { "v2" }
 //!
 //! let builder = VersionedRouterBuilder::new()
-//!     .route(versions!("1.0.0..2.0.0"), openapi_from_handler!(handler_v1))
-//!     .route(versions!("2.0.0.."), openapi_from_handler!(handler_v2));
+//!     .route(versions!("1.0.0..2.0.0"), versioned_route!(handler_v1))
+//!     .route(versions!("2.0.0.."), versioned_route!(handler_v2));
 //!
-//! let router = builder.build(()).unwrap().into_axum_router();
+//! let router = builder.build(())?;
 //! ```
 
 use axum::{
@@ -45,22 +45,55 @@ use crate::{
     error_response::{RouteConfigError, VersioningError},
 };
 
-/// Metadata extracted from a utoipa path handler
+/// A versioned route with private OpenAPI metadata.
+///
+/// Values are created by [`versioned_route!`](crate::versioned_route), rather
+/// than by manually constructing metadata.
 #[derive(Clone)]
-pub struct PathMetadata {
-    pub path: String,
-    pub operation: utoipa::openapi::path::Operation,
-    pub tags: Vec<&'static str>,
-    pub methods: Vec<utoipa::openapi::path::HttpMethod>,
-    pub schemas: Vec<(String, RefOr<Schema>)>,
+pub struct VersionedRoute<S> {
+    handler: MethodRouter<S>,
+    metadata: RouteMetadata,
+}
+
+#[derive(Clone)]
+struct RouteMetadata {
+    path: String,
+    operation: utoipa::openapi::path::Operation,
+    #[allow(dead_code)]
+    tags: Vec<&'static str>,
+    methods: Vec<utoipa::openapi::path::HttpMethod>,
+    schemas: Vec<(String, RefOr<Schema>)>,
+}
+
+impl<S> VersionedRoute<S> {
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn __from_parts(
+        handler: MethodRouter<S>,
+        path: String,
+        operation: utoipa::openapi::path::Operation,
+        tags: Vec<&'static str>,
+        methods: Vec<utoipa::openapi::path::HttpMethod>,
+        schemas: Vec<(String, RefOr<Schema>)>,
+    ) -> Self {
+        Self {
+            handler,
+            metadata: RouteMetadata {
+                path,
+                operation,
+                tags,
+                methods,
+                schemas,
+            },
+        }
+    }
 }
 
 /// One normalized route registration used by runtime routing and OpenAPI.
 #[derive(Clone)]
 struct RegisteredRoute<S> {
     range: VersionRange,
-    handler: MethodRouter<S>,
-    metadata: PathMetadata,
+    route: VersionedRoute<S>,
 }
 
 struct CollectedSchema {
@@ -91,20 +124,16 @@ fn collect_schema(
 }
 
 impl<S> RegisteredRoute<S> {
-    fn new(range: VersionRange, handler: MethodRouter<S>, metadata: PathMetadata) -> Self {
-        Self {
-            range,
-            handler,
-            metadata,
-        }
+    fn new(range: VersionRange, route: VersionedRoute<S>) -> Self {
+        Self { range, route }
     }
 
     fn path(&self) -> &str {
-        &self.metadata.path
+        &self.route.metadata.path
     }
 
     fn methods(&self) -> &[utoipa::openapi::path::HttpMethod] {
-        &self.metadata.methods
+        &self.route.metadata.methods
     }
 
     fn matches(&self, version: &Version) -> bool {
@@ -137,50 +166,15 @@ impl<S: Clone + Send + Sync + 'static> VersionedRouterBuilder<S> {
 
     /// Set the header name for version extraction
     #[must_use]
-    pub fn header_name(mut self, name: impl Into<String>) -> Self {
+    pub fn version_header_name(mut self, name: impl Into<String>) -> Self {
         self.header_name = name.into();
         self
     }
 
-    /// Add a route with OpenAPI metadata
+    /// Add a route with metadata extracted by [`versioned_route!`].
     #[must_use]
-    pub fn route_with_openapi(
-        mut self,
-        range: VersionRange,
-        handler: MethodRouter<S>,
-        metadata: PathMetadata,
-    ) -> Self {
-        self.routes
-            .push(RegisteredRoute::new(range, handler, metadata));
-        self
-    }
-
-    /// Add a route with OpenAPI metadata from a handler using the openapi_from_handler macro
-    ///
-    /// This is a convenience method that combines the macro call with route registration.
-    /// Note: This method is designed for use with `VersionedRouterBuilder<()>`.
-    ///
-    /// Example:
-    /// ```rust
-    /// use versioned::{VersionedRouterBuilder, versions, openapi_from_handler};
-    ///
-    /// #[utoipa::path(get, path="/")]
-    /// async fn my_handler() -> &'static str {
-    ///     "foobar"
-    /// }
-    ///
-    /// let builder = VersionedRouterBuilder::<()>::new()
-    ///     .route(versions!("1.0.0.."), openapi_from_handler!(my_handler));
-    /// ```
-    #[must_use]
-    pub fn route(
-        mut self,
-        range: VersionRange,
-        handler_tuple: (PathMetadata, MethodRouter<S>),
-    ) -> Self {
-        let (metadata, handler) = handler_tuple;
-        self.routes
-            .push(RegisteredRoute::new(range, handler, metadata));
+    pub fn route(mut self, range: VersionRange, route: VersionedRoute<S>) -> Self {
+        self.routes.push(RegisteredRoute::new(range, route));
         self
     }
 
@@ -199,7 +193,7 @@ impl<S: Clone + Send + Sync + 'static> VersionedRouterBuilder<S> {
         let mut router = Router::new();
         for &index in &route_set.0 {
             let route = &self.routes[index];
-            router = router.route(route.path(), route.handler.clone());
+            router = router.route(route.path(), route.route.handler.clone());
         }
         router.with_state(state.clone())
     }
@@ -232,7 +226,7 @@ impl<S: Clone + Send + Sync + 'static> VersionedRouterBuilder<S> {
             let range = &route.range;
             if let Some(start) = range.exact_version().or_else(|| range.start()) {
                 path_intro_versions
-                    .entry(route.metadata.path.clone())
+                    .entry(route.route.metadata.path.clone())
                     .and_modify(|existing| {
                         if start < existing {
                             *existing = start.clone();
@@ -248,7 +242,7 @@ impl<S: Clone + Send + Sync + 'static> VersionedRouterBuilder<S> {
             .iter()
             .filter(|route| route.matches(&latest_version))
         {
-            let metadata = &route.metadata;
+            let metadata = &route.route.metadata;
             let range = &route.range;
 
             // Get the earliest introduction version for this path
@@ -354,11 +348,15 @@ impl<S: Clone + Send + Sync + 'static> VersionedRouterBuilder<S> {
         Ok(openapi_builder.build())
     }
 
-    /// Create a cached versioned router
+    /// Build the versioned Axum router.
     #[allow(clippy::result_large_err)]
-    pub fn build(self, state: S) -> Result<CachedVersionedRouter<S>, RouteConfigError> {
+    pub fn build(self, state: S) -> Result<Router<()>, RouteConfigError> {
         self.validate()?;
-        Ok(CachedVersionedRouter::new(self, state))
+        let dispatch = Arc::new(VersionedRouterState::new(self, state));
+        Ok(Router::new().layer(axum::middleware::from_fn_with_state(
+            dispatch,
+            version_dispatch,
+        )))
     }
 
     #[allow(clippy::result_large_err)]
@@ -455,16 +453,16 @@ impl RouteSetKey {
     }
 }
 
-/// Cached versioned router that builds and caches one router per matching route set.
+/// Private dispatch state used by the returned Axum router.
 #[derive(Clone)]
-pub struct CachedVersionedRouter<S> {
+struct VersionedRouterState<S> {
     builder: VersionedRouterBuilder<S>,
     state: S,
     cache: Arc<Mutex<HashMap<RouteSetKey, Router<()>>>>,
     header_name: String,
 }
 
-impl<S: Clone + Send + Sync + 'static> CachedVersionedRouter<S> {
+impl<S: Clone + Send + Sync + 'static> VersionedRouterState<S> {
     fn new(builder: VersionedRouterBuilder<S>, state: S) -> Self {
         let header_name = builder.header_name.clone();
         Self {
@@ -475,7 +473,7 @@ impl<S: Clone + Send + Sync + 'static> CachedVersionedRouter<S> {
         }
     }
 
-    pub async fn router_for_version(&self, version: &Version) -> Router<()> {
+    async fn router_for_version(&self, version: &Version) -> Router<()> {
         let route_set = self.builder.route_set_for_version(version);
 
         // Keep the public API's empty 404 router behavior, but do not allow
@@ -498,28 +496,16 @@ impl<S: Clone + Send + Sync + 'static> CachedVersionedRouter<S> {
         cache.entry(route_set).or_insert(router).clone()
     }
 
-    pub fn into_axum_router(self) -> Router {
-        Router::new().layer(axum::middleware::from_fn_with_state(
-            Arc::new(self),
-            version_dispatch,
-        ))
-    }
-
-    /// Check if a version has any matching routes
-    pub fn version_is_supported(&self, version: &Version) -> bool {
+    fn version_is_supported(&self, version: &Version) -> bool {
         self.builder
             .routes
             .iter()
             .any(|route| route.matches(version))
     }
-
-    pub fn header_name(&self) -> &str {
-        &self.header_name
-    }
 }
 
 async fn version_dispatch<S: Clone + Send + Sync + 'static>(
-    State(cached): State<Arc<CachedVersionedRouter<S>>>,
+    State(cached): State<Arc<VersionedRouterState<S>>>,
     mut req: Request,
     _next: Next,
 ) -> Response {
@@ -596,15 +582,15 @@ fn extract_version(req: &Request, header_name: &str) -> Result<Option<Version>, 
         .transpose()
 }
 
-/// Macro to extract OpenAPI metadata from a utoipa path handler.
+/// Macro to construct a versioned route from a utoipa path handler.
 ///
 /// This macro extracts path, operation, tags, methods, and schemas from a utoipa
-/// path handler and returns a tuple of `(PathMetadata, MethodRouter<S>)`.
+/// path handler and returns an opaque [`VersionedRoute`].
 ///
 /// # Example
 ///
 /// ```rust
-/// use versioned::{VersionedRouterBuilder, versions, openapi_from_handler};
+/// use versioned::{VersionedRouterBuilder, versioned_route, versions};
 ///
 /// #[utoipa::path(get, path="/")]
 /// async fn my_handler() -> &'static str {
@@ -612,10 +598,10 @@ fn extract_version(req: &Request, header_name: &str) -> Result<Option<Version>, 
 /// }
 ///
 /// let builder = VersionedRouterBuilder::<()>::new()
-///     .route(versions!("1.0.0.."), openapi_from_handler!(my_handler));
+///     .route(versions!("1.0.0.."), versioned_route!(my_handler));
 /// ```
 #[macro_export]
-macro_rules! openapi_from_handler {
+macro_rules! versioned_route {
     ($handler:ident) => {{
         use axum::routing::{delete, get, head, options, patch, post, put, trace};
         $crate::__paste::paste! {
@@ -627,14 +613,6 @@ macro_rules! openapi_from_handler {
             <[<__path_ $handler>] as utoipa::__dev::SchemaReferences>::schemas(&mut schemas);
 
             // Create the metadata
-            let metadata = $crate::router::PathMetadata {
-                path: <[<__path_ $handler>] as utoipa::Path>::path().to_string(),
-                operation: <[<__path_ $handler>] as utoipa::Path>::operation(),
-                tags: <[<__path_ $handler>] as utoipa::__dev::Tags>::tags(),
-                methods: methods.to_vec(),
-                schemas,
-            };
-
             // Create a MethodRouter that handles ALL methods by merging them
             let mut method_router: Option<axum::routing::MethodRouter<_>> = None;
             for method in &methods {
@@ -654,7 +632,14 @@ macro_rules! openapi_from_handler {
                 });
             }
 
-            (metadata, method_router.unwrap_or_else(|| get($handler)))
+            $crate::router::VersionedRoute::__from_parts(
+                method_router.unwrap_or_else(|| get($handler)),
+                <[<__path_ $handler>] as utoipa::Path>::path().to_string(),
+                <[<__path_ $handler>] as utoipa::Path>::operation(),
+                <[<__path_ $handler>] as utoipa::__dev::Tags>::tags(),
+                methods.to_vec(),
+                schemas,
+            )
         }
     }};
 }
@@ -663,546 +648,38 @@ macro_rules! openapi_from_handler {
 mod tests {
     use super::*;
     use crate::versions;
-    use axum::{
-        Json,
-        extract::{Extension, Path},
-        http::{Request as HttpRequest, StatusCode},
-        response::IntoResponse,
-        routing::get,
-    };
-    use serde::{Deserialize, Serialize};
+    use axum::routing::get;
 
-    fn test_metadata(path: &str, method: utoipa::openapi::path::HttpMethod) -> PathMetadata {
-        PathMetadata {
-            path: path.to_owned(),
-            operation: utoipa::openapi::path::OperationBuilder::new().build(),
-            tags: vec![],
-            methods: vec![method],
-            schemas: vec![],
-        }
+    async fn handler() -> &'static str {
+        "ok"
     }
 
-    #[derive(Debug, Clone)]
-    struct AppState {
-        domain: String,
-    }
-
-    async fn handle_user_v1(Path(id): Path<u32>) -> impl IntoResponse {
-        Json(UserV1 {
-            id,
-            name: format!("User {}", id),
-        })
-    }
-
-    async fn handle_user_v2(
-        Path(id): Path<u32>,
-        State(state): State<AppState>,
-    ) -> impl IntoResponse {
-        Json(UserV2 {
-            id,
-            name: format!("User {}", id),
-            email: format!("user{}@{}", id, state.domain),
-        })
-    }
-
-    #[derive(Serialize, Deserialize, Debug, PartialEq)]
-    struct UserV1 {
-        id: u32,
-        name: String,
-    }
-
-    #[derive(Serialize, Deserialize, Debug, PartialEq)]
-    struct UserV2 {
-        id: u32,
-        name: String,
-        email: String,
-    }
-
-    #[tokio::test]
-    async fn test_builder_pattern() {
-        let builder = VersionedRouterBuilder::new()
-            .route_with_openapi(
-                versions!("1.0.0..2.0.0"),
-                get(handle_user_v1),
-                test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-            )
-            .route_with_openapi(
-                versions!("2.0.0.."),
-                get(handle_user_v2),
-                test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-            );
-
-        let state = AppState {
-            domain: "example.com".to_owned(),
-        };
-
-        let cached = builder.build(state).unwrap();
-
-        let router_v1 = cached.router_for_version(&Version::new(1, 5, 0)).await;
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/users/42")
-            .body(Body::empty())
-            .unwrap();
-
-        let response = router_v1.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), 1024)
-            .await
-            .unwrap();
-        let user: UserV1 = serde_json::from_slice(&body).unwrap();
-        assert_eq!(user.name, "User 42");
-
-        let router_v2 = cached.router_for_version(&Version::new(2, 0, 0)).await;
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/users/42")
-            .body(Body::empty())
-            .unwrap();
-
-        let response = router_v2.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), 1024)
-            .await
-            .unwrap();
-        let user: UserV2 = serde_json::from_slice(&body).unwrap();
-        assert_eq!(user.name, "User 42");
-        assert_eq!(user.email, "user42@example.com");
-    }
-
-    #[tokio::test]
-    async fn test_caching_uses_matching_route_sets() {
-        let builder = VersionedRouterBuilder::new()
-            .route_with_openapi(
-                versions!("1.0.0..2.0.0"),
-                get(handle_user_v1),
-                test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-            )
-            .route_with_openapi(
-                versions!("2.0.0.."),
-                get(handle_user_v2),
-                test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-            );
-
-        let state = AppState {
-            domain: "example.com".to_owned(),
-        };
-
-        let cached = builder.build(state).unwrap();
-
-        for version in [
-            "1.0.0",
-            "1.5.0",
-            "1.5.0-alpha.1",
-            "1.5.0+build.1",
-            "1.5.0+build.2",
-            "1.999.999",
-            "2.0.0-alpha.1",
-            "2.0.0",
-            "2.5.0",
-            "999.0.0",
-        ] {
-            let version = Version::parse(version).expect("test version should be valid");
-            let _ = cached.router_for_version(&version).await;
-        }
-
-        let cache = cached.cache.lock().await;
-        assert_eq!(cache.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_no_matching_version() {
-        let builder = VersionedRouterBuilder::new().route_with_openapi(
-            versions!("2.0.0.."),
-            get(handle_user_v2),
-            test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-        );
-
-        let state = AppState {
-            domain: "example.com".to_owned(),
-        };
-
-        let cached = builder.build(state).unwrap();
-
-        let router = cached.router_for_version(&Version::new(1, 0, 0)).await;
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/users/42")
-            .body(Body::empty())
-            .unwrap();
-
-        let response = router.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-        let cache = cached.cache.lock().await;
-        assert!(cache.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_concurrent_equivalent_versions_share_cache_entry() {
-        let builder = VersionedRouterBuilder::new().route_with_openapi(
+    fn builder() -> VersionedRouterBuilder<()> {
+        VersionedRouterBuilder::new().route(
             versions!("1.0.0..2.0.0"),
-            get(handle_user_v1),
-            test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-        );
-        let cached = builder
-            .build(AppState {
-                domain: "example.com".to_owned(),
-            })
-            .unwrap();
-
-        let v1 = Version::new(1, 1, 0);
-        let v2 = Version::new(1, 2, 0);
-        let v3 = Version::new(1, 3, 0);
-        let v4 = Version::new(1, 4, 0);
-        let _ = tokio::join!(
-            cached.router_for_version(&v1),
-            cached.router_for_version(&v2),
-            cached.router_for_version(&v3),
-            cached.router_for_version(&v4),
-        );
-
-        let cache = cached.cache.lock().await;
-        assert_eq!(cache.len(), 1);
+            VersionedRoute::__from_parts(
+                get(handler),
+                "/health".to_owned(),
+                utoipa::openapi::path::OperationBuilder::new().build(),
+                vec![],
+                vec![utoipa::openapi::path::HttpMethod::Get],
+                vec![],
+            ),
+        )
     }
 
     #[tokio::test]
-    async fn test_cached_router_preserves_plain_requested_version_extension() {
-        async fn version(Extension(version): Extension<Version>) -> String {
-            version.to_string()
-        }
-
-        let cached = VersionedRouterBuilder::new()
-            .route_with_openapi(
-                versions!("1.0.0..2.0.0"),
-                get(version),
-                test_metadata("/version", utoipa::openapi::path::HttpMethod::Get),
-            )
-            .build(())
-            .unwrap();
-        let app = cached.clone().into_axum_router();
-
-        for requested_version in ["1.1.0", "1.9.0"] {
-            let request = HttpRequest::builder()
-                .uri("/version")
-                .header("X-API-Version", requested_version)
-                .body(Body::empty())
-                .expect("version request should be valid");
-            let response = app
-                .clone()
-                .oneshot(request)
-                .await
-                .expect("version request should succeed");
-            let body = axum::body::to_bytes(response.into_body(), 1024)
-                .await
-                .expect("version response body should be readable");
-
-            assert_eq!(body.as_ref(), requested_version.as_bytes());
-        }
-
-        let cache = cached.cache.lock().await;
-        assert_eq!(cache.len(), 1);
+    async fn equivalent_versions_share_a_cache_entry() {
+        let state = VersionedRouterState::new(builder(), ());
+        let _ = state.router_for_version(&Version::new(1, 1, 0)).await;
+        let _ = state.router_for_version(&Version::new(1, 9, 0)).await;
+        assert_eq!(state.cache.lock().await.len(), 1);
     }
 
     #[tokio::test]
-    async fn test_custom_header_name() {
-        let builder = VersionedRouterBuilder::new()
-            .header_name("X-Custom-API-Version")
-            .route_with_openapi(
-                versions!("1.0.0..2.0.0"),
-                get(handle_user_v1),
-                test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-            )
-            .route_with_openapi(
-                versions!("2.0.0.."),
-                get(handle_user_v2),
-                test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-            );
-
-        let state = AppState {
-            domain: "example.com".to_owned(),
-        };
-
-        let cached = builder.build(state).unwrap();
-        let axum_router = cached.into_axum_router();
-
-        // Request with custom header - should use v1 handler
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/users/42")
-            .header("X-Custom-API-Version", "1.5.0")
-            .body(Body::empty())
-            .unwrap();
-
-        let response = axum_router.clone().oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), 1024)
-            .await
-            .unwrap();
-        let user: UserV1 = serde_json::from_slice(&body).unwrap();
-        assert_eq!(user.name, "User 42");
-
-        // Request with wrong header name - should return MissingVersion error
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/users/42")
-            .header("X-API-Version", "1.5.0")
-            .body(Body::empty())
-            .unwrap();
-
-        let response = axum_router.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body = axum::body::to_bytes(response.into_body(), 1024)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["type"], "missing_version");
-    }
-
-    #[tokio::test]
-    async fn test_unsupported_version_dispatch() {
-        let builder = VersionedRouterBuilder::new().route_with_openapi(
-            versions!("2.0.0.."),
-            get(handle_user_v2),
-            test_metadata("/users/{id}", utoipa::openapi::path::HttpMethod::Get),
-        );
-
-        let state = AppState {
-            domain: "example.com".to_owned(),
-        };
-
-        let cached = builder.build(state).unwrap();
-        let axum_router = cached.into_axum_router();
-
-        // Request with version 1.0.0 - no matching route (only 2.0.0+ supported)
-        // Now returns 400 with UnsupportedVersion error (fixed behavior)
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/users/42")
-            .header("X-API-Version", "1.0.0")
-            .body(Body::empty())
-            .unwrap();
-
-        let response = axum_router.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        // Verify the response contains the UnsupportedVersion error
-        let body = axum::body::to_bytes(response.into_body(), 1024)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["type"], "unsupported_version");
-        assert!(json["error"].as_str().unwrap().contains("1.0.0"));
-    }
-
-    #[tokio::test]
-    // Smoke test for Default implementation
-    async fn test_builder_default_smoke() {
-        let builder = VersionedRouterBuilder::<()>::default();
-        let _cached = builder.build(());
-        // If this compiles and runs, Default works
-    }
-
-    // ============================================================================
-    // Test for ToSchema on VersioningError (Issue #3)
-    // ============================================================================
-
-    #[tokio::test]
-    async fn test_versioning_error_has_to_schema() {
-        // This test verifies that VersioningError implements ToSchema
-        // so it can be automatically included in OpenAPI specs.
-        use crate::error_response::VersioningError;
-        use utoipa::ToSchema;
-
-        // This line will fail to compile if VersioningError doesn't implement ToSchema
-        fn assert_to_schema<T: ToSchema>() {}
-        assert_to_schema::<VersioningError>();
-    }
-
-    #[tokio::test]
-    async fn test_versioning_error_in_openapi_components() {
-        // This test verifies that VersioningError is included in the generated
-        // OpenAPI specification components as the error response for version
-        // negotiation failures.
-        use crate::{VersionedRouterBuilder, versions};
-        use semver::Version;
-
-        // Create a simple handler inside the test module
-        #[derive(utoipa::ToSchema, serde::Serialize)]
-        struct SimpleResponse {
-            data: String,
-        }
-
-        #[utoipa::path(get, path = "/simple", responses((status = 200, description = "OK", body = SimpleResponse)))]
-        async fn simple_handler() -> Json<SimpleResponse> {
-            Json(SimpleResponse {
-                data: "test".to_string(),
-            })
-        }
-
-        let (meta, handler) = openapi_from_handler!(simple_handler);
-
-        let builder = VersionedRouterBuilder::<()>::new().route_with_openapi(
-            versions!("1.0.0.."),
-            handler,
-            meta,
-        );
-
-        let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
-        let json = serde_json::to_string_pretty(&openapi).unwrap();
-        let spec: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-        // Get the components section
-        let components = spec.get("components").and_then(|c| c.as_object());
-
-        // Components section should exist (it will have SimpleResponse schema)
-        assert!(
-            components.is_some(),
-            "OpenAPI spec should have components section"
-        );
-
-        let schemas = components
-            .unwrap()
-            .get("schemas")
-            .and_then(|s| s.as_object());
-
-        // Schemas section should exist
-        assert!(schemas.is_some(), "Components should have schemas section");
-
-        let schema_names: Vec<&String> = schemas.unwrap().keys().collect();
-        println!("Schemas in OpenAPI spec: {:?}", schema_names);
-
-        // VersioningError should be in the components
-        assert!(
-            schema_names
-                .iter()
-                .any(|name| name.contains("VersioningError")),
-            "VersioningError should be in OpenAPI components. Found: {:?}",
-            schema_names
-        );
-    }
-
-    #[tokio::test]
-    async fn test_routes_include_400_versioning_error_response() {
-        // This test verifies that all routes automatically include a 400 response
-        // with VersioningError schema, since the versioning middleware can return
-        // 400 errors before route execution (missing/invalid version headers).
-        //
-        // Expected: Every route should have a 400 response documented
-        use crate::{VersionedRouterBuilder, versions};
-        use semver::Version;
-
-        // Create a simple handler
-        #[derive(utoipa::ToSchema, serde::Serialize)]
-        struct SimpleResponse {
-            data: String,
-        }
-
-        #[utoipa::path(get, path = "/test", responses((status = 200, description = "OK", body = SimpleResponse)))]
-        async fn test_handler() -> Json<SimpleResponse> {
-            Json(SimpleResponse {
-                data: "test".to_string(),
-            })
-        }
-
-        let (meta, handler) = openapi_from_handler!(test_handler);
-
-        let builder = VersionedRouterBuilder::<()>::new().route_with_openapi(
-            versions!("1.0.0.."),
-            handler,
-            meta,
-        );
-
-        let openapi = builder.generate_openapi(Version::new(1, 0, 0)).unwrap();
-        let json = serde_json::to_string_pretty(&openapi).unwrap();
-        let spec: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-        // Get the path item for /test
-        let paths = spec.get("paths").and_then(|p| p.as_object()).unwrap();
-        let path_item = paths.get("/test").and_then(|p| p.as_object()).unwrap();
-        let get_operation = path_item.get("get").and_then(|g| g.as_object()).unwrap();
-        let responses = get_operation
-            .get("responses")
-            .and_then(|r| r.as_object())
-            .unwrap();
-
-        // 400 response should exist
-        assert!(
-            responses.contains_key("400"),
-            "Routes should include 400 response for versioning errors. \
-             Available responses: {:?}",
-            responses.keys().collect::<Vec<_>>()
-        );
-
-        // The 400 response should reference VersioningError schema
-        let response_400 = responses.get("400").and_then(|r| r.as_object()).unwrap();
-        if let Some(content) = response_400.get("content").and_then(|c| c.as_object()) {
-            if let Some(json_content) = content.get("application/json").and_then(|j| j.as_object())
-            {
-                if let Some(schema) = json_content.get("schema").and_then(|s| s.as_object()) {
-                    // Should reference VersioningError
-                    if let Some(reference) = schema.get("$ref").and_then(|r| r.as_str()) {
-                        assert!(
-                            reference.contains("VersioningError"),
-                            "400 response should reference VersioningError schema. Got: {}",
-                            reference
-                        );
-                    } else {
-                        panic!("400 response schema should have $ref field");
-                    }
-                } else {
-                    panic!("400 response should have schema field");
-                }
-            } else {
-                panic!("400 response should have application/json content");
-            }
-        } else {
-            panic!("400 response should have content field");
-        }
-    }
-
-    fn router_with_panicking_handler() -> Router {
-        async fn handler() -> &'static str {
-            panic!("intentional handler panic");
-        }
-        let builder = VersionedRouterBuilder::new().route_with_openapi(
-            versions!("1.0.0.."),
-            get(handler),
-            test_metadata("/crash", utoipa::openapi::path::HttpMethod::Get),
-        );
-        let state = AppState {
-            domain: "example.com".to_owned(),
-        };
-        builder.build(state).unwrap().into_axum_router()
-    }
-
-    fn crash_request() -> HttpRequest<Body> {
-        HttpRequest::builder()
-            .method("GET")
-            .uri("/crash")
-            .header("X-API-Version", "1.0.0")
-            .body(Body::empty())
-            .expect("crash request should be valid")
-    }
-
-    #[tokio::test]
-    #[should_panic(expected = "intentional handler panic")]
-    async fn test_handler_panic_propagates_without_recovery_layer() {
-        let _ = router_with_panicking_handler()
-            .oneshot(crash_request())
-            .await;
-    }
-
-    #[tokio::test]
-    async fn test_application_can_convert_handler_panic_to_500() {
-        use tower_http::catch_panic::CatchPanicLayer;
-
-        let response = router_with_panicking_handler()
-            .layer(CatchPanicLayer::new())
-            .oneshot(crash_request())
-            .await
-            .expect("catch-panic layer should return a response");
-
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    async fn unsupported_versions_do_not_create_cache_entries() {
+        let state = VersionedRouterState::new(builder(), ());
+        let _ = state.router_for_version(&Version::new(9, 0, 0)).await;
+        assert!(state.cache.lock().await.is_empty());
     }
 }

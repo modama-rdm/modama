@@ -4,7 +4,7 @@ use axum::routing::get;
 use semver::Version;
 use utoipa::openapi::{RefOr, path::HttpMethod, schema::Schema};
 use versioned::{
-    PathMetadata, RouteConfigError, VersionedRouterBuilder, error_response::VersioningError,
+    RouteConfigError, VersionedRoute, VersionedRouterBuilder, error_response::VersioningError,
     versions,
 };
 
@@ -18,14 +18,18 @@ fn schema(schema_type: &str) -> RefOr<Schema> {
     .unwrap()
 }
 
-fn metadata(path: &str, schemas: Vec<(String, RefOr<Schema>)>) -> PathMetadata {
-    PathMetadata {
-        path: path.to_owned(),
-        operation: utoipa::openapi::path::OperationBuilder::new().build(),
-        tags: vec![],
-        methods: vec![HttpMethod::Get],
+fn versioned_route_from_parts(
+    path: &str,
+    schemas: Vec<(String, RefOr<Schema>)>,
+) -> VersionedRoute<()> {
+    VersionedRoute::__from_parts(
+        get(|| async {}),
+        path.to_owned(),
+        utoipa::openapi::path::OperationBuilder::new().build(),
+        vec![],
+        vec![HttpMethod::Get],
         schemas,
-    }
+    )
 }
 
 fn route(
@@ -34,7 +38,7 @@ fn route(
     range: versioned::VersionRange,
     schemas: Vec<(String, RefOr<Schema>)>,
 ) -> VersionedRouterBuilder<()> {
-    builder.route_with_openapi(range, get(|| async {}), metadata(path, schemas))
+    builder.route(range, versioned_route_from_parts(path, schemas))
 }
 
 #[test]

@@ -23,7 +23,7 @@ The `versioned` crate provides a flexible, middleware-based approach to API vers
 ### Basic Versioned Router Setup
 
 ```rust
-use versioned::{VersionedRouterBuilder, versions, openapi_from_handler};
+use versioned::{VersionedRouterBuilder, versions, versioned_route};
 use axum::routing::get;
 
 #[utoipa::path(get, path = "/greeting")]
@@ -39,10 +39,10 @@ async fn greeting_v2() -> &'static str {
 #[tokio::main]
 async fn main() {
     let builder = VersionedRouterBuilder::new()
-        .route(versions!("1.0.0..2.0.0"), openapi_from_handler!(greeting_v1))
-        .route(versions!("2.0.0.."), openapi_from_handler!(greeting_v2));
+        .route(versions!("1.0.0..2.0.0"), versioned_route!(greeting_v1))
+        .route(versions!("2.0.0.."), versioned_route!(greeting_v2));
 
-    let router = builder.build(()).unwrap().into_axum_router();
+    let router = builder.build(()).unwrap();
     
     // router is now a ready-to-use Axum Router with version dispatch middleware
 }
@@ -72,7 +72,7 @@ let range = versions!("1.0.0..2.0.0"); // Compile-time parsing
 
 ### Automatic Schema Collection
 
-The `openapi_from_handler!` macro automatically extracts:
+The `versioned_route!` macro automatically extracts:
 - Path template
 - HTTP method(s)
 - Request/response schemas
@@ -99,7 +99,7 @@ async fn get_user(Path(id): Path<u32>) -> Json<User> {
 }
 
 let builder = VersionedRouterBuilder::new()
-    .route(versions!("1.0.0.."), openapi_from_handler!(get_user));
+    .route(versions!("1.0.0.."), versioned_route!(get_user));
 
 // Generate OpenAPI spec
 let openapi = builder.generate_openapi(semver::Version::new(1, 0, 0))?;
@@ -134,14 +134,14 @@ The error enum variants are documented in the OpenAPI schema.
 
 ## Applying Middleware
 
-You can use the normal axum facilities to apply middleware by converting
-the versioned router into an axum router:
+The builder returns a normal Axum router, so you can use the usual middleware
+facilities directly:
 
 ```rust
 use axum::middleware;
 use tower_http::trace::TraceLayer;
 
-let app = builder.build(())?.into_axum_router()
+let app = builder.build(())?
     .layer(TraceLayer::new_for_http())
     .layer(middleware::from_fn(auth_middleware));
 ```

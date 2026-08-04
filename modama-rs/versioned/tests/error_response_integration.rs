@@ -9,7 +9,7 @@ use axum::{
 };
 use serde_json::Value;
 use tower::ServiceExt;
-use versioned::{VersionedRouterBuilder, openapi_from_handler, versions};
+use versioned::{VersionedRouterBuilder, versioned_route, versions};
 
 #[utoipa::path(get, path = "/test")]
 async fn test_handler() -> &'static str {
@@ -18,17 +18,13 @@ async fn test_handler() -> &'static str {
 
 fn create_test_builder() -> VersionedRouterBuilder<()> {
     VersionedRouterBuilder::new()
-        .route(
-            versions!("1.0.0..2.0.0"),
-            openapi_from_handler!(test_handler),
-        )
-        .route(versions!("2.0.0.."), openapi_from_handler!(test_handler))
+        .route(versions!("1.0.0..2.0.0"), versioned_route!(test_handler))
+        .route(versions!("2.0.0.."), versioned_route!(test_handler))
 }
 
 async fn make_request(version: Option<&str>) -> (StatusCode, Value) {
     let builder = create_test_builder();
-    let cached = builder.build(()).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(()).unwrap();
 
     let mut req_builder = Request::builder().method("GET").uri("/test");
 

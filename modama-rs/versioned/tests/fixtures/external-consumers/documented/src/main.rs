@@ -1,4 +1,4 @@
-use versioned::{VersionedRouterBuilder, openapi_from_handler, versions};
+use versioned::{VersionedRouterBuilder, versioned_route, versions};
 
 #[utoipa::path(get, path = "/greeting")]
 async fn greeting_v1() -> &'static str {
@@ -15,15 +15,15 @@ async fn main() {
     let router = VersionedRouterBuilder::new()
         .route(
             versions!("1.0.0..2.0.0"),
-            openapi_from_handler!(greeting_v1),
+            versioned_route!(greeting_v1),
         )
         .route(
             versions!("2.0.0.."),
-            openapi_from_handler!(greeting_v2),
+            versioned_route!(greeting_v2),
         )
         .build(())
         .expect("documented routes should be valid")
-        .into_axum_router();
+        ;
 
     let _: axum::Router = router;
 }

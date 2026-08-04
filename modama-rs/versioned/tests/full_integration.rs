@@ -198,8 +198,7 @@ fn create_test_state() -> AppState {
 async fn test_state_extraction_v1() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let request = Request::builder()
         .method("POST")
@@ -228,8 +227,7 @@ async fn test_state_extraction_v1() {
 async fn test_state_extraction_v2() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let request = Request::builder()
         .method("POST")
@@ -258,8 +256,7 @@ async fn test_state_extraction_v2() {
 async fn test_json_extraction_v1() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let request = Request::builder()
         .method("POST")
@@ -287,8 +284,7 @@ async fn test_json_extraction_v1() {
 async fn test_json_extraction_v2() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let request = Request::builder()
         .method("POST")
@@ -316,8 +312,7 @@ async fn test_json_extraction_v2() {
 async fn test_path_extraction_v1() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let request = Request::builder()
         .method("GET")
@@ -343,8 +338,7 @@ async fn test_path_extraction_v1() {
 async fn test_path_extraction_v2() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let request = Request::builder()
         .method("GET")
@@ -373,8 +367,7 @@ async fn test_path_extraction_v2() {
 async fn test_body_extraction_v1() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let test_payload = r#"{"message":"hello world","count":42}"#;
 
@@ -403,8 +396,7 @@ async fn test_body_extraction_v1() {
 async fn test_body_extraction_v2() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let test_payload = r#"{"message":"hello v2","count":99}"#;
 
@@ -435,8 +427,7 @@ async fn test_body_extraction_v2() {
 async fn test_combined_state_json_path() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     // Test that State and Path work together
     let request = Request::builder()
@@ -463,8 +454,7 @@ async fn test_combined_state_json_path() {
 async fn test_combined_state_json_body() {
     let builder = create_test_builder();
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     // Test that State and Json/Body work together
     let request = Request::builder()
@@ -547,8 +537,7 @@ async fn test_result_extraction_success_v1() {
     );
 
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let request = Request::builder()
         .method("POST")
@@ -582,8 +571,7 @@ async fn test_result_extraction_success_v2() {
     );
 
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     let request = Request::builder()
         .method("POST")
@@ -618,8 +606,7 @@ async fn test_result_extraction_invalid_json() {
     );
 
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     // Send invalid JSON
     let request = Request::builder()
@@ -707,8 +694,7 @@ async fn test_different_methods_same_path_v1_get() {
         );
 
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     // Test GET method
     let request = Request::builder()
@@ -745,8 +731,7 @@ async fn test_different_methods_same_path_v1_post() {
         );
 
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     // Test POST method
     let request = Request::builder()
@@ -779,8 +764,7 @@ async fn test_different_methods_same_path_v2_get() {
         .route_post("/multi", versions!("2.0.0.."), post(handle_users_post_v2));
 
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     // Test GET method
     let request = Request::builder()
@@ -810,8 +794,7 @@ async fn test_different_methods_same_path_v2_post() {
         .route_post("/multi", versions!("2.0.0.."), post(handle_users_post_v2));
 
     let state = create_test_state();
-    let cached = builder.build(state).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(state).unwrap();
 
     // Test POST method
     let request = Request::builder()

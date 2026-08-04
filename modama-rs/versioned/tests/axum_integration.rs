@@ -57,8 +57,7 @@ fn create_test_builder() -> VersionedRouterBuilder<()> {
 #[tokio::test]
 async fn test_users_v1() {
     let builder = create_test_builder();
-    let cached = builder.build(()).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(()).unwrap();
 
     let request = Request::builder()
         .method("GET")
@@ -80,8 +79,7 @@ async fn test_users_v1() {
 #[tokio::test]
 async fn test_users_v2() {
     let builder = create_test_builder();
-    let cached = builder.build(()).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(()).unwrap();
 
     let request = Request::builder()
         .method("GET")
@@ -103,8 +101,7 @@ async fn test_users_v2() {
 #[tokio::test]
 async fn test_products_v1_only() {
     let builder = create_test_builder();
-    let cached = builder.build(()).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(()).unwrap();
 
     // v1 should work
     let request = Request::builder()
@@ -132,8 +129,7 @@ async fn test_products_v1_only() {
 #[tokio::test]
 async fn test_invalid_version_header() {
     let builder = create_test_builder();
-    let cached = builder.build(()).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(()).unwrap();
 
     let request = Request::builder()
         .method("GET")
@@ -149,8 +145,7 @@ async fn test_invalid_version_header() {
 #[tokio::test]
 async fn test_missing_version_header() {
     let builder = create_test_builder();
-    let cached = builder.build(()).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(()).unwrap();
 
     let request = Request::builder()
         .method("GET")

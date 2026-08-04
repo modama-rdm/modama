@@ -25,8 +25,7 @@ async fn test_missing_version_header_returns_400() {
         .route_get("/greeting", versions!("1.0.0..2.0.0"), get(greeting_v1))
         .route_get("/greeting", versions!("2.0.0..3.0.0"), get(greeting_v2));
 
-    let cached = builder.build(()).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(()).unwrap();
 
     // Request WITHOUT X-API-Version header - should return 400
     let req = Request::builder()
@@ -54,8 +53,7 @@ async fn test_valid_version_header() {
         .route_get("/greeting", versions!("1.0.0..2.0.0"), get(greeting_v1))
         .route_get("/greeting", versions!("2.0.0..3.0.0"), get(greeting_v2));
 
-    let cached = builder.build(()).unwrap();
-    let app = cached.into_axum_router();
+    let app = builder.build(()).unwrap();
 
     // Request WITH v1.5.0 header - should return v1
     let req = Request::builder()
