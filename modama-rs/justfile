@@ -10,7 +10,7 @@ validate-design:
 
 # Run opt-in egui_kittest visual regression tests.
 visual-tests:
-    cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast -- --test-threads=1
+    WGPU_DEBUG=0 cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
 
 # Run the GUI with egui inspection enabled for egui-mcp.
 inspect-gui:
