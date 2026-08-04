@@ -33,7 +33,8 @@ rust-tests:
   stage: test
   image: rust:1-slim-trixie
   script:
-    - apt-get -y update && apt-get -y install lld build-essential git
+    - apt-get -y update && apt-get -y install lld build-essential git libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
+    - vulkaninfo --summary
     - rustup component add clippy
     - cargo install just
     - git fetch --tags
