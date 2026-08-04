@@ -53,4 +53,16 @@ describe('journey: projects list', () => {
         expect(await screen.findByRole('heading', {name: FIXTURE_PROJECT.name})).toBeInTheDocument()
         expect(screen.getByText(`Project owned by ${FIXTURE_PROJECT.owner}`)).toBeInTheDocument()
     })
+
+    it('reads the list from the new API while shares stay on the legacy one', async () => {
+        // Pins the half-migrated state (#172) that this screen is in, so the
+        // day shares move over, this fails and gets updated deliberately.
+        const api = installApiMock(baseWorld())
+        renderApp({route: '/projects'})
+        await screen.findByText('My Projects')
+
+        expect(api.matching('GET', '/api/v2/projects')).toHaveLength(1)
+        expect(api.matching('GET', '/api/project/')).toHaveLength(0)
+        expect(api.matching('GET', '/api/share/')).toHaveLength(1)
+    })
 })

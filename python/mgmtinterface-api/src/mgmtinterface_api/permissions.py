@@ -1,5 +1,6 @@
 import requests
 from permissions_client import PermissionsClient
+from permissions_client.schema import SerializedProject
 
 from .config import Settings
 from .errors import APIError
@@ -25,12 +26,28 @@ def authenticate(settings: Settings, username: str, password: str) -> bool:
         # the permissions service we cannot tell a good password from a bad one,
         # and answering 401 would tell the user their credentials are wrong when
         # they are not.
-        raise APIError(
-            502,
-            "permissions_unavailable",
-            "The account service is unavailable. Please try again shortly.",
-        ) from exc
+        raise _unavailable() from exc
     return result.get("errno") == 0
+
+
+def list_projects(settings: Settings) -> list[SerializedProject]:
+    try:
+        result = make_client(settings).list_projects()
+    except requests.RequestException as exc:
+        raise _unavailable() from exc
+    if result.get("errno") != 0:
+        # The upstream reported a logical failure. Nothing here can act on it,
+        # and its wording is aimed at operators, so answer with our own.
+        raise _unavailable()
+    return result["projects"]
+
+
+def _unavailable() -> APIError:
+    return APIError(
+        502,
+        "permissions_unavailable",
+        "The account service is unavailable. Please try again shortly.",
+    )
 
 
 def user_exists(settings: Settings, username: str) -> bool:

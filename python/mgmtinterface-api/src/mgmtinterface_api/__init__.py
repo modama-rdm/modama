@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI
 
 from .config import Settings, get_settings
 from .errors import APIError, api_error_handler
-from .routes import auth
+from .routes import auth, projects
 from .security import enforce_same_origin
 from .session import SessionCodec
 from .throttle import FailureThrottle
@@ -52,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(auth.router, prefix=API_PREFIX)
+    app.include_router(projects.router, prefix=API_PREFIX)
 
     @app.get(f"{API_PREFIX}/healthz")
     def healthz() -> dict[str, str]:

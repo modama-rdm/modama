@@ -1,4 +1,4 @@
-import type {ListProjectsResponse} from '../../api/types'
+import type {SerializedProject} from '../../api/types'
 
 /**
  * 24 of the real production project list's 227 entries, scrubbed (see README.md
@@ -7,7 +7,7 @@ import type {ListProjectsResponse} from '../../api/types'
  * "90000002" — the unresolved-username edge case), and one project ("mws")
  * whose sole member is its own owner.
  */
-export const FIXTURE_PROJECTS: ListProjectsResponse['projects'] = [
+export const FIXTURE_PROJECTS: SerializedProject[] = [
     {
         "ctime": 1783695300.3267505,
         "gid": 1020,

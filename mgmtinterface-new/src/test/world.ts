@@ -19,13 +19,19 @@ export interface WorldOptions {
  * real name, and a thin (empty-datasets) envelope built from the matching
  * `FIXTURE_PROJECTS` list entry for any other name — real projects that were
  * only ever captured at list-shape, not queried individually.
+ *
+ * Handlers here span both APIs while the migration runs: `/api/v2/*` answers
+ * without an `errno` envelope, the legacy `/api/*` ones still carry it.
  */
 export function baseWorld({shares = {}}: WorldOptions = {}): ApiHandler[] {
     return [
         {
+            // Migrated to the new API (#172): no `errno`, failures would be
+            // status codes. The project shape itself is unchanged, so the same
+            // fixture serves both.
             method: 'GET',
-            path: '/api/project/',
-            respond: () => ({body: {errno: 0, projects: FIXTURE_PROJECTS}}),
+            path: '/api/v2/projects',
+            respond: () => ({body: {projects: FIXTURE_PROJECTS}}),
         },
         {
             method: 'GET',

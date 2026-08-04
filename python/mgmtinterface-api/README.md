@@ -102,6 +102,24 @@ service is merely down sends them off resetting credentials that were fine.
 Session *refresh* takes the opposite line and keeps the session, since failing
 closed there would sign everyone out during a restart of that service.
 
+## Endpoints
+
+| | |
+|---|---|
+| `POST /api/v2/auth/login` | credentials in, session cookie out |
+| `POST /api/v2/auth/logout` | 204; clears the cookie |
+| `GET /api/v2/auth/session` | the signed-in user, or 401 |
+| `GET /api/v2/projects` | every project, unfiltered |
+| `GET /api/v2/healthz` | liveness probe |
+
+`GET /projects` returns `{"projects": [...]}` rather than a bare array so that
+pagination fields (Theme A / #90) can arrive without breaking callers. The
+project shape is field-for-field what the legacy `/api/project/` returned, which
+is why the journey fixtures carried over untouched — only the envelope changed.
+Grouping into own/member/other stays client-side, and access is enforced by the
+file system rather than by hiding rows; private projects (Theme D) is what turns
+this into a filtered query.
+
 ## Layout
 
     src/mgmtinterface_api/
@@ -113,7 +131,8 @@ closed there would sign everyone out during a restart of that service.
         security.py   CSRF origin/referer check, current-session dependency
         throttle.py   in-process failed-login counter
         permissions.py  calls into the permissions service
-        routes/auth.py  login / logout / session
+        routes/auth.py      login / logout / session
+        routes/projects.py  project list
     tests/
 
 The app is built by `create_app()`; `main.py` is the only place that calls it at
