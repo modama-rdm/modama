@@ -1,0 +1,54 @@
+import pytest
+from fastapi.testclient import TestClient
+from mgmtinterface_api import API_PREFIX, create_app
+from mgmtinterface_api.config import Settings
+from mgmtinterface_api.errors import APIError
+
+
+@pytest.fixture
+def client() -> TestClient:
+    app = create_app()
+
+    @app.get(f"{API_PREFIX}/boom")
+    def boom() -> None:
+        raise APIError(403, "not_a_member", "You are not a member of this project.")
+
+    return TestClient(app)
+
+
+def test_healthz(client: TestClient):
+    response = client.get(f"{API_PREFIX}/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_api_error_uses_status_code_and_house_body(client: TestClient):
+    response = client.get(f"{API_PREFIX}/boom")
+    # Real status code, not HTTP 200 + `errno` like the legacy Flask API.
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": "not_a_member",
+        "message": "You are not a member of this project.",
+    }
+
+
+def test_errors_never_challenge_with_basic_auth(client: TestClient):
+    """
+    A `WWW-Authenticate: Basic` header makes the browser pop its own login
+    dialog on top of the SPA's login screen. The Flask API needed an explicit
+    workaround for this; here it just has to never happen.
+    """
+    response = client.get(f"{API_PREFIX}/boom")
+    assert "www-authenticate" not in {k.lower() for k in response.headers}
+
+
+def test_session_secret_is_required():
+    with pytest.raises(RuntimeError):
+        Settings(session_secret="", session_secret_file="").resolve_session_secret()
+
+
+def test_session_secret_read_from_file(tmp_path):
+    secret_file = tmp_path / "session_secret"
+    _ = secret_file.write_text("s3cret\n", encoding="utf8")
+    settings = Settings(session_secret_file=str(secret_file))
+    assert settings.resolve_session_secret() == "s3cret"

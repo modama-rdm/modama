@@ -1,6 +1,9 @@
 *.pyc
 __pycache__
 *.egg-info
+# setuptools leaves this behind on a non-editable `pip install ./python/<pkg>`
+build/
+.pytest_cache/
 .ipynb_checkpoints
 .vscode
 /deploy/testfolder/*/*

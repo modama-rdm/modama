@@ -88,6 +88,14 @@ services:
     working_dir: /
     # command: gunicorn --bind 0.0.0.0:5000 mgmtinterface:app --log-level=debug
     command: /venv/bin/flask run --debug --port 5000 --host 0.0.0.0
+  mgmtinterface-api:
+    volumes:
+      - type: bind
+        source: "../python/mgmtinterface-api"
+        target: "/code/mgmtinterface-api"
+        read_only: true
+    working_dir: /code/mgmtinterface-api
+    command: /venv/bin/uvicorn mgmtinterface_api:app --reload --host 0.0.0.0 --port 8000
   mgmtinterface-proxy:
     volumes:
       - type: bind

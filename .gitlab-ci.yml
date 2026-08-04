@@ -26,12 +26,14 @@ unit-tests:
   script:
     - apt-get -y update && apt-get -y upgrade && apt-get -y install python3-full
     - python3 -m venv /venv/
-    - /venv/bin/pip install pytest
+    - /venv/bin/pip install pytest httpx2
     - /venv/bin/pip install ./python/smbdrop-client
     - /venv/bin/pip install ./python/permissions-client
     - /venv/bin/pip install ./python/mgmtinterface-client
     - /venv/bin/pip install -e ./python/mgmtinterface
-    - cd python/mgmtinterface/ && /venv/bin/pytest tests
+    - /venv/bin/pip install -e ./python/mgmtinterface-api
+    - cd $CI_PROJECT_DIR/python/mgmtinterface/ && /venv/bin/pytest tests
+    - cd $CI_PROJECT_DIR/python/mgmtinterface-api/ && /venv/bin/pytest tests
 
 rust-tests:
   stage: test
@@ -172,6 +174,9 @@ container-image-build:
       - DOCKERFILE: deploy/mgmtinterface/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface
+      - DOCKERFILE: deploy/mgmtinterface-api/Dockerfile
+        CONTEXT: "${CI_PROJECT_DIR}"
+        IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-api
       - DOCKERFILE: deploy/wsgidav/Dockerfile
         CONTEXT: "${CI_PROJECT_DIR}/deploy/wsgidav/"
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/wsgidav
@@ -219,6 +224,7 @@ container-image-retag:
       - IMAGE_NAME: wsgidav
       - IMAGE_NAME: tsm-client
       - IMAGE_NAME: mgmtinterface-new
+      - IMAGE_NAME: mgmtinterface-api
   script:
     - crane auth login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - crane tag iffregistry.fz-juelich.de/weber/data-management-system/$IMAGE_NAME:$CI_COMMIT_SHA latest

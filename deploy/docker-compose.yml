@@ -110,6 +110,18 @@ services:
       dockerfile: mgmtinterface-new/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-new:latest
 
+  mgmtinterface-api:  # new FastAPI API (#172), served at /api/v2/
+    hostname: mgmtinterface-api
+    restart: always
+    build:
+      context: ..
+      dockerfile: deploy/mgmtinterface-api/Dockerfile
+    image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-api:latest
+    # The session signing secret is mounted with the auth slice; the scaffold has
+    # no endpoints that need it.
+    depends_on:
+      - "permissions"
+
   mgmtinterface-proxy:  # another nginx, in prod this terminates TLS
     # see prod/override files for config volumes and ports
     hostname: mgmtinterface-proxy
@@ -118,6 +130,7 @@ services:
     depends_on:
       - "mgmtinterface"
       - "mgmtinterface-new"
+      - "mgmtinterface-api"
 
   permissions:
     hostname: permissions
