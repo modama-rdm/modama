@@ -37,8 +37,9 @@ rust-tests:
     - rustup component add clippy
     - cargo install just
     - git fetch --tags
-    - cd modama-rs/ && cargo check --all-targets --all-features && cargo clippy --all-targets --all-features && cargo test
-    - cd modama-rs/ && just visual-tests && just validate-design
+    - cd modama-rs/
+    - cargo check --all-targets --all-features && cargo clippy --all-targets --all-features && cargo test
+    - just visual-tests && just validate-design
 
 lint-and-format:
   stage: test
