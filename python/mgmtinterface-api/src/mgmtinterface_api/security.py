@@ -46,15 +46,16 @@ def enforce_same_origin(request: Request) -> None:
     if request.method in _SAFE_METHODS:
         return
 
-    expected = _expected_origin(request)
+    allowed = {_expected_origin(request)} | settings_of(request).extra_origins
+
     origin = request.headers.get("origin")
     if origin is not None:
-        if origin != expected:
+        if origin not in allowed:
             raise APIError(403, "bad_origin", "Cross-origin request rejected.")
         return
 
     referer = request.headers.get("referer")
-    if referer is not None and not _origin_of(referer) == expected:
+    if referer is not None and _origin_of(referer) not in allowed:
         raise APIError(403, "bad_origin", "Cross-origin request rejected.")
 
 

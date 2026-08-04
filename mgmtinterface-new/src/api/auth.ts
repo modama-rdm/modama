@@ -1,21 +1,26 @@
 /**
- * Client-side authentication for the frozen mgmtinterface API.
+ * Client-side authentication, mid-migration between two APIs (GitLab #172).
  *
- * The API only accepts HTTP Basic auth (`Authorization: Basic base64(user:pass)`)
- * and ignores session cookies, so the browser must replay the credential on every
- * request. We validate credentials once via the public `/api/users/auth/`
- * endpoint, then keep the Basic token for the session.
+ * Signing in now happens against `POST /api/v2/auth/login`, which authenticates
+ * and sets an **httpOnly session cookie** the browser attaches to every `/api/v2`
+ * request on its own. JS never sees that cookie.
  *
- * SECURITY (known, accepted risk — see PR discussion / GitLab #156, #172):
- * Basic auth means the stored token is base64(username:password) — reversible
- * encoding, i.e. the user's *reusable IFF/ER-C Unix password*. It lives in
- * `localStorage`, which any XSS on the page can read. This is an accepted
- * interim compromise: the proper fix (httpOnly cookie / short-lived bearer token
- * the JS never sees) requires a backend change and is owned by the FastAPI
- * rewrite (#172). To keep that future swap to a single file, all storage access
- * goes through `tokenStore` below — replace its internals (e.g. with an
- * in-memory or cookie-backed store) without touching callers.
+ * The Basic token below has *not* gone away yet, because most screens still call
+ * the legacy Flask `/api/*` endpoints, and those accept nothing but
+ * `Authorization: Basic`. So one sign-in establishes both credentials, and the
+ * token is retired when the last screen moves to `/api/v2` — at which point
+ * `tokenStore`, `getToken`, and the backend's `xBasic` handler all go together.
+ *
+ * SECURITY (known, accepted, and shrinking — GitLab #156, #172): the Basic token
+ * is base64(username:password), i.e. reversible encoding of the user's reusable
+ * IFF/ER-C Unix password, held in `localStorage` where any XSS can read it. The
+ * cookie has no such exposure. Every endpoint migrated to `/api/v2` is one less
+ * reason for the token to exist.
  */
+
+// `Unauthorized` extends `ApiError`, so catching the latter covers a 401 too.
+import {ApiError} from './client'
+import {apiFetchV2} from './clientV2'
 
 const SESSION_KEY = 'erc.auth'
 
@@ -69,45 +74,48 @@ function basicToken(username: string, password: string): string {
 export type LoginResult = { ok: true } | { ok: false; message: string }
 
 /**
- * Validate credentials against the public auth endpoint and, on success, persist
- * the Basic token for the session. Does not throw on bad credentials — returns a
- * discriminated result the login screen can render.
+ * Sign in: establishes the session cookie and, for as long as legacy screens
+ * need it, the Basic token.
+ *
+ * Does not throw on bad credentials — returns a discriminated result the login
+ * screen renders. The messages come from the API itself, so a throttled sign-in
+ * (429) explains itself without this file knowing about throttling.
  */
 export async function login(
     username: string,
     password: string,
 ): Promise<LoginResult> {
-    let res: Response
     try {
-        res = await fetch('/api/users/auth/', {
+        await apiFetchV2<{username: string}>('/auth/login', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({username, password}),
         })
-    } catch {
+    } catch (err) {
+        if (err instanceof ApiError) {
+            return {ok: false, message: err.message}
+        }
         return {ok: false, message: 'Could not reach the server. Please try again.'}
     }
 
-    let body: { errno?: number; message?: string } = {}
-    try {
-        body = await res.json()
-    } catch {
-        /* fall through to status-based handling */
-    }
-
-    if (res.ok && body.errno === 0) {
-        tokenStore.write({username, token: basicToken(username, password)})
-        return {ok: true}
-    }
-
-    return {
-        ok: false,
-        message: body.message || 'Sign-in failed. Check your username and password.',
-    }
+    tokenStore.write({username, token: basicToken(username, password)})
+    return {ok: true}
 }
 
-export function logout(): void {
-    tokenStore.clear()
+/**
+ * Sign out of both credentials.
+ *
+ * The local token is cleared even when the server call fails: the user asked to
+ * be signed out, and leaving a usable credential behind because the network
+ * blipped is the wrong failure mode. The cookie then expires on its own.
+ */
+export async function logout(): Promise<void> {
+    try {
+        await apiFetchV2<void>('/auth/logout', {method: 'POST'})
+    } catch {
+        /* clearing the local credential matters more than the round trip */
+    } finally {
+        tokenStore.clear()
+    }
 }
 
 export function getToken(): string | null {

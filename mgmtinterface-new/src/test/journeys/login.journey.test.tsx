@@ -7,7 +7,11 @@ import {baseWorld} from '../world'
 /**
  * #169 journey 1/6 — login. Gates every other journey (they start via
  * `signIn()` and skip this), so it's the one place the actual `POST
- * /api/users/auth/` -> sessionStorage -> redirect chain gets exercised.
+ * /api/v2/auth/login` -> stored credential -> redirect chain gets exercised.
+ *
+ * Sign-in moved to the FastAPI endpoint with #172: it answers with real status
+ * codes and sets an httpOnly session cookie the test environment never sees,
+ * which is the point — the app cannot read it either.
  */
 describe('journey: login', () => {
     beforeEach(() => {
@@ -15,13 +19,19 @@ describe('journey: login', () => {
             ...baseWorld(),
             {
                 method: 'POST',
-                path: '/api/users/auth/',
+                path: '/api/v2/auth/login',
                 respond: ({body}) => {
                     const {username, password} = body as {username: string; password: string}
                     if (username === 'user1' && password === 'correct-horse') {
-                        return {body: {errno: 0, id: {uid: 1001}}}
+                        return {body: {username}}
                     }
-                    return {body: {errno: 1, message: 'Invalid credentials'}}
+                    return {
+                        status: 401,
+                        body: {
+                            code: 'invalid_credentials',
+                            message: 'Wrong username or password.',
+                        },
+                    }
                 },
             },
         ])

@@ -80,6 +80,11 @@ falling back to `Referer` when `Origin` is absent, applied app-wide. A request
 with *neither* header is allowed — browsers always send one on cross-site
 POSTs, so absence means a non-browser caller rather than an attack.
 
+`csrf_extra_origins` (comma-separated) widens the accepted set. Local
+development needs it: the vite dev server on :5180 proxies `/api` to the VM with
+`changeOrigin`, so the `Host` the service sees no longer matches the browser's
+`Origin` and every POST would 403. Production sets none.
+
 **Brute force:** failed logins are counted per username (case-folded) in
 process; past `login_max_failures` within `login_failure_window_seconds` the
 endpoint answers 429 with `Retry-After` and stops calling the permissions

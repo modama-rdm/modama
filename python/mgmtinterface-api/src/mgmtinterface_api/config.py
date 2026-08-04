@@ -49,7 +49,21 @@ class Settings(BaseSettings):
     login_max_failures: int = 10
     login_failure_window_seconds: int = 5 * 60
 
+    # Additional origins the CSRF check accepts, comma-separated. Needed when a
+    # dev server proxies the API under a different origin than the browser sees
+    # — vite on :5180 forwards to the VM on :5001 with `changeOrigin`, so the
+    # Host header no longer matches the Origin. Leave empty in production.
+    csrf_extra_origins: str = ""
+
     _generated_secret: str | None = PrivateAttr(default=None)
+
+    @property
+    def extra_origins(self) -> frozenset[str]:
+        return frozenset(
+            origin.strip()
+            for origin in self.csrf_extra_origins.split(",")
+            if origin.strip()
+        )
 
     @property
     def effective_cookie_name(self) -> str:

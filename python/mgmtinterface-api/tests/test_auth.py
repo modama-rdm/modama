@@ -230,6 +230,38 @@ def test_missing_origin_is_allowed(client: TestClient):
     assert client.post(LOGIN, json=GOOD).status_code == 200
 
 
+def test_configured_extra_origin_is_accepted(
+    settings: Settings, upstream: dict[str, int]
+):
+    """
+    The vite dev server proxies /api with `changeOrigin`, so the Host stops
+    matching the browser's Origin and every POST would 403 in local development.
+    """
+    app = create_app(
+        Settings(
+            **{**settings.model_dump(), "csrf_extra_origins": "http://localhost:5180"}
+        )
+    )
+    response = TestClient(app).post(
+        LOGIN, json=GOOD, headers={"Origin": "http://localhost:5180"}
+    )
+    assert response.status_code == 200
+
+
+def test_extra_origins_do_not_open_the_door_to_anything_else(
+    settings: Settings, upstream: dict[str, int]
+):
+    app = create_app(
+        Settings(
+            **{**settings.model_dump(), "csrf_extra_origins": "http://localhost:5180"}
+        )
+    )
+    response = TestClient(app).post(
+        LOGIN, json=GOOD, headers={"Origin": "https://evil.example"}
+    )
+    assert response.status_code == 403
+
+
 def test_referer_is_checked_when_origin_is_absent(client: TestClient):
     # OWASP's fallback order: Origin, then Referer.
     response = client.post(
