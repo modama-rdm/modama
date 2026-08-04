@@ -6,8 +6,8 @@ from mgmtinterface_api.errors import APIError
 
 
 @pytest.fixture
-def client() -> TestClient:
-    app = create_app()
+def client(settings: Settings) -> TestClient:
+    app = create_app(settings)
 
     @app.get(f"{API_PREFIX}/boom")
     def boom() -> None:
@@ -42,9 +42,25 @@ def test_errors_never_challenge_with_basic_auth(client: TestClient):
     assert "www-authenticate" not in {k.lower() for k in response.headers}
 
 
-def test_session_secret_is_required():
-    with pytest.raises(RuntimeError):
-        Settings(session_secret="", session_secret_file="").resolve_session_secret()
+def test_unconfigured_session_secret_is_generated_not_defaulted():
+    """
+    No hardcoded fallback: a predictable signing key would let anyone mint a
+    session cookie. A random per-boot key is fine — it just doesn't outlive the
+    process.
+    """
+    unconfigured = Settings(session_secret="", session_secret_file="")
+    generated = unconfigured.resolve_session_secret()
+    assert len(generated) >= 32
+    # Stable within the process, or every request would invalidate the last.
+    assert unconfigured.resolve_session_secret() == generated
+    # ...and not shared with any other boot.
+    other = Settings(session_secret="", session_secret_file="")
+    assert other.resolve_session_secret() != generated
+
+
+def test_app_starts_without_any_session_configuration():
+    app = create_app(Settings(session_secret="", session_secret_file=""))
+    assert TestClient(app).get(f"{API_PREFIX}/healthz").status_code == 200
 
 
 def test_session_secret_read_from_file(tmp_path):

@@ -1,0 +1,297 @@
+import time
+from http.cookies import SimpleCookie
+
+import pytest
+from fastapi.testclient import TestClient
+from mgmtinterface_api import API_PREFIX, create_app
+from mgmtinterface_api.config import Settings
+from mgmtinterface_api.routes import auth as auth_routes
+
+LOGIN = f"{API_PREFIX}/auth/login"
+LOGOUT = f"{API_PREFIX}/auth/logout"
+SESSION = f"{API_PREFIX}/auth/session"
+
+GOOD = {"username": "mmustermann", "password": "correct horse"}
+
+
+@pytest.fixture
+def upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """
+    Stands in for the permissions service, and counts the calls so tests can
+    show that refreshing is paced rather than per-request.
+    """
+    calls = {"authenticate": 0, "user_exists": 0}
+
+    def fake_authenticate(settings: Settings, username: str, password: str) -> bool:
+        calls["authenticate"] += 1
+        return username == GOOD["username"] and password == GOOD["password"]
+
+    def fake_user_exists(settings: Settings, username: str) -> bool:
+        calls["user_exists"] += 1
+        return username == GOOD["username"]
+
+    monkeypatch.setattr(auth_routes, "authenticate", fake_authenticate)
+    monkeypatch.setattr("mgmtinterface_api.security.user_exists", fake_user_exists)
+    return calls
+
+
+@pytest.fixture
+def client(settings: Settings, upstream: dict[str, int]) -> TestClient:
+    return TestClient(create_app(settings))
+
+
+def test_login_sets_a_session_cookie(client: TestClient, settings: Settings):
+    response = client.post(LOGIN, json=GOOD)
+    assert response.status_code == 200
+    assert response.json() == {"username": "mmustermann"}
+
+    cookie = response.cookies.get(settings.effective_cookie_name)
+    assert cookie is not None
+    set_cookie = response.headers["set-cookie"].lower()
+    assert "httponly" in set_cookie
+    assert "samesite=lax" in set_cookie
+    assert "path=/" in set_cookie
+
+
+def test_login_response_is_not_cacheable(client: TestClient):
+    assert client.post(LOGIN, json=GOOD).headers["cache-control"] == "no-store"
+
+
+def test_cookie_name_does_not_collide_with_flask_login(settings: Settings):
+    # Both apps are live on the same origin until the cutover (#170).
+    assert settings.effective_cookie_name != "mgmtinterface_session"
+
+
+def test_secure_deployments_use_the_host_cookie_prefix():
+    """
+    `__Host-` makes the browser refuse the cookie unless it is Secure, Path=/
+    and Domain-less, which is what stops another host under fz-juelich.de from
+    planting a session cookie for this one.
+    """
+    secure = Settings(session_secret="x", session_cookie_secure=True)
+    assert secure.effective_cookie_name == "__Host-modama_session"
+    # The prefix requires Secure, so plain-http dev has to go without it.
+    insecure = Settings(session_secret="x", session_cookie_secure=False)
+    assert insecure.effective_cookie_name == "modama_session"
+
+
+def test_host_prefixed_cookie_carries_the_attributes_the_prefix_requires(
+    upstream: dict[str, int],
+):
+    app = create_app(Settings(session_secret="x", session_cookie_secure=True))
+    client = TestClient(app, base_url="https://testserver")
+    set_cookie = client.post(LOGIN, json=GOOD).headers["set-cookie"]
+    assert set_cookie.startswith("__Host-modama_session=")
+    assert "Secure" in set_cookie
+    assert "Path=/" in set_cookie
+    assert "Domain" not in set_cookie
+
+
+def test_login_rejects_bad_credentials(client: TestClient, settings: Settings):
+    response = client.post(LOGIN, json={**GOOD, "password": "wrong"})
+    assert response.status_code == 401
+    assert response.json()["code"] == "invalid_credentials"
+    assert settings.effective_cookie_name not in response.cookies
+    # Must not trigger the browser's own login dialog.
+    assert "www-authenticate" not in {k.lower() for k in response.headers}
+
+
+def test_login_validates_its_body(client: TestClient):
+    response = client.post(LOGIN, json={"username": "", "password": ""})
+    # FastAPI's own 422 shape is the documented exception to the house model.
+    assert response.status_code == 422
+
+
+def test_session_requires_a_cookie(client: TestClient):
+    response = client.get(SESSION)
+    assert response.status_code == 401
+    assert response.json()["code"] == "not_authenticated"
+
+
+def test_session_returns_the_signed_in_user(client: TestClient):
+    _ = client.post(LOGIN, json=GOOD)
+    response = client.get(SESSION)
+    assert response.status_code == 200
+    assert response.json() == {"username": "mmustermann"}
+
+
+def test_logout_clears_the_cookie(client: TestClient):
+    _ = client.post(LOGIN, json=GOOD)
+    response = client.post(LOGOUT)
+    assert response.status_code == 204
+    assert client.get(SESSION).status_code == 401
+
+
+def test_logout_without_a_session_is_not_an_error(client: TestClient):
+    assert client.post(LOGOUT).status_code == 204
+
+
+def test_forged_cookie_is_rejected(client: TestClient, settings: Settings):
+    other = create_app(Settings(session_secret="other", session_cookie_secure=False))
+    forged = other.state.session_codec.issue("mmustermann")
+    client.cookies.set(settings.effective_cookie_name, forged)
+    response = client.get(SESSION)
+    assert response.status_code == 401
+    assert response.json()["code"] == "session_expired"
+
+
+def test_fresh_session_does_not_call_the_permissions_service(
+    client: TestClient, upstream: dict[str, int]
+):
+    """
+    The reason for refreshing on an interval: a cookie that was just issued must
+    not cost an upstream call, or we are back to Basic auth's one-call-per-
+    request behaviour.
+    """
+    _ = client.post(LOGIN, json=GOOD)
+    for _i in range(3):
+        assert client.get(SESSION).status_code == 200
+    assert upstream["user_exists"] == 0
+
+
+def always_refreshing(settings: Settings) -> Settings:
+    """Refresh interval of 0, so every request takes the refresh path."""
+    return Settings(**{**settings.model_dump(), "session_refresh_seconds": 0})
+
+
+def test_stale_cookie_is_refreshed_and_revalidated(
+    settings: Settings, upstream: dict[str, int]
+):
+    app = create_app(always_refreshing(settings))
+    client = TestClient(app)
+    issued = int(time.time()) - 60
+    client.cookies.set(
+        settings.effective_cookie_name,
+        app.state.session_codec.issue("mmustermann", issued=issued),
+    )
+
+    response = client.get(SESSION)
+    assert response.status_code == 200
+    assert upstream["user_exists"] == 1
+
+    # A refreshed cookie comes back on the response, carrying the original
+    # `issued` — so refreshing cannot extend the absolute lifetime.
+    jar = SimpleCookie(response.headers["set-cookie"])
+    refreshed, _ = app.state.session_codec.read(
+        jar[settings.effective_cookie_name].value
+    )
+    assert refreshed["issued"] == issued
+
+
+def test_session_ends_when_the_account_disappears(
+    settings: Settings, upstream: dict[str, int], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        "mgmtinterface_api.security.user_exists", lambda settings, username: False
+    )
+    app = create_app(always_refreshing(settings))
+    client = TestClient(app)
+    client.cookies.set(
+        settings.effective_cookie_name, app.state.session_codec.issue("mmustermann")
+    )
+    response = client.get(SESSION)
+    assert response.status_code == 401
+    assert response.json()["code"] == "session_expired"
+
+
+def test_cross_origin_post_is_rejected(client: TestClient):
+    response = client.post(LOGIN, json=GOOD, headers={"Origin": "https://evil.example"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "bad_origin"
+
+
+def test_same_origin_post_is_allowed(client: TestClient):
+    response = client.post(
+        LOGIN, json=GOOD, headers={"Origin": "http://testserver", "Host": "testserver"}
+    )
+    assert response.status_code == 200
+
+
+def test_origin_is_compared_against_the_forwarded_scheme(client: TestClient):
+    """
+    Behind nginx the request arrives over http while the browser saw https, so
+    the check has to use X-Forwarded-Proto or every real POST would 403.
+    """
+    response = client.post(
+        LOGIN,
+        json=GOOD,
+        headers={
+            "Origin": "https://er-c-data-mgmt.fz-juelich.de",
+            "Host": "er-c-data-mgmt.fz-juelich.de",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_missing_origin_is_allowed(client: TestClient):
+    # curl, scripts and the test suite send no Origin; browsers always do on
+    # cross-site state-changing requests.
+    assert client.post(LOGIN, json=GOOD).status_code == 200
+
+
+def test_referer_is_checked_when_origin_is_absent(client: TestClient):
+    # OWASP's fallback order: Origin, then Referer.
+    response = client.post(
+        LOGIN, json=GOOD, headers={"Referer": "https://evil.example/attack.html"}
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "bad_origin"
+
+
+def test_same_origin_referer_is_allowed(client: TestClient):
+    response = client.post(
+        LOGIN, json=GOOD, headers={"Referer": "http://testserver/new/login"}
+    )
+    assert response.status_code == 200
+
+
+def test_repeated_failures_are_throttled(settings: Settings, upstream: dict[str, int]):
+    app = create_app(Settings(**{**settings.model_dump(), "login_max_failures": 3}))
+    client = TestClient(app)
+    bad = {**GOOD, "password": "wrong"}
+
+    for _i in range(3):
+        assert client.post(LOGIN, json=bad).status_code == 401
+
+    blocked = client.post(LOGIN, json=bad)
+    assert blocked.status_code == 429
+    assert blocked.json()["code"] == "too_many_attempts"
+    assert int(blocked.headers["retry-after"]) > 0
+    # Blocked attempts must not reach the permissions service either.
+    assert upstream["authenticate"] == 3
+
+    # Even the correct password waits out the window — otherwise the throttle
+    # would be trivially bypassed by guessing.
+    assert client.post(LOGIN, json=GOOD).status_code == 429
+
+
+def test_throttle_counts_only_failures(settings: Settings, upstream: dict[str, int]):
+    app = create_app(Settings(**{**settings.model_dump(), "login_max_failures": 3}))
+    client = TestClient(app)
+    bad = {**GOOD, "password": "wrong"}
+
+    # Two typos then a success must leave the user with a clean slate.
+    for _i in range(2):
+        assert client.post(LOGIN, json=bad).status_code == 401
+    assert client.post(LOGIN, json=GOOD).status_code == 200
+    for _i in range(2):
+        assert client.post(LOGIN, json=bad).status_code == 401
+    assert client.post(LOGIN, json=GOOD).status_code == 200
+
+
+def test_throttle_key_ignores_case_and_padding(
+    settings: Settings, upstream: dict[str, int]
+):
+    app = create_app(Settings(**{**settings.model_dump(), "login_max_failures": 2}))
+    client = TestClient(app)
+
+    assert client.post(LOGIN, json={**GOOD, "password": "wrong"}).status_code == 401
+    assert (
+        client.post(
+            LOGIN, json={"username": "MMustermann ", "password": "wrong"}
+        ).status_code
+        == 401
+    )
+    # Alternating case must not hand an attacker a fresh budget.
+    assert client.post(LOGIN, json={**GOOD, "password": "wrong"}).status_code == 429

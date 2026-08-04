@@ -18,18 +18,32 @@ class APIError(Exception):
     default shape and is the documented exception to this convention.
     """
 
-    def __init__(self, status_code: int, code: str, message: str):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        # Headers a handler sets on its injected `Response` are lost once an
+        # exception takes over, so anything an error must carry (`Retry-After`,
+        # say) has to travel with the error itself.
+        self.headers = headers
 
 
 async def api_error_handler(request: Request, exc: Exception) -> JSONResponse:
     # Starlette types handlers as taking a bare Exception; narrow it here rather
     # than silencing the type checker at the registration site.
     assert isinstance(exc, APIError)
+    # Error responses are never cacheable, and some of them (401s especially)
+    # reflect session state.
+    headers = {"Cache-Control": "no-store", **(exc.headers or {})}
     return JSONResponse(
         status_code=exc.status_code,
         content={"code": exc.code, "message": exc.message},
+        headers=headers,
     )

@@ -95,7 +95,14 @@ services:
         target: "/code/mgmtinterface-api"
         read_only: true
     working_dir: /code/mgmtinterface-api
-    command: /venv/bin/uvicorn mgmtinterface_api:app --reload --host 0.0.0.0 --port 8000
+    environment:
+      # Dev-only: the test VM is plain http, so a Secure cookie would never come
+      # back, and the secret is a throwaway rather than a mounted file.
+      - MODAMA_SESSION_COOKIE_SECURE=false
+      - MODAMA_SESSION_SECRET=dev-only-not-a-real-secret
+    command: >
+      /venv/bin/uvicorn mgmtinterface_api.main:app --reload
+      --host 0.0.0.0 --port 8000
   mgmtinterface-proxy:
     volumes:
       - type: bind

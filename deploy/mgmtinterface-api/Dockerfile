@@ -19,4 +19,4 @@ RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install -e /code/mgmtin
 
 WORKDIR /code/mgmtinterface-api
 
-CMD ["/venv/bin/uvicorn", "mgmtinterface_api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/venv/bin/uvicorn", "mgmtinterface_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
