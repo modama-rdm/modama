@@ -1,0 +1,5 @@
+error: Invalid version range 'invalid': expected X.Y.Z or '..' (at offset 0, 'invalid')
+ --> tests/ui/invalid_format.rs:4:24
+  |
+4 |     let _r = versions!("invalid");
+  |                        ^^^^^^^^^

@@ -1,0 +1,5 @@
+[workspace]
+members = ["documented", "renamed"]
+resolver = "2"
+
+

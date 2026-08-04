@@ -1,0 +1,5 @@
+error: Invalid version range '1.0.0..1.0.0': range start must be less than range end; both bounds are 1.0.0
+ --> tests/ui/empty_range.rs:4:28
+  |
+4 |     let _range = versions!("1.0.0..1.0.0");
+  |                            ^^^^^^^^^^^^^^

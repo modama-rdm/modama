@@ -1,0 +1,13 @@
+[package]
+name = "renamed-consumer"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+api_versioning = { package = "versioned", path = "../../../.." }
+utoipa = "5"
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+
+

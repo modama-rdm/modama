@@ -1,0 +1,5 @@
+error: Invalid version range '1.0.0..2.0.0.0': expected X.Y.Z or end of input (at offset 7, '2.0.0.0')
+ --> tests/ui/too_many_parts.rs:4:24
+  |
+4 |     let _r = versions!("1.0.0..2.0.0.0");
+  |                        ^^^^^^^^^^^^^^^^

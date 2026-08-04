@@ -4,6 +4,9 @@ members = [
     "modama-agent",
     "modama-common",
     "modama-agent-gui",
+    "version-range",
+    "versions-macro",
+    "versioned",
 ]
 package.edition = "2021"
 resolver = "2"
@@ -16,7 +19,7 @@ axum-macros = "0.5.0"
 clap = { version = "4.4.11", features = ["derive"] } 
 log = "0.4.20"
 thiserror = "2.0.16"
-tokio = { version = "1.35.1", features = ["rt-multi-thread", "macros", "time", "process", "fs", "signal"] }
+tokio = { version = "1.35.1", features = ["rt-multi-thread", "macros", "time", "process", "fs", "signal", "sync"] }
 tokio-tungstenite = { version = "0.27.0", features = ["rustls-tls-webpki-roots"] }
 tungstenite = "0.27.0"
 serde = { version = "1.0.193", features = ["derive"] }
@@ -38,6 +41,10 @@ procfs = "0.18.0"
 rand = "0.9.2"
 jsonwebtoken = "9.2.0"
 git-version = "0.3.9"
+tower = "0.5"
+tower-http = { version = "0.6.10", features = ["trace"] }
+utoipa = { version = "5", features = ["axum_extras", "macros"] }
+utoipa-axum = "0.2"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

@@ -1,0 +1,5 @@
+error: Invalid version range '1.0..': expected X.Y.Z or '..' (at offset 0, '1.0..')
+ --> tests/ui/missing_patch.rs:4:24
+  |
+4 |     let _r = versions!("1.0..");
+  |                        ^^^^^^^

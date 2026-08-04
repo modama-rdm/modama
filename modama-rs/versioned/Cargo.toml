@@ -1,0 +1,36 @@
+[package]
+name = "versioned"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Header-based API versioning and OpenAPI generation for Axum"
+readme = "README.md"
+
+[dependencies]
+axum = { workspace = true }
+tower = { workspace = true }
+utoipa = { workspace = true, features = ["macros"] }
+semver = "1"
+matchit = "0.8"
+serde = { workspace = true }
+thiserror = "2.0.18"
+tokio = { workspace = true }
+versions-macro = { version = "0.1.0", path = "../versions-macro" }
+version-range = { version = "0.1.0", path = "../version-range" }
+paste = "1"
+
+[dev-dependencies]
+tokio = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+serde_json = { workspace = true }
+utoipa = { workspace = true, features = ["macros"] }
+utoipa-axum = { workspace = true }
+anyhow = "1"
+versions-macro = { path = "../versions-macro" }
+paste = "1"
+tower-http = { workspace = true, features = ["catch-panic", "cors"] }
+semver = "1"
+
+[lints]
+workspace = true

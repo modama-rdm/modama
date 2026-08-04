@@ -1,0 +1,5 @@
+error: Invalid version range '1.0.0-alpha': expected '..' (at offset 5, '-alpha')
+ --> tests/ui/prerelease.rs:4:28
+  |
+4 |     let _range = versions!("1.0.0-alpha");
+  |                            ^^^^^^^^^^^^^
