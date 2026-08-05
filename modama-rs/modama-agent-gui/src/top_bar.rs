@@ -1,6 +1,4 @@
 use crate::top_bar::avatar::avatar;
-use std::time::Duration;
-
 use eframe::egui::{self, Align, Color32, FontFamily, FontId, Layout, RichText, Sense, Stroke};
 use egui_taffy::{
     taffy::{
@@ -11,8 +9,7 @@ use egui_taffy::{
 };
 
 use crate::{
-    actions::{Action, RetryAction, TaskFailure},
-    async_state::AsyncState,
+    actions::Action,
     components::avatar,
     components::buttons::{
         loading_button, primary_button, secondary_button, ButtonVariant, DesignButton,
@@ -21,17 +18,8 @@ use crate::{
     styles,
 };
 
-pub(crate) struct TopBar {
-    logout_task: AsyncState<()>,
-}
-
-impl Default for TopBar {
-    fn default() -> Self {
-        Self {
-            logout_task: AsyncState::Idle,
-        }
-    }
-}
+#[derive(Default)]
+pub(crate) struct TopBar {}
 
 impl TopBar {
     pub(crate) fn show_inside(
@@ -81,7 +69,7 @@ impl TopBar {
         show_login_action: bool,
     ) -> Action {
         let mut action = Action::None;
-        let is_logging_out = self.logout_task.is_pending();
+        let is_logging_out = false;
         let navigation_busy = page_busy || is_logging_out;
         let layout_state = (username.is_some(), show_login_action);
         tui(ui, ui.id().with(("top-bar-content", layout_state)))
@@ -127,8 +115,7 @@ impl TopBar {
             }
 
             if let Some(username) = username {
-                self.show_authenticated_controls(ui, username, navigation_busy, is_logging_out);
-                None
+                self.show_authenticated_controls(ui, username, navigation_busy, is_logging_out)
             } else if show_login_action {
                 ui.add_enabled(!navigation_busy, primary_button("Log in", ui))
                     .clicked()
@@ -146,7 +133,7 @@ impl TopBar {
         username: &str,
         navigation_busy: bool,
         is_logging_out: bool,
-    ) {
+    ) -> Option<Action> {
         divider(
             ui,
             styles::components::top_bar_control_divider::height::EGUI_POINTS,
@@ -176,38 +163,13 @@ impl TopBar {
             ui.add_enabled(!navigation_busy, secondary_button("Log out", ui))
         };
         if response.clicked() {
-            self.logout_task.spawn(
-                || crate::simulated_work::sleep(Duration::from_millis(500)),
-                ui.ctx().clone(),
-            );
+            return Some(Action::LogoutSuccess);
         }
+        None
     }
 
     pub(crate) fn poll(&mut self) -> Action {
-        match self.logout_task.poll() {
-            Ok(task) => {
-                if task.take_ready().is_some() {
-                    Action::LogoutSuccess
-                } else {
-                    Action::None
-                }
-            }
-            Err(error) => {
-                log::error!("logout task failed: {error}");
-                Action::TaskFailed(TaskFailure::Stay {
-                    message: "Could not log out.".to_owned(),
-                    retry: RetryAction::Logout,
-                })
-            }
-        }
-    }
-
-    pub(crate) fn retry_logout(&mut self, ctx: egui::Context) {
-        self.logout_task.reset();
-        self.logout_task.spawn(
-            || crate::simulated_work::sleep(Duration::from_millis(500)),
-            ctx,
-        );
+        Action::None
     }
 }
 

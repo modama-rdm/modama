@@ -146,7 +146,7 @@ fn project_selection_snapshots() {
         page.projects_task.spawn(
             move || {
                 task_release.wait();
-                representative_projects()
+                Ok(representative_projects())
             },
             ctx,
         );
@@ -193,7 +193,7 @@ fn project_selection_snapshots() {
 
     let mut no_access_page = PageSelectProject::new();
     no_access_page.projects_task = AsyncState::Ready {
-        payload: Vec::new(),
+        payload: Ok(Vec::new()),
     };
     let mut no_access = selection_harness(Page::SelectProject(no_access_page));
     no_access.run_steps(3);
@@ -348,7 +348,7 @@ fn project_sort_dropdown_options_are_accessible_and_selectable() {
 fn an_empty_project_fetch_stays_in_the_no_access_state() {
     let mut page = PageSelectProject::new();
     page.projects_task = AsyncState::Ready {
-        payload: Vec::new(),
+        payload: Ok(Vec::new()),
     };
     let mut harness = selection_harness(Page::SelectProject(page));
     harness.run_steps(3);
@@ -828,7 +828,7 @@ fn session_selection_snapshots() {
         page.sessions_task.spawn(
             move || {
                 task_release.wait();
-                strings(&SESSIONS)
+                Ok(strings(&SESSIONS))
             },
             ctx,
         );
@@ -840,7 +840,7 @@ fn session_selection_snapshots() {
 
     let mut empty_page = PageSelectCreateSession::new("Project Alpha".to_string());
     empty_page.sessions_task = AsyncState::Ready {
-        payload: Vec::new(),
+        payload: Ok(Vec::new()),
     };
     let mut empty = selection_harness(Page::SelectCreateSession(empty_page));
     empty.run_steps(3);
@@ -989,11 +989,12 @@ fn session_selection_snapshots() {
         page.create_ingest_task.spawn(
             move || {
                 task_release.wait();
-                ActiveSession {
+                Ok(ActiveSession {
+                    share_id: "starting-share".to_owned(),
                     project: "Project Alpha".to_string(),
                     session: SESSIONS[1].to_string(),
                     mount_path: None,
-                }
+                })
             },
             ctx,
         );
@@ -1019,11 +1020,12 @@ fn session_choices_are_disabled_while_starting() {
         page.create_ingest_task.spawn(
             move || {
                 task_release.wait();
-                ActiveSession {
+                Ok(ActiveSession {
+                    share_id: "starting-share".to_owned(),
                     project: "Project Alpha".to_string(),
                     session: SESSIONS[1].to_string(),
                     mount_path: None,
-                }
+                })
             },
             ctx,
         );
@@ -1158,6 +1160,7 @@ fn successful_session_creation_returns_to_overview_with_an_active_session() {
     if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
         page.create_session_task = AsyncState::Ready {
             payload: Ok(ActiveSession {
+                share_id: "created-share".to_owned(),
                 project: "Project Alpha".to_owned(),
                 session: "2026-07-30-new-run".to_owned(),
                 mount_path: Some("/todo/Project Alpha/2026-07-30-new-run/".to_owned()),
@@ -1244,7 +1247,7 @@ fn session_loading_is_centered_in_the_list_area() {
         page.sessions_task.spawn(
             move || {
                 task_release.wait();
-                strings(&SESSIONS)
+                Ok(strings(&SESSIONS))
             },
             ctx,
         );

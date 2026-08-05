@@ -95,6 +95,11 @@ pub struct CreateDatasetResponse {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct DeleteShareResponse {
+    pub status: String,
+}
+
 pub struct MgmtClient {
     client: Client,
     username: String,
@@ -252,5 +257,24 @@ impl MgmtClient {
             .await?;
         maybe_status_to_err(&resp)?;
         parse_to_response(resp).await
+    }
+
+    pub async fn delete_share(&self, share_id: &str) -> Result<DeleteShareResponse, MgmtError> {
+        let full_url = self.base_url.join(&format!("/api/share/{share_id}/"))?;
+        let resp = self
+            .client
+            .delete(full_url)
+            .basic_auth(&self.username, Some(&self.password))
+            .send()
+            .await?;
+        maybe_status_to_err(&resp)?;
+        let response: DeleteShareResponse = parse_to_response(resp).await?;
+        if response.status != "ok" {
+            return Err(MgmtError::Formatting(format!(
+                "share deletion status must be 'ok', got {:?}",
+                response.status
+            )));
+        }
+        Ok(response)
     }
 }

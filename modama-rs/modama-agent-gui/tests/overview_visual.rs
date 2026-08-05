@@ -3,6 +3,7 @@ use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
     pages::{Page, PageConnecting, PageOverview},
+    service::ServiceError,
     state::{ActiveSession, Credentials},
     styles,
 };
@@ -45,6 +46,7 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
                 password: "representative-password".to_string(),
             });
             app.app_state.session = Some(ActiveSession {
+                share_id: "representative-share".to_owned(),
                 project: "representative-project".to_string(),
                 session: "2026-07-29-ingest".to_string(),
                 mount_path: Some(
@@ -94,6 +96,7 @@ fn overview_snapshots() {
         page.close_task.spawn(
             move || {
                 task_release.wait();
+                Ok(())
             },
             ctx,
         );
@@ -209,6 +212,10 @@ fn error_toast_aligns_with_the_app_shell_geometry() {
 #[test]
 fn error_toast_retry_routes_back_to_the_failed_selection_page() {
     let mut harness = overview_harness(false, false);
+    harness.state_mut().app_state.creds = Some(Credentials {
+        username: "representative.user".to_owned(),
+        password: "representative-password".to_owned(),
+    });
     harness.state_mut().toast.show_error(
         "Could not load projects.".to_owned(),
         modama_agent_gui::actions::RetryAction::FetchProjects,
@@ -352,7 +359,9 @@ fn connecting_snapshot() {
             connecting.connect_task.spawn(
                 move || {
                     task_release.wait();
-                    Ok(())
+                    Err(ServiceError::Transport(
+                        "connecting snapshot complete".to_owned(),
+                    ))
                 },
                 cc.egui_ctx.clone(),
             );

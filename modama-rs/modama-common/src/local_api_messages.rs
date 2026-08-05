@@ -1,7 +1,18 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::messages::Share;
+/// The identity configured for this local agent.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+#[serde(tag = "type")]
+pub enum APIAgentIdentity {
+    Anonymous {
+        hostname: String,
+    },
+    AgentId {
+        agent_name: String,
+        resource_name: String,
+    },
+}
 
 /// Local system users can ask the agent for the current foreground share. This
 /// doesn't have to contain credentials, most important is some kind of identity
@@ -11,6 +22,15 @@ use crate::messages::Share;
 pub enum APICurrentForegroundShare {
     None,
     Share {
+        /// Stable identifier used to close this share.
+        share_id: String,
+
+        /// Project derived from the share destination.
+        project: String,
+
+        /// Session derived from the share destination.
+        session: String,
+
         /// The path in the data management that is exported with this Share
         dest_path: String,
 
@@ -22,14 +42,26 @@ pub enum APICurrentForegroundShare {
 /// Response when successfully creating a new ingest share.
 #[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APICreateShareResponse {
-    pub share: Share,
+    pub share_id: String,
+    pub project: String,
+    pub session: String,
+    pub dest_path: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+pub struct APIProjectSummary {
+    pub name: String,
+    pub owner: String,
+    pub members: Vec<String>,
+    /// Last modification as an integer Unix timestamp.
+    pub modified_at: i64,
 }
 
 /// Response listing projects the current user has access to,
 /// with the intent of creating a session or
 #[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APIListProjectsResponse {
-    pub projects: Vec<String>,
+    pub projects: Vec<APIProjectSummary>,
 }
 
 /// Response listing existing sessions in the given project

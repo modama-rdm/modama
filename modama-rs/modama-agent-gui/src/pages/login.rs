@@ -1,5 +1,5 @@
 use eframe::egui::{self, RichText, TextEdit};
-use std::time::Duration;
+use std::sync::Arc;
 
 use crate::{
     actions::{Action, RetryAction, TaskFailure},
@@ -9,23 +9,21 @@ use crate::{
         display_error,
         forms::labeled_text_input,
     },
+    service::{AgentService, ServiceError, StubAgentService},
     state::Credentials,
     styles,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct LoginRequest {
     pub credentials: Credentials,
+    service: Arc<dyn AgentService>,
 }
 
 impl LoginRequest {
-    pub fn execute(&self) -> Result<Credentials, String> {
-        crate::simulated_work::sleep(Duration::from_millis(500));
-        if self.credentials.username.trim() == "stupid" {
-            Err("Username is stupid".to_string())
-        } else {
-            Ok(self.credentials.clone())
-        }
+    pub fn execute(&self) -> Result<Credentials, ServiceError> {
+        self.service.login(&self.credentials)?;
+        Ok(self.credentials.clone())
     }
 }
 
@@ -33,7 +31,8 @@ pub struct PageLogin {
     pub username: String,
     pub password: String,
     pub login_error: Option<String>,
-    pub login_task: AsyncState<Result<Credentials, String>>,
+    pub login_task: AsyncState<Result<Credentials, ServiceError>>,
+    service: Arc<dyn AgentService>,
     focus_username_on_entry: bool,
 }
 
@@ -45,11 +44,16 @@ impl Default for PageLogin {
 
 impl PageLogin {
     pub fn new() -> Self {
+        Self::with_service(StubAgentService::shared())
+    }
+
+    pub fn with_service(service: Arc<dyn AgentService>) -> Self {
         Self {
             username: String::new(),
             password: String::new(),
             login_error: None,
             login_task: AsyncState::Idle,
+            service,
             focus_username_on_entry: true,
         }
     }
@@ -157,6 +161,7 @@ impl PageLogin {
                 username: self.username.clone(),
                 password: self.password.clone(),
             },
+            service: Arc::clone(&self.service),
         };
         self.login_task.spawn(move || req.execute(), ctx);
     }
@@ -167,7 +172,10 @@ impl PageLogin {
                 if let Some(res) = task.take_ready() {
                     match res {
                         Ok(creds) => return Action::LoginSuccess { creds },
-                        Err(error) => self.login_error = Some(error),
+                        Err(ServiceError::Unauthorized) => {
+                            self.login_error = Some("Invalid username or password.".to_owned())
+                        }
+                        Err(error) => self.login_error = Some(error.to_string()),
                     }
                 }
             }
@@ -224,6 +232,7 @@ mod tests {
                 username: "alex".to_string(),
                 password: "pass".to_string(),
             },
+            service: StubAgentService::shared(),
         };
         let res = req.execute();
         assert!(res.is_ok());
@@ -237,6 +246,7 @@ mod tests {
                 username: "stupid".to_string(),
                 password: "pass".to_string(),
             },
+            service: StubAgentService::shared(),
         };
         let res = req.execute();
         assert!(res.is_err());

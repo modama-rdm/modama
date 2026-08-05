@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
@@ -31,21 +33,20 @@ fn main() {
 
     generate_api_client(&manifest_dir);
 
-    let source = fs::read_to_string(&design_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", design_path.display()));
-    let front_matter = extract_front_matter(&source)
-        .unwrap_or_else(|error| panic!("failed to read DESIGN.md front matter: {error}"));
+    let source = fs::read_to_string(&design_path).expect("failed to read DESIGN.md");
+    let front_matter =
+        extract_front_matter(&source).expect("failed to read DESIGN.md front matter");
     let design = match front_matter {
-        Some(front_matter) => serde_yaml::from_str(front_matter)
-            .unwrap_or_else(|error| panic!("failed to parse DESIGN.md front matter: {error}")),
+        Some(front_matter) => {
+            serde_yaml::from_str(front_matter).expect("failed to parse DESIGN.md front matter")
+        }
         None => DesignDocument::default(),
     };
 
-    let generated = generate_styles(&design).unwrap_or_else(|error| panic!("{error}"));
+    let generated = generate_styles(&design).expect("failed to generate design styles");
     let output_path = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set by Cargo"))
         .join("design_styles.rs");
-    fs::write(&output_path, generated)
-        .unwrap_or_else(|error| panic!("failed to write {}: {error}", output_path.display()));
+    fs::write(&output_path, generated).expect("failed to write generated design styles");
 }
 
 fn generate_api_client(manifest_dir: &std::path::Path) {
@@ -54,16 +55,14 @@ fn generate_api_client(manifest_dir: &std::path::Path) {
     let schema_path = manifest_dir.join("../modama-agent/openapi.json");
     println!("cargo:rerun-if-changed={}", schema_path.display());
 
-    let source = fs::read_to_string(&schema_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", schema_path.display()));
-    let schema: serde_json::Value = serde_json::from_str(&source)
-        .unwrap_or_else(|error| panic!("failed to parse {}: {error}", schema_path.display()));
+    let source = fs::read_to_string(&schema_path).expect("failed to read OpenAPI schema");
+    let schema: serde_json::Value =
+        serde_json::from_str(&source).expect("failed to parse OpenAPI schema");
 
-    let mut analyzer = SchemaAnalyzer::new(schema)
-        .unwrap_or_else(|error| panic!("failed to analyze OpenAPI schema: {error}"));
+    let mut analyzer = SchemaAnalyzer::new(schema).expect("failed to initialize schema analyzer");
     let mut analysis = analyzer
         .analyze()
-        .unwrap_or_else(|error| panic!("failed to analyze OpenAPI schema: {error}"));
+        .expect("failed to analyze OpenAPI schema");
     let generator = CodeGenerator::new(GeneratorConfig {
         enable_async_client: true,
         enable_sse_client: false,
@@ -72,22 +71,19 @@ fn generate_api_client(manifest_dir: &std::path::Path) {
     });
     let generated = generator
         .generate_all(&mut analysis)
-        .unwrap_or_else(|error| panic!("failed to generate API client: {error}"));
+        .expect("failed to generate API client");
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set by Cargo"))
         .join("generated");
-    fs::create_dir_all(&out_dir)
-        .unwrap_or_else(|error| panic!("failed to create {}: {error}", out_dir.display()));
+    fs::create_dir_all(&out_dir).expect("failed to create generated API client directory");
 
     for file in generated.files {
         let output_path = out_dir.join(&file.path);
         if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent)
-                .unwrap_or_else(|error| panic!("failed to create {}: {error}", parent.display()));
+            fs::create_dir_all(parent).expect("failed to create generated API client subdirectory");
         }
         let content = strip_leading_comments_and_attrs(&file.content);
-        fs::write(&output_path, content)
-            .unwrap_or_else(|error| panic!("failed to write {}: {error}", output_path.display()));
+        fs::write(&output_path, content).expect("failed to write generated API client file");
     }
 }
 

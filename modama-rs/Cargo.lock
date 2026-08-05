@@ -3342,6 +3342,7 @@ dependencies = [
  "base64",
  "clap",
  "csscolorparser",
+ "directories",
  "eframe",
  "egui-phosphor",
  "egui_extras",
@@ -3361,7 +3362,9 @@ dependencies = [
  "thiserror 2.0.19",
  "time",
  "tokio",
+ "toml 0.9.12+spec-1.1.0",
  "url",
+ "windows",
 ]
 
 [[package]]

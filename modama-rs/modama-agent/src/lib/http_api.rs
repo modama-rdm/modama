@@ -19,12 +19,23 @@ use crate::local_http_service::{get_auth, ApiState, LocalAPIError};
 
 use modama_common::{
     local_api_messages::{
-        APICreateSessionRequest, APICreateSessionResponse, APICreateShareResponse,
-        APICurrentForegroundShare, APIHealthCheckResponse, APIListProjectsResponse,
-        APIListSessionsResponse, APILoginResponse,
+        APIAgentIdentity, APICreateSessionRequest, APICreateSessionResponse,
+        APICreateShareResponse, APICurrentForegroundShare, APIHealthCheckResponse,
+        APIListProjectsResponse, APIListSessionsResponse, APILoginResponse, APIProjectSummary,
     },
     mgmt_client::MgmtClient,
 };
+
+fn project_and_session(dest_path: &str) -> Result<(String, String), String> {
+    let mut components = dest_path.split('/').filter(|part| !part.is_empty()).rev();
+    let session = components
+        .next()
+        .ok_or_else(|| format!("share destination has no session: {dest_path:?}"))?;
+    let project = components
+        .next()
+        .ok_or_else(|| format!("share destination has no project: {dest_path:?}"))?;
+    Ok((project.to_owned(), session.to_owned()))
+}
 
 #[utoipa::path(
     get,
@@ -34,25 +45,53 @@ use modama_common::{
     responses((status = 200, description = "Current foreground share", body = APICurrentForegroundShare))
 )]
 /// Query for the current foreground share
-async fn api_shares_foreground(
-    State(api_state): State<ApiState>,
-) -> Json<APICurrentForegroundShare> {
-    Json(
-        match &api_state.state.lock().await.current_shares.foreground_share {
-            None => APICurrentForegroundShare::None,
-            Some(s) => match s.mount_path.to_str() {
-                None => {
-                    let p = s.mount_path.to_string_lossy();
-                    warn!("Mount path {p} contains invalid unicode, cannot get foreground share!");
-                    APICurrentForegroundShare::None
-                }
-                Some(mount_path) => APICurrentForegroundShare::Share {
+async fn api_shares_foreground(State(api_state): State<ApiState>) -> axum::response::Response {
+    let response = match &api_state.state.lock().await.current_shares.foreground_share {
+        None => APICurrentForegroundShare::None,
+        Some(s) => match s.mount_path.to_str() {
+            None => {
+                let p = s.mount_path.to_string_lossy();
+                warn!("Mount path {p} contains invalid unicode, cannot get foreground share!");
+                APICurrentForegroundShare::None
+            }
+            Some(mount_path) => {
+                let (project, session) = match project_and_session(&s.share.dest_path) {
+                    Ok(parts) => parts,
+                    Err(error) => return LocalAPIError::InvalidResponse(error).into_response(),
+                };
+                APICurrentForegroundShare::Share {
+                    share_id: s.share.share_id.clone(),
+                    project,
+                    session,
                     dest_path: s.share.dest_path.to_owned(),
                     mount_path: mount_path.to_owned(),
-                },
-            },
+                }
+            }
         },
-    )
+    };
+    Json(response).into_response()
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/identity/",
+    operation_id = "get_identity",
+    params(("X-API-Version" = String, Header, description = "API version")),
+    responses((status = 200, description = "Local agent identity", body = APIAgentIdentity))
+)]
+async fn api_identity(State(api_state): State<ApiState>) -> Json<APIAgentIdentity> {
+    Json(match &api_state.state.lock().await.config.identity {
+        crate::config::MTLSIdentity::Anonymous { hostname } => APIAgentIdentity::Anonymous {
+            hostname: hostname.clone(),
+        },
+        crate::config::MTLSIdentity::AgentId {
+            agent_name,
+            resource_name,
+        } => APIAgentIdentity::AgentId {
+            agent_name: agent_name.clone(),
+            resource_name: resource_name.clone(),
+        },
+    })
 }
 
 #[utoipa::path(
@@ -100,9 +139,45 @@ async fn api_start_ingest(
         )
         .await?;
 
-    // FIXME: `dest_path` should probably be "normalized", as it is currently
-    // the raw path as it is used inside the smbdrop container
-    Ok(Json(APICreateShareResponse { share }).into_response())
+    let (project, session) =
+        project_and_session(&share.dest_path).map_err(LocalAPIError::InvalidResponse)?;
+    Ok(Json(APICreateShareResponse {
+        share_id: share.share_id,
+        project,
+        session,
+        dest_path: share.dest_path,
+    })
+    .into_response())
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/shares/{share_id}/",
+    operation_id = "delete_share",
+    params(
+        ("X-API-Version" = String, Header, description = "API version"),
+        ("share_id" = String, Path, description = "Share identifier")
+    ),
+    responses(
+        (status = 204, description = "Share deletion accepted"),
+        (status = 401, description = "Authentication failed"),
+        (status = 404, description = "Share not found")
+    ),
+    security(("basic_auth" = []))
+)]
+async fn api_delete_share(
+    Path(share_id): Path<String>,
+    State(agent_state): State<ApiState>,
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+) -> Result<StatusCode, LocalAPIError> {
+    let auth = get_auth(auth).await?;
+    let client = MgmtClient::new(
+        &agent_state.state.lock().await.config.mgmt_api_url,
+        auth.username(),
+        auth.password(),
+    )?;
+    client.delete_share(&share_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -155,7 +230,12 @@ async fn api_list_projects(
         projects: projects
             .projects
             .iter()
-            .map(|adhoc_project| adhoc_project.name.clone())
+            .map(|project| APIProjectSummary {
+                name: project.name.clone(),
+                owner: project.owner.clone(),
+                members: project.members.clone(),
+                modified_at: project.mtime as i64,
+            })
             .collect(),
     };
 
@@ -259,6 +339,8 @@ fn api_routes() -> VersionedRouterBuilder<ApiState> {
             versions!("1.0.0.."),
             versioned_route!(api_shares_foreground),
         )
+        .route(versions!("1.0.0.."), versioned_route!(api_identity))
+        .route(versions!("1.0.0.."), versioned_route!(api_delete_share))
         .route(versions!("1.0.0.."), versioned_route!(api_health))
         .route(versions!("1.0.0.."), versioned_route!(api_login))
         .route(versions!("1.0.0.."), versioned_route!(api_list_projects))

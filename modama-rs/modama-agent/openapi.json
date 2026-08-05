@@ -44,6 +44,45 @@
         "x-introduced-in-version": "1.0.0"
       }
     },
+    "/api/identity/": {
+      "get": {
+        "operationId": "get_identity",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Local agent identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIAgentIdentity"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          }
+        },
+        "x-introduced-in-version": "1.0.0"
+      }
+    },
     "/api/login/": {
       "post": {
         "operationId": "login",
@@ -371,10 +410,107 @@
         },
         "x-introduced-in-version": "1.0.0"
       }
+    },
+    "/api/shares/{share_id}/": {
+      "delete": {
+        "operationId": "delete_share",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "share_id",
+            "in": "path",
+            "description": "Share identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Share deletion accepted"
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "404": {
+            "description": "Share not found"
+          }
+        },
+        "security": [
+          {
+            "basic_auth": []
+          }
+        ],
+        "x-introduced-in-version": "1.0.0"
+      }
     }
   },
   "components": {
     "schemas": {
+      "APIAgentIdentity": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "hostname",
+              "type"
+            ],
+            "properties": {
+              "hostname": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Anonymous"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "agent_name",
+              "resource_name",
+              "type"
+            ],
+            "properties": {
+              "agent_name": {
+                "type": "string"
+              },
+              "resource_name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "AgentId"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The identity configured for this local agent."
+      },
       "APICreateSessionRequest": {
         "type": "object",
         "description": "Create a new session in the given project\n(`project_name` is part of the URL)",
@@ -407,11 +543,23 @@
         "type": "object",
         "description": "Response when successfully creating a new ingest share.",
         "required": [
-          "share"
+          "share_id",
+          "project",
+          "session",
+          "dest_path"
         ],
         "properties": {
-          "share": {
-            "$ref": "#/components/schemas/Share"
+          "dest_path": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "share_id": {
+            "type": "string"
           }
         }
       },
@@ -434,6 +582,9 @@
           {
             "type": "object",
             "required": [
+              "share_id",
+              "project",
+              "session",
               "dest_path",
               "mount_path",
               "type"
@@ -446,6 +597,18 @@
               "mount_path": {
                 "type": "string",
                 "description": "Where the share is mounted on the local system"
+              },
+              "project": {
+                "type": "string",
+                "description": "Project derived from the share destination."
+              },
+              "session": {
+                "type": "string",
+                "description": "Session derived from the share destination."
+              },
+              "share_id": {
+                "type": "string",
+                "description": "Stable identifier used to close this share."
               },
               "type": {
                 "type": "string",
@@ -487,7 +650,7 @@
           "projects": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/APIProjectSummary"
             }
           }
         }
@@ -522,63 +685,31 @@
           }
         }
       },
-      "Share": {
+      "APIProjectSummary": {
         "type": "object",
         "required": [
-          "share_id",
-          "share_name",
-          "dest_path",
-          "created_timestamp",
-          "username",
-          "password",
-          "uid",
-          "gid"
+          "name",
+          "owner",
+          "members",
+          "modified_at"
         ],
         "properties": {
-          "created_timestamp": {
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "modified_at": {
             "type": "integer",
             "format": "int64",
-            "description": "When was this share created? Unix timestamp",
-            "minimum": 0
+            "description": "Last modification as an integer Unix timestamp."
           },
-          "dest_path": {
-            "type": "string",
-            "description": "The path in the data management that is exported with this Share"
+          "name": {
+            "type": "string"
           },
-          "gid": {
-            "type": "integer",
-            "format": "int32",
-            "description": "the underlying unix group for which the share is created",
-            "minimum": 0
-          },
-          "password": {
-            "type": "string",
-            "description": "Password for connecting (temporary)"
-          },
-          "resource": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "the name of the Resource this share belongs to; None if it wasn't\ncreated for a Resource"
-          },
-          "share_id": {
-            "type": "string",
-            "description": "A UUID for this share"
-          },
-          "share_name": {
-            "type": "string",
-            "description": "The full share name; the first path element of the SMB URL"
-          },
-          "uid": {
-            "type": "integer",
-            "format": "int32",
-            "description": "the underlying unix user for which the share is created",
-            "minimum": 0
-          },
-          "username": {
-            "type": "string",
-            "description": "Username for connecting (temporary)"
+          "owner": {
+            "type": "string"
           }
         }
       },
@@ -687,4 +818,3 @@
     }
   }
 }
-

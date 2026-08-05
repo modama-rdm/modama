@@ -1,5 +1,5 @@
 use eframe::egui::{self, Label, RichText};
-use std::time::Duration;
+use std::sync::Arc;
 
 use crate::{
     actions::{Action, RetryAction, TaskFailure},
@@ -9,26 +9,21 @@ use crate::{
         dialogs::{destructive_confirmation_dialog, ConfirmationDialogAction},
         page_heading,
     },
-    state::ActiveSession,
+    service::{AgentService, ServiceError, StubAgentService},
+    state::{ActiveSession, Credentials},
     styles,
 };
 
 const CLOSE_CONFIRMATION_ID: &str = "close-session-confirmation";
 
-#[derive(Debug, Clone)]
-pub struct CloseSessionRequest;
-
-impl CloseSessionRequest {
-    pub fn execute(&self) {
-        crate::simulated_work::sleep(Duration::from_millis(500));
-    }
-}
-
 pub struct PageOverview {
-    pub close_task: AsyncState<()>,
+    pub close_task: AsyncState<Result<(), ServiceError>>,
     close_confirmation_open: bool,
     focus_confirmation_cancel: bool,
     focus_on_entry: bool,
+    service: Arc<dyn AgentService>,
+    last_close: Option<(Credentials, ActiveSession)>,
+    login_required: bool,
 }
 
 impl Default for PageOverview {
@@ -39,11 +34,18 @@ impl Default for PageOverview {
 
 impl PageOverview {
     pub fn new() -> Self {
+        Self::with_service(StubAgentService::shared())
+    }
+
+    pub fn with_service(service: Arc<dyn AgentService>) -> Self {
         Self {
             close_task: AsyncState::Idle,
             close_confirmation_open: false,
             focus_confirmation_cancel: false,
             focus_on_entry: true,
+            service,
+            last_close: None,
+            login_required: false,
         }
     }
 
@@ -52,6 +54,7 @@ impl PageOverview {
         ui: &mut egui::Ui,
         _frame: &mut eframe::Frame,
         session: &Option<ActiveSession>,
+        credentials: &Option<Credentials>,
     ) -> Action {
         page_heading(ui, "Overview");
         ui.add_space(styles::content_card_top_margin_adjustment());
@@ -59,7 +62,7 @@ impl PageOverview {
         if let Some(session) = session {
             self.show_active_session_card(ui, session);
             if self.close_confirmation_open {
-                self.show_close_confirmation(ui, session);
+                self.show_close_confirmation(ui, session, credentials);
             }
         } else {
             self.close_confirmation_open = false;
@@ -72,10 +75,22 @@ impl PageOverview {
     }
 
     pub fn poll(&mut self) -> Action {
+        if std::mem::take(&mut self.login_required) {
+            return Action::GoToLogin;
+        }
         match self.close_task.poll() {
             Ok(task) => {
-                if task.take_ready().is_some() {
-                    Action::CloseSessionSuccess
+                if let Some(result) = task.take_ready() {
+                    match result {
+                        Ok(()) => Action::CloseSessionSuccess,
+                        Err(error) => {
+                            log::error!("close-session failed: {error}");
+                            Action::TaskFailed(TaskFailure::Stay {
+                                message: "Could not close the ingest session.".to_owned(),
+                                retry: RetryAction::CloseSession,
+                            })
+                        }
+                    }
                 } else {
                     Action::None
                 }
@@ -96,8 +111,9 @@ impl PageOverview {
 
     pub fn retry_close_session(&mut self, ctx: egui::Context) {
         self.close_task.reset();
-        self.close_task
-            .spawn(move || CloseSessionRequest.execute(), ctx);
+        if let Some((credentials, session)) = self.last_close.clone() {
+            self.spawn_close(credentials, session, ctx);
+        }
     }
 
     fn show_create_card(&mut self, ui: &mut egui::Ui) -> bool {
@@ -170,7 +186,12 @@ impl PageOverview {
         });
     }
 
-    fn show_close_confirmation(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {
+    fn show_close_confirmation(
+        &mut self,
+        ui: &mut egui::Ui,
+        session: &ActiveSession,
+        credentials: &Option<Credentials>,
+    ) {
         let message = format!(
             "This will stop incoming data for session {} in project {}. Data already stored will \
              not be deleted.",
@@ -194,10 +215,26 @@ impl PageOverview {
             }
             ConfirmationDialogAction::Confirm => {
                 self.close_confirmation_open = false;
-                self.close_task
-                    .spawn(move || CloseSessionRequest.execute(), ui.ctx().clone());
+                if let Some(credentials) = credentials.clone() {
+                    self.last_close = Some((credentials.clone(), session.clone()));
+                    self.spawn_close(credentials, session.clone(), ui.ctx().clone());
+                } else {
+                    self.login_required = true;
+                    ui.ctx().request_repaint();
+                }
             }
         }
+    }
+
+    fn spawn_close(
+        &mut self,
+        credentials: Credentials,
+        session: ActiveSession,
+        ctx: egui::Context,
+    ) {
+        let service = Arc::clone(&self.service);
+        self.close_task
+            .spawn(move || service.close_session(&credentials, &session), ctx);
     }
 }
 
@@ -230,11 +267,6 @@ fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn close_session_request_completes() {
-        CloseSessionRequest.execute();
-    }
 
     #[test]
     fn test_overview_poll_returns_none() {

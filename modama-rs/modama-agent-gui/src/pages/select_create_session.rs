@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::sync::Arc;
 
 use eframe::egui::{
     self, text::LayoutJob, Align, FontFamily, FontId, Label, Layout, Response, RichText, Sense,
@@ -24,55 +24,13 @@ use crate::{
         list_view::{show_roving_list, RovingListOutput, RovingListState},
         page_heading,
     },
+    service::{AgentService, ServiceError, StubAgentService},
     state::ActiveSession,
+    state::Credentials,
     styles,
 };
 
 const SESSION_ROW_HEIGHT: f32 = 48.0;
-const ASYNC_REJECTION_SENTINEL: &str = "forbidden";
-const ASYNC_REJECTION_MESSAGE: &str = "Session name was rejected by the server.";
-
-#[derive(Debug, Clone)]
-pub struct FetchSessionsRequest {
-    pub project: String,
-}
-
-impl FetchSessionsRequest {
-    pub fn execute(&self) -> Vec<String> {
-        crate::simulated_work::sleep(Duration::from_millis(500));
-        vec![
-            format!("{}-holo-stacks", "2026-06-16"),
-            format!("{}-holo-stacks", "2026-06-18"),
-            format!("{}-holo-stacks", "2026-06-20"),
-            format!("{}-holo-stacks", "2026-06-26"),
-        ]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateIngestRequest {
-    pub project: String,
-    pub session: String,
-}
-
-impl CreateIngestRequest {
-    pub fn execute(&self) -> ActiveSession {
-        crate::simulated_work::sleep(Duration::from_millis(500));
-
-        ActiveSession {
-            project: self.project.clone(),
-            session: self.session.clone(),
-            mount_path: Some(format!("/todo/{}/{}/", self.project, self.session)),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateSessionAndIngestRequest {
-    pub project: String,
-    pub session: String,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CreateSessionError {
     #[error("Please enter a session name.")]
@@ -81,24 +39,8 @@ pub enum CreateSessionError {
     ContainsSlash,
     #[error("{0}")]
     Server(String),
-}
-
-impl CreateSessionAndIngestRequest {
-    pub fn execute(&self) -> Result<ActiveSession, CreateSessionError> {
-        crate::simulated_work::sleep(Duration::from_millis(500));
-        let session = validate_session_name(&self.session)?;
-        if session.to_lowercase().contains(ASYNC_REJECTION_SENTINEL) {
-            return Err(CreateSessionError::Server(
-                ASYNC_REJECTION_MESSAGE.to_owned(),
-            ));
-        }
-
-        Ok(CreateIngestRequest {
-            project: self.project.clone(),
-            session,
-        }
-        .execute())
-    }
+    #[error("Session was created, but the ingest share could not be started: {0}")]
+    Start(String),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -122,17 +64,34 @@ pub struct PageSelectCreateSession {
     pub selected_session: Option<String>,
     pub new_session_input: String,
     pub create_session_error: Option<CreateSessionError>,
-    pub sessions_task: AsyncState<Vec<String>>,
-    pub create_ingest_task: AsyncState<ActiveSession>,
+    pub sessions_task: AsyncState<Result<Vec<String>, ServiceError>>,
+    pub create_ingest_task: AsyncState<Result<ActiveSession, ServiceError>>,
     pub create_session_task: AsyncState<Result<ActiveSession, CreateSessionError>>,
     pub available_sessions: Vec<String>,
     mode: SessionPageMode,
     focused_session: RovingListState,
     focus_target: SessionFocusTarget,
+    service: Arc<dyn AgentService>,
+    credentials: Credentials,
 }
 
 impl PageSelectCreateSession {
     pub fn new(project: String) -> Self {
+        Self::with_service(
+            project,
+            StubAgentService::shared(),
+            Credentials {
+                username: "representative.user".to_owned(),
+                password: "representative-password".to_owned(),
+            },
+        )
+    }
+
+    pub fn with_service(
+        project: String,
+        service: Arc<dyn AgentService>,
+        credentials: Credentials,
+    ) -> Self {
         Self {
             project,
             selected_session: None,
@@ -145,17 +104,20 @@ impl PageSelectCreateSession {
             mode: SessionPageMode::SelectExisting,
             focused_session: RovingListState::default(),
             focus_target: SessionFocusTarget::ExistingList,
+            service,
+            credentials,
         }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         self.handle_keyboard_shortcuts(ui);
         if self.sessions_task.is_idle() && self.available_sessions.is_empty() {
-            let req = FetchSessionsRequest {
-                project: self.project.clone(),
-            };
+            let project = self.project.clone();
+            let service = Arc::clone(&self.service);
+            let credentials = self.credentials.clone();
             let ctx = ui.ctx().clone();
-            self.sessions_task.spawn(move || req.execute(), ctx);
+            self.sessions_task
+                .spawn(move || service.list_sessions(&credentials, &project), ctx);
         }
 
         if let Some(stage) = flow_navigation(ui, FlowStage::Session) {
@@ -429,11 +391,13 @@ impl PageSelectCreateSession {
             return;
         }
         if let Some(session) = self.selected_session.clone() {
-            let task = CreateIngestRequest {
-                project: self.project.clone(),
-                session,
-            };
-            self.create_ingest_task.spawn(move || task.execute(), ctx);
+            let project = self.project.clone();
+            let service = Arc::clone(&self.service);
+            let credentials = self.credentials.clone();
+            self.create_ingest_task.spawn(
+                move || service.start_ingest(&credentials, &project, &session),
+                ctx,
+            );
         }
     }
 
@@ -447,8 +411,19 @@ impl PageSelectCreateSession {
     pub fn poll(&mut self) -> Action {
         match self.sessions_task.poll() {
             Ok(task) => {
-                if let Some(sessions) = task.take_ready() {
-                    self.available_sessions = sessions;
+                if let Some(result) = task.take_ready() {
+                    match result {
+                        Ok(sessions) => self.available_sessions = sessions,
+                        Err(error) => {
+                            log::error!("session-fetch failed: {error}");
+                            return Action::TaskFailed(TaskFailure::ReturnToOverview {
+                                message: "Could not load sessions.".to_owned(),
+                                retry: RetryAction::FetchSessions {
+                                    project: self.project.clone(),
+                                },
+                            });
+                        }
+                    }
                 }
             }
             Err(error) => {
@@ -463,10 +438,28 @@ impl PageSelectCreateSession {
         }
         match self.create_ingest_task.poll() {
             Ok(task) => {
-                if let Some(active_ingest) = task.take_ready() {
-                    return Action::SelectSession {
-                        session: active_ingest,
-                    };
+                if let Some(result) = task.take_ready() {
+                    match result {
+                        Ok(active_ingest) => {
+                            return Action::SelectSession {
+                                session: active_ingest,
+                            }
+                        }
+                        Err(error) => {
+                            log::error!("create-ingest failed: {error}");
+                            let session = self
+                                .selected_session
+                                .clone()
+                                .unwrap_or_else(|| self.new_session_input.clone());
+                            return Action::TaskFailed(TaskFailure::Stay {
+                                message: "Could not start the ingest session.".to_owned(),
+                                retry: RetryAction::CreateIngest {
+                                    project: self.project.clone(),
+                                    session,
+                                },
+                            });
+                        }
+                    }
                 }
             }
             Err(error) => {
@@ -498,6 +491,12 @@ impl PageSelectCreateSession {
                                 session: active_ingest,
                             };
                         }
+                        Err(CreateSessionError::Start(_error)) => {
+                            return Action::TaskFailed(TaskFailure::Stay {
+                                message: "The session was created, but its ingest share could not be started.".to_owned(),
+                                retry: RetryAction::CreateIngest { project: self.project.clone(), session: self.new_session_input.trim().to_owned() },
+                            });
+                        }
                         Err(error) => self.create_session_error = Some(error),
                     }
                 }
@@ -519,8 +518,10 @@ impl PageSelectCreateSession {
     pub fn retry_create_ingest(&mut self, project: String, session: String, ctx: egui::Context) {
         self.selected_session = Some(session.clone());
         self.create_ingest_task.reset();
+        let service = Arc::clone(&self.service);
+        let credentials = self.credentials.clone();
         self.create_ingest_task.spawn(
-            move || CreateIngestRequest { project, session }.execute(),
+            move || service.start_ingest(&credentials, &project, &session),
             ctx,
         );
     }
@@ -541,9 +542,25 @@ impl PageSelectCreateSession {
         ctx: egui::Context,
     ) {
         self.create_session_error = None;
+        let session = match validate_session_name(&session) {
+            Ok(session) => session,
+            Err(error) => {
+                self.create_session_error = Some(error);
+                return;
+            }
+        };
         self.create_session_task.reset();
+        let service = Arc::clone(&self.service);
+        let credentials = self.credentials.clone();
         self.create_session_task.spawn(
-            move || CreateSessionAndIngestRequest { project, session }.execute(),
+            move || {
+                service
+                    .create_session(&credentials, &project, &session)
+                    .map_err(|error| CreateSessionError::Server(error.to_string()))?;
+                service
+                    .start_ingest(&credentials, &project, &session)
+                    .map_err(|error| CreateSessionError::Start(error.to_string()))
+            },
             ctx,
         );
     }
@@ -807,15 +824,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_fetch_sessions_request() {
-        let req = FetchSessionsRequest {
-            project: "test".to_string(),
-        };
-        let res = req.execute();
-        assert_eq!(res.len(), 4);
-    }
-
-    #[test]
     fn formats_session_name_prefix() {
         let date = Date::from_calendar_date(2026, Month::January, 3).unwrap();
         assert_eq!(session_name_prefix(date), "2026-01-03-");
@@ -835,32 +843,5 @@ mod tests {
             validate_session_name("2026-07-30/run"),
             Err(CreateSessionError::ContainsSlash)
         );
-    }
-
-    #[test]
-    fn create_request_can_simulate_an_api_rejection() {
-        let rejected = CreateSessionAndIngestRequest {
-            project: "test".to_owned(),
-            session: "2026-07-30-FORBIDDEN-run".to_owned(),
-        }
-        .execute();
-        assert_eq!(
-            rejected,
-            Err(CreateSessionError::Server(
-                ASYNC_REJECTION_MESSAGE.to_owned()
-            ))
-        );
-    }
-
-    #[test]
-    fn create_request_starts_ingest_after_success() {
-        let result = CreateSessionAndIngestRequest {
-            project: "test".to_owned(),
-            session: "  2026-07-30-run  ".to_owned(),
-        }
-        .execute()
-        .unwrap();
-        assert_eq!(result.project, "test");
-        assert_eq!(result.session, "2026-07-30-run");
     }
 }

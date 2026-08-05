@@ -1,5 +1,6 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveSession {
+    pub share_id: String,
     pub session: String,
     pub project: String,
     pub mount_path: Option<String>,

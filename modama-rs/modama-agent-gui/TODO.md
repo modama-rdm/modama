@@ -68,11 +68,11 @@
 - [x] BUG: when clicking on a project or session in the list, the item should also have keyboard focus
     - right now, the item is only selected and doesn't get focus
 - [x] async fetcher should allow to distinguish between "idle before first fetch" and "idle some time after", so we don't have to track if it is the initial fetch outside (like in the select projects view right now)
-- [ ] once versioned axum is feasible, 
-    - [ ] update modama-agent local API to have versioned endpoints and schemas
-    - [ ] auto-generate a rust client for it
-    - [ ] have the GUI use that client
-    - [ ] mock the API for the GUI tests? 
+- [x] adopt the versioned local API
+    - [x] update modama-agent local API endpoints and schemas
+    - [x] auto-generate a Rust client for it
+    - [x] have the GUI use that client
+    - [x] use a deterministic stub service for GUI tests
 - [ ] general design fixes
     - [ ] review vertical and horizontal flow of the design? are there elements that should be aligned which are not?
     - [ ] hovered card rows are subtle, thats ok, but they overlay the top border. that looks dumb on displays with too much contrast

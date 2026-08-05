@@ -26,18 +26,30 @@ pub struct AgentClient {
 }
 
 impl AgentClient {
-    pub fn new(
-        base_url: impl Into<String>,
-        username: impl AsRef<str>,
-        password: impl AsRef<str>,
-    ) -> Self {
+    pub fn new(base_url: impl Into<String>) -> Self {
+        Self {
+            inner: GeneratedClient::new().with_base_url(base_url),
+        }
+    }
+
+    pub fn with_basic_auth(&self, username: impl AsRef<str>, password: impl AsRef<str>) -> Self {
         let credentials = format!("{}:{}", username.as_ref(), password.as_ref());
         let authorization = format!("Basic {}", STANDARD.encode(credentials));
         Self {
-            inner: GeneratedClient::new()
-                .with_base_url(base_url)
+            inner: self
+                .inner
+                .clone()
                 .with_header("Authorization", authorization),
         }
+    }
+
+    pub async fn get_identity(
+        &self,
+    ) -> Result<
+        APIAgentIdentity,
+        generated::client::ApiOpError<generated::client::GetIdentityApiError>,
+    > {
+        self.inner.get_identity(API_VERSION).await
     }
 
     pub async fn get_foreground_share(
@@ -111,6 +123,13 @@ impl AgentClient {
             .start_ingest(project_name, session_name, API_VERSION)
             .await
     }
+
+    pub async fn delete_share(
+        &self,
+        share_id: impl AsRef<str>,
+    ) -> Result<(), generated::client::ApiOpError<generated::client::DeleteShareApiError>> {
+        self.inner.delete_share(share_id, API_VERSION).await
+    }
 }
 
 #[cfg(test)]
@@ -130,10 +149,48 @@ mod tests {
             .create_async()
             .await;
 
-        let client = AgentClient::new(server.url(), "alice", "secret");
+        let client = AgentClient::new(server.url()).with_basic_auth("alice", "secret");
         let response = client.login().await?;
 
         assert_eq!(response.username, "alice");
+        mock.assert_async().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn identity_sends_api_version_without_credentials(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/identity/")
+            .match_header("x-api-version", "1.0.0")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"type":"Anonymous","hostname":"workstation"}"#)
+            .create_async()
+            .await;
+
+        AgentClient::new(server.url()).get_identity().await?;
+        mock.assert_async().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delete_accepts_204_and_sends_auth_and_version(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("DELETE", "/api/shares/share-123/")
+            .match_header("authorization", "Basic YWxpY2U6c2VjcmV0")
+            .match_header("x-api-version", "1.0.0")
+            .with_status(204)
+            .create_async()
+            .await;
+
+        AgentClient::new(server.url())
+            .with_basic_auth("alice", "secret")
+            .delete_share("share-123")
+            .await?;
         mock.assert_async().await;
         Ok(())
     }

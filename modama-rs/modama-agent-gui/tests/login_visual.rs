@@ -4,6 +4,7 @@ use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
     pages::{Page, PageLogin},
+    service::ServiceError,
     styles,
 };
 use std::sync::{Arc, Barrier};
@@ -101,7 +102,9 @@ fn login_back_link_stays_visible_but_disabled_while_authenticating() {
         login.login_task.spawn(
             move || {
                 task_release.wait();
-                Err("pending login link test complete".to_string())
+                Err(ServiceError::Transport(
+                    "pending login link test complete".to_owned(),
+                ))
             },
             ctx,
         );
@@ -126,7 +129,9 @@ fn enter_does_not_replace_a_pending_login() {
         login.login_task.spawn(
             move || {
                 task_release.wait();
-                Err("pending login test complete".to_string())
+                Err(ServiceError::Transport(
+                    "pending login test complete".to_owned(),
+                ))
             },
             ctx,
         );
@@ -213,7 +218,9 @@ fn login_snapshots() {
         login.login_task.spawn(
             move || {
                 task_release.wait();
-                Err("pending login snapshot complete".to_string())
+                Err(ServiceError::Transport(
+                    "pending login snapshot complete".to_owned(),
+                ))
             },
             ctx,
         );
@@ -233,7 +240,9 @@ fn login_snapshots() {
         login.login_task.spawn(
             move || {
                 task_release.wait();
-                Err("focused disabled login snapshot complete".to_string())
+                Err(ServiceError::Transport(
+                    "focused disabled login snapshot complete".to_owned(),
+                ))
             },
             ctx,
         );

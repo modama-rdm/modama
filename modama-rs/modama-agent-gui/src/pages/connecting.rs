@@ -1,14 +1,15 @@
 use eframe::egui;
-use std::time::Duration;
+use std::sync::Arc;
 
 use crate::{
     actions::{Action, RetryAction, TaskFailure},
     async_state::AsyncState,
-    state::AgentIdentity,
+    service::{AgentService, ConnectedAgent, ServiceError, StubAgentService},
 };
 
 pub struct PageConnecting {
-    pub connect_task: AsyncState<Result<(), String>>,
+    pub connect_task: AsyncState<Result<ConnectedAgent, ServiceError>>,
+    service: Arc<dyn AgentService>,
 }
 
 impl Default for PageConnecting {
@@ -19,21 +20,21 @@ impl Default for PageConnecting {
 
 impl PageConnecting {
     pub fn new() -> Self {
+        Self::with_service(StubAgentService::shared())
+    }
+
+    pub fn with_service(service: Arc<dyn AgentService>) -> Self {
         Self {
             connect_task: AsyncState::Idle,
+            service,
         }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         if self.connect_task.is_idle() {
             let ctx = ui.ctx().clone();
-            self.connect_task.spawn(
-                move || {
-                    crate::simulated_work::sleep(Duration::from_millis(1500));
-                    Ok(())
-                },
-                ctx,
-            );
+            let service = Arc::clone(&self.service);
+            self.connect_task.spawn(move || service.connect(), ctx);
         }
 
         egui::Area::new(egui::Id::new("connecting-status"))
@@ -57,13 +58,20 @@ impl PageConnecting {
         match self.connect_task.poll() {
             Ok(task) => {
                 if let Some(res) = task.take_ready() {
-                    if res.is_ok() {
-                        return Action::Connected {
-                            identity: AgentIdentity::AgentId {
-                                agent_name: "k2".to_owned(),
-                                resource_name: "Holo".to_owned(),
-                            },
-                        };
+                    match res {
+                        Ok(connected) => {
+                            return Action::Connected {
+                                identity: connected.identity,
+                                session: connected.session,
+                            }
+                        }
+                        Err(error) => {
+                            log::error!("connecting failed: {error}");
+                            return Action::TaskFailed(TaskFailure::Stay {
+                                message: "Could not connect to the agent.".to_owned(),
+                                retry: RetryAction::Reconnect,
+                            });
+                        }
                     }
                 }
             }

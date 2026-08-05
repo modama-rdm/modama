@@ -1,5 +1,5 @@
 use crate::components::{avatar::avatar, dropdown};
-use std::{cmp::Ordering, fmt::Display, time::Duration};
+use std::{cmp::Ordering, fmt::Display, sync::Arc};
 
 use eframe::egui::{self, Align, Layout, RichText, Sense, Stroke, TextEdit, WidgetInfo};
 use egui_extras::{Size, StripBuilder};
@@ -22,8 +22,12 @@ use crate::{
         list_view::{show_roving_list, RovingListState},
         page_heading,
     },
+    service::{AgentService, ServiceError, StubAgentService},
+    state::Credentials,
     styles,
 };
+
+pub use crate::service::ProjectSummary;
 
 const PROJECT_ROW_HEIGHT: f32 = 64.0;
 const MEMBER_AVATAR_SIZE: f32 = 24.0;
@@ -31,14 +35,6 @@ const MAX_VISIBLE_AVATARS: usize = 5;
 const MEMBER_AVATAR_OVERLAP: f32 = 5.0;
 const MODIFIED_COLUMN_WIDTH: f32 = 126.0;
 const SORT_CONTROL_WIDTH: f32 = 172.0;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectSummary {
-    pub name: String,
-    pub owner: String,
-    pub members: Vec<String>,
-    pub modified_at: i64,
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ProjectSort {
@@ -56,24 +52,16 @@ impl Display for ProjectSort {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FetchProjectsRequest;
-
-impl FetchProjectsRequest {
-    pub fn execute(&self) -> Vec<ProjectSummary> {
-        crate::simulated_work::sleep(Duration::from_millis(500));
-        representative_projects()
-    }
-}
-
 pub struct PageSelectProject {
     pub selected_project: Option<String>,
-    pub projects_task: AsyncState<Vec<ProjectSummary>>,
+    pub projects_task: AsyncState<Result<Vec<ProjectSummary>, ServiceError>>,
     pub available_projects: Vec<ProjectSummary>,
     pub search_query: String,
     pub sort: ProjectSort,
     focused_project: RovingListState,
     focus_search_on_entry: bool,
+    service: Arc<dyn AgentService>,
+    credentials: Credentials,
 }
 
 impl Default for PageSelectProject {
@@ -84,6 +72,16 @@ impl Default for PageSelectProject {
 
 impl PageSelectProject {
     pub fn new() -> Self {
+        Self::with_service(
+            StubAgentService::shared(),
+            Credentials {
+                username: "representative.user".to_owned(),
+                password: "representative-password".to_owned(),
+            },
+        )
+    }
+
+    pub fn with_service(service: Arc<dyn AgentService>, credentials: Credentials) -> Self {
         Self {
             selected_project: None,
             projects_task: AsyncState::Idle,
@@ -92,6 +90,8 @@ impl PageSelectProject {
             sort: ProjectSort::Modified,
             focused_project: RovingListState::default(),
             focus_search_on_entry: true,
+            service,
+            credentials,
         }
     }
 
@@ -113,8 +113,10 @@ impl PageSelectProject {
     fn start_initial_fetch(&mut self, ui: &egui::Ui) {
         if self.projects_task.is_idle() && self.available_projects.is_empty() {
             let ctx = ui.ctx().clone();
+            let service = Arc::clone(&self.service);
+            let credentials = self.credentials.clone();
             self.projects_task
-                .spawn(move || FetchProjectsRequest.execute(), ctx);
+                .spawn(move || service.list_projects(&credentials), ctx);
         }
     }
 
@@ -362,8 +364,17 @@ impl PageSelectProject {
     pub fn poll(&mut self) -> Action {
         match self.projects_task.poll() {
             Ok(task) => {
-                if let Some(projects) = task.take_ready() {
-                    self.available_projects = projects;
+                if let Some(result) = task.take_ready() {
+                    match result {
+                        Ok(projects) => self.available_projects = projects,
+                        Err(error) => {
+                            log::error!("project-fetch failed: {error}");
+                            return Action::TaskFailed(TaskFailure::ReturnToOverview {
+                                message: "Could not load projects.".to_owned(),
+                                retry: RetryAction::FetchProjects,
+                            });
+                        }
+                    }
                 }
             }
             Err(error) => {

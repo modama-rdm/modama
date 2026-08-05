@@ -9,7 +9,6 @@ pub enum RetryAction {
     CreateIngest { project: String, session: String },
     CreateSession { project: String, session: String },
     CloseSession,
-    Logout,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,13 +20,22 @@ pub enum TaskFailure {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     None,
-    Connected { identity: AgentIdentity },
+    Connected {
+        identity: AgentIdentity,
+        session: Option<ActiveSession>,
+    },
     GoToLogin,
     CreateSession,
-    LoginSuccess { creds: Credentials },
+    LoginSuccess {
+        creds: Credentials,
+    },
     GoToSelectProject,
-    SelectProject { project: String },
-    SelectSession { session: ActiveSession },
+    SelectProject {
+        project: String,
+    },
+    SelectSession {
+        session: ActiveSession,
+    },
     GoToOverview,
     CloseSessionSuccess,
     LogoutSuccess,

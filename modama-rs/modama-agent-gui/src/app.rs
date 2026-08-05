@@ -1,4 +1,5 @@
 use eframe::egui::{self, vec2, Margin};
+use std::sync::Arc;
 
 use crate::{
     actions::{Action, RetryAction, TaskFailure},
@@ -6,6 +7,7 @@ use crate::{
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
     },
+    service::{AgentService, StubAgentService},
     state::AgentAppState,
     styles,
     top_bar::TopBar,
@@ -16,6 +18,7 @@ pub struct AgentGuiApp {
     pub app_state: AgentAppState,
     pub toast: ToastState,
     top_bar: TopBar,
+    service: Arc<dyn AgentService>,
 }
 
 impl Default for AgentGuiApp {
@@ -26,12 +29,44 @@ impl Default for AgentGuiApp {
 
 impl AgentGuiApp {
     pub fn new() -> Self {
+        Self::with_service(StubAgentService::shared())
+    }
+
+    pub fn with_service(service: Arc<dyn AgentService>) -> Self {
         Self {
-            page: Page::Connecting(PageConnecting::new()),
+            page: Page::Connecting(PageConnecting::with_service(Arc::clone(&service))),
             app_state: AgentAppState::new(),
             toast: ToastState::default(),
             top_bar: TopBar::default(),
+            service,
         }
+    }
+
+    fn overview_page(&self) -> Page {
+        Page::Overview(PageOverview::with_service(Arc::clone(&self.service)))
+    }
+
+    fn login_page(&self) -> Page {
+        Page::Login(PageLogin::with_service(Arc::clone(&self.service)))
+    }
+
+    fn project_page(&self) -> Option<Page> {
+        self.app_state.creds.clone().map(|credentials| {
+            Page::SelectProject(PageSelectProject::with_service(
+                Arc::clone(&self.service),
+                credentials,
+            ))
+        })
+    }
+
+    fn session_page(&self, project: String) -> Option<Page> {
+        self.app_state.creds.clone().map(|credentials| {
+            Page::SelectCreateSession(PageSelectCreateSession::with_service(
+                project,
+                Arc::clone(&self.service),
+                credentials,
+            ))
+        })
     }
 
     pub fn handle_action(&mut self, action: Action) {
@@ -39,37 +74,44 @@ impl AgentGuiApp {
             Action::None => {}
             Action::GoToLogin => {
                 self.toast.clear();
-                self.page = Page::Login(PageLogin::new());
+                self.page = self.login_page();
             }
             Action::CreateSession => {
                 self.toast.clear();
-                if self.app_state.creds.is_some() {
-                    self.page = Page::SelectProject(PageSelectProject::new());
+                if let Some(page) = self.project_page() {
+                    self.page = page;
                 } else {
-                    self.page = Page::Login(PageLogin::new());
+                    self.page = self.login_page();
                 }
             }
             Action::LoginSuccess { creds } => {
                 self.toast.clear();
-                self.app_state.creds = Some(creds);
-                self.page = Page::SelectProject(PageSelectProject::new());
+                self.app_state.creds = Some(creds.clone());
+                self.page = Page::SelectProject(PageSelectProject::with_service(
+                    Arc::clone(&self.service),
+                    creds,
+                ));
             }
             Action::GoToSelectProject => {
                 self.toast.clear();
-                self.page = Page::SelectProject(PageSelectProject::new());
+                if let Some(page) = self.project_page() {
+                    self.page = page;
+                }
             }
             Action::SelectProject { project } => {
                 self.toast.clear();
-                self.page = Page::SelectCreateSession(PageSelectCreateSession::new(project));
+                if let Some(page) = self.session_page(project) {
+                    self.page = page;
+                }
             }
             Action::SelectSession { session } => {
                 self.toast.clear();
                 self.app_state.session = Some(session);
-                self.page = Page::Overview(PageOverview::new());
+                self.page = self.overview_page();
             }
             Action::GoToOverview => {
                 self.toast.clear();
-                self.page = Page::Overview(PageOverview::new());
+                self.page = self.overview_page();
             }
             Action::CloseSessionSuccess => {
                 self.toast.clear();
@@ -78,19 +120,20 @@ impl AgentGuiApp {
             Action::LogoutSuccess => {
                 self.toast.clear();
                 self.app_state.creds = None;
-                self.page = Page::Overview(PageOverview::new());
+                self.page = self.overview_page();
             }
-            Action::Connected { identity } => {
+            Action::Connected { identity, session } => {
                 self.toast.clear();
-                self.page = Page::Overview(PageOverview::new());
+                self.page = self.overview_page();
                 self.app_state.identity = Some(identity);
+                self.app_state.session = session;
             }
             Action::TaskFailed(failure) => match failure {
                 TaskFailure::Stay { message, retry } => {
                     self.toast.show_error(message, retry);
                 }
                 TaskFailure::ReturnToOverview { message, retry } => {
-                    self.page = Page::Overview(PageOverview::new());
+                    self.page = self.overview_page();
                     self.toast.show_error(message, retry);
                 }
             },
@@ -110,10 +153,14 @@ impl AgentGuiApp {
                 }
             }
             RetryAction::FetchProjects => {
-                self.page = Page::SelectProject(PageSelectProject::new());
+                if let Some(page) = self.project_page() {
+                    self.page = page;
+                }
             }
             RetryAction::FetchSessions { project } => {
-                self.page = Page::SelectCreateSession(PageSelectCreateSession::new(project));
+                if let Some(page) = self.session_page(project) {
+                    self.page = page;
+                }
             }
             RetryAction::CreateIngest { project, session } => {
                 if let Page::SelectCreateSession(page) = &mut self.page {
@@ -130,7 +177,6 @@ impl AgentGuiApp {
                     page.retry_close_session(ctx);
                 }
             }
-            RetryAction::Logout => self.top_bar.retry_logout(ctx),
         }
         self.toast.clear();
     }
@@ -183,13 +229,20 @@ impl eframe::App for AgentGuiApp {
             .frame(central_panel_frame)
             .show(ui, |ui| {
                 if matches!(self.page, Page::Login(_)) {
-                    let ui_action = self.page.ui(ui, frame, &self.app_state.session);
+                    let ui_action =
+                        self.page
+                            .ui(ui, frame, &self.app_state.session, &self.app_state.creds);
                     self.handle_action(ui_action);
                 } else {
                     egui::Frame::default()
                         .inner_margin(styles::components::app_shell::padding::EGUI_POINTS)
                         .show(ui, |ui| {
-                            let ui_action = self.page.ui(ui, frame, &self.app_state.session);
+                            let ui_action = self.page.ui(
+                                ui,
+                                frame,
+                                &self.app_state.session,
+                                &self.app_state.creds,
+                            );
                             self.handle_action(ui_action);
                         });
                 }
@@ -238,6 +291,7 @@ mod tests {
             password: "pass".to_string(),
         });
         app.app_state.session = Some(crate::state::ActiveSession {
+            share_id: "share".to_owned(),
             project: "project".to_string(),
             session: "session".to_string(),
             mount_path: None,
@@ -255,6 +309,7 @@ mod tests {
         let mut app = AgentGuiApp::new();
         app.page = Page::Overview(PageOverview::new());
         app.app_state.session = Some(crate::state::ActiveSession {
+            share_id: "share".to_owned(),
             project: "project".to_string(),
             session: "session".to_string(),
             mount_path: None,
@@ -263,6 +318,27 @@ mod tests {
         app.handle_action(Action::CloseSessionSuccess);
 
         assert!(app.app_state.session.is_none());
+        assert!(matches!(app.page, Page::Overview(_)));
+    }
+
+    #[test]
+    fn connected_action_restores_the_foreground_session() {
+        let mut app = AgentGuiApp::new();
+        let session = crate::state::ActiveSession {
+            share_id: "restored-share".to_owned(),
+            project: "project".to_owned(),
+            session: "session".to_owned(),
+            mount_path: Some("/mnt/session".to_owned()),
+        };
+
+        app.handle_action(Action::Connected {
+            identity: crate::state::AgentIdentity::Anonymous {
+                hostname: "workstation".to_owned(),
+            },
+            session: Some(session.clone()),
+        });
+
+        assert_eq!(app.app_state.session, Some(session));
         assert!(matches!(app.page, Page::Overview(_)));
     }
 }

@@ -6,7 +6,10 @@ pub mod select_project;
 
 use eframe::egui;
 
-use crate::{actions::Action, state::ActiveSession};
+use crate::{
+    actions::Action,
+    state::{ActiveSession, Credentials},
+};
 
 pub use connecting::PageConnecting;
 pub use login::PageLogin;
@@ -44,10 +47,11 @@ impl Page {
         ui: &mut egui::Ui,
         frame: &mut eframe::Frame,
         session: &Option<ActiveSession>,
+        credentials: &Option<Credentials>,
     ) -> Action {
         match self {
             Page::Connecting(p) => p.ui(ui, frame),
-            Page::Overview(p) => p.ui(ui, frame, session),
+            Page::Overview(p) => p.ui(ui, frame, session, credentials),
             Page::Login(p) => p.ui(ui, frame),
             Page::SelectProject(p) => p.ui(ui, frame),
             Page::SelectCreateSession(p) => p.ui(ui, frame),

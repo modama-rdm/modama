@@ -78,6 +78,9 @@ pub enum LocalAPIError {
 
     #[error("configuration: {0}")]
     Config(#[from] ConfigError),
+
+    #[error("invalid API response: {0}")]
+    InvalidResponse(String),
 }
 
 impl IntoResponse for LocalAPIError {
@@ -158,6 +161,15 @@ impl IntoResponse for LocalAPIError {
                 "internal server error: bad configuration",
             )
                 .into_response(),
+            LocalAPIError::InvalidResponse(error) => {
+                error!("invalid API response: {error}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    "internal server error: invalid response",
+                )
+                    .into_response()
+            }
         }
     }
 }
@@ -445,7 +457,7 @@ mod tests {
                 resource: None,
                 share_id: "id".to_string(),
                 share_name: "sname".to_string(),
-                dest_path: "dest".to_string(),
+                dest_path: "/adhoc/project/session/".to_string(),
                 created_timestamp: 0,
                 username: "u".to_string(),
                 password: "p".to_string(),
@@ -473,7 +485,10 @@ mod tests {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let got: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(got["type"], "Share");
-        assert_eq!(got["dest_path"], "dest");
+        assert_eq!(got["share_id"], "id");
+        assert_eq!(got["project"], "project");
+        assert_eq!(got["session"], "session");
+        assert_eq!(got["dest_path"], "/adhoc/project/session/");
         assert_eq!(got["mount_path"], "/mnt/point");
     }
 
@@ -495,6 +510,58 @@ mod tests {
         let got: Value = serde_json::from_slice(&bytes).unwrap();
         println!("{got}");
         assert_eq!(got["type"], "None");
+    }
+
+    #[tokio::test]
+    async fn test_identity_is_unauthenticated() {
+        let test_setup = TestSetup::start().await;
+        let req = Request::builder()
+            .uri("/api/identity/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got: Value =
+            serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(got["type"], "AgentId");
+        assert_eq!(got["agent_name"], "agent-name");
+        assert_eq!(got["resource_name"], "res");
+    }
+
+    #[tokio::test]
+    async fn malformed_foreground_destination_is_an_api_error() {
+        let test_setup = TestSetup::start().await;
+        test_setup
+            .shared_state
+            .lock()
+            .await
+            .current_shares
+            .foreground_share = Some(MountedShare {
+            share: MessageShare {
+                resource: None,
+                share_id: "id".to_owned(),
+                share_name: "share".to_owned(),
+                dest_path: "session-only".to_owned(),
+                created_timestamp: 0,
+                username: "user".to_owned(),
+                password: "secret".to_owned(),
+                uid: 1000,
+                gid: 1000,
+            },
+            mount_path: PathBuf::from("/mnt/share"),
+        });
+        let req = Request::builder()
+            .uri("/api/shares/foreground/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]
@@ -559,12 +626,14 @@ mod tests {
 
         let paths = got["paths"].as_object().unwrap();
         assert!(paths.contains_key("/api/health/"));
+        assert!(paths.contains_key("/api/identity/"));
         assert!(paths.contains_key("/api/login/"));
         assert!(paths.contains_key("/api/projects/"));
         assert!(paths.contains_key("/api/projects/{project_name}/sessions/"));
         assert!(paths
             .contains_key("/api/projects/{project_name}/sessions/{session_name}/start-ingest/"));
         assert!(paths.contains_key("/api/shares/foreground/"));
+        assert!(paths.contains_key("/api/shares/{share_id}/"));
         assert!(got["components"]["schemas"]["APIListProjectsResponse"].is_object());
         assert!(got["components"]["securitySchemes"]["basic_auth"].is_object());
     }
@@ -1000,5 +1069,172 @@ mod tests {
         mock_details.assert_async().await;
         mock_create_share.assert_async().await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn local_api_lists_enriched_projects() {
+        let test_setup = TestSetup::start().await;
+        let projects = ListProjectsResponse {
+            errno: 0,
+            projects: vec![AdhocProject {
+                relpath: "project".to_owned(),
+                name: "Project One".to_owned(),
+                owner: "owner".to_owned(),
+                members: vec!["member".to_owned()],
+                ctime: 10.0,
+                mtime: 1_782_432_123.75,
+                gid: 1000,
+                usage_bytes: None,
+            }],
+        };
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/project/")
+            .match_header("authorization", "Basic dGVzdHVzZXI6cGFzcw==")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&projects).unwrap())
+            .create_async()
+            .await;
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
+        let req = Request::builder()
+            .uri("/api/projects/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got: Value =
+            serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(got["projects"][0]["name"], "Project One");
+        assert_eq!(got["projects"][0]["owner"], "owner");
+        assert_eq!(got["projects"][0]["members"][0], "member");
+        assert_eq!(got["projects"][0]["modified_at"], 1_782_432_123_i64);
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn local_api_deletes_share_without_returning_management_body() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("DELETE", "/api/share/share-123/")
+            .match_header("authorization", "Basic dGVzdHVzZXI6cGFzcw==")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"ok"}"#)
+            .create_async()
+            .await;
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
+        let req = Request::builder()
+            .uri("/api/shares/share-123/")
+            .method("DELETE")
+            .header("X-API-Version", "1.0.0")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(resp
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .is_empty());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn local_api_start_response_contains_only_safe_share_metadata() {
+        let test_setup = TestSetup::start().await;
+        let project = AdhocProject {
+            relpath: "project".to_owned(),
+            name: "project".to_owned(),
+            owner: "testuser".to_owned(),
+            members: vec!["testuser".to_owned()],
+            ctime: 0.0,
+            mtime: 0.0,
+            gid: 1000,
+            usage_bytes: None,
+        };
+        let details = ProjectDetailsResponse {
+            errno: 0,
+            project,
+            datasets: vec![DataInProject {
+                name: "session".to_owned(),
+                immutable: false,
+                ctime: 0.0,
+                mtime: 0.0,
+            }],
+        };
+        let share = messages::Share {
+            resource: Some("resource".to_owned()),
+            share_id: "share-123".to_owned(),
+            share_name: "share-name".to_owned(),
+            dest_path: "/adhoc/project/session/".to_owned(),
+            created_timestamp: 0,
+            username: "temporary-user".to_owned(),
+            password: "temporary-secret".to_owned(),
+            uid: 1000,
+            gid: 1000,
+        };
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&details).unwrap())
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/api/share/")
+            .match_header("x-agent-token", "dummy-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&share).unwrap())
+            .create_async()
+            .await;
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
+        let req = Request::builder()
+            .uri("/api/projects/project/sessions/session/start-ingest/")
+            .method("POST")
+            .header("X-API-Version", "1.0.0")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got: Value =
+            serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(got["share_id"], "share-123");
+        assert_eq!(got["project"], "project");
+        assert_eq!(got["session"], "session");
+        assert_eq!(got["dest_path"], "/adhoc/project/session/");
+        assert!(got.get("username").is_none());
+        assert!(got.get("password").is_none());
+        assert!(got.get("share").is_none());
+    }
+
+    #[tokio::test]
+    async fn authenticated_local_api_rejects_missing_credentials() {
+        let test_setup = TestSetup::start().await;
+        let req = Request::builder()
+            .uri("/api/projects/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }
