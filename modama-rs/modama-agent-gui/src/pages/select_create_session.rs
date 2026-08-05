@@ -272,45 +272,47 @@ impl PageSelectCreateSession {
             }
             ui.style_mut().spacing.item_spacing.y =
                 1.0 - styles::spacing::app_item_gap_y::EGUI_POINTS;
-            egui::ScrollArea::vertical()
-                .id_salt("session-list")
-                .auto_shrink([false, false])
-                .max_height(list_height)
-                .show(ui, |ui| {
-                    ui.style_mut().spacing.item_spacing.y = 0.0;
-                    let has_sessions = !self.available_sessions.is_empty();
-                    let selected_index = self.selected_session_index();
-                    let create_response = create_session_row(ui, has_sessions, true);
-                    if ((self.focus_target == SessionFocusTarget::ExistingList
-                        && self.available_sessions.is_empty())
-                        || self.focus_target == SessionFocusTarget::CreateRow)
-                        && create_response.enabled()
-                    {
-                        create_response.request_focus();
-                        self.focus_target = SessionFocusTarget::None;
-                    }
-                    if create_response.clicked() {
-                        self.enter_create_mode();
-                    }
-                    let list_output = show_roving_list(
-                        ui,
-                        ui.id().with("session-rows"),
-                        &self.available_sessions,
-                        selected_index,
-                        &mut self.focused_session,
-                        self.focus_target == SessionFocusTarget::ExistingList,
-                        |ui, _index, name, selected, focusable| {
-                            session_row(
-                                ui,
-                                name,
-                                selected,
-                                _index + 1 < self.available_sessions.len(),
-                                focusable,
-                            )
-                        },
-                    );
-                    self.apply_session_list_output(list_output, ui.ctx().clone());
-                });
+            styles::scrollbar_scope(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("session-list")
+                    .auto_shrink([false, false])
+                    .max_height(list_height)
+                    .show(ui, |ui| {
+                        ui.style_mut().spacing.item_spacing.y = 0.0;
+                        let has_sessions = !self.available_sessions.is_empty();
+                        let selected_index = self.selected_session_index();
+                        let create_response = create_session_row(ui, has_sessions, true);
+                        if ((self.focus_target == SessionFocusTarget::ExistingList
+                            && self.available_sessions.is_empty())
+                            || self.focus_target == SessionFocusTarget::CreateRow)
+                            && create_response.enabled()
+                        {
+                            create_response.request_focus();
+                            self.focus_target = SessionFocusTarget::None;
+                        }
+                        if create_response.clicked() {
+                            self.enter_create_mode();
+                        }
+                        let list_output = show_roving_list(
+                            ui,
+                            ui.id().with("session-rows"),
+                            &self.available_sessions,
+                            selected_index,
+                            &mut self.focused_session,
+                            self.focus_target == SessionFocusTarget::ExistingList,
+                            |ui, _index, name, selected, focusable| {
+                                session_row(
+                                    ui,
+                                    name,
+                                    selected,
+                                    _index + 1 < self.available_sessions.len(),
+                                    focusable,
+                                )
+                            },
+                        );
+                        self.apply_session_list_output(list_output, ui.ctx().clone());
+                    });
+            });
         });
     }
 

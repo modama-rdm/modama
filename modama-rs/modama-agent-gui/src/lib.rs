@@ -62,6 +62,35 @@ mod style_tests {
     }
 
     #[test]
+    fn scrollbar_scope_uses_neutral_state_colors_without_leaking() {
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let ctx = egui::Context::default();
+            styles::theme::install(&ctx);
+            ctx.set_theme(theme);
+
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let original_widgets = ui.visuals().widgets.clone();
+                styles::scrollbar_scope(ui, |ui| {
+                    let visuals = ui.visuals();
+                    assert_eq!(
+                        visuals.widgets.inactive.fg_stroke.color,
+                        styles::color::on_surface_dim::VALUE.resolve(visuals)
+                    );
+                    assert_eq!(
+                        visuals.widgets.hovered.fg_stroke.color,
+                        styles::color::on_surface_variant::VALUE.resolve(visuals)
+                    );
+                    assert_eq!(
+                        visuals.widgets.active.fg_stroke.color,
+                        styles::color::on_surface::VALUE.resolve(visuals)
+                    );
+                });
+                assert_eq!(ui.visuals().widgets, original_widgets);
+            });
+        }
+    }
+
+    #[test]
     fn alpha_color_tokens_preserve_native_treatments() {
         assert_eq!(
             styles::color::error_container::VALUE.light_egui,

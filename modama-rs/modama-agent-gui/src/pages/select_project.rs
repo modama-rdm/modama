@@ -318,45 +318,49 @@ impl PageSelectProject {
                     ProjectListState::Projects => {}
                 }
 
-                egui::ScrollArea::vertical()
-                    .id_salt("project-list")
-                    .auto_shrink([false, false])
-                    .max_height(list_height)
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        let selected_index = self.selected_project.as_ref().and_then(|selected| {
-                            projects
-                                .iter()
-                                .position(|project| project.name == *selected)
-                        });
-                        let list_output = show_roving_list(
-                            ui,
-                            ui.id().with("project-rows"),
-                            projects,
-                            selected_index,
-                            &mut self.focused_project,
-                            false,
-                            |ui, index, project, selected, focusable| {
-                                project_row(
-                                    ui,
-                                    project,
-                                    selected,
-                                    index + 1 < projects.len(),
-                                    focusable,
-                                )
-                            },
-                        );
-                        if let Some(index) = list_output.selection_changed {
-                            self.selected_project = Some(projects[index].name.clone());
-                        }
-                        if let Some(index) = list_output.activated {
-                            return Some(Action::SelectProject {
-                                project: projects[index].name.clone(),
-                            });
-                        }
-                        None
-                    })
-                    .inner
+                styles::scrollbar_scope(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("project-list")
+                        .auto_shrink([false, false])
+                        .max_height(list_height)
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            let selected_index =
+                                self.selected_project.as_ref().and_then(|selected| {
+                                    projects
+                                        .iter()
+                                        .position(|project| project.name == *selected)
+                                });
+                            let list_output = show_roving_list(
+                                ui,
+                                ui.id().with("project-rows"),
+                                projects,
+                                selected_index,
+                                &mut self.focused_project,
+                                false,
+                                |ui, index, project, selected, focusable| {
+                                    project_row(
+                                        ui,
+                                        project,
+                                        selected,
+                                        index + 1 < projects.len(),
+                                        focusable,
+                                    )
+                                },
+                            );
+                            if let Some(index) = list_output.selection_changed {
+                                self.selected_project = Some(projects[index].name.clone());
+                            }
+                            if let Some(index) = list_output.activated {
+                                return Some(Action::SelectProject {
+                                    project: projects[index].name.clone(),
+                                });
+                            }
+                            None
+                        })
+                        .inner
+                })
+                .inner
             })
             .inner
     }

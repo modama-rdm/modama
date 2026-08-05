@@ -217,6 +217,22 @@ fn project_selection_snapshots() {
     hovered.snapshot("select_project_hovered");
     results.extend_harness(&mut hovered);
 
+    let mut hovered_dark_page = PageSelectProject::new();
+    hovered_dark_page.available_projects = representative_projects();
+    let mut hovered_dark =
+        selection_harness_with_theme(Page::SelectProject(hovered_dark_page), true);
+    hovered_dark.run_steps(3);
+    let hovered_dark_row = hovered_dark
+        .get_by_label_contains("Holo Stacks, owner")
+        .rect();
+    hovered_dark.hover_at(egui::pos2(
+        hovered_dark_row.left() + 2.0,
+        hovered_dark_row.center().y,
+    ));
+    hovered_dark.run_steps(2);
+    hovered_dark.snapshot("select_project_hovered_dark");
+    results.extend_harness(&mut hovered_dark);
+
     let mut sort_open_page = PageSelectProject::new();
     sort_open_page.available_projects = representative_projects();
     let mut sort_open = selection_harness(Page::SelectProject(sort_open_page));

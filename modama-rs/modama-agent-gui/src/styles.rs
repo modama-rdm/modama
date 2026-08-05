@@ -220,6 +220,25 @@ pub mod theme {
     }
 }
 
+/// Run scroll-area contents with neutral, high-contrast handle colors without
+/// changing the visuals of surrounding widgets.
+pub(crate) fn scrollbar_scope<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    ui.scope(|ui| {
+        let inactive = color::on_surface_dim::VALUE.resolve(ui.visuals());
+        let hovered = color::on_surface_variant::VALUE.resolve(ui.visuals());
+        let active = color::on_surface::VALUE.resolve(ui.visuals());
+        let widgets = &mut ui.visuals_mut().widgets;
+        widgets.inactive.fg_stroke.color = inactive;
+        widgets.hovered.fg_stroke.color = hovered;
+        widgets.open.fg_stroke.color = hovered;
+        widgets.active.fg_stroke.color = active;
+        add_contents(ui)
+    })
+}
+
 pub fn radius(points: f32) -> CornerRadius {
     CornerRadius::same(points.clamp(0.0, 255.0) as u8)
 }
