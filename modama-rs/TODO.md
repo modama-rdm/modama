@@ -30,5 +30,5 @@
 - [x] set up logging in the main entry point
 - [ ] ensure important errors are logged (any of the errors that result in a "dismiss"/"retry" dialog for example)
 - [x] BUG: scrollbar color is not distinguishable from background
-- [ ] extra binary for generating screnshots for the user documentation
+- [x] extra binary for generating screnshots for the user documentation
 - [ ] port the busy indicator from the react UI - the lil spinner is too subtle IMHO

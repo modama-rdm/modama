@@ -4,6 +4,8 @@ pub mod app;
 pub mod async_state;
 pub mod components;
 pub mod config;
+#[cfg(feature = "guide-screenshots")]
+pub mod guide_screenshots;
 pub mod pages;
 pub mod service;
 pub mod state;

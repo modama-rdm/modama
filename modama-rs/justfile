@@ -1,5 +1,6 @@
 agent_gui_package := "modama-agent-gui"
 snapshot_dir := "modama-agent-gui/tests/snapshots"
+guide_image_dir := "../docs/guide/src/user/images/agent"
 design_spec := "../mgmtinterface-new/DESIGN.md"
 
 fmt:
@@ -22,15 +23,20 @@ update-openapi:
 visual-tests:
     WGPU_DEBUG=0 cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
 
+# Regenerate and compress the screenshots embedded in the user guide.
+guide-screenshots:
+    WGPU_DEBUG=0 cargo run -p {{ agent_gui_package }} --features guide-screenshots --bin generate-guide-screenshots
+    oxipng -o max --strip safe {{ guide_image_dir }}/*.png
+
 # Run the GUI with egui inspection enabled for egui-mcp.
 inspect-gui:
     EGUI_INSPECTION=1 xvfb-run --auto-servernum cargo run -p {{ agent_gui_package }} --bin {{ agent_gui_package }} --features inspection
 
 # Update visual regression test snapshots.
 update-snapshots:
-    UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
-    oxipng -o max --strip safe {{ snapshot_dir }}/*.png
+    WGPU_DEBUG=0 UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
+    oxipng -o max --strip safe {{ snapshot_dir }}/*.png {{ guide_image_dir }}/*.png
 
 # Remove generated visual-test review artifacts.
 clean:
-    find {{ snapshot_dir }} -maxdepth 1 -type f \( -name '*.new.png' -o -name '*.diff.png' -o -name '*.old.png' \) -delete
+    find {{ snapshot_dir }} {{ guide_image_dir }} -maxdepth 1 -type f \( -name '*.new.png' -o -name '*.diff.png' -o -name '*.old.png' \) -delete
