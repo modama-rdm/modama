@@ -3130,6 +3130,8 @@ dependencies = [
  "tower",
  "tungstenite",
  "url",
+ "utoipa",
+ "versioned",
  "widestring",
  "windows",
  "x509-parser",
@@ -3184,6 +3186,7 @@ dependencies = [
  "tokio-rustls",
  "toml 0.9.12+spec-1.1.0",
  "url",
+ "utoipa",
  "x509-parser",
 ]
 

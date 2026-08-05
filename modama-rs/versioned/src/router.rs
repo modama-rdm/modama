@@ -23,6 +23,7 @@
 //!     .route(versions!("2.0.0.."), versioned_route!(handler_v2));
 //!
 //! let router = builder.build(())?;
+//! # Ok::<(), versioned::RouteConfigError>(())
 //! ```
 
 use axum::{

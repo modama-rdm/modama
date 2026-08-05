@@ -58,6 +58,9 @@ impl ApiState {
 
 #[derive(thiserror::Error, Debug)]
 pub enum LocalAPIError {
+    #[error("API route configuration: {0}")]
+    RouteConfig(#[from] versioned::RouteConfigError),
+
     #[error("error in backend API: {0}")]
     BackendAPI(#[from] MgmtError),
 
@@ -80,6 +83,15 @@ pub enum LocalAPIError {
 impl IntoResponse for LocalAPIError {
     fn into_response(self) -> axum::response::Response {
         match self {
+            LocalAPIError::RouteConfig(error) => {
+                error!("local API route configuration error: {error}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    "internal server error: bad API route configuration",
+                )
+                    .into_response()
+            }
             LocalAPIError::BackendAPI(MgmtError::Unauthorized) | LocalAPIError::Auth => (
                 StatusCode::UNAUTHORIZED,
                 [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
@@ -311,7 +323,7 @@ pub async fn serve_local_web_api(
     listen_addr: &str,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) -> Result<(), LocalAPIError> {
-    let app = make_app(ApiState::new(&state, &token_provider));
+    let app = make_app(ApiState::new(&state, &token_provider))?;
     let listener = tokio::net::TcpListener::bind(listen_addr).await?;
 
     #[allow(clippy::unwrap_used)] // infallible
@@ -320,7 +332,7 @@ pub async fn serve_local_web_api(
     Ok(())
 }
 
-fn make_app(state: ApiState) -> Router {
+fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
     let router = Router::new()
         .route("/", get(serve_index_page))
         .route("/start-ingest/{project_name}/", get(start_ingest_step1))
@@ -333,8 +345,7 @@ fn make_app(state: ApiState) -> Router {
             post(start_ingest_step3),
         );
 
-    add_api_routes(router)
-        .with_state(state)
+    add_api_routes(router, state)
 }
 
 #[cfg(test)]
@@ -419,7 +430,7 @@ mod tests {
 
             let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
             let api_state = ApiState::new(&shared_state, &token_provider);
-            let app = make_app(api_state);
+            let app = make_app(api_state).unwrap();
 
             Self { app, shared_state }
         }
@@ -452,6 +463,7 @@ mod tests {
         let req = Request::builder()
             .uri("/api/shares/foreground/")
             .method("GET")
+            .header("X-API-Version", "1.0.0")
             .body(Body::empty())
             .unwrap();
 
@@ -472,6 +484,7 @@ mod tests {
         let req = Request::builder()
             .uri("/api/shares/foreground/")
             .method("GET")
+            .header("X-API-Version", "1.0.0")
             .body(Body::empty())
             .unwrap();
 
@@ -482,6 +495,78 @@ mod tests {
         let got: Value = serde_json::from_slice(&bytes).unwrap();
         println!("{got}");
         assert_eq!(got["type"], "None");
+    }
+
+    #[tokio::test]
+    async fn test_version_header_is_required_for_api_routes() {
+        let test_setup = TestSetup::start().await;
+
+        let req = Request::builder()
+            .uri("/api/health/")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let got: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(got["type"], "missing_version");
+        assert_eq!(got["header"], "X-API-Version");
+    }
+
+    #[tokio::test]
+    async fn test_invalid_or_unsupported_api_version_is_rejected() {
+        for version in ["not-a-version", "0.0.0"] {
+            let test_setup = TestSetup::start().await;
+            let req = Request::builder()
+                .uri("/api/health/")
+                .method("GET")
+                .header("X-API-Version", version)
+                .body(Body::empty())
+                .unwrap();
+
+            let resp = test_setup.app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+            let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+            let got: Value = serde_json::from_slice(&bytes).unwrap();
+            assert!(matches!(
+                got["type"].as_str(),
+                Some("invalid_version") | Some("unsupported_version")
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_openapi_endpoint_describes_latest_api() {
+        let test_setup = TestSetup::start().await;
+
+        let req = Request::builder()
+            .uri("/openapi.json")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let got: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(got["info"]["title"], "modama-agent local API");
+        assert_eq!(got["info"]["version"], "1.0.0");
+
+        let paths = got["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/health/"));
+        assert!(paths.contains_key("/api/login/"));
+        assert!(paths.contains_key("/api/projects/"));
+        assert!(paths.contains_key("/api/projects/{project_name}/sessions/"));
+        assert!(paths
+            .contains_key("/api/projects/{project_name}/sessions/{session_name}/start-ingest/"));
+        assert!(paths.contains_key("/api/shares/foreground/"));
+        assert!(got["components"]["schemas"]["APIListProjectsResponse"].is_object());
+        assert!(got["components"]["securitySchemes"]["basic_auth"].is_object());
     }
 
     #[tokio::test]

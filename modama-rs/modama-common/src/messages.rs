@@ -4,10 +4,11 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::agent::AgentId;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, ToSchema)]
 pub struct Share {
     /// the name of the Resource this share belongs to; None if it wasn't
     /// created for a Resource
@@ -79,7 +80,6 @@ pub enum EventChannelMessage {
 pub enum EventChannelRequests {
     ShareListUpdate,
 }
-
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]

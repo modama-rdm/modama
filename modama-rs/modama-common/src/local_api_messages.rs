@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::messages::Share;
 
 /// Local system users can ask the agent for the current foreground share. This
 /// doesn't have to contain credentials, most important is some kind of identity
 /// and the path where the share is mounted.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 #[serde(tag = "type")]
 pub enum APICurrentForegroundShare {
     None,
@@ -19,20 +20,20 @@ pub enum APICurrentForegroundShare {
 }
 
 /// Response when successfully creating a new ingest share.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APICreateShareResponse {
     pub share: Share,
 }
 
 /// Response listing projects the current user has access to,
-/// with the intent of creating a session or 
-#[derive(Serialize, Deserialize, Clone)]
+/// with the intent of creating a session or
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APIListProjectsResponse {
     pub projects: Vec<String>,
 }
 
 /// Response listing existing sessions in the given project
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APIListSessionsResponse {
     pub project: String,
     pub sessions: Vec<String>,
@@ -40,28 +41,28 @@ pub struct APIListSessionsResponse {
 
 /// Create a new session in the given project
 /// (`project_name` is part of the URL)
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APICreateSessionRequest {
     pub session: String,
 }
 
 /// Response when successfully creating a new session
 /// in a project
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APICreateSessionResponse {
     pub project: String,
     pub session: String,
 }
 
 // TODO: what info do we need in here?
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APILoginResponse {
     pub username: String,
 }
 
 /// Health check API endpoint response
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, ToSchema)]
 #[serde(tag = "type")]
 pub enum APIHealthCheckResponse {
-    Ok
+    Ok,
 }

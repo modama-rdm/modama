@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 use axum_extra::{
@@ -11,16 +11,27 @@ use axum_extra::{
 };
 use hyper::StatusCode;
 use log::warn;
+use std::sync::Arc;
+use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
+use versioned::{semver::Version, versioned_route, versions, VersionedRouterBuilder};
 
 use crate::local_http_service::{get_auth, ApiState, LocalAPIError};
 
 use modama_common::{
     local_api_messages::{
-        APICreateSessionRequest, APICreateSessionResponse, APICreateShareResponse, APICurrentForegroundShare, APIHealthCheckResponse, APIListProjectsResponse, APIListSessionsResponse, APILoginResponse
+        APICreateSessionRequest, APICreateSessionResponse, APICreateShareResponse,
+        APICurrentForegroundShare, APIHealthCheckResponse, APIListProjectsResponse,
+        APIListSessionsResponse, APILoginResponse,
     },
     mgmt_client::MgmtClient,
 };
 
+#[utoipa::path(
+    get,
+    path = "/api/shares/foreground/",
+    params(("X-API-Version" = String, Header, description = "API version")),
+    responses((status = 200, description = "Current foreground share", body = APICurrentForegroundShare))
+)]
 /// Query for the current foreground share
 async fn api_shares_foreground(
     State(api_state): State<ApiState>,
@@ -43,6 +54,21 @@ async fn api_shares_foreground(
     )
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/projects/{project_name}/sessions/{session_name}/start-ingest/",
+    params(
+        ("X-API-Version" = String, Header, description = "API version"),
+        ("project_name" = String, Path, description = "Project name"),
+        ("session_name" = String, Path, description = "Session name")
+    ),
+    responses(
+        (status = 200, description = "Created ingest share", body = APICreateShareResponse),
+        (status = 401, description = "Authentication failed"),
+        (status = 404, description = "Project or session not found")
+    ),
+    security(("basic_auth" = []))
+)]
 async fn api_start_ingest(
     Path((project_name, session_name)): Path<(String, String)>,
     State(agent_state): State<ApiState>,
@@ -77,6 +103,16 @@ async fn api_start_ingest(
     Ok(Json(APICreateShareResponse { share }).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/login/",
+    params(("X-API-Version" = String, Header, description = "API version")),
+    responses(
+        (status = 200, description = "Authenticated user", body = APILoginResponse),
+        (status = 401, description = "Authentication failed")
+    ),
+    security(("basic_auth" = []))
+)]
 async fn api_login(
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
 ) -> Result<impl IntoResponse, LocalAPIError> {
@@ -88,6 +124,16 @@ async fn api_login(
     .into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/projects/",
+    params(("X-API-Version" = String, Header, description = "API version")),
+    responses(
+        (status = 200, description = "Available projects", body = APIListProjectsResponse),
+        (status = 401, description = "Authentication failed")
+    ),
+    security(("basic_auth" = []))
+)]
 async fn api_list_projects(
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
@@ -112,6 +158,20 @@ async fn api_list_projects(
     Ok(Json(resp).into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/projects/{project_name}/sessions/",
+    params(
+        ("X-API-Version" = String, Header, description = "API version"),
+        ("project_name" = String, Path, description = "Project name")
+    ),
+    responses(
+        (status = 200, description = "Sessions in the project", body = APIListSessionsResponse),
+        (status = 401, description = "Authentication failed"),
+        (status = 404, description = "Project not found")
+    ),
+    security(("basic_auth" = []))
+)]
 async fn api_list_sessions_in_project(
     Path(project_name): Path<String>,
     State(agent_state): State<ApiState>,
@@ -134,6 +194,21 @@ async fn api_list_sessions_in_project(
     Ok(Json(resp).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/projects/{project_name}/sessions/",
+    params(
+        ("X-API-Version" = String, Header, description = "API version"),
+        ("project_name" = String, Path, description = "Project name")
+    ),
+    request_body = APICreateSessionRequest,
+    responses(
+        (status = 200, description = "Created session", body = APICreateSessionResponse),
+        (status = 401, description = "Authentication failed"),
+        (status = 404, description = "Project not found")
+    ),
+    security(("basic_auth" = []))
+)]
 async fn api_create_session_in_project(
     Path(project_name): Path<String>,
     State(agent_state): State<ApiState>,
@@ -157,30 +232,63 @@ async fn api_create_session_in_project(
     .into_response())
 }
 
-async fn api_health(
-    State(_api_state): State<ApiState>,
-) -> Json<APIHealthCheckResponse> {
+#[utoipa::path(
+    get,
+    path = "/api/health/",
+    params(("X-API-Version" = String, Header, description = "API version")),
+    responses((status = 200, description = "Agent is healthy", body = APIHealthCheckResponse))
+)]
+async fn api_health(State(_api_state): State<ApiState>) -> Json<APIHealthCheckResponse> {
     Json(APIHealthCheckResponse::Ok)
 }
 
+fn latest_api_version() -> Version {
+    Version::new(1, 0, 0)
+}
 
-pub fn add_api_routes(router: Router<ApiState>) -> Router<ApiState> {
-    // FIXME: make the URLs beautiful
-    router
-        .route("/api/shares/foreground/", get(api_shares_foreground))
-        .route("/api/health/", get(api_health))
-        .route("/api/login/", post(api_login))
-        .route("/api/projects/", get(api_list_projects))
+fn api_routes() -> VersionedRouterBuilder<ApiState> {
+    VersionedRouterBuilder::new()
         .route(
-            "/api/projects/{project_name}/sessions/",
-            get(api_list_sessions_in_project),
+            versions!("1.0.0.."),
+            versioned_route!(api_shares_foreground),
+        )
+        .route(versions!("1.0.0.."), versioned_route!(api_health))
+        .route(versions!("1.0.0.."), versioned_route!(api_login))
+        .route(versions!("1.0.0.."), versioned_route!(api_list_projects))
+        .route(
+            versions!("1.0.0.."),
+            versioned_route!(api_list_sessions_in_project),
         )
         .route(
-            "/api/projects/{project_name}/sessions/",
-            post(api_create_session_in_project),
+            versions!("1.0.0.."),
+            versioned_route!(api_create_session_in_project),
         )
-        .route(
-            "/api/projects/{project_name}/sessions/{session_name}/start-ingest/",
-            post(api_start_ingest),
-        )
+        .route(versions!("1.0.0.."), versioned_route!(api_start_ingest))
+}
+
+fn customize_openapi(mut openapi: utoipa::openapi::OpenApi) -> utoipa::openapi::OpenApi {
+    openapi.info.title = "modama-agent local API".to_owned();
+    if let Some(components) = openapi.components.as_mut() {
+        components.add_security_scheme(
+            "basic_auth",
+            SecurityScheme::Http(Http::new(HttpAuthScheme::Basic)),
+        );
+    }
+    openapi
+}
+
+pub fn add_api_routes(router: Router<ApiState>, state: ApiState) -> Result<Router, LocalAPIError> {
+    let api_routes = api_routes();
+    let openapi = customize_openapi(api_routes.generate_openapi(latest_api_version())?);
+    let versioned_router = api_routes.build(state.clone())?;
+    let openapi = Arc::new(openapi);
+
+    let router = router.with_state(state).merge(versioned_router);
+    Ok(router.route(
+        "/openapi.json",
+        get(move || {
+            let openapi = Arc::clone(&openapi);
+            async move { Json((*openapi).clone()) }
+        }),
+    ))
 }
