@@ -279,9 +279,8 @@ impl PageSelectCreateSession {
                     .max_height(list_height)
                     .show(ui, |ui| {
                         ui.style_mut().spacing.item_spacing.y = 0.0;
-                        let has_sessions = !self.available_sessions.is_empty();
                         let selected_index = self.selected_session_index();
-                        let create_response = create_session_row(ui, has_sessions, true);
+                        let create_response = create_session_row(ui, true);
                         if ((self.focus_target == SessionFocusTarget::ExistingList
                             && self.available_sessions.is_empty())
                             || self.focus_target == SessionFocusTarget::CreateRow)
@@ -300,14 +299,8 @@ impl PageSelectCreateSession {
                             selected_index,
                             &mut self.focused_session,
                             self.focus_target == SessionFocusTarget::ExistingList,
-                            |ui, _index, name, selected, focusable| {
-                                session_row(
-                                    ui,
-                                    name,
-                                    selected,
-                                    _index + 1 < self.available_sessions.len(),
-                                    focusable,
-                                )
+                            |ui, _, name, selected, focusable| {
+                                session_row(ui, name, selected, true, focusable)
                             },
                         );
                         self.apply_session_list_output(list_output, ui.ctx().clone());
@@ -575,63 +568,56 @@ impl PageSelectCreateSession {
     }
 }
 
-fn create_session_row(ui: &mut egui::Ui, show_separator: bool, focusable: bool) -> egui::Response {
-    interactive_row(
-        ui,
-        false,
-        show_separator,
-        focusable,
-        |response, ui, _selected| {
-            let label = "Create a new session";
-            let mut job = LayoutJob::default();
-            job.append(
-                egui_phosphor::regular::PLUS,
-                0.0,
-                egui::TextFormat {
-                    font_id: FontId::new(
-                        styles::typography::body::FONT_SIZE,
-                        FontFamily::Proportional,
-                    ),
-                    color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
-                    ..Default::default()
-                },
-            );
-            job.append(
-                label,
-                4.0,
-                egui::TextFormat {
-                    font_id: styles::typography::body::font_id(),
-                    color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
-                    ..Default::default()
-                },
-            );
+fn create_session_row(ui: &mut egui::Ui, focusable: bool) -> egui::Response {
+    interactive_row(ui, false, false, focusable, |response, ui, _selected| {
+        let label = "Create a new session";
+        let mut job = LayoutJob::default();
+        job.append(
+            egui_phosphor::regular::PLUS,
+            0.0,
+            egui::TextFormat {
+                font_id: FontId::new(
+                    styles::typography::body::FONT_SIZE,
+                    FontFamily::Proportional,
+                ),
+                color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
+                ..Default::default()
+            },
+        );
+        job.append(
+            label,
+            4.0,
+            egui::TextFormat {
+                font_id: styles::typography::body::font_id(),
+                color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
+                ..Default::default()
+            },
+        );
 
-            let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::body::font_id()));
-            let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
+        let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::body::font_id()));
+        let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
 
-            ui.vertical(|ui| {
-                ui.add_space(padding);
-                ui.add(Label::new(job).sense(Sense::empty()).selectable(false));
-                ui.add_space(padding);
-            });
+        ui.vertical(|ui| {
+            ui.add_space(padding);
+            ui.add(Label::new(job).sense(Sense::empty()).selectable(false));
+            ui.add_space(padding);
+        });
 
-            response
-                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
-        },
-    )
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
+    })
 }
 
 fn session_row(
     ui: &mut egui::Ui,
     name: &str,
     selected: bool,
-    show_separator: bool,
+    show_top_separator: bool,
     focusable: bool,
 ) -> egui::Response {
     interactive_row(
         ui,
         selected,
-        show_separator,
+        show_top_separator,
         focusable,
         |response, ui, selected| {
             let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::mono::font_id()));
@@ -653,7 +639,7 @@ fn session_row(
 fn interactive_row(
     ui: &mut egui::Ui,
     selected: bool,
-    show_separator: bool,
+    show_top_separator: bool,
     focusable: bool,
     content: impl Fn(&Response, &mut egui::Ui, bool),
 ) -> egui::Response {
@@ -681,11 +667,10 @@ fn interactive_row(
         egui::Color32::TRANSPARENT
     };
     ui.painter().rect_filled(rect, 0.0, fill);
-    if show_separator {
-        let sep_rect = &content_rect;
+    if show_top_separator {
         ui.painter().hline(
-            sep_rect.x_range(),
-            sep_rect.bottom() - 1.0,
+            content_rect.x_range(),
+            content_rect.top(),
             Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
                 styles::color::outline::VALUE.resolve(visuals),

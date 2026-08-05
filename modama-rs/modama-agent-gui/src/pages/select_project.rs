@@ -339,13 +339,7 @@ impl PageSelectProject {
                                 &mut self.focused_project,
                                 false,
                                 |ui, index, project, selected, focusable| {
-                                    project_row(
-                                        ui,
-                                        project,
-                                        selected,
-                                        index + 1 < projects.len(),
-                                        focusable,
-                                    )
+                                    project_row(ui, project, selected, index > 0, focusable)
                                 },
                             );
                             if let Some(index) = list_output.selection_changed {
@@ -598,7 +592,7 @@ fn project_row(
     ui: &mut egui::Ui,
     project: &ProjectSummary,
     selected: bool,
-    show_separator: bool,
+    show_top_separator: bool,
     focusable: bool,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
@@ -622,10 +616,10 @@ fn project_row(
         egui::Color32::TRANSPARENT
     };
     ui.painter().rect_filled(rect, 0.0, fill);
-    if show_separator {
+    if show_top_separator {
         ui.painter().hline(
             content_rect.x_range(),
-            rect.bottom(),
+            rect.top(),
             Stroke::new(
                 styles::components::standard_border::width::EGUI_POINTS,
                 styles::color::outline::VALUE.resolve(visuals),

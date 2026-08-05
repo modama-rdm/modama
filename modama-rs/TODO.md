@@ -26,7 +26,7 @@
 - [ ] test long project and ingest-share session names against backend limits
 - [ ] general design fixes
     - [ ] Review vertical and horizontal flow
-    - [ ] Fix hovered card rows overlaying the top border
+    - [x] Fix hovered card rows overlaying the top border
 - [x] set up logging in the main entry point
 - [ ] ensure important errors are logged (any of the errors that result in a "dismiss"/"retry" dialog for example)
 - [x] BUG: scrollbar color is not distinguishable from background

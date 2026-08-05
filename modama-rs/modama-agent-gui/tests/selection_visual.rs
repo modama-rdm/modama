@@ -211,7 +211,9 @@ fn project_selection_snapshots() {
     hovered_page.available_projects = representative_projects();
     let mut hovered = selection_harness(Page::SelectProject(hovered_page));
     hovered.run_steps(3);
-    let hovered_row = hovered.get_by_label_contains("Holo Stacks, owner").rect();
+    let hovered_row = hovered
+        .get_by_label_contains("Adaptive Optics, owner")
+        .rect();
     hovered.hover_at(egui::pos2(hovered_row.left() + 2.0, hovered_row.center().y));
     hovered.run_steps(2);
     hovered.snapshot("select_project_hovered");
@@ -223,7 +225,7 @@ fn project_selection_snapshots() {
         selection_harness_with_theme(Page::SelectProject(hovered_dark_page), true);
     hovered_dark.run_steps(3);
     let hovered_dark_row = hovered_dark
-        .get_by_label_contains("Holo Stacks, owner")
+        .get_by_label_contains("Adaptive Optics, owner")
         .rect();
     hovered_dark.hover_at(egui::pos2(
         hovered_dark_row.left() + 2.0,
@@ -263,7 +265,7 @@ fn project_selection_snapshots() {
 
     let mut selected_page = PageSelectProject::new();
     selected_page.available_projects = representative_projects();
-    selected_page.selected_project = Some("Holo Stacks".to_string());
+    selected_page.selected_project = Some("Adaptive Optics".to_string());
     let mut selected = selection_harness(Page::SelectProject(selected_page));
     selected.run_steps(3);
     selected.snapshot("select_project_selected");
