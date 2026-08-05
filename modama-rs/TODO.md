@@ -30,3 +30,5 @@
 - [ ] general design fixes
     - [ ] Review vertical and horizontal flow
     - [ ] Fix hovered card rows overlaying the top border
+- [ ] set up logging in the main entry point
+- [ ] ensure important issues are logged (any of the errors that result in a "dismiss"/"retry" dialog for example)

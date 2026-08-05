@@ -80,7 +80,7 @@ pub enum LocalAPIError {
     Config(#[from] ConfigError),
 
     #[error("invalid API response: {0}")]
-    InvalidResponse(String),
+    InvalidResponse(#[from] crate::http_api::ShareDestinationError),
 }
 
 impl IntoResponse for LocalAPIError {

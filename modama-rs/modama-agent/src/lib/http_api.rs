@@ -26,14 +26,27 @@ use modama_common::{
     mgmt_client::MgmtClient,
 };
 
-fn project_and_session(dest_path: &str) -> Result<(String, String), String> {
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ShareDestinationError {
+    #[error("share destination has no session: {dest_path:?}")]
+    MissingSession { dest_path: String },
+
+    #[error("share destination has no project: {dest_path:?}")]
+    MissingProject { dest_path: String },
+}
+
+fn project_and_session(dest_path: &str) -> Result<(String, String), ShareDestinationError> {
     let mut components = dest_path.split('/').filter(|part| !part.is_empty()).rev();
     let session = components
         .next()
-        .ok_or_else(|| format!("share destination has no session: {dest_path:?}"))?;
+        .ok_or_else(|| ShareDestinationError::MissingSession {
+            dest_path: dest_path.to_owned(),
+        })?;
     let project = components
         .next()
-        .ok_or_else(|| format!("share destination has no project: {dest_path:?}"))?;
+        .ok_or_else(|| ShareDestinationError::MissingProject {
+            dest_path: dest_path.to_owned(),
+        })?;
     Ok((project.to_owned(), session.to_owned()))
 }
 
@@ -45,7 +58,9 @@ fn project_and_session(dest_path: &str) -> Result<(String, String), String> {
     responses((status = 200, description = "Current foreground share", body = APICurrentForegroundShare))
 )]
 /// Query for the current foreground share
-async fn api_shares_foreground(State(api_state): State<ApiState>) -> axum::response::Response {
+async fn api_shares_foreground(
+    State(api_state): State<ApiState>,
+) -> Result<impl IntoResponse, LocalAPIError> {
     let response = match &api_state.state.lock().await.current_shares.foreground_share {
         None => APICurrentForegroundShare::None,
         Some(s) => match s.mount_path.to_str() {
@@ -55,10 +70,7 @@ async fn api_shares_foreground(State(api_state): State<ApiState>) -> axum::respo
                 APICurrentForegroundShare::None
             }
             Some(mount_path) => {
-                let (project, session) = match project_and_session(&s.share.dest_path) {
-                    Ok(parts) => parts,
-                    Err(error) => return LocalAPIError::InvalidResponse(error).into_response(),
-                };
+                let (project, session) = project_and_session(&s.share.dest_path)?;
                 APICurrentForegroundShare::Share {
                     share_id: s.share.share_id.clone(),
                     project,
@@ -69,7 +81,7 @@ async fn api_shares_foreground(State(api_state): State<ApiState>) -> axum::respo
             }
         },
     };
-    Json(response).into_response()
+    Ok(Json(response))
 }
 
 #[utoipa::path(
@@ -139,8 +151,7 @@ async fn api_start_ingest(
         )
         .await?;
 
-    let (project, session) =
-        project_and_session(&share.dest_path).map_err(LocalAPIError::InvalidResponse)?;
+    let (project, session) = project_and_session(&share.dest_path)?;
     Ok(Json(APICreateShareResponse {
         share_id: share.share_id,
         project,
@@ -392,7 +403,35 @@ pub fn add_api_routes(router: Router<ApiState>, state: ApiState) -> Result<Route
 
 #[cfg(test)]
 mod tests {
-    use super::openapi_document;
+    use super::{openapi_document, project_and_session, ShareDestinationError};
+
+    #[test]
+    fn project_and_session_uses_the_final_non_empty_components() {
+        assert_eq!(
+            project_and_session("/adhoc//project/session///"),
+            Ok(("project".to_owned(), "session".to_owned()))
+        );
+    }
+
+    #[test]
+    fn project_and_session_reports_a_missing_session() {
+        assert_eq!(
+            project_and_session("///"),
+            Err(ShareDestinationError::MissingSession {
+                dest_path: "///".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_and_session_reports_a_missing_project() {
+        assert_eq!(
+            project_and_session("/session/"),
+            Err(ShareDestinationError::MissingProject {
+                dest_path: "/session/".to_owned(),
+            })
+        );
+    }
 
     #[test]
     fn checked_in_openapi_schema_matches_the_api() -> Result<(), Box<dyn std::error::Error>> {
