@@ -25,7 +25,10 @@ pub struct DiscoveryInnerValidated {
 impl DiscoveryInner {
     pub fn validate(self) -> Option<DiscoveryInnerValidated> {
         let url = Url::try_from(self.api.as_str()).ok()?;
-        Some(DiscoveryInnerValidated { version: self.version, api: url })
+        Some(DiscoveryInnerValidated {
+            version: self.version,
+            api: url,
+        })
     }
 }
 

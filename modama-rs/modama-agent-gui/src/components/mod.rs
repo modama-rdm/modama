@@ -1,10 +1,10 @@
 pub mod avatar;
 pub mod buttons;
 pub mod dialogs;
+pub mod dropdown;
 pub mod flow_navigation;
 pub mod forms;
 pub mod list_view;
-pub mod dropdown;
 pub mod toast;
 
 use eframe::egui::{self, RichText};

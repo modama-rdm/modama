@@ -66,9 +66,7 @@ fn enabled_custom_rows_use_pointing_hand_cursor_and_disabled_actions_do_not() {
     let mut projects = selection_harness(Page::SelectProject(project_page));
     projects.run_steps(3);
 
-    projects
-        .get_by_label_contains("Holo Stacks, owner")
-        .hover();
+    projects.get_by_label_contains("Holo Stacks, owner").hover();
     projects.run_steps(1);
     assert_eq!(
         projects.output().platform_output.cursor_icon,

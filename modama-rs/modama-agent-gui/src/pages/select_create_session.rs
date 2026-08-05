@@ -87,10 +87,7 @@ impl CreateSessionAndIngestRequest {
     pub fn execute(&self) -> Result<ActiveSession, CreateSessionError> {
         crate::simulated_work::sleep(Duration::from_millis(500));
         let session = validate_session_name(&self.session)?;
-        if session
-            .to_lowercase()
-            .contains(ASYNC_REJECTION_SENTINEL)
-        {
+        if session.to_lowercase().contains(ASYNC_REJECTION_SENTINEL) {
             return Err(CreateSessionError::Server(
                 ASYNC_REJECTION_MESSAGE.to_owned(),
             ));

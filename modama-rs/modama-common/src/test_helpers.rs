@@ -2,7 +2,8 @@
 use std::{
     env::temp_dir,
     ops::Deref,
-    path::{Path, PathBuf}, sync::Arc,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use rand::{distr::Alphanumeric, Rng};
@@ -44,7 +45,6 @@ impl Deref for TempDir {
         &self.path
     }
 }
-
 
 #[derive(Debug)]
 pub struct MockTokenProvider {

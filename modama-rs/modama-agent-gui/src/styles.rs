@@ -99,9 +99,7 @@ pub mod font {
             };
             let mut family_chain = vec![name.to_owned()];
             family_chain.extend(fallbacks.iter().cloned());
-            fonts
-                .families
-                .insert(family(family_name), family_chain);
+            fonts.families.insert(family(family_name), family_chain);
         }
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         ctx.set_fonts(fonts);
@@ -199,22 +197,16 @@ pub mod theme {
         }
         visuals.widgets.inactive.weak_bg_fill = primary;
         visuals.widgets.inactive.bg_fill = primary;
-        visuals.widgets.inactive.bg_stroke = Stroke::new(
-            components::standard_border::width::EGUI_POINTS,
-            border,
-        );
+        visuals.widgets.inactive.bg_stroke =
+            Stroke::new(components::standard_border::width::EGUI_POINTS, border);
         visuals.widgets.hovered.weak_bg_fill = primary_hover;
         visuals.widgets.hovered.bg_fill = primary_hover;
-        visuals.widgets.hovered.bg_stroke = Stroke::new(
-            components::standard_border::width::EGUI_POINTS,
-            border,
-        );
+        visuals.widgets.hovered.bg_stroke =
+            Stroke::new(components::standard_border::width::EGUI_POINTS, border);
         visuals.widgets.active.weak_bg_fill = primary_hover;
         visuals.widgets.active.bg_fill = primary_hover;
-        visuals.widgets.active.bg_stroke = Stroke::new(
-            components::standard_border::width::EGUI_POINTS,
-            border,
-        );
+        visuals.widgets.active.bg_stroke =
+            Stroke::new(components::standard_border::width::EGUI_POINTS, border);
         visuals.widgets.open = visuals.widgets.hovered;
 
         // Text edits use the inactive state while idle and active while focused.
@@ -386,7 +378,7 @@ fn paint_focus_indicator(
 ) {
     if response.has_focus() {
         let width = components::focus_ring::width::EGUI_POINTS;
-        let corner_radius = if rounded { 
+        let corner_radius = if rounded {
             radius(rounded::lg::EGUI_POINTS)
         } else {
             radius(0.0)
@@ -394,10 +386,7 @@ fn paint_focus_indicator(
         ui.painter().rect_stroke(
             response.rect,
             corner_radius,
-            Stroke::new(
-                components::standard_border::width::EGUI_POINTS,
-                inner_color,
-            ),
+            Stroke::new(components::standard_border::width::EGUI_POINTS, inner_color),
             egui::StrokeKind::Inside,
         );
         ui.painter().rect_stroke(

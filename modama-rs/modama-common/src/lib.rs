@@ -1,12 +1,12 @@
 pub mod agent;
+pub mod ca;
 pub mod cert_helpers;
 pub mod config;
+pub mod local_api_messages;
 pub mod logging;
 pub mod messages;
-pub mod local_api_messages;
 pub mod mgmt_client;
 pub mod requests;
-pub mod tokens;
-pub mod ca;
 pub mod test_helpers;
+pub mod tokens;
 pub mod version;

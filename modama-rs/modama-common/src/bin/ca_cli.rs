@@ -1,21 +1,16 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use modama_common::{
     ca::Ca,
     config::{
-        AgentConfigFile,
-        AgentConfigFileCa,
-        AgentConfigFileClientCert,
-        AgentConfigFileServices,
-        default_event_url,
-        default_listen_local_api,
-        default_mgmt_api_url,
-        default_smb_domain,
-        default_smb_host,
-        default_smb_port,
-        default_token_service_url,
+        default_event_url, default_listen_local_api, default_mgmt_api_url, default_smb_domain,
+        default_smb_host, default_smb_port, default_token_service_url, AgentConfigFile,
+        AgentConfigFileCa, AgentConfigFileClientCert, AgentConfigFileServices,
     },
     logging::init_logging,
 };
@@ -73,7 +68,6 @@ struct Cli {
     insecure_no_password: bool,
 }
 
-
 fn ca_with_optional_password(args: &Cli) -> Result<Ca> {
     let password = if args.insecure_no_password {
         String::new()
@@ -119,16 +113,14 @@ fn generate_agent_config(args: &Cli) -> Result<()> {
         smb_domain,
         agent_name,
         resource_name,
-    } = &args.command {
+    } = &args.command
+    {
         let client_cert = match (agent_name, resource_name) {
             (Some(agent_name), Some(resource_name)) => {
                 validate_name(agent_name, "agent name")?;
                 validate_name(resource_name, "resource name")?;
-                let chain = read_pem_raw(&client_chain_path(
-                    &args.ca_path,
-                    resource_name,
-                    agent_name,
-                ))?;
+                let chain =
+                    read_pem_raw(&client_chain_path(&args.ca_path, resource_name, agent_name))?;
                 let private_key = read_pem_raw(&client_privkey_path(
                     &args.ca_path,
                     resource_name,
@@ -143,22 +135,14 @@ fn generate_agent_config(args: &Cli) -> Result<()> {
         (
             listen_local_api.clone(),
             AgentConfigFileServices {
-                event_url: event_url
-                    .clone()
-                    .unwrap_or_else(default_event_url),
+                event_url: event_url.clone().unwrap_or_else(default_event_url),
                 token_service_url: token_service_url
                     .clone()
                     .unwrap_or_else(default_token_service_url),
-                mgmt_api_url: mgmt_api_url
-                    .clone()
-                    .unwrap_or_else(default_mgmt_api_url),
-                smb_hostname: smb_hostname
-                    .clone()
-                    .unwrap_or_else(default_smb_host),
+                mgmt_api_url: mgmt_api_url.clone().unwrap_or_else(default_mgmt_api_url),
+                smb_hostname: smb_hostname.clone().unwrap_or_else(default_smb_host),
                 smb_port: smb_port.unwrap_or_else(default_smb_port),
-                smb_domain: smb_domain
-                    .clone()
-                    .unwrap_or_else(default_smb_domain),
+                smb_domain: smb_domain.clone().unwrap_or_else(default_smb_domain),
             },
             client_cert,
         )

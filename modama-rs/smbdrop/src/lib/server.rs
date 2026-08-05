@@ -638,7 +638,9 @@ mod tests {
         share_manager.start().await.unwrap();
 
         let api_state = ApiState::new(share_manager, apistate_events_tx);
-        let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0").await.unwrap();
+        let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0")
+            .await
+            .unwrap();
         let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
 
         let client = ClientBuilder::new().build().unwrap();
@@ -742,7 +744,9 @@ mod tests {
         share_manager.start().await.unwrap();
 
         let api_state = ApiState::new(share_manager, apistate_events_tx);
-        let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0").await.unwrap();
+        let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0")
+            .await
+            .unwrap();
         let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
 
         let client = ClientBuilder::new().build().unwrap();

@@ -44,7 +44,10 @@ pub async fn ensure_mounted(
 
     // already mounted? okay!
     if let Some(md) = mapped_remote_shares.get(&resource_string) {
-        info!("share {} already mounted at {}", &share.share_name, &md.drive);
+        info!(
+            "share {} already mounted at {}",
+            &share.share_name, &md.drive
+        );
         return Ok(MountedShare {
             share: share.clone(),
             mount_path: PathBuf::from(&md.drive),
@@ -108,9 +111,7 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
             .clone()
             .into_iter()
             .filter(|m| !should_be_mapped.contains(&PathBuf::from(&m.drive)))
-            .map(|m| async move {
-                internal::ensure_umounted(&m.drive, &config).await
-            }),
+            .map(|m| async move { internal::ensure_umounted(&m.drive, &config).await }),
     )
     .await
     .into_iter()
@@ -363,8 +364,7 @@ pub mod internal {
     }
 }
 
-pub struct CurrentPlatformMountBackend {
-}
+pub struct CurrentPlatformMountBackend {}
 
 impl MountBackend for CurrentPlatformMountBackend {
     async fn initialize(&self, config: &AgentConfig) {
@@ -375,7 +375,11 @@ impl MountBackend for CurrentPlatformMountBackend {
         cleanup_mount_points(config)
     }
 
-    async fn ensure_mounted(&self, share: &Share, config: &AgentConfig) -> Result<MountedShare, EnsureMountedError> {
+    async fn ensure_mounted(
+        &self,
+        share: &Share,
+        config: &AgentConfig,
+    ) -> Result<MountedShare, EnsureMountedError> {
         ensure_mounted(share, config).await
     }
 

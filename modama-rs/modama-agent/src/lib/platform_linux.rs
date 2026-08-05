@@ -17,9 +17,7 @@ use crate::{
     share::MountedShare,
 };
 
-async fn prepare_mountpoint_directory(
-    config: &AgentConfig,
-) {
+async fn prepare_mountpoint_directory(config: &AgentConfig) {
     let prefix = config.get_linux_config().mount_point_prefix;
 
     if !prefix.exists() {

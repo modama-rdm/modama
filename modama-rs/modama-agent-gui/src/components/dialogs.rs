@@ -1,6 +1,9 @@
 use eframe::egui::{self, Align, Layout, RichText};
 
-use crate::{components::buttons::{danger_button, secondary_button}, styles};
+use crate::{
+    components::buttons::{danger_button, secondary_button},
+    styles,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ConfirmationDialogAction {

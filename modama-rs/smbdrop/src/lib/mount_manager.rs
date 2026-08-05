@@ -1,7 +1,8 @@
 use std::{
     collections::HashSet,
     fs::create_dir_all,
-    path::{Path, PathBuf}, sync::Arc,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use anyhow::Result;
@@ -225,7 +226,8 @@ mod test {
     use std::{
         collections::HashSet,
         path::{Path, PathBuf},
-        str::FromStr, sync::Arc,
+        str::FromStr,
+        sync::Arc,
     };
 
     use crate::{
@@ -339,7 +341,6 @@ mod test {
         });
         mm.set_state(desired_mounts).unwrap();
     }
-
 
     #[test]
     fn test_mount_failed() {

@@ -172,9 +172,7 @@ pub async fn task_exists_and_running(
     }
 }
 
-pub async fn token_publisher_loop(
-    token_fetcher: Arc<dyn TokenProvider + Sync + Send>,
-) {
+pub async fn token_publisher_loop(token_fetcher: Arc<dyn TokenProvider + Sync + Send>) {
     let mut advertisement_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
     let mut token_server_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
 

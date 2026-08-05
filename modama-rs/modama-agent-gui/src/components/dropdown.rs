@@ -51,8 +51,8 @@ where
             sw: 0,
             se: 0,
         };
-        let selected_text = RichText::new(format!("{}", selected_option))
-            .font(styles::typography::body::font_id());
+        let selected_text =
+            RichText::new(format!("{}", selected_option)).font(styles::typography::body::font_id());
 
         let response = egui::ComboBox::from_id_salt(id_salt)
             .width(ui.available_width())

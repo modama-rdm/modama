@@ -1,4 +1,4 @@
-use eframe::egui::{self, Color32, Sense, };
+use eframe::egui::{self, Color32, Sense};
 
 use crate::styles;
 

@@ -33,7 +33,8 @@ fn set_perms_priv(path: &Path) -> Result<(), CAError> {
 
 use pkcs8::{der::EncodePem, DecodePrivateKey, LineEnding, PrivateKeyInfoOwned};
 use rcgen::{
-    Certificate, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519, string::Ia5String
+    string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
+    ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
 };
 
 #[derive(thiserror::Error, Debug)]

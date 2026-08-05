@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use modama_common::tokens::{TokenFetcher, TokenVerifier};
 
-#[allow(clippy::unwrap_used)]  // don't care in this test tool
+#[allow(clippy::unwrap_used)] // don't care in this test tool
 #[tokio::main]
 async fn main() {
     let token_fetcher = TokenFetcher::from_files(
@@ -21,5 +21,8 @@ async fn main() {
 
     let sign_response = token_fetcher.fetch_token().await.unwrap();
     eprintln!("{:?}", sign_response);
-    eprintln!("{:?}", token_verifier.verify(&sign_response.token).await.unwrap());
+    eprintln!(
+        "{:?}",
+        token_verifier.verify(&sign_response.token).await.unwrap()
+    );
 }

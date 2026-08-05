@@ -2,6 +2,9 @@ agent_gui_package := "modama-agent-gui"
 snapshot_dir := "modama-agent-gui/tests/snapshots"
 design_spec := "../mgmtinterface-new/DESIGN.md"
 
+fmt:
+    cargo fmt
+
 # Validate the shared design specification, treating warnings as failures.
 validate-design:
     #!/usr/bin/env bash

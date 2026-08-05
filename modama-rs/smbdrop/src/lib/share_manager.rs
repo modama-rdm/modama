@@ -250,13 +250,12 @@ impl SmbDropState {
         }
 
         for (_uid, user) in self.users.iter().sorted() {
-            let pwd =
-                user_provider
-                    .passwd_from_name_string(&user.username)
-                    .map_err(|e| ShareError::IoError {
-                        source: e,
-                        msg: format!("look up username {}", user.username),
-                    })?;
+            let pwd = user_provider
+                .passwd_from_name_string(&user.username)
+                .map_err(|e| ShareError::IoError {
+                    source: e,
+                    msg: format!("look up username {}", user.username),
+                })?;
             if let Some(pwd) = pwd {
                 if pwd.uid != user.uid {
                     return Err(ShareError::Inconsistent(format!(

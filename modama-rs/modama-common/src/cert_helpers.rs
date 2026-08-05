@@ -88,8 +88,7 @@ pub fn get_private_key(privkey: &Path) -> Result<PrivateKeyDer<'static>, CertHel
 pub fn private_key_from_reader(
     reader: &mut impl BufRead,
 ) -> Result<PrivateKeyDer<'static>, CertHelperError> {
-    let pk = private_key(reader)?
-        .ok_or_else(|| CertHelperError::KeyNotFound)?;
+    let pk = private_key(reader)?.ok_or_else(|| CertHelperError::KeyNotFound)?;
     Ok(pk)
 }
 

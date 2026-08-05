@@ -9,10 +9,12 @@ use std::{
 
 use etc_passwd::Passwd;
 use log::warn;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{mpsc, Mutex};
 
 use crate::{
-    mount::{BindMount, MountBackend}, process_manager::{ProcessManager, ProcessManagerCommand}, share_manager::{CreateUserError, UserProvider}
+    mount::{BindMount, MountBackend},
+    process_manager::{ProcessManager, ProcessManagerCommand},
+    share_manager::{CreateUserError, UserProvider},
 };
 
 #[derive(Clone)]
@@ -22,7 +24,9 @@ pub struct MockUserProvider {
 
 impl MockUserProvider {
     pub fn new(users: Vec<(String, u32)>) -> Self {
-        Self { users: Arc::new(std::sync::Mutex::new(users)) }
+        Self {
+            users: Arc::new(std::sync::Mutex::new(users)),
+        }
     }
 }
 
@@ -69,7 +73,10 @@ impl UserProvider for MockUserProvider {
         user: &crate::share_manager::User,
     ) -> Result<(), CreateUserError> {
         warn!("mock: add_system_user {user:?}");
-        self.users.lock().unwrap().push((user.username.clone(), user.uid));
+        self.users
+            .lock()
+            .unwrap()
+            .push((user.username.clone(), user.uid));
         Ok(())
     }
 
@@ -155,15 +162,16 @@ impl MountBackend for MockMountBackend {
     }
 }
 
-
 #[derive(Clone)]
 pub struct MockProcessManager {
     pub q: Arc<Mutex<Option<mpsc::Receiver<ProcessManagerCommand>>>>,
 }
 
 impl MockProcessManager {
-    pub fn new() -> Self { 
-        Self { q: Arc::new(Mutex::new(None)) }
+    pub fn new() -> Self {
+        Self {
+            q: Arc::new(Mutex::new(None)),
+        }
     }
 }
 

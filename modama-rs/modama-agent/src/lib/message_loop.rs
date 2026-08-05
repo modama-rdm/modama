@@ -10,7 +10,8 @@ use futures_util::{future::join_all, SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use modama_common::{
     messages::{EventChannelInitialMessages, EventChannelMessage, Share},
-    tokens::TokenProvider, version::modama_git_version,
+    tokens::TokenProvider,
+    version::modama_git_version,
 };
 use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
@@ -145,7 +146,10 @@ pub async fn message_loop(
                 continue;
             }
         };
-        let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login { token: token.token, version: modama_git_version().to_owned() }) {
+        let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login {
+            token: token.token,
+            version: modama_git_version().to_owned(),
+        }) {
             Ok(msg) => msg,
             Err(e) => {
                 error!("Could not serialize authentication message, reconnecting...");
@@ -256,11 +260,8 @@ mod tests {
                 .await
                 .unwrap()
         }
-        
-        async fn initialize(
-            &self,
-            _config: &AgentConfig,
-        ) {
+
+        async fn initialize(&self, _config: &AgentConfig) {
             warn!("nothing to do here");
         }
     }
@@ -333,7 +334,11 @@ mod tests {
                 token_service_url: Url::parse("http://localhost").unwrap(),
                 ca_root_store: root.clone(),
                 ca_root_cert: "".to_owned(),
-                client_config: Arc::new(ClientConfig::builder().with_root_certificates(root).with_no_client_auth()),
+                client_config: Arc::new(
+                    ClientConfig::builder()
+                        .with_root_certificates(root)
+                        .with_no_client_auth(),
+                ),
                 client_cert: None,
             };
 
@@ -361,16 +366,17 @@ mod tests {
             ));
 
             let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
-            let token_provider: Arc<dyn TokenProvider + 'static + Sync + Send> = Arc::new(MockTokenProvider {
-                signer: token_signer,
-                claims: Claims {
-                    sub: "x-modama-agent://test_resource#test-agent".to_owned(),
-                    exp: (SystemTime::now() + Duration::from_secs(1000))
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                },
-            });
+            let token_provider: Arc<dyn TokenProvider + 'static + Sync + Send> =
+                Arc::new(MockTokenProvider {
+                    signer: token_signer,
+                    claims: Claims {
+                        sub: "x-modama-agent://test_resource#test-agent".to_owned(),
+                        exp: (SystemTime::now() + Duration::from_secs(1000))
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    },
+                });
 
             // run message_loop in background
             let message_loop_state = Arc::clone(&state);

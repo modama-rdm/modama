@@ -8,13 +8,18 @@ use nix::{
 use tokio::{
     process::{Child, Command},
     select,
-    sync::{Mutex, mpsc::{self, Sender}},
+    sync::{
+        mpsc::{self, Sender},
+        Mutex,
+    },
 };
 
 pub trait ProcessManager: Clone + Sync + Send {
-    fn start_in_background(&self, debug: bool) -> impl Future<Output = Sender<ProcessManagerCommand>> + Send;
+    fn start_in_background(
+        &self,
+        debug: bool,
+    ) -> impl Future<Output = Sender<ProcessManagerCommand>> + Send;
 }
-
 
 #[derive(Clone)]
 pub struct SambaProcessManagerState {
@@ -22,12 +27,11 @@ pub struct SambaProcessManagerState {
 }
 
 #[derive(Clone)]
-pub struct SambaProcessManager {
-}
+pub struct SambaProcessManager {}
 
 impl SambaProcessManager {
     pub fn new() -> Self {
-        Self { }
+        Self {}
     }
 }
 
@@ -121,7 +125,6 @@ impl ProcessManager for SambaProcessManager {
 
         tx
     }
-
 }
 
 impl SambaProcessManagerState {
@@ -135,7 +138,9 @@ impl SambaProcessManagerState {
             .stdin(Stdio::null())
             .spawn()?;
 
-        Ok(Self { child: Arc::new(Mutex::new(child)) })
+        Ok(Self {
+            child: Arc::new(Mutex::new(child)),
+        })
     }
 
     pub async fn stop(self) -> Result<(), Box<dyn Error + Send + Sync>> {

@@ -9,7 +9,10 @@ use std::{
 };
 
 use log::{debug, error, info, warn};
-use modama_common::{tokens::{BoxFutureToken, TokenError, TokenProvider, TokenSignResponse}, version::modama_git_version};
+use modama_common::{
+    tokens::{BoxFutureToken, TokenError, TokenProvider, TokenSignResponse},
+    version::modama_git_version,
+};
 use reqwest::{Certificate, Client, StatusCode};
 use tokio::{
     net::UdpSocket,
@@ -193,7 +196,10 @@ impl LocalNetTokenProvider {
         })
     }
 
-    pub async fn new(ca_cert_reader: &mut impl BufRead, local_addr: DiscoveryAddr) -> Result<Self, TokenError> {
+    pub async fn new(
+        ca_cert_reader: &mut impl BufRead,
+        local_addr: DiscoveryAddr,
+    ) -> Result<Self, TokenError> {
         let mut ca_pem: Vec<u8> = Vec::new();
         ca_cert_reader.read_to_end(&mut ca_pem)?;
         Self::new_with_pem(&ca_pem, local_addr).await
@@ -260,7 +266,11 @@ impl LocalNetTokenProvider {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::{
-        io::BufReader, net::Ipv4Addr, path::PathBuf, sync::{Arc, LazyLock}, time::{Duration, SystemTime, UNIX_EPOCH}
+        io::BufReader,
+        net::Ipv4Addr,
+        path::PathBuf,
+        sync::{Arc, LazyLock},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use itertools::Itertools;
@@ -286,9 +296,7 @@ mod tests {
         local_net_token_proxy::{advertisement_loop, local_token_proxy, SharedState},
     };
 
-    static DISCOVERY_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| {
-        Mutex::new(())
-    });
+    static DISCOVERY_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn test_disco_parse_invalid_1() {
@@ -588,7 +596,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(matches!(receiver.token_from_local_net().await, Err(TokenError::NoSource)));
+        assert!(matches!(
+            receiver.token_from_local_net().await,
+            Err(TokenError::NoSource)
+        ));
     }
 
     // TODO: more tests

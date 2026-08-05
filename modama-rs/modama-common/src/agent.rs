@@ -49,8 +49,14 @@ impl AgentId {
         }
 
         Ok(Self {
-            resource: uri_parsed.host_str().ok_or_else(|| FromURIError::URIParts(uri.to_owned()))?.to_string(),
-            agent: uri_parsed.fragment().ok_or_else(|| FromURIError::URIParts(uri.to_owned()))?.to_string(),
+            resource: uri_parsed
+                .host_str()
+                .ok_or_else(|| FromURIError::URIParts(uri.to_owned()))?
+                .to_string(),
+            agent: uri_parsed
+                .fragment()
+                .ok_or_else(|| FromURIError::URIParts(uri.to_owned()))?
+                .to_string(),
             san_encoded: uri.to_owned(),
         })
     }

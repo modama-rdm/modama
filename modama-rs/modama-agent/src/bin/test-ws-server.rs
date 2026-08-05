@@ -59,7 +59,9 @@ async fn handle_message(
             let msg = get_share_list().await;
             let json_msg = serde_json::to_string(&msg)?;
 
-            ws_stream.send(tungstenite::Message::Text(json_msg.into())).await?;
+            ws_stream
+                .send(tungstenite::Message::Text(json_msg.into()))
+                .await?;
         }
     }
 
