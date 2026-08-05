@@ -3,6 +3,7 @@ use std::{error::Error, path::PathBuf, sync::Arc};
 use clap::Parser;
 use eframe::egui;
 use modama_agent_gui::{app::AgentGuiApp, config::load_config, service::HttpAgentService, styles};
+use modama_common::logging::init_logging;
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -16,6 +17,8 @@ struct Cli {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    init_logging();
+
     let cli = Cli::parse();
     let config = load_config(cli.config_path.as_deref(), cli.agent_url)?;
     let service = Arc::new(HttpAgentService::new(config.agent_url)?);

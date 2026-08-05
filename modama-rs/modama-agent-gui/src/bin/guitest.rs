@@ -8,6 +8,7 @@ use modama_agent_gui::{
     state::{ActiveSession, AgentIdentity, Credentials},
     styles,
 };
+use modama_common::logging::init_logging;
 
 const DEFAULT_PROJECT: &str = "Holo Stacks";
 const DEFAULT_SESSION: &str = "2026-06-26-holo-stacks";
@@ -107,6 +108,8 @@ fn seed_logged_in(app: &mut AgentGuiApp) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    init_logging();
+
     let cli = Cli::parse();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([

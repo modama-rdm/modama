@@ -10,7 +10,6 @@ inspection = ["eframe/inspection"]
 [dependencies]
 eframe = "0.35.0"
 anyhow = { workspace = true }
-env_logger = { workspace = true }
 log = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }

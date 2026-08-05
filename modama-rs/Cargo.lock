@@ -3348,7 +3348,6 @@ dependencies = [
  "egui_extras",
  "egui_kittest",
  "egui_taffy",
- "env_logger",
  "log",
  "mockito",
  "modama-common",
