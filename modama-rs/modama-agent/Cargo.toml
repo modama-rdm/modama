@@ -11,6 +11,10 @@ path = "src/bin/modama-agent.rs"
 name = "test-ws-server"
 path = "src/bin/test-ws-server.rs"
 
+[[bin]]
+name = "generate-openapi"
+path = "src/bin/generate-openapi.rs"
+
 [lib]
 name = "modama_agent"
 path = "src/lib/lib.rs"

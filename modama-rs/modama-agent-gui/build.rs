@@ -29,6 +29,8 @@ fn main() {
     let design_path = manifest_dir.join("../../mgmtinterface-new/DESIGN.md");
     println!("cargo:rerun-if-changed={}", design_path.display());
 
+    generate_api_client(&manifest_dir);
+
     let source = fs::read_to_string(&design_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", design_path.display()));
     let front_matter = extract_front_matter(&source)
@@ -40,10 +42,69 @@ fn main() {
     };
 
     let generated = generate_styles(&design).unwrap_or_else(|error| panic!("{error}"));
-    let output_path =
-        PathBuf::from(env::var_os("OUT_DIR").unwrap_or_default()).join("design_styles.rs");
+    let output_path = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set by Cargo"))
+        .join("design_styles.rs");
     fs::write(&output_path, generated)
         .unwrap_or_else(|error| panic!("failed to write {}: {error}", output_path.display()));
+}
+
+fn generate_api_client(manifest_dir: &std::path::Path) {
+    use openapi_to_rust::{CodeGenerator, GeneratorConfig, SchemaAnalyzer};
+
+    let schema_path = manifest_dir.join("../modama-agent/openapi.json");
+    println!("cargo:rerun-if-changed={}", schema_path.display());
+
+    let source = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", schema_path.display()));
+    let schema: serde_json::Value = serde_json::from_str(&source)
+        .unwrap_or_else(|error| panic!("failed to parse {}: {error}", schema_path.display()));
+
+    let mut analyzer = SchemaAnalyzer::new(schema)
+        .unwrap_or_else(|error| panic!("failed to analyze OpenAPI schema: {error}"));
+    let mut analysis = analyzer
+        .analyze()
+        .unwrap_or_else(|error| panic!("failed to analyze OpenAPI schema: {error}"));
+    let generator = CodeGenerator::new(GeneratorConfig {
+        enable_async_client: true,
+        enable_sse_client: false,
+        tracing_enabled: false,
+        ..GeneratorConfig::default()
+    });
+    let generated = generator
+        .generate_all(&mut analysis)
+        .unwrap_or_else(|error| panic!("failed to generate API client: {error}"));
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set by Cargo"))
+        .join("generated");
+    fs::create_dir_all(&out_dir)
+        .unwrap_or_else(|error| panic!("failed to create {}: {error}", out_dir.display()));
+
+    for file in generated.files {
+        let output_path = out_dir.join(&file.path);
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent)
+                .unwrap_or_else(|error| panic!("failed to create {}: {error}", parent.display()));
+        }
+        let content = strip_leading_comments_and_attrs(&file.content);
+        fs::write(&output_path, content)
+            .unwrap_or_else(|error| panic!("failed to write {}: {error}", output_path.display()));
+    }
+}
+
+fn strip_leading_comments_and_attrs(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut first_code_line = 0;
+
+    while first_code_line < lines.len() {
+        let trimmed = lines[first_code_line].trim();
+        if trimmed.starts_with("//!") || trimmed.starts_with("#![") || trimmed.is_empty() {
+            first_code_line += 1;
+        } else {
+            break;
+        }
+    }
+
+    lines[first_code_line..].join("\n")
 }
 
 fn extract_front_matter(source: &str) -> Result<Option<&str>, String> {

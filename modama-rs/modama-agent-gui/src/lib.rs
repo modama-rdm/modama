@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod api_client;
 pub mod app;
 pub mod async_state;
 pub mod components;

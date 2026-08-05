@@ -29,6 +29,7 @@ use modama_common::{
 #[utoipa::path(
     get,
     path = "/api/shares/foreground/",
+    operation_id = "get_foreground_share",
     params(("X-API-Version" = String, Header, description = "API version")),
     responses((status = 200, description = "Current foreground share", body = APICurrentForegroundShare))
 )]
@@ -57,6 +58,7 @@ async fn api_shares_foreground(
 #[utoipa::path(
     post,
     path = "/api/projects/{project_name}/sessions/{session_name}/start-ingest/",
+    operation_id = "start_ingest",
     params(
         ("X-API-Version" = String, Header, description = "API version"),
         ("project_name" = String, Path, description = "Project name"),
@@ -106,6 +108,7 @@ async fn api_start_ingest(
 #[utoipa::path(
     post,
     path = "/api/login/",
+    operation_id = "login",
     params(("X-API-Version" = String, Header, description = "API version")),
     responses(
         (status = 200, description = "Authenticated user", body = APILoginResponse),
@@ -127,6 +130,7 @@ async fn api_login(
 #[utoipa::path(
     get,
     path = "/api/projects/",
+    operation_id = "list_projects",
     params(("X-API-Version" = String, Header, description = "API version")),
     responses(
         (status = 200, description = "Available projects", body = APIListProjectsResponse),
@@ -161,6 +165,7 @@ async fn api_list_projects(
 #[utoipa::path(
     get,
     path = "/api/projects/{project_name}/sessions/",
+    operation_id = "list_sessions_in_project",
     params(
         ("X-API-Version" = String, Header, description = "API version"),
         ("project_name" = String, Path, description = "Project name")
@@ -197,6 +202,7 @@ async fn api_list_sessions_in_project(
 #[utoipa::path(
     post,
     path = "/api/projects/{project_name}/sessions/",
+    operation_id = "create_session_in_project",
     params(
         ("X-API-Version" = String, Header, description = "API version"),
         ("project_name" = String, Path, description = "Project name")
@@ -235,6 +241,7 @@ async fn api_create_session_in_project(
 #[utoipa::path(
     get,
     path = "/api/health/",
+    operation_id = "health",
     params(("X-API-Version" = String, Header, description = "API version")),
     responses((status = 200, description = "Agent is healthy", body = APIHealthCheckResponse))
 )]
@@ -277,9 +284,17 @@ fn customize_openapi(mut openapi: utoipa::openapi::OpenApi) -> utoipa::openapi::
     openapi
 }
 
+/// Generate the canonical OpenAPI document for the local API.
+pub fn openapi_document() -> Result<utoipa::openapi::OpenApi, versioned::RouteConfigError> {
+    let api_routes = api_routes();
+    Ok(customize_openapi(
+        api_routes.generate_openapi(latest_api_version())?,
+    ))
+}
+
 pub fn add_api_routes(router: Router<ApiState>, state: ApiState) -> Result<Router, LocalAPIError> {
     let api_routes = api_routes();
-    let openapi = customize_openapi(api_routes.generate_openapi(latest_api_version())?);
+    let openapi = openapi_document()?;
     let versioned_router = api_routes.build(state.clone())?;
     let openapi = Arc::new(openapi);
 
@@ -291,4 +306,19 @@ pub fn add_api_routes(router: Router<ApiState>, state: ApiState) -> Result<Route
             async move { Json((*openapi).clone()) }
         }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::openapi_document;
+
+    #[test]
+    fn checked_in_openapi_schema_matches_the_api() -> Result<(), Box<dyn std::error::Error>> {
+        let checked_in: serde_json::Value =
+            serde_json::from_str(include_str!("../../openapi.json"))?;
+        let generated = serde_json::to_value(openapi_document()?)?;
+
+        assert_eq!(checked_in, generated);
+        Ok(())
+    }
 }

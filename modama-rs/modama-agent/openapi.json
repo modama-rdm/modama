@@ -1,0 +1,690 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "modama-agent local API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/health/": {
+      "get": {
+        "operationId": "health",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIHealthCheckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          }
+        },
+        "x-introduced-in-version": "1.0.0"
+      }
+    },
+    "/api/login/": {
+      "post": {
+        "operationId": "login",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APILoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed"
+          }
+        },
+        "security": [
+          {
+            "basic_auth": []
+          }
+        ],
+        "x-introduced-in-version": "1.0.0"
+      }
+    },
+    "/api/projects/": {
+      "get": {
+        "operationId": "list_projects",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Available projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIListProjectsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed"
+          }
+        },
+        "security": [
+          {
+            "basic_auth": []
+          }
+        ],
+        "x-introduced-in-version": "1.0.0"
+      }
+    },
+    "/api/projects/{project_name}/sessions/": {
+      "get": {
+        "operationId": "list_sessions_in_project",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_name",
+            "in": "path",
+            "description": "Project name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sessions in the project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIListSessionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "basic_auth": []
+          }
+        ],
+        "x-introduced-in-version": "1.0.0"
+      },
+      "post": {
+        "operationId": "create_session_in_project",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_name",
+            "in": "path",
+            "description": "Project name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APICreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Created session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APICreateSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "basic_auth": []
+          }
+        ],
+        "x-introduced-in-version": "1.0.0"
+      }
+    },
+    "/api/projects/{project_name}/sessions/{session_name}/start-ingest/": {
+      "post": {
+        "operationId": "start_ingest",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_name",
+            "in": "path",
+            "description": "Project name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Created ingest share",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APICreateShareResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "404": {
+            "description": "Project or session not found"
+          }
+        },
+        "security": [
+          {
+            "basic_auth": []
+          }
+        ],
+        "x-introduced-in-version": "1.0.0"
+      }
+    },
+    "/api/shares/foreground/": {
+      "get": {
+        "summary": "Query for the current foreground share",
+        "operationId": "get_foreground_share",
+        "parameters": [
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current foreground share",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APICurrentForegroundShare"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          }
+        },
+        "x-introduced-in-version": "1.0.0"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "APICreateSessionRequest": {
+        "type": "object",
+        "description": "Create a new session in the given project\n(`project_name` is part of the URL)",
+        "required": [
+          "session"
+        ],
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        }
+      },
+      "APICreateSessionResponse": {
+        "type": "object",
+        "description": "Response when successfully creating a new session\nin a project",
+        "required": [
+          "project",
+          "session"
+        ],
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          }
+        }
+      },
+      "APICreateShareResponse": {
+        "type": "object",
+        "description": "Response when successfully creating a new ingest share.",
+        "required": [
+          "share"
+        ],
+        "properties": {
+          "share": {
+            "$ref": "#/components/schemas/Share"
+          }
+        }
+      },
+      "APICurrentForegroundShare": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "None"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "dest_path",
+              "mount_path",
+              "type"
+            ],
+            "properties": {
+              "dest_path": {
+                "type": "string",
+                "description": "The path in the data management that is exported with this Share"
+              },
+              "mount_path": {
+                "type": "string",
+                "description": "Where the share is mounted on the local system"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Share"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Local system users can ask the agent for the current foreground share. This\ndoesn't have to contain credentials, most important is some kind of identity\nand the path where the share is mounted."
+      },
+      "APIHealthCheckResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Ok"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Health check API endpoint response"
+      },
+      "APIListProjectsResponse": {
+        "type": "object",
+        "description": "Response listing projects the current user has access to,\nwith the intent of creating a session or",
+        "required": [
+          "projects"
+        ],
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "APIListSessionsResponse": {
+        "type": "object",
+        "description": "Response listing existing sessions in the given project",
+        "required": [
+          "project",
+          "sessions"
+        ],
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "APILoginResponse": {
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "Share": {
+        "type": "object",
+        "required": [
+          "share_id",
+          "share_name",
+          "dest_path",
+          "created_timestamp",
+          "username",
+          "password",
+          "uid",
+          "gid"
+        ],
+        "properties": {
+          "created_timestamp": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When was this share created? Unix timestamp",
+            "minimum": 0
+          },
+          "dest_path": {
+            "type": "string",
+            "description": "The path in the data management that is exported with this Share"
+          },
+          "gid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "the underlying unix group for which the share is created",
+            "minimum": 0
+          },
+          "password": {
+            "type": "string",
+            "description": "Password for connecting (temporary)"
+          },
+          "resource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the name of the Resource this share belongs to; None if it wasn't\ncreated for a Resource"
+          },
+          "share_id": {
+            "type": "string",
+            "description": "A UUID for this share"
+          },
+          "share_name": {
+            "type": "string",
+            "description": "The full share name; the first path element of the SMB URL"
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "the underlying unix user for which the share is created",
+            "minimum": 0
+          },
+          "username": {
+            "type": "string",
+            "description": "Username for connecting (temporary)"
+          }
+        }
+      },
+      "VersioningError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "error",
+              "supported",
+              "header",
+              "type"
+            ],
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              },
+              "supported": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsupported_version"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "error",
+              "supported",
+              "version",
+              "header",
+              "type"
+            ],
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              },
+              "supported": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_version"
+                ]
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "error",
+              "supported",
+              "header",
+              "type"
+            ],
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              },
+              "supported": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_version"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Error response for version negotiation failures."
+      }
+    },
+    "securitySchemes": {
+      "basic_auth": {
+        "type": "http",
+        "scheme": "basic"
+      }
+    }
+  }
+}
+

@@ -16,6 +16,8 @@ clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
+reqwest-middleware = { version = "0.4.2", default-features = false }
+base64 = "0.22.1"
 egui_extras = { version = "0.35.0", features = ["svg"] }
 egui_taffy = "0.13"
 egui-phosphor = "0.13"
@@ -30,9 +32,13 @@ egui_kittest = { version = "0.35.0", optional = true, features = ["eframe", "sna
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "0.9.34"
 csscolorparser = "0.8.3"
+openapi-to-rust = { version = "0.12.0", default-features = false }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 csscolorparser = "0.8.3"
+mockito = "1.7.0"
+tokio = { workspace = true }
 
 [[test]]
 name = "login_visual"
