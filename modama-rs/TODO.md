@@ -6,15 +6,12 @@
     - [x] Have the GUI use the generated client
     - [x] Add deterministic API service fixtures for GUI tests
 - [ ] expose structured project/session metadata from the management API while
-      keeping smbdrop project-agnostic
+      keeping smbdrop project-agnostic (deferred until the new mgmtinterface API exists)
 - [x] review retained versioned tests for overlap after omitting exploratory tests
 - [x] clean up the versioned builder API: reconcile naming, state ownership,
       fallible validation, and metadata-required route registration into one
       coherent public interface
-- [ ] BUG: while connecting to the agent, going to the overview or to the login page clears the "connecting..." state
-    - the overview state needs an indication of the current connection status
-    - when not connected, maybe display "broken plug" kinda icon in top bar
-    - disable login button when not connected
+- [x] BUG: keep the connecting state active and automatically retry until the agent is available
 - [ ] re-examine polling for status updates
     - expose websocket from modama-agent and have a background thread continuously listen on that?
 - [ ] need to also get updates when we are not waiting for an ingest share to mount
@@ -31,4 +28,6 @@
     - [ ] Review vertical and horizontal flow
     - [ ] Fix hovered card rows overlaying the top border
 - [ ] set up logging in the main entry point
-- [ ] ensure important issues are logged (any of the errors that result in a "dismiss"/"retry" dialog for example)
+- [ ] ensure important errors are logged (any of the errors that result in a "dismiss"/"retry" dialog for example)
+- [ ] BUG: scrollbar color is not distinguishable from background
+- [ ] extra binary for generating screnshots for the user documentation

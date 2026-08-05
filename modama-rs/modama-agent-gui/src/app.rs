@@ -142,11 +142,6 @@ impl AgentGuiApp {
 
     fn handle_retry(&mut self, retry: RetryAction, ctx: egui::Context) {
         match retry {
-            RetryAction::Reconnect => {
-                if let Page::Connecting(page) = &mut self.page {
-                    page.retry(ctx);
-                }
-            }
             RetryAction::Login => {
                 if let Page::Login(page) = &mut self.page {
                     page.retry(ctx);

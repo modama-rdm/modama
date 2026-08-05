@@ -3,7 +3,7 @@ use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
     pages::{Page, PageConnecting, PageOverview},
-    service::ServiceError,
+    service::ConnectedAgent,
     state::{ActiveSession, Credentials},
     styles,
 };
@@ -359,9 +359,12 @@ fn connecting_snapshot() {
             connecting.connect_task.spawn(
                 move || {
                     task_release.wait();
-                    Err(ServiceError::Transport(
-                        "connecting snapshot complete".to_owned(),
-                    ))
+                    ConnectedAgent {
+                        identity: modama_agent_gui::state::AgentIdentity::Anonymous {
+                            hostname: "snapshot-host".to_owned(),
+                        },
+                        session: None,
+                    }
                 },
                 cc.egui_ctx.clone(),
             );
@@ -372,6 +375,14 @@ fn connecting_snapshot() {
     harness.ctx.set_theme(egui::Theme::Light);
 
     harness.run_steps(3);
+    assert!(harness
+        .query_by(|node| node.label().as_deref() == Some("Log in") && node.is_disabled())
+        .is_some());
+    assert!(harness
+        .query_by(|node| {
+            node.label().as_deref() == Some("go to Overview") && node.is_disabled()
+        })
+        .is_some());
     harness.snapshot("connecting");
     release.wait();
 

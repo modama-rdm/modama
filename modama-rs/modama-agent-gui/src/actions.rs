@@ -2,7 +2,6 @@ use crate::state::{ActiveSession, AgentIdentity, Credentials};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetryAction {
-    Reconnect,
     Login,
     FetchProjects,
     FetchSessions { project: String },
