@@ -23,7 +23,14 @@ impl FlowStage {
 
 /// Show the compact project/session flow and return a completed stage selected
 /// by the user. The current and future stages are intentionally not links.
-pub(crate) fn flow_navigation(ui: &mut egui::Ui, current: FlowStage) -> Option<FlowStage> {
+///
+/// Completed stages are disabled while the current page has work in flight so
+/// navigation cannot discard the page that owns the task.
+pub(crate) fn flow_navigation(
+    ui: &mut egui::Ui,
+    current: FlowStage,
+    navigation_enabled: bool,
+) -> Option<FlowStage> {
     let mut selected = None;
     let current_index = FlowStage::ALL
         .into_iter()
@@ -58,7 +65,8 @@ pub(crate) fn flow_navigation(ui: &mut egui::Ui, current: FlowStage) -> Option<F
             }
 
             if index < current_index {
-                let response = ui.add(egui::Button::new(text).frame(false));
+                let response =
+                    ui.add_enabled(navigation_enabled, egui::Button::new(text).frame(false));
                 styles::paint_focus_ring(ui, &response);
                 if response.clicked() {
                     selected = Some(stage);

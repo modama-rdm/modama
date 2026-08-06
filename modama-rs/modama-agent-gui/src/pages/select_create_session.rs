@@ -118,7 +118,7 @@ impl PageSelectCreateSession {
                 .spawn(move || service.list_sessions(&credentials, &project), ctx);
         }
 
-        if let Some(stage) = flow_navigation(ui, FlowStage::Session) {
+        if let Some(stage) = flow_navigation(ui, FlowStage::Session, !self.is_busy()) {
             return match stage {
                 FlowStage::Overview => Action::GoToOverview,
                 FlowStage::Project => Action::GoToSelectProject,

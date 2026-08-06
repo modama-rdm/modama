@@ -93,7 +93,7 @@ impl PageSelectProject {
     pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) -> Action {
         self.start_initial_fetch(ui);
 
-        if let Some(stage) = flow_navigation(ui, FlowStage::Project) {
+        if let Some(stage) = flow_navigation(ui, FlowStage::Project, !self.is_busy()) {
             return match stage {
                 FlowStage::Overview => Action::GoToOverview,
                 FlowStage::Project | FlowStage::Session => Action::None,
