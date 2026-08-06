@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::{
     actions::{Action, RetryAction, TaskFailure},
     components::toast::{ToastAction, ToastState},
+    navigation_progress::NavigationProgress,
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
     },
@@ -18,6 +19,7 @@ pub struct AgentGuiApp {
     pub app_state: AgentAppState,
     pub toast: ToastState,
     top_bar: TopBar,
+    navigation_progress: NavigationProgress,
     service: Arc<dyn AgentService>,
 }
 
@@ -38,6 +40,7 @@ impl AgentGuiApp {
             app_state: AgentAppState::new(),
             toast: ToastState::default(),
             top_bar: TopBar::default(),
+            navigation_progress: NavigationProgress::default(),
             service,
         }
     }
@@ -249,6 +252,8 @@ impl eframe::App for AgentGuiApp {
                 ToastAction::Dismiss => self.toast.clear(),
             }
         }
+
+        self.navigation_progress.show(ui.ctx(), self.page.is_busy());
     }
 }
 

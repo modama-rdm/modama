@@ -143,6 +143,9 @@ fn overview_actions_are_mutually_exclusive() {
     let inactive = overview_harness(false, false);
     assert!(inactive.query_by_label("Create Session").is_some());
     assert!(inactive.query_by_label("Close Session").is_none());
+    assert!(inactive
+        .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
+        .is_none());
 }
 
 #[test]
@@ -382,6 +385,9 @@ fn connecting_snapshot() {
         .query_by(|node| {
             node.label().as_deref() == Some("go to Overview") && node.is_disabled()
         })
+        .is_some());
+    assert!(harness
+        .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
         .is_some());
     harness.snapshot("connecting");
     release.wait();

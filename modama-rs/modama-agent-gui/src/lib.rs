@@ -6,6 +6,7 @@ pub mod components;
 pub mod config;
 #[cfg(feature = "guide-screenshots")]
 pub mod guide_screenshots;
+mod navigation_progress;
 pub mod pages;
 pub mod service;
 pub mod state;
@@ -34,6 +35,10 @@ mod style_tests {
         assert_eq!(styles::spacing::button_padding_x::EGUI_POINTS, 20.0);
         assert_eq!(styles::rounded::_2xl::EGUI_POINTS, 16.0);
         assert_eq!(styles::components::top_bar::height::EGUI_POINTS, 56.0);
+        assert_eq!(
+            styles::components::navigation_progress::height::EGUI_POINTS,
+            4.0
+        );
         assert_eq!(styles::components::app_shell::padding::EGUI_POINTS, 27.0);
     }
 

@@ -125,6 +125,8 @@ components:
   top-bar:
     height: 56px
     padding: 28px
+  navigation-progress:
+    height: 4px
   top-bar-logo:
     height: 26px
   top-bar-brand-gap:

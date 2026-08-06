@@ -167,10 +167,12 @@ fn project_selection_snapshots() {
         })
         .is_some());
     assert!(loading
-        .query_by_role(egui::accesskit::Role::ProgressIndicator)
+        .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
         .is_some());
     let progress = loading
-        .get_by_role(egui::accesskit::Role::ProgressIndicator)
+        .get_by(|node| {
+            node.role() == egui::accesskit::Role::ProgressIndicator && node.label().is_none()
+        })
         .rect();
     let loading_label = loading.get_by_label("Fetching projects…").rect();
     let loading_group = progress.union(loading_label);
@@ -1273,7 +1275,9 @@ fn session_loading_is_centered_in_the_list_area() {
     harness.run_steps(3);
 
     let progress = harness
-        .get_by_role(egui::accesskit::Role::ProgressIndicator)
+        .get_by(|node| {
+            node.role() == egui::accesskit::Role::ProgressIndicator && node.label().is_none()
+        })
         .rect();
     let label = harness.get_by_label("Fetching sessions…").rect();
     let group = progress.union(label);
