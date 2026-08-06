@@ -486,11 +486,16 @@ impl PageSelectCreateSession {
                                 session: active_ingest,
                             };
                         }
-                        Err(CreateSessionError::Start(_error)) => {
+                        Err(error @ CreateSessionError::Start(_)) => {
+                            log::error!("create-ingest after session creation failed: {error}");
                             return Action::TaskFailed(TaskFailure::Stay {
                                 message: "The session was created, but its ingest share could not be started.".to_owned(),
                                 retry: RetryAction::CreateIngest { project: self.project.clone(), session: self.new_session_input.trim().to_owned() },
                             });
+                        }
+                        Err(error @ CreateSessionError::Server(_)) => {
+                            log::error!("create-session failed: {error}");
+                            self.create_session_error = Some(error);
                         }
                         Err(error) => self.create_session_error = Some(error),
                     }
@@ -829,6 +834,41 @@ mod tests {
         assert_eq!(
             validate_session_name("2026-07-30/run"),
             Err(CreateSessionError::ContainsSlash)
+        );
+    }
+
+    #[test]
+    fn create_session_server_failures_remain_visible_inline() {
+        let mut page = PageSelectCreateSession::new("Holo Stacks".to_owned());
+        page.create_session_task = AsyncState::Ready {
+            payload: Err(CreateSessionError::Server("request rejected".to_owned())),
+        };
+
+        assert_eq!(page.poll(), Action::None);
+        assert_eq!(
+            page.create_session_error,
+            Some(CreateSessionError::Server("request rejected".to_owned()))
+        );
+    }
+
+    #[test]
+    fn start_failure_after_creation_retains_the_ingest_retry() {
+        let mut page = PageSelectCreateSession::new("Holo Stacks".to_owned());
+        page.new_session_input = "  2026-08-06-alignment-run  ".to_owned();
+        page.create_session_task = AsyncState::Ready {
+            payload: Err(CreateSessionError::Start("mount failed".to_owned())),
+        };
+
+        assert_eq!(
+            page.poll(),
+            Action::TaskFailed(TaskFailure::Stay {
+                message: "The session was created, but its ingest share could not be started."
+                    .to_owned(),
+                retry: RetryAction::CreateIngest {
+                    project: "Holo Stacks".to_owned(),
+                    session: "2026-08-06-alignment-run".to_owned(),
+                },
+            })
         );
     }
 }

@@ -175,7 +175,10 @@ impl PageLogin {
                         Err(ServiceError::Unauthorized) => {
                             self.login_error = Some("Invalid username or password.".to_owned())
                         }
-                        Err(error) => self.login_error = Some(error.to_string()),
+                        Err(error) => {
+                            log::error!("login failed: {error}");
+                            self.login_error = Some(error.to_string());
+                        }
                     }
                 }
             }
@@ -250,5 +253,19 @@ mod tests {
         };
         let res = req.execute();
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn operational_login_failures_remain_visible_inline() {
+        let mut page = PageLogin::new();
+        page.login_task = AsyncState::Ready {
+            payload: Err(ServiceError::Transport("agent unavailable".to_owned())),
+        };
+
+        assert_eq!(page.poll(), Action::None);
+        assert_eq!(
+            page.login_error.as_deref(),
+            Some("transport error: agent unavailable")
+        );
     }
 }
