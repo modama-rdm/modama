@@ -52,6 +52,11 @@ fn button_text_color(visuals: &egui::Visuals, variant: ButtonVariant) -> Color32
     }
 }
 
+/// Return the spinner's color before the disabled painter applies its opacity.
+fn loading_spinner_color(visuals: &egui::Visuals, variant: ButtonVariant) -> Color32 {
+    button_text_color(visuals, variant)
+}
+
 /// Construct a button using one of the semantic design-system variants.
 pub fn button<'a>(label: &'a str, ui: &egui::Ui, variant: ButtonVariant) -> DesignButton<'a> {
     let text = RichText::new(label)
@@ -123,10 +128,7 @@ pub fn loading_button(
         if let Some(spinner_rect) = response.rect(spinner_id) {
             egui::Spinner::new()
                 .size(spinner_size)
-                .color(
-                    button_text_color(ui.visuals(), variant)
-                        .gamma_multiply(ui.visuals().disabled_alpha),
-                )
+                .color(loading_spinner_color(ui.visuals(), variant))
                 .paint_at(ui, spinner_rect);
         }
         response.response
@@ -203,5 +205,29 @@ mod tests {
             - 2.0;
         assert!(size.get().y >= minimum_height);
         assert!(size.get().x > 2.0 * styles::spacing::button_padding_x::EGUI_POINTS);
+    }
+
+    #[test]
+    fn loading_spinner_leaves_disabled_opacity_to_the_painter() {
+        let ctx = egui::Context::default();
+        styles::theme::install(&ctx);
+
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            ctx.set_theme(theme);
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                assert_eq!(ui.visuals().disabled_alpha, 0.6);
+                for variant in [
+                    ButtonVariant::Primary,
+                    ButtonVariant::Secondary,
+                    ButtonVariant::Danger,
+                    ButtonVariant::DangerOutline,
+                ] {
+                    assert_eq!(
+                        loading_spinner_color(ui.visuals(), variant),
+                        button_text_color(ui.visuals(), variant),
+                    );
+                }
+            });
+        }
     }
 }
