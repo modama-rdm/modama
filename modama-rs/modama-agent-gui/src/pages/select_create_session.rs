@@ -66,6 +66,7 @@ pub struct PageSelectCreateSession {
     pub create_ingest_task: AsyncState<Result<PendingSession, ServiceError>>,
     pub create_session_task: AsyncState<Result<PendingSession, CreateSessionError>>,
     pub available_sessions: Vec<String>,
+    pub session_date: Date,
     mode: SessionPageMode,
     focused_session: RovingListState,
     focus_target: SessionFocusTarget,
@@ -90,15 +91,17 @@ impl PageSelectCreateSession {
         service: Arc<dyn AgentService>,
         credentials: Credentials,
     ) -> Self {
+        let session_date = today();
         Self {
             project,
             selected_session: None,
-            new_session_input: session_name_prefix(today()),
+            new_session_input: session_name_prefix(session_date),
             create_session_error: None,
             sessions_task: AsyncState::Idle,
             create_ingest_task: AsyncState::Idle,
             create_session_task: AsyncState::Idle,
             available_sessions: Vec::new(),
+            session_date,
             mode: SessionPageMode::SelectExisting,
             focused_session: RovingListState::default(),
             focus_target: SessionFocusTarget::ExistingList,
@@ -356,6 +359,8 @@ impl PageSelectCreateSession {
                 })
                 .inner;
 
+            ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
+            session_creation_hint(ui, self.session_date);
             ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
             ui.horizontal(|ui| {
                 let submit = if is_submitting {
@@ -810,6 +815,21 @@ fn session_name_prefix(date: Date) -> String {
     )
 }
 
+fn session_name_example(date: Date) -> String {
+    format!("{}alignment-run", session_name_prefix(date))
+}
+
+fn session_creation_hint(ui: &mut egui::Ui, session_date: Date) {
+    ui.label(
+        RichText::new(format!(
+            "Store measurement data and important notes in the raw subfolder. Today's date is pre-filled; add a suffix, e.g. {}.",
+            session_name_example(session_date),
+        ))
+        .font(styles::typography::supporting_text::font_id())
+        .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+    );
+}
+
 fn content_guide_widget_offset(horizontal_padding: f32) -> f32 {
     (styles::content_card_inset() - horizontal_padding).max(0.0)
 }
@@ -824,6 +844,12 @@ mod tests {
     fn formats_session_name_prefix() {
         let date = Date::from_calendar_date(2026, Month::January, 3).unwrap();
         assert_eq!(session_name_prefix(date), "2026-01-03-");
+    }
+
+    #[test]
+    fn formats_session_name_example_with_the_date_prefix() {
+        let date = Date::from_calendar_date(2026, Month::January, 3).unwrap();
+        assert_eq!(session_name_example(date), "2026-01-03-alignment-run");
     }
 
     #[test]

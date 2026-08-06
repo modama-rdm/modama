@@ -13,6 +13,7 @@ use modama_agent_gui::{
     state::{Credentials, PendingSession},
     styles,
 };
+use time::{Date, Month};
 
 const SESSIONS: [&str; 4] = [
     "2026-06-16-holo-stacks",
@@ -20,6 +21,12 @@ const SESSIONS: [&str; 4] = [
     "2026-06-20-holo-stacks",
     "2026-06-26-holo-stacks",
 ];
+
+fn session_page_at_fixture_date() -> PageSelectCreateSession {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.session_date = Date::from_calendar_date(2026, Month::July, 30).unwrap();
+    page
+}
 
 fn selection_harness(page: Page) -> Harness<'static, AgentGuiApp> {
     selection_harness_with_theme(page, false)
@@ -923,7 +930,7 @@ fn session_selection_snapshots() {
     dark.snapshot("select_session_selected_dark");
     results.extend_harness(&mut dark);
 
-    let mut form_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    let mut form_page = session_page_at_fixture_date();
     form_page.available_sessions = strings(&SESSIONS);
     form_page.new_session_input = "2026-07-30-".to_owned();
     let mut form = selection_harness(Page::SelectCreateSession(form_page));
@@ -933,7 +940,7 @@ fn session_selection_snapshots() {
     form.snapshot("select_session_create_form");
     results.extend_harness(&mut form);
 
-    let mut validation_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    let mut validation_page = session_page_at_fixture_date();
     validation_page.available_sessions = strings(&SESSIONS);
     validation_page.new_session_input = "2026-07-30/invalid".to_owned();
     let mut validation = selection_harness(Page::SelectCreateSession(validation_page));
@@ -945,7 +952,7 @@ fn session_selection_snapshots() {
     validation.snapshot("select_session_create_validation");
     results.extend_harness(&mut validation);
 
-    let mut rejected_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    let mut rejected_page = session_page_at_fixture_date();
     rejected_page.available_sessions = strings(&SESSIONS);
     rejected_page.new_session_input = "2026-07-30-forbidden-run".to_owned();
     let mut rejected = selection_harness(Page::SelectCreateSession(rejected_page));
@@ -965,7 +972,7 @@ fn session_selection_snapshots() {
 
     let release = Arc::new(Barrier::new(2));
     let task_release = Arc::clone(&release);
-    let mut creating_page = PageSelectCreateSession::new("Project Alpha".to_string());
+    let mut creating_page = session_page_at_fixture_date();
     creating_page.available_sessions = strings(&SESSIONS);
     creating_page.new_session_input = "2026-07-30-alignment-run".to_owned();
     let mut creating = selection_harness(Page::SelectCreateSession(creating_page));
