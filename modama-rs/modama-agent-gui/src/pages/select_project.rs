@@ -674,12 +674,12 @@ fn project_row(
             strip.cell(|ui| {
                 StripBuilder::new(ui)
                     .size(Size::exact(
-                        styles::components::project_row::padding_y::EGUI_POINTS,
+                        styles::components::project_row_padding_y::padding::EGUI_POINTS,
                     ))
                     .size(Size::remainder())
                     .size(Size::remainder())
                     .size(Size::exact(
-                        styles::components::project_row::padding_y::EGUI_POINTS,
+                        styles::components::project_row_padding_y::padding::EGUI_POINTS,
                     ))
                     .vertical(|mut strip| {
                         strip.empty();

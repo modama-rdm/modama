@@ -27,7 +27,7 @@ pub fn destructive_confirmation_dialog(
     let response = egui::Modal::new(egui::Id::new(id))
         .frame(styles::card_frame(visuals))
         .show(ctx, |ui| {
-            ui.set_width(styles::components::login_card::width::EGUI_POINTS);
+            ui.set_width(styles::components::dialog::width::EGUI_POINTS);
             ui.add(
                 egui::Label::new(
                     RichText::new(title).font(styles::typography::section_heading::font_id()),

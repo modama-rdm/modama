@@ -17,8 +17,8 @@ use crate::{
 };
 
 pub const VIEWPORT: egui::Vec2 = egui::vec2(
-    styles::components::app_window_width::width::EGUI_POINTS,
-    styles::components::app_window_height::height::EGUI_POINTS,
+    styles::components::app_window::width::EGUI_POINTS,
+    styles::components::app_window::height::EGUI_POINTS,
 );
 
 const PROJECT: &str = "Holo Stacks";

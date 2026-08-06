@@ -40,7 +40,7 @@ impl ToastState {
         let mut action = None;
         egui::Area::new(Id::new(ERROR_TOAST_ID))
             .order(egui::Order::Foreground)
-            .default_width(styles::components::login_card::width::EGUI_POINTS)
+            .default_width(styles::components::error_toast::width::EGUI_POINTS)
             .fixed_pos(
                 ctx.viewport_rect().right_bottom()
                     + egui::vec2(

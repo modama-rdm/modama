@@ -24,8 +24,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let service = Arc::new(HttpAgentService::new(config.agent_url)?);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([
-            styles::components::app_window_width::width::EGUI_POINTS,
-            styles::components::app_window_height::height::EGUI_POINTS,
+            styles::components::app_window::width::EGUI_POINTS,
+            styles::components::app_window::height::EGUI_POINTS,
         ]),
         ..Default::default()
     };

@@ -190,23 +190,24 @@ fn error_toast_aligns_with_the_app_shell_geometry() {
 
     assert!((logo.left() - heading.left()).abs() <= tolerance);
     assert!(
-        (controls_right + styles::components::error_toast::padding_x::EGUI_POINTS - expected_right)
+        (controls_right + styles::components::error_toast_padding_x::padding::EGUI_POINTS
+            - expected_right)
             .abs()
             <= tolerance,
         "controls right {}, expected outer right {}, expected inner right {}",
         controls_right,
         expected_right,
-        expected_right - styles::components::error_toast::padding_x::EGUI_POINTS
+        expected_right - styles::components::error_toast_padding_x::padding::EGUI_POINTS
     );
     assert!(
-        (dismiss.bottom() + styles::components::error_toast::padding_y::EGUI_POINTS
+        (dismiss.bottom() + styles::components::error_toast_padding_y::padding::EGUI_POINTS
             - expected_bottom)
             .abs()
             <= tolerance,
         "dismiss bottom {}, expected outer bottom {}, expected inner bottom {}",
         dismiss.bottom(),
         expected_bottom,
-        expected_bottom - styles::components::error_toast::padding_y::EGUI_POINTS
+        expected_bottom - styles::components::error_toast_padding_y::padding::EGUI_POINTS
     );
     assert!(retry.top() > logo.bottom());
 }

@@ -116,9 +116,8 @@ components:
     width: 3px
   standard-border:
     width: 1px
-  app-window-width:
+  app-window:
     width: 1024px
-  app-window-height:
     height: 768px
   app-shell:
     padding: 27px
@@ -145,7 +144,8 @@ components:
     size: 32px
   project-row:
     height: 64px
-    padding-y: 12px
+  project-row-padding-y:
+    padding: 12px
   project-member-avatar:
     size: 24px
   project-member-avatar-overlap:
@@ -157,6 +157,8 @@ components:
   session-row:
     height: 48px
   login-card:
+    width: 400px
+  dialog:
     width: 400px
   card-shadow-offset-y:
     size: 1px
@@ -172,12 +174,16 @@ components:
     padding: 14px
   danger-alert-padding-y:
     padding: 12px
-  content-card:
-    padding-x: 20px
-    padding-y: 20px
+  content-card-padding-x:
+    padding: 20px
+  content-card-padding-y:
+    padding: 20px
   error-toast:
-    padding-x: 20px
-    padding-y: 20px
+    width: 400px
+  error-toast-padding-x:
+    padding: 20px
+  error-toast-padding-y:
+    padding: 20px
 ---
 
 # Design Specification: ER-C Data Management UI
@@ -219,7 +225,9 @@ tonal surface differences carry most of the visual hierarchy in both themes.
 Component geometry is defined in the front matter so that the React and native
 implementations share the same dimensions. Single-purpose component entries
 use the standard `width`, `height`, `size`, and `padding` sub-tokens supported
-by the design.md schema. The application defaults to a 1024px × 768px window
+by the design.md schema. Axis-specific padding uses separate component entries,
+such as `content-card-padding-x`, with the standard `padding` sub-token. The
+application defaults to a 1024px × 768px window
 with 27px content padding. Standard outlines and dividers use the 1px
 `standard-border` component token.
 

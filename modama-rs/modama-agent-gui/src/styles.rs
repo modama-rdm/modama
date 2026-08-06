@@ -255,7 +255,7 @@ pub fn pointer_cursor(response: egui::Response) -> egui::Response {
 /// Horizontal distance from a compact content card's outer edge to its content guide.
 pub fn content_card_inset() -> f32 {
     components::standard_border::width::EGUI_POINTS
-        + components::content_card::padding_x::EGUI_POINTS
+        + components::content_card_padding_x::padding::EGUI_POINTS
 }
 
 /// Horizontal distance from the window edge to a content card's outer edge.
@@ -315,8 +315,8 @@ pub fn content_card_frame(visuals: &egui::Visuals) -> Frame {
     card_frame_with_padding(
         visuals,
         Margin::symmetric(
-            components::content_card::padding_x::EGUI_POINTS as i8,
-            components::content_card::padding_y::EGUI_POINTS as i8,
+            components::content_card_padding_x::padding::EGUI_POINTS as i8,
+            components::content_card_padding_y::padding::EGUI_POINTS as i8,
         ),
     )
 }
@@ -440,8 +440,8 @@ pub fn toast_frame(visuals: &egui::Visuals) -> Frame {
         ))
         .corner_radius(radius(rounded::xl::EGUI_POINTS))
         .inner_margin(Margin::symmetric(
-            components::error_toast::padding_x::EGUI_POINTS as i8,
-            components::error_toast::padding_y::EGUI_POINTS as i8,
+            components::error_toast_padding_x::padding::EGUI_POINTS as i8,
+            components::error_toast_padding_y::padding::EGUI_POINTS as i8,
         ))
         .shadow(card_shadow(visuals))
 }

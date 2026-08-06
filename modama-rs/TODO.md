@@ -19,8 +19,8 @@
 
 ## GUI
 
-- [ ] review design-token usage
-    - [ ] Check token naming and component-specific usage
+- [x] review design-token usage
+    - [x] Check token naming and component-specific usage
     - [x] Replace hardcoded pixel/point sizes where appropriate
     - [x] Check disabled-element color consistency
 - [ ] test long project and ingest-share session names against backend limits

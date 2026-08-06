@@ -32,6 +32,10 @@ guide-screenshots:
 inspect-gui:
     EGUI_INSPECTION=1 xvfb-run --auto-servernum cargo run -p {{ agent_gui_package }} --bin {{ agent_gui_package }} --features inspection
 
+# Run the test-GUI with egui inspection enabled for egui-mcp.
+inspect-guitest:
+    EGUI_INSPECTION=1 xvfb-run --auto-servernum cargo run -p {{ agent_gui_package }} --bin guitest --features inspection
+
 # Update visual regression test snapshots.
 update-snapshots:
     WGPU_DEBUG=0 UPDATE_SNAPSHOTS=true cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast

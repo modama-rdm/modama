@@ -40,6 +40,11 @@ mod style_tests {
             4.0
         );
         assert_eq!(styles::components::app_shell::padding::EGUI_POINTS, 27.0);
+        assert_eq!(styles::components::app_window::width::EGUI_POINTS, 1024.0);
+        assert_eq!(styles::components::app_window::height::EGUI_POINTS, 768.0);
+        assert_eq!(styles::components::login_card::width::EGUI_POINTS, 400.0);
+        assert_eq!(styles::components::dialog::width::EGUI_POINTS, 400.0);
+        assert_eq!(styles::components::error_toast::width::EGUI_POINTS, 400.0);
         assert_eq!(styles::components::project_row::height::EGUI_POINTS, 64.0);
         assert_eq!(styles::components::session_row::height::EGUI_POINTS, 48.0);
         assert_eq!(
@@ -159,8 +164,8 @@ mod style_tests {
         assert_eq!(
             frame.inner_margin,
             egui::Margin::symmetric(
-                styles::components::content_card::padding_x::EGUI_POINTS as i8,
-                styles::components::content_card::padding_y::EGUI_POINTS as i8,
+                styles::components::content_card_padding_x::padding::EGUI_POINTS as i8,
+                styles::components::content_card_padding_y::padding::EGUI_POINTS as i8,
             )
         );
     }
@@ -177,8 +182,8 @@ mod style_tests {
         assert_eq!(
             frame.inner_margin,
             egui::Margin::symmetric(
-                styles::components::error_toast::padding_x::EGUI_POINTS as i8,
-                styles::components::error_toast::padding_y::EGUI_POINTS as i8,
+                styles::components::error_toast_padding_x::padding::EGUI_POINTS as i8,
+                styles::components::error_toast_padding_y::padding::EGUI_POINTS as i8,
             )
         );
         assert_eq!(frame.corner_radius, styles::rounded::xl::EGUI_POINTS.into());
@@ -190,7 +195,7 @@ mod style_tests {
         assert_eq!(
             styles::content_card_inset(),
             styles::components::standard_border::width::EGUI_POINTS
-                + styles::components::content_card::padding_x::EGUI_POINTS
+                + styles::components::content_card_padding_x::padding::EGUI_POINTS
         );
     }
 
