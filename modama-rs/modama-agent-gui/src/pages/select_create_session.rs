@@ -30,7 +30,6 @@ use crate::{
     styles,
 };
 
-const SESSION_ROW_HEIGHT: f32 = 48.0;
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CreateSessionError {
     #[error("Please enter a session name.")]
@@ -255,8 +254,8 @@ impl PageSelectCreateSession {
     ) {
         let frame_vertical_padding = 4.0 * styles::spacing::button_padding_y::EGUI_POINTS;
         let frame_border = 2.0 * styles::components::standard_border::width::EGUI_POINTS;
-        let list_height =
-            (outer_height - frame_vertical_padding - frame_border).max(SESSION_ROW_HEIGHT);
+        let list_height = (outer_height - frame_vertical_padding - frame_border)
+            .max(styles::components::session_row::height::EGUI_POINTS);
         let mut list_frame = styles::content_card_frame(ui.visuals());
         list_frame.inner_margin.left = 0;
         list_frame.inner_margin.right = 0;
@@ -591,7 +590,7 @@ fn create_session_row(ui: &mut egui::Ui, focusable: bool) -> egui::Response {
         );
         job.append(
             label,
-            4.0,
+            styles::spacing::unit::EGUI_POINTS,
             egui::TextFormat {
                 font_id: styles::typography::body::font_id(),
                 color: styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
@@ -600,7 +599,7 @@ fn create_session_row(ui: &mut egui::Ui, focusable: bool) -> egui::Response {
         );
 
         let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::body::font_id()));
-        let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
+        let padding = (styles::components::session_row::height::EGUI_POINTS - row_height) / 2.0;
 
         ui.vertical(|ui| {
             ui.add_space(padding);
@@ -626,7 +625,7 @@ fn session_row(
         focusable,
         |response, ui, selected| {
             let row_height = ui.fonts_mut(|f| f.row_height(&styles::typography::mono::font_id()));
-            let padding = (SESSION_ROW_HEIGHT - row_height) / 2.0;
+            let padding = (styles::components::session_row::height::EGUI_POINTS - row_height) / 2.0;
 
             ui.vertical(|ui| {
                 ui.add_space(padding);
@@ -648,7 +647,10 @@ fn interactive_row(
     focusable: bool,
     content: impl Fn(&Response, &mut egui::Ui, bool),
 ) -> egui::Response {
-    let row_size = egui::vec2(ui.available_width(), SESSION_ROW_HEIGHT);
+    let row_size = egui::vec2(
+        ui.available_width(),
+        styles::components::session_row::height::EGUI_POINTS,
+    );
 
     let (rect, response) = ui.allocate_exact_size(
         row_size,
@@ -724,7 +726,11 @@ fn session_list_layout_style() -> Style {
         flex_basis: length(0.0_f32),
         min_size: taffy::Size {
             width: auto(),
-            height: length(SESSION_ROW_HEIGHT + frame_vertical_padding + frame_border),
+            height: length(
+                styles::components::session_row::height::EGUI_POINTS
+                    + frame_vertical_padding
+                    + frame_border,
+            ),
         },
         ..Default::default()
     }

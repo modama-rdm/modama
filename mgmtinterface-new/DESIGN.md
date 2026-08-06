@@ -144,7 +144,18 @@ components:
   avatar:
     size: 32px
   project-row:
+    height: 64px
     padding-y: 12px
+  project-member-avatar:
+    size: 24px
+  project-member-avatar-overlap:
+    size: 5px
+  project-modified-column:
+    width: 126px
+  project-sort-control:
+    width: 172px
+  session-row:
+    height: 48px
   login-card:
     width: 400px
   card-shadow-offset-y:

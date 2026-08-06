@@ -16,7 +16,10 @@ use crate::{
     styles,
 };
 
-pub const VIEWPORT: egui::Vec2 = egui::vec2(1024.0, 768.0);
+pub const VIEWPORT: egui::Vec2 = egui::vec2(
+    styles::components::app_window_width::width::EGUI_POINTS,
+    styles::components::app_window_height::height::EGUI_POINTS,
+);
 
 const PROJECT: &str = "Holo Stacks";
 const SESSION: &str = "2026-06-26-holo-stacks";

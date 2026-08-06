@@ -29,12 +29,7 @@ use crate::{
 
 pub use crate::service::ProjectSummary;
 
-const PROJECT_ROW_HEIGHT: f32 = 64.0;
-const MEMBER_AVATAR_SIZE: f32 = 24.0;
 const MAX_VISIBLE_AVATARS: usize = 5;
-const MEMBER_AVATAR_OVERLAP: f32 = 5.0;
-const MODIFIED_COLUMN_WIDTH: f32 = 126.0;
-const SORT_CONTROL_WIDTH: f32 = 172.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ProjectSort {
@@ -195,7 +190,9 @@ impl PageSelectProject {
                     .style(Style {
                         flex_shrink: 0.0,
                         size: taffy::Size {
-                            width: length(SORT_CONTROL_WIDTH),
+                            width: length(
+                                styles::components::project_sort_control::width::EGUI_POINTS,
+                            ),
                             height: auto(),
                         },
                         ..Default::default()
@@ -284,8 +281,8 @@ impl PageSelectProject {
     ) -> Option<Action> {
         let frame_vertical_padding = 4.0 * styles::spacing::button_padding_y::EGUI_POINTS;
         let frame_border = 2.0 * styles::components::standard_border::width::EGUI_POINTS;
-        let list_height =
-            (outer_height - frame_vertical_padding - frame_border).max(PROJECT_ROW_HEIGHT);
+        let list_height = (outer_height - frame_vertical_padding - frame_border)
+            .max(styles::components::project_row::height::EGUI_POINTS);
         let mut list_frame = styles::content_card_frame(ui.visuals());
         list_frame.inner_margin.left = 0;
         list_frame.inner_margin.right = 0;
@@ -457,7 +454,11 @@ fn project_list_layout_style() -> Style {
         flex_basis: length(0.0_f32),
         min_size: taffy::Size {
             width: auto(),
-            height: length(PROJECT_ROW_HEIGHT + frame_vertical_padding + frame_border),
+            height: length(
+                styles::components::project_row::height::EGUI_POINTS
+                    + frame_vertical_padding
+                    + frame_border,
+            ),
         },
         ..Default::default()
     }
@@ -487,22 +488,22 @@ fn project_action_layout_style() -> Style {
 
 fn show_loading_state(ui: &mut egui::Ui, list_height: f32) {
     let loading_text = "Fetching projects…";
-    let loading_text_width = ui
+    let loading_text_size = ui
         .painter()
         .layout_no_wrap(
             loading_text.to_owned(),
             styles::typography::body::font_id(),
             ui.visuals().text_color(),
         )
-        .size()
-        .x;
-    let loading_width =
-        ui.spacing().interact_size.y + ui.spacing().item_spacing.x + loading_text_width;
+        .size();
+    let spinner_size = ui.spacing().interact_size.y;
     centered_list_state(
         ui,
         list_height,
-        loading_width,
-        24.0,
+        egui::vec2(
+            spinner_size + ui.spacing().item_spacing.x + loading_text_size.x,
+            spinner_size.max(loading_text_size.y),
+        ),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spinner();
@@ -512,11 +513,29 @@ fn show_loading_state(ui: &mut egui::Ui, list_height: f32) {
 }
 
 fn show_empty_state(ui: &mut egui::Ui, list_height: f32, title: &str, description: String) {
+    let title_size = ui
+        .painter()
+        .layout_no_wrap(
+            title.to_owned(),
+            styles::typography::section_heading::font_id(),
+            ui.visuals().text_color(),
+        )
+        .size();
+    let description_size = ui
+        .painter()
+        .layout_no_wrap(
+            description.clone(),
+            styles::typography::body::font_id(),
+            styles::color::on_surface_variant::VALUE.resolve(ui.visuals()),
+        )
+        .size();
     centered_list_state(
         ui,
         list_height,
-        ui.available_width(),
-        62.0,
+        egui::vec2(
+            title_size.x.max(description_size.x),
+            title_size.y + ui.spacing().item_spacing.y + description_size.y,
+        ),
         Layout::top_down(Align::Center),
         |ui| {
             ui.label(RichText::new(title).font(styles::typography::section_heading::font_id()));
@@ -532,20 +551,13 @@ fn show_empty_state(ui: &mut egui::Ui, list_height: f32, title: &str, descriptio
 fn centered_list_state(
     ui: &mut egui::Ui,
     height: f32,
-    content_width: f32,
-    content_height: f32,
+    content_size: egui::Vec2,
     layout: Layout,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
     let available = ui.available_rect_before_wrap();
     let (_, reserved) = ui.allocate_space(egui::vec2(available.width(), height));
-    let content_rect = egui::Rect::from_min_size(
-        egui::pos2(
-            reserved.center().x - content_width / 2.0,
-            reserved.top() + ((height - content_height) / 2.0).max(0.0),
-        ),
-        egui::vec2(content_width, content_height),
-    );
+    let content_rect = egui::Rect::from_center_size(reserved.center(), content_size);
     let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect).layout(layout));
     add_contents(&mut content_ui);
 }
@@ -555,17 +567,19 @@ fn content_guide_widget_offset(horizontal_padding: f32) -> f32 {
 }
 
 fn additional_members_avatar(ui: &mut egui::Ui, count: usize) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::Vec2::splat(MEMBER_AVATAR_SIZE), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::Vec2::splat(styles::components::project_member_avatar::size::EGUI_POINTS),
+        Sense::hover(),
+    );
     let visuals = ui.visuals();
     ui.painter().circle_filled(
         rect.center(),
-        MEMBER_AVATAR_SIZE / 2.0,
+        styles::components::project_member_avatar::size::EGUI_POINTS / 2.0,
         styles::color::surface_variant::VALUE.resolve(visuals),
     );
     ui.painter().circle_stroke(
         rect.center(),
-        MEMBER_AVATAR_SIZE / 2.0,
+        styles::components::project_member_avatar::size::EGUI_POINTS / 2.0,
         Stroke::new(
             styles::components::standard_border::width::EGUI_POINTS,
             styles::color::outline::VALUE.resolve(visuals),
@@ -596,7 +610,10 @@ fn project_row(
     focusable: bool,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), PROJECT_ROW_HEIGHT),
+        egui::vec2(
+            ui.available_width(),
+            styles::components::project_row::height::EGUI_POINTS,
+        ),
         if focusable {
             Sense::click()
         } else {
@@ -630,7 +647,10 @@ fn project_row(
     let details_color = styles::color::on_surface_dim::VALUE.resolve(visuals);
     let modified_color = styles::color::on_surface_variant::VALUE.resolve(visuals);
     ui.painter().text(
-        egui::pos2(content_rect.right() - 8.0, rect.center().y),
+        egui::pos2(
+            content_rect.right() - styles::spacing::app_item_gap_x::EGUI_POINTS,
+            rect.center().y,
+        ),
         egui::Align2::RIGHT_CENTER,
         format_modified_date(project.modified_at),
         styles::typography::supporting_text::font_id(),
@@ -647,7 +667,9 @@ fn project_row(
     StripBuilder::new(&mut content_ui)
         .size(Size::remainder())
         .size(Size::exact(avatars_width))
-        .size(Size::exact(MODIFIED_COLUMN_WIDTH))
+        .size(Size::exact(
+            styles::components::project_modified_column::width::EGUI_POINTS,
+        ))
         .horizontal(|mut strip| {
             strip.cell(|ui| {
                 StripBuilder::new(ui)
@@ -696,12 +718,17 @@ fn project_row(
             });
             strip.cell(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = -MEMBER_AVATAR_OVERLAP;
+                    ui.spacing_mut().item_spacing.x =
+                        -styles::components::project_member_avatar_overlap::size::EGUI_POINTS;
                     if overflow_count > 0 {
                         additional_members_avatar(ui, overflow_count);
                     }
                     for username in people.iter().take(MAX_VISIBLE_AVATARS).rev() {
-                        avatar(ui, username, MEMBER_AVATAR_SIZE);
+                        avatar(
+                            ui,
+                            username,
+                            styles::components::project_member_avatar::size::EGUI_POINTS,
+                        );
                     }
                 });
             });
@@ -732,8 +759,9 @@ fn project_row(
 fn member_avatars_width(people_count: usize) -> f32 {
     let avatar_count = people_count.min(MAX_VISIBLE_AVATARS);
     let displayed_avatar_count = avatar_count + usize::from(people_count > MAX_VISIBLE_AVATARS);
-    displayed_avatar_count as f32 * (MEMBER_AVATAR_SIZE - MEMBER_AVATAR_OVERLAP)
-        + MEMBER_AVATAR_OVERLAP
+    let avatar_size = styles::components::project_member_avatar::size::EGUI_POINTS;
+    let overlap = styles::components::project_member_avatar_overlap::size::EGUI_POINTS;
+    displayed_avatar_count as f32 * (avatar_size - overlap) + overlap
 }
 
 fn member_count_label(member_count: usize) -> String {
@@ -881,7 +909,10 @@ mod tests {
 
     #[test]
     fn avatar_stack_width_accounts_for_overlap_and_overflow() {
-        assert_eq!(member_avatars_width(1), MEMBER_AVATAR_SIZE);
+        assert_eq!(
+            member_avatars_width(1),
+            styles::components::project_member_avatar::size::EGUI_POINTS
+        );
         assert_eq!(member_avatars_width(3), 62.0);
         assert_eq!(member_avatars_width(6), 119.0);
         assert_eq!(member_avatars_width(12), 119.0);

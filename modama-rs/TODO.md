@@ -21,7 +21,7 @@
 
 - [ ] review design-token usage
     - [ ] Check token naming and component-specific usage
-    - [ ] Replace hardcoded pixel/point sizes where appropriate
+    - [x] Replace hardcoded pixel/point sizes where appropriate
     - [x] Check disabled-element color consistency
 - [ ] test long project and ingest-share session names against backend limits
 - [ ] general design fixes

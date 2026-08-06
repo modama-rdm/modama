@@ -2,14 +2,13 @@ use eframe::egui;
 use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
+    guide_screenshots::VIEWPORT,
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
     state::{ActiveSession, Credentials},
     styles,
 };
 use std::sync::{Arc, Barrier};
-
-const VIEWPORT: egui::Vec2 = egui::vec2(1024.0, 768.0);
 
 #[test]
 fn enabled_top_bar_controls_use_pointing_hand_cursor() {

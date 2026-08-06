@@ -40,6 +40,24 @@ mod style_tests {
             4.0
         );
         assert_eq!(styles::components::app_shell::padding::EGUI_POINTS, 27.0);
+        assert_eq!(styles::components::project_row::height::EGUI_POINTS, 64.0);
+        assert_eq!(styles::components::session_row::height::EGUI_POINTS, 48.0);
+        assert_eq!(
+            styles::components::project_member_avatar::size::EGUI_POINTS,
+            24.0
+        );
+        assert_eq!(
+            styles::components::project_member_avatar_overlap::size::EGUI_POINTS,
+            5.0
+        );
+        assert_eq!(
+            styles::components::project_modified_column::width::EGUI_POINTS,
+            126.0
+        );
+        assert_eq!(
+            styles::components::project_sort_control::width::EGUI_POINTS,
+            172.0
+        );
     }
 
     #[test]

@@ -5,6 +5,7 @@ use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
+    guide_screenshots::VIEWPORT,
     pages::{
         select_project::{representative_projects, ProjectSort},
         CreateSessionError, Page, PageSelectCreateSession, PageSelectProject,
@@ -13,7 +14,6 @@ use modama_agent_gui::{
     styles,
 };
 
-const VIEWPORT: egui::Vec2 = egui::vec2(1024.0, 768.0);
 const SESSIONS: [&str; 4] = [
     "2026-06-16-holo-stacks",
     "2026-06-18-holo-stacks",
@@ -180,7 +180,12 @@ fn project_selection_snapshots() {
         .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
         .rect();
     let action = loading.get_by_label("Select Project").rect();
-    assert!((loading_group.center().x - VIEWPORT.x / 2.0).abs() <= 1.0);
+    assert!(
+        (loading_group.center().x - VIEWPORT.x / 2.0).abs() <= 1.0,
+        "loading center {}, viewport center {}",
+        loading_group.center().x,
+        VIEWPORT.x / 2.0,
+    );
     assert!(
         (loading_group.center().y - (sort.bottom() + action.top()) / 2.0).abs() <= 3.0,
         "loading center {}, content center {}, sort bottom {}, action top {}",
