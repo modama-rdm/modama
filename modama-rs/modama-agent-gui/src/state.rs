@@ -6,6 +6,49 @@ pub struct ActiveSession {
     pub mount_path: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingSession {
+    pub share_id: String,
+    pub session: String,
+    pub project: String,
+}
+
+impl PendingSession {
+    pub fn matches(&self, share_id: &str) -> bool {
+        self.share_id == share_id
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ForegroundSession {
+    #[default]
+    None,
+    Mounting(PendingSession),
+    Unmounting(ActiveSession),
+    Mounted(ActiveSession),
+}
+
+impl ForegroundSession {
+    pub fn share_id(&self) -> Option<&str> {
+        match self {
+            Self::None => None,
+            Self::Mounting(session) => Some(&session.share_id),
+            Self::Unmounting(session) | Self::Mounted(session) => Some(&session.share_id),
+        }
+    }
+
+    pub fn active_session(&self) -> Option<&ActiveSession> {
+        match self {
+            Self::Unmounting(session) | Self::Mounted(session) => Some(session),
+            Self::None | Self::Mounting(_) => None,
+        }
+    }
+
+    pub fn is_unmounting(&self, share_id: &str) -> bool {
+        matches!(self, Self::Unmounting(session) if session.share_id == share_id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentIdentity {
     Anonymous {
@@ -45,9 +88,14 @@ pub struct AgentAppState {
     /// if None, the user is logged out
     pub creds: Option<Credentials>,
 
-    /// currently active ingest session, None if
-    /// there isn't one (or we don't know about it)
-    pub session: Option<ActiveSession>,
+    /// Foreground ingest state reported by the local agent.
+    pub foreground: ForegroundSession,
+
+    /// A successfully created share that has not appeared in agent state yet.
+    pub pending_start: Option<PendingSession>,
+
+    /// A successfully deleted share that has not disappeared from agent state yet.
+    pub pending_close: Option<String>,
 
     /// Agent mTLS identity, should be set once we are connected
     pub identity: Option<AgentIdentity>,

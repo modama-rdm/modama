@@ -25,8 +25,7 @@ use crate::{
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},
-    state::ActiveSession,
-    state::Credentials,
+    state::{Credentials, PendingSession},
     styles,
 };
 
@@ -64,8 +63,8 @@ pub struct PageSelectCreateSession {
     pub new_session_input: String,
     pub create_session_error: Option<CreateSessionError>,
     pub sessions_task: AsyncState<Result<Vec<String>, ServiceError>>,
-    pub create_ingest_task: AsyncState<Result<ActiveSession, ServiceError>>,
-    pub create_session_task: AsyncState<Result<ActiveSession, CreateSessionError>>,
+    pub create_ingest_task: AsyncState<Result<PendingSession, ServiceError>>,
+    pub create_session_task: AsyncState<Result<PendingSession, CreateSessionError>>,
     pub available_sessions: Vec<String>,
     mode: SessionPageMode,
     focused_session: RovingListState,
@@ -434,9 +433,9 @@ impl PageSelectCreateSession {
             Ok(task) => {
                 if let Some(result) = task.take_ready() {
                     match result {
-                        Ok(active_ingest) => {
-                            return Action::SelectSession {
-                                session: active_ingest,
+                        Ok(pending_ingest) => {
+                            return Action::IngestCreated {
+                                session: pending_ingest,
                             }
                         }
                         Err(error) => {
@@ -480,9 +479,9 @@ impl PageSelectCreateSession {
             Ok(task) => {
                 if let Some(result) = task.take_ready() {
                     match result {
-                        Ok(active_ingest) => {
-                            return Action::SelectSession {
-                                session: active_ingest,
+                        Ok(pending_ingest) => {
+                            return Action::IngestCreated {
+                                session: pending_ingest,
                             };
                         }
                         Err(error @ CreateSessionError::Start(_)) => {

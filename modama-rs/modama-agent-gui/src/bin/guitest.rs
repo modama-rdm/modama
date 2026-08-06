@@ -5,7 +5,7 @@ use eframe::egui;
 use modama_agent_gui::{
     app::AgentGuiApp,
     pages::{Page, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject},
-    state::{ActiveSession, AgentIdentity, Credentials},
+    state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession},
     styles,
 };
 use modama_common::logging::init_logging;
@@ -81,7 +81,7 @@ impl Cli {
             app.page = Page::SelectCreateSession(PageSelectCreateSession::new(self.project));
         } else if self.page_active_session {
             seed_logged_in(app);
-            app.app_state.session = Some(ActiveSession {
+            app.app_state.foreground = ForegroundSession::Mounted(ActiveSession {
                 share_id: "stub-seeded-share".to_owned(),
                 mount_path: Some(format!("/todo/{}/{}/", self.project, self.session)),
                 project: self.project,
@@ -155,7 +155,7 @@ mod tests {
         assert!(matches!(app.page, Page::Connecting(_)));
         assert!(app.app_state.identity.is_none());
         assert!(app.app_state.creds.is_none());
-        assert!(app.app_state.session.is_none());
+        assert_eq!(app.app_state.foreground, ForegroundSession::None);
         Ok(())
     }
 
@@ -169,7 +169,7 @@ mod tests {
         assert!(matches!(app.page, Page::SelectProject(_)));
         assert!(app.app_state.identity.is_some());
         assert!(app.app_state.creds.is_some());
-        assert!(app.app_state.session.is_none());
+        assert_eq!(app.app_state.foreground, ForegroundSession::None);
         Ok(())
     }
 
@@ -207,8 +207,8 @@ mod tests {
         assert!(app.app_state.identity.is_some());
         assert!(app.app_state.creds.is_some());
         assert_eq!(
-            app.app_state.session,
-            Some(ActiveSession {
+            app.app_state.foreground,
+            ForegroundSession::Mounted(ActiveSession {
                 share_id: "stub-seeded-share".to_owned(),
                 project: "Test Project".to_owned(),
                 session: "Test Session".to_owned(),

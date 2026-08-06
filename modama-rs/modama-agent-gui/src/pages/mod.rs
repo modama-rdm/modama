@@ -8,7 +8,7 @@ use eframe::egui;
 
 use crate::{
     actions::Action,
-    state::{ActiveSession, Credentials},
+    state::{Credentials, ForegroundSession, PendingSession},
 };
 
 pub use connecting::PageConnecting;
@@ -46,12 +46,21 @@ impl Page {
         &mut self,
         ui: &mut egui::Ui,
         frame: &mut eframe::Frame,
-        session: &Option<ActiveSession>,
+        foreground: &ForegroundSession,
+        pending_start: &Option<PendingSession>,
+        pending_close: &Option<String>,
         credentials: &Option<Credentials>,
     ) -> Action {
         match self {
             Page::Connecting(p) => p.ui(ui, frame),
-            Page::Overview(p) => p.ui(ui, frame, session, credentials),
+            Page::Overview(p) => p.ui(
+                ui,
+                frame,
+                foreground,
+                pending_start,
+                pending_close,
+                credentials,
+            ),
             Page::Login(p) => p.ui(ui, frame),
             Page::SelectProject(p) => p.ui(ui, frame),
             Page::SelectCreateSession(p) => p.ui(ui, frame),

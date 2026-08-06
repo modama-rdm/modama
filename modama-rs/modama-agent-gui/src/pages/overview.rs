@@ -10,7 +10,7 @@ use crate::{
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},
-    state::{ActiveSession, Credentials},
+    state::{ActiveSession, Credentials, ForegroundSession, PendingSession},
     styles,
 };
 
@@ -53,21 +53,40 @@ impl PageOverview {
         &mut self,
         ui: &mut egui::Ui,
         _frame: &mut eframe::Frame,
-        session: &Option<ActiveSession>,
+        foreground: &ForegroundSession,
+        pending_start: &Option<PendingSession>,
+        pending_close: &Option<String>,
         credentials: &Option<Credentials>,
     ) -> Action {
         page_heading(ui, "Overview");
         ui.add_space(styles::content_card_top_margin_adjustment());
 
-        if let Some(session) = session {
-            self.show_active_session_card(ui, session);
-            if self.close_confirmation_open {
-                self.show_close_confirmation(ui, session, credentials);
+        match foreground {
+            ForegroundSession::Mounted(session) => {
+                self.show_active_session_card(
+                    ui,
+                    session,
+                    pending_close.as_deref() == Some(&session.share_id),
+                );
+                if self.close_confirmation_open {
+                    self.show_close_confirmation(ui, session, credentials);
+                }
             }
-        } else {
-            self.close_confirmation_open = false;
-            if self.show_create_card(ui) {
-                return Action::CreateSession;
+            ForegroundSession::Mounting(session) => {
+                self.close_confirmation_open = false;
+                self.show_mounting_session_card(ui, session, "Mounting ingest share…");
+            }
+            ForegroundSession::Unmounting(session) => {
+                self.close_confirmation_open = false;
+                self.show_unmounting_session_card(ui, session);
+            }
+            ForegroundSession::None => {
+                self.close_confirmation_open = false;
+                if let Some(session) = pending_start {
+                    self.show_mounting_session_card(ui, session, "Waiting for agent…");
+                } else if self.show_create_card(ui) {
+                    return Action::CreateSession;
+                }
             }
         }
 
@@ -82,7 +101,13 @@ impl PageOverview {
             Ok(task) => {
                 if let Some(result) = task.take_ready() {
                     match result {
-                        Ok(()) => Action::CloseSessionSuccess,
+                        Ok(()) => self
+                            .last_close
+                            .as_ref()
+                            .map(|(_, session)| Action::CloseSessionSuccess {
+                                share_id: session.share_id.clone(),
+                            })
+                            .unwrap_or(Action::None),
                         Err(error) => {
                             log::error!("close-session failed: {error}");
                             Action::TaskFailed(TaskFailure::Stay {
@@ -137,8 +162,32 @@ impl PageOverview {
         clicked
     }
 
-    fn show_active_session_card(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {
-        let is_closing = self.close_task.is_pending();
+    fn show_mounting_session_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        session: &PendingSession,
+        status: &str,
+    ) {
+        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            card_heading(ui, "Preparing ingest session");
+            session_detail(ui, "Project", &session.project);
+            session_detail(ui, "Session", &session.session);
+            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                card_description(ui, status);
+            });
+        });
+    }
+
+    fn show_active_session_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        session: &ActiveSession,
+        awaiting_close: bool,
+    ) {
+        let is_closing = self.close_task.is_pending() || awaiting_close;
         styles::content_card_frame(ui.visuals()).show(ui, |ui| {
             ui.set_width(ui.available_width());
 
@@ -183,6 +232,28 @@ impl PageOverview {
                 self.close_confirmation_open = true;
                 self.focus_confirmation_cancel = true;
             }
+        });
+    }
+
+    fn show_unmounting_session_card(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {
+        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            card_heading(ui, "Closing ingest session");
+            session_detail(ui, "Project", &session.project);
+            session_detail(ui, "Session", &session.session);
+            session_detail(
+                ui,
+                "Mount path on this agent",
+                session
+                    .mount_path
+                    .as_deref()
+                    .unwrap_or("Not available on this agent"),
+            );
+            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                card_description(ui, "Closing ingest share…");
+            });
         });
     }
 

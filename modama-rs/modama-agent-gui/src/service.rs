@@ -1,6 +1,6 @@
 use std::{
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::{
@@ -8,11 +8,10 @@ use crate::{
         generated::client::ApiOpError, APIAgentIdentity, APICreateSessionRequest,
         APICurrentForegroundShare, AgentClient,
     },
-    state::{ActiveSession, AgentIdentity, Credentials},
+    state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession, PendingSession},
 };
 
-const POLL_INTERVAL: Duration = Duration::from_millis(500);
-const POLL_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectSummary {
@@ -25,7 +24,7 @@ pub struct ProjectSummary {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectedAgent {
     pub identity: AgentIdentity,
-    pub session: Option<ActiveSession>,
+    pub foreground: ForegroundSession,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -44,6 +43,7 @@ pub enum ServiceError {
 
 pub trait AgentService: Send + Sync {
     fn connect(&self) -> Result<ConnectedAgent, ServiceError>;
+    fn foreground(&self) -> Result<ForegroundSession, ServiceError>;
     fn login(&self, credentials: &Credentials) -> Result<(), ServiceError>;
     fn list_projects(&self, credentials: &Credentials)
         -> Result<Vec<ProjectSummary>, ServiceError>;
@@ -63,7 +63,7 @@ pub trait AgentService: Send + Sync {
         credentials: &Credentials,
         project: &str,
         session: &str,
-    ) -> Result<ActiveSession, ServiceError>;
+    ) -> Result<PendingSession, ServiceError>;
     fn close_session(
         &self,
         credentials: &Credentials,
@@ -93,15 +93,32 @@ impl HttpAgentService {
             .with_basic_auth(&credentials.username, &credentials.password)
     }
 
-    fn foreground(&self) -> Result<Option<ActiveSession>, ServiceError> {
+    fn foreground(&self) -> Result<ForegroundSession, ServiceError> {
         let response = self
             .runtime
             .block_on(self.client.get_foreground_share())
             .map_err(map_api_error)?;
         Ok(match response {
-            APICurrentForegroundShare::APICurrentForegroundShareVariant(_) => None,
+            APICurrentForegroundShare::APICurrentForegroundShareVariant(_) => {
+                ForegroundSession::None
+            }
             APICurrentForegroundShare::APICurrentForegroundShareVariant2(share) => {
-                Some(ActiveSession {
+                ForegroundSession::Mounting(PendingSession {
+                    share_id: share.share_id,
+                    project: share.project,
+                    session: share.session,
+                })
+            }
+            APICurrentForegroundShare::APICurrentForegroundShareVariant3(share) => {
+                ForegroundSession::Unmounting(ActiveSession {
+                    share_id: share.share_id,
+                    project: share.project,
+                    session: share.session,
+                    mount_path: Some(share.mount_path),
+                })
+            }
+            APICurrentForegroundShare::APICurrentForegroundShareVariant4(share) => {
+                ForegroundSession::Mounted(ActiveSession {
                     share_id: share.share_id,
                     project: share.project,
                     session: share.session,
@@ -109,31 +126,6 @@ impl HttpAgentService {
                 })
             }
         })
-    }
-
-    fn wait_for_share(
-        &self,
-        share_id: &str,
-        present: bool,
-    ) -> Result<Option<ActiveSession>, ServiceError> {
-        let start = Instant::now();
-        loop {
-            let foreground = self.foreground()?;
-            if foreground
-                .as_ref()
-                .is_some_and(|share| share.share_id == share_id)
-                == present
-            {
-                return Ok(foreground);
-            }
-            if start.elapsed() >= POLL_TIMEOUT {
-                return Err(ServiceError::Transport(format!(
-                    "timed out waiting for share {share_id} to {}",
-                    if present { "mount" } else { "close" }
-                )));
-            }
-            std::thread::sleep(POLL_INTERVAL);
-        }
     }
 }
 
@@ -173,8 +165,12 @@ impl AgentService for HttpAgentService {
         };
         Ok(ConnectedAgent {
             identity,
-            session: self.foreground()?,
+            foreground: self.foreground()?,
         })
+    }
+
+    fn foreground(&self) -> Result<ForegroundSession, ServiceError> {
+        Self::foreground(self)
     }
 
     fn login(&self, credentials: &Credentials) -> Result<(), ServiceError> {
@@ -244,7 +240,7 @@ impl AgentService for HttpAgentService {
         credentials: &Credentials,
         project: &str,
         session: &str,
-    ) -> Result<ActiveSession, ServiceError> {
+    ) -> Result<PendingSession, ServiceError> {
         let response = self
             .runtime
             .block_on(
@@ -257,8 +253,11 @@ impl AgentService for HttpAgentService {
                 "started share does not match the requested project and session".to_owned(),
             ));
         }
-        self.wait_for_share(&response.share_id, true)?
-            .ok_or_else(|| ServiceError::InvalidResponse("mounted share disappeared".to_owned()))
+        Ok(PendingSession {
+            share_id: response.share_id,
+            project: response.project,
+            session: response.session,
+        })
     }
 
     fn close_session(
@@ -272,14 +271,13 @@ impl AgentService for HttpAgentService {
                     .delete_share(&session.share_id),
             )
             .map_err(map_api_error)?;
-        self.wait_for_share(&session.share_id, false)?;
         Ok(())
     }
 }
 
 #[derive(Default)]
 struct StubState {
-    foreground: Option<ActiveSession>,
+    foreground: ForegroundSession,
 }
 
 pub struct StubAgentService {
@@ -322,13 +320,22 @@ impl AgentService for StubAgentService {
                 agent_name: "k2".to_owned(),
                 resource_name: "Holo".to_owned(),
             },
-            session: self
+            foreground: self
                 .state
                 .lock()
                 .map_err(|error| ServiceError::Transport(error.to_string()))?
                 .foreground
                 .clone(),
         })
+    }
+
+    fn foreground(&self) -> Result<ForegroundSession, ServiceError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|error| ServiceError::Transport(error.to_string()))?
+            .foreground
+            .clone())
     }
 
     fn login(&self, credentials: &Credentials) -> Result<(), ServiceError> {
@@ -382,19 +389,24 @@ impl AgentService for StubAgentService {
         _credentials: &Credentials,
         project: &str,
         session: &str,
-    ) -> Result<ActiveSession, ServiceError> {
+    ) -> Result<PendingSession, ServiceError> {
         self.delay();
-        let active = ActiveSession {
+        let pending = PendingSession {
             share_id: format!("stub-{project}-{session}"),
             project: project.to_owned(),
             session: session.to_owned(),
+        };
+        let active = ActiveSession {
+            share_id: pending.share_id.clone(),
+            project: pending.project.clone(),
+            session: pending.session.clone(),
             mount_path: Some(format!("/todo/{project}/{session}/")),
         };
         self.state
             .lock()
             .map_err(|error| ServiceError::Transport(error.to_string()))?
-            .foreground = Some(active.clone());
-        Ok(active)
+            .foreground = ForegroundSession::Mounted(active);
+        Ok(pending)
     }
 
     fn close_session(
@@ -407,12 +419,8 @@ impl AgentService for StubAgentService {
             .state
             .lock()
             .map_err(|error| ServiceError::Transport(error.to_string()))?;
-        if state
-            .foreground
-            .as_ref()
-            .is_some_and(|active| active.share_id == session.share_id)
-        {
-            state.foreground = None;
+        if state.foreground.share_id() == Some(&session.share_id) {
+            state.foreground = ForegroundSession::None;
         }
         Ok(())
     }
@@ -433,10 +441,13 @@ mod tests {
     fn stub_restores_started_state_and_closes_it() -> Result<(), ServiceError> {
         let service = StubAgentService::new();
         let credentials = credentials("user");
-        let session = service.start_ingest(&credentials, "project", "session")?;
-        assert_eq!(service.connect()?.session, Some(session.clone()));
+        let pending = service.start_ingest(&credentials, "project", "session")?;
+        let ForegroundSession::Mounted(session) = service.connect()?.foreground else {
+            panic!("stub session was not mounted");
+        };
+        assert_eq!(session.share_id, pending.share_id);
         service.close_session(&credentials, &session)?;
-        assert!(service.connect()?.session.is_none());
+        assert_eq!(service.connect()?.foreground, ForegroundSession::None);
         Ok(())
     }
 
@@ -451,5 +462,58 @@ mod tests {
             service.create_session(&credentials("user"), "project", "forbidden-session"),
             Err(ServiceError::Server { status: 400, .. })
         ));
+    }
+
+    #[test]
+    fn http_service_maps_mounting_foreground_state() -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/shares/foreground/")
+            .match_header("x-api-version", "1.0.0")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"type":"Mounting","share_id":"share","project":"project","session":"session","dest_path":"/project/session"}"#,
+            )
+            .create();
+
+        let service = HttpAgentService::new(server.url())?;
+        assert_eq!(
+            service.foreground()?,
+            ForegroundSession::Mounting(PendingSession {
+                share_id: "share".to_owned(),
+                project: "project".to_owned(),
+                session: "session".to_owned(),
+            })
+        );
+        mock.assert();
+        Ok(())
+    }
+
+    #[test]
+    fn http_service_maps_unmounting_foreground_state() -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/shares/foreground/")
+            .match_header("x-api-version", "1.0.0")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"type":"Unmounting","share_id":"share","project":"project","session":"session","dest_path":"/project/session","mount_path":"/mnt/session"}"#,
+            )
+            .create();
+
+        let service = HttpAgentService::new(server.url())?;
+        assert_eq!(
+            service.foreground()?,
+            ForegroundSession::Unmounting(ActiveSession {
+                share_id: "share".to_owned(),
+                project: "project".to_owned(),
+                session: "session".to_owned(),
+                mount_path: Some("/mnt/session".to_owned()),
+            })
+        );
+        mock.assert();
+        Ok(())
     }
 }

@@ -5,7 +5,7 @@ use modama_agent_gui::{
     guide_screenshots::VIEWPORT,
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
-    state::{ActiveSession, Credentials},
+    state::{ActiveSession, Credentials, ForegroundSession, PendingSession},
     styles,
 };
 use std::sync::{Arc, Barrier};
@@ -44,7 +44,7 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
                 username: "representative.user".to_string(),
                 password: "representative-password".to_string(),
             });
-            app.app_state.session = Some(ActiveSession {
+            app.app_state.foreground = ForegroundSession::Mounted(ActiveSession {
                 share_id: "representative-share".to_owned(),
                 project: "representative-project".to_string(),
                 session: "2026-07-29-ingest".to_string(),
@@ -80,6 +80,27 @@ fn overview_snapshots() {
     let mut logged_out = overview_harness(false, false);
     logged_out.snapshot("overview_logged_out");
     results.extend_harness(&mut logged_out);
+
+    let mut mounting = overview_harness(false, false);
+    mounting.state_mut().app_state.foreground = ForegroundSession::Mounting(PendingSession {
+        share_id: "mounting-share".to_owned(),
+        project: "representative-project".to_owned(),
+        session: "2026-07-29-ingest".to_owned(),
+    });
+    mounting.run_steps(1);
+    mounting.snapshot("overview_mounting");
+    results.extend_harness(&mut mounting);
+
+    let mut unmounting = overview_harness(false, true);
+    unmounting.state_mut().app_state.foreground = ForegroundSession::Unmounting(ActiveSession {
+        share_id: "unmounting-share".to_owned(),
+        project: "representative-project".to_owned(),
+        session: "2026-07-29-ingest".to_owned(),
+        mount_path: Some("/mnt/modama/representative-project/2026-07-29-ingest".to_owned()),
+    });
+    unmounting.run_steps(1);
+    unmounting.snapshot("overview_unmounting");
+    results.extend_harness(&mut unmounting);
 
     let mut close_confirmation = overview_harness(false, true);
     close_confirmation.get_by_label("Close Session").click();
@@ -291,13 +312,10 @@ fn top_bar_tab_order_follows_its_visual_order() {
 #[test]
 fn missing_agent_mount_path_is_explained() {
     let mut active = overview_harness(false, true);
-    active
-        .state_mut()
-        .app_state
-        .session
-        .as_mut()
-        .expect("the harness should have an active session")
-        .mount_path = None;
+    let ForegroundSession::Mounted(session) = &mut active.state_mut().app_state.foreground else {
+        panic!("the harness should have an active session");
+    };
+    session.mount_path = None;
     active.run_steps(1);
 
     assert!(active
@@ -311,12 +329,18 @@ fn closing_requires_confirmation_and_can_be_cancelled() {
     harness.get_by_label("Close Session").click();
     harness.run();
 
-    assert!(harness.state().app_state.session.is_some());
+    assert!(matches!(
+        harness.state().app_state.foreground,
+        ForegroundSession::Mounted(_)
+    ));
     assert!(harness.query_by_label("Close ingest session?").is_some());
     harness.get_by_label("Cancel").click();
     harness.run();
 
-    assert!(harness.state().app_state.session.is_some());
+    assert!(matches!(
+        harness.state().app_state.foreground,
+        ForegroundSession::Mounted(_)
+    ));
     assert!(harness.query_by_label("Close ingest session?").is_none());
 }
 
@@ -328,12 +352,15 @@ fn escape_dismisses_close_confirmation() {
     harness.key_press(egui::Key::Escape);
     harness.run();
 
-    assert!(harness.state().app_state.session.is_some());
+    assert!(matches!(
+        harness.state().app_state.foreground,
+        ForegroundSession::Mounted(_)
+    ));
     assert!(harness.query_by_label("Close ingest session?").is_none());
 }
 
 #[test]
-fn confirming_close_clears_the_active_session() {
+fn confirming_close_waits_for_the_authoritative_update() {
     let mut harness = overview_harness(false, true);
     harness.get_by_label("Close Session").click();
     harness.run();
@@ -344,7 +371,19 @@ fn confirming_close_clears_the_active_session() {
         .click();
     harness.run_steps(3);
 
-    assert!(harness.state().app_state.session.is_none());
+    assert_eq!(
+        harness.state().app_state.pending_close.as_deref(),
+        Some("representative-share")
+    );
+    assert!(harness.query_by_label("Closing…").is_some());
+
+    harness
+        .state_mut()
+        .handle_action(modama_agent_gui::actions::Action::ForegroundChanged(
+            ForegroundSession::None,
+        ));
+    harness.run_steps(1);
+
     assert!(harness.query_by_label("Create Session").is_some());
     assert!(harness.query_by_label("Close Session").is_none());
 }
@@ -366,7 +405,7 @@ fn connecting_snapshot() {
                         identity: modama_agent_gui::state::AgentIdentity::Anonymous {
                             hostname: "snapshot-host".to_owned(),
                         },
-                        session: None,
+                        foreground: ForegroundSession::None,
                     }
                 },
                 cc.egui_ctx.clone(),

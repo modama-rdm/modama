@@ -10,7 +10,7 @@ use modama_agent_gui::{
         select_project::{representative_projects, ProjectSort},
         CreateSessionError, Page, PageSelectCreateSession, PageSelectProject,
     },
-    state::{ActiveSession, Credentials},
+    state::{Credentials, PendingSession},
     styles,
 };
 
@@ -1014,11 +1014,10 @@ fn session_selection_snapshots() {
         page.create_ingest_task.spawn(
             move || {
                 task_release.wait();
-                Ok(ActiveSession {
+                Ok(PendingSession {
                     share_id: "starting-share".to_owned(),
                     project: "Project Alpha".to_string(),
                     session: SESSIONS[1].to_string(),
-                    mount_path: None,
                 })
             },
             ctx,
@@ -1045,11 +1044,10 @@ fn session_choices_are_disabled_while_starting() {
         page.create_ingest_task.spawn(
             move || {
                 task_release.wait();
-                Ok(ActiveSession {
+                Ok(PendingSession {
                     share_id: "starting-share".to_owned(),
                     project: "Project Alpha".to_string(),
                     session: SESSIONS[1].to_string(),
-                    mount_path: None,
                 })
             },
             ctx,
@@ -1173,7 +1171,7 @@ fn asynchronous_session_creation_errors_remain_on_the_form() {
 }
 
 #[test]
-fn successful_session_creation_returns_to_overview_with_an_active_session() {
+fn successful_session_creation_returns_to_overview_while_waiting_for_the_agent() {
     let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
     page.available_sessions = strings(&SESSIONS);
     page.new_session_input = "2026-07-30-new-run".to_owned();
@@ -1184,25 +1182,24 @@ fn successful_session_creation_returns_to_overview_with_an_active_session() {
 
     if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
         page.create_session_task = AsyncState::Ready {
-            payload: Ok(ActiveSession {
+            payload: Ok(PendingSession {
                 share_id: "created-share".to_owned(),
                 project: "Project Alpha".to_owned(),
                 session: "2026-07-30-new-run".to_owned(),
-                mount_path: Some("/todo/Project Alpha/2026-07-30-new-run/".to_owned()),
             }),
         };
     }
     harness.run_steps(2);
 
     assert!(matches!(harness.state().page, Page::Overview(_)));
-    let active = harness
+    let pending = harness
         .state()
         .app_state
-        .session
+        .pending_start
         .as_ref()
-        .expect("successful creation should activate the session");
-    assert_eq!(active.project, "Project Alpha");
-    assert_eq!(active.session, "2026-07-30-new-run");
+        .expect("successful creation should wait for the agent");
+    assert_eq!(pending.project, "Project Alpha");
+    assert_eq!(pending.session, "2026-07-30-new-run");
 }
 
 #[test]

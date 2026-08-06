@@ -586,6 +586,79 @@
               "project",
               "session",
               "dest_path",
+              "type"
+            ],
+            "properties": {
+              "dest_path": {
+                "type": "string",
+                "description": "The path in the data management that is exported with this Share."
+              },
+              "project": {
+                "type": "string",
+                "description": "Project derived from the share destination."
+              },
+              "session": {
+                "type": "string",
+                "description": "Session derived from the share destination."
+              },
+              "share_id": {
+                "type": "string",
+                "description": "Stable identifier used to close this share."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Mounting"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "share_id",
+              "project",
+              "session",
+              "dest_path",
+              "mount_path",
+              "type"
+            ],
+            "properties": {
+              "dest_path": {
+                "type": "string",
+                "description": "The path in the data management that is exported with this Share."
+              },
+              "mount_path": {
+                "type": "string",
+                "description": "Where the share is still mounted on the local system."
+              },
+              "project": {
+                "type": "string",
+                "description": "Project derived from the share destination."
+              },
+              "session": {
+                "type": "string",
+                "description": "Session derived from the share destination."
+              },
+              "share_id": {
+                "type": "string",
+                "description": "Stable identifier used to close this share."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Unmounting"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "share_id",
+              "project",
+              "session",
+              "dest_path",
               "mount_path",
               "type"
             ],

@@ -466,12 +466,11 @@ mod tests {
             },
             mount_path: PathBuf::from("/mnt/point"),
         };
-        test_setup
-            .shared_state
-            .lock()
-            .await
-            .current_shares
-            .foreground_share = Some(mshare.clone());
+        {
+            let mut state = test_setup.shared_state.lock().await;
+            state.desired_shares.foreground_share = Some(mshare.share.clone());
+            state.current_shares.foreground_share = Some(mshare.clone());
+        }
         let req = Request::builder()
             .uri("/api/shares/foreground/")
             .method("GET")
@@ -534,12 +533,7 @@ mod tests {
     #[tokio::test]
     async fn malformed_foreground_destination_is_an_api_error() {
         let test_setup = TestSetup::start().await;
-        test_setup
-            .shared_state
-            .lock()
-            .await
-            .current_shares
-            .foreground_share = Some(MountedShare {
+        let mounted = MountedShare {
             share: MessageShare {
                 resource: None,
                 share_id: "id".to_owned(),
@@ -552,7 +546,12 @@ mod tests {
                 gid: 1000,
             },
             mount_path: PathBuf::from("/mnt/share"),
-        });
+        };
+        {
+            let mut state = test_setup.shared_state.lock().await;
+            state.desired_shares.foreground_share = Some(mounted.share.clone());
+            state.current_shares.foreground_share = Some(mounted);
+        }
         let req = Request::builder()
             .uri("/api/shares/foreground/")
             .method("GET")

@@ -16,6 +16,7 @@ use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use versioned::{semver::Version, versioned_route, versions, VersionedRouterBuilder};
 
 use crate::local_http_service::{get_auth, ApiState, LocalAPIError};
+use crate::share::MountedShare;
 
 use modama_common::{
     local_api_messages::{
@@ -23,6 +24,7 @@ use modama_common::{
         APICreateShareResponse, APICurrentForegroundShare, APIHealthCheckResponse,
         APIListProjectsResponse, APIListSessionsResponse, APILoginResponse, APIProjectSummary,
     },
+    messages::Share,
     mgmt_client::MgmtClient,
 };
 
@@ -50,6 +52,64 @@ fn project_and_session(dest_path: &str) -> Result<(String, String), ShareDestina
     Ok((project.to_owned(), session.to_owned()))
 }
 
+fn foreground_response(
+    desired: Option<Share>,
+    current: Option<MountedShare>,
+) -> Result<APICurrentForegroundShare, ShareDestinationError> {
+    Ok(match (desired, current) {
+        (None, None) => APICurrentForegroundShare::None,
+        (None, Some(current)) => match current.mount_path.to_str() {
+            None => {
+                let path = current.mount_path.to_string_lossy();
+                warn!("Mount path {path} contains invalid unicode, cannot get foreground share!");
+                APICurrentForegroundShare::None
+            }
+            Some(mount_path) => {
+                let (project, session) = project_and_session(&current.share.dest_path)?;
+                APICurrentForegroundShare::Unmounting {
+                    share_id: current.share.share_id,
+                    project,
+                    session,
+                    dest_path: current.share.dest_path,
+                    mount_path: mount_path.to_owned(),
+                }
+            }
+        },
+        (Some(desired), current) => {
+            match current.filter(|mounted| mounted.share.share_id == desired.share_id) {
+                None => {
+                    let (project, session) = project_and_session(&desired.dest_path)?;
+                    APICurrentForegroundShare::Mounting {
+                        share_id: desired.share_id,
+                        project,
+                        session,
+                        dest_path: desired.dest_path,
+                    }
+                }
+                Some(s) => {
+                    match s.mount_path.to_str() {
+                        None => {
+                            let p = s.mount_path.to_string_lossy();
+                            warn!("Mount path {p} contains invalid unicode, cannot get foreground share!");
+                            APICurrentForegroundShare::None
+                        }
+                        Some(mount_path) => {
+                            let (project, session) = project_and_session(&s.share.dest_path)?;
+                            APICurrentForegroundShare::Share {
+                                share_id: s.share.share_id.clone(),
+                                project,
+                                session,
+                                dest_path: s.share.dest_path.to_owned(),
+                                mount_path: mount_path.to_owned(),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 #[utoipa::path(
     get,
     path = "/api/shares/foreground/",
@@ -61,26 +121,14 @@ fn project_and_session(dest_path: &str) -> Result<(String, String), ShareDestina
 async fn api_shares_foreground(
     State(api_state): State<ApiState>,
 ) -> Result<impl IntoResponse, LocalAPIError> {
-    let response = match &api_state.state.lock().await.current_shares.foreground_share {
-        None => APICurrentForegroundShare::None,
-        Some(s) => match s.mount_path.to_str() {
-            None => {
-                let p = s.mount_path.to_string_lossy();
-                warn!("Mount path {p} contains invalid unicode, cannot get foreground share!");
-                APICurrentForegroundShare::None
-            }
-            Some(mount_path) => {
-                let (project, session) = project_and_session(&s.share.dest_path)?;
-                APICurrentForegroundShare::Share {
-                    share_id: s.share.share_id.clone(),
-                    project,
-                    session,
-                    dest_path: s.share.dest_path.to_owned(),
-                    mount_path: mount_path.to_owned(),
-                }
-            }
-        },
+    let (desired, current) = {
+        let state = api_state.state.lock().await;
+        (
+            state.desired_shares.foreground_share.clone(),
+            state.current_shares.foreground_share.clone(),
+        )
     };
+    let response = foreground_response(desired, current)?;
     Ok(Json(response))
 }
 
@@ -403,7 +451,29 @@ pub fn add_api_routes(router: Router<ApiState>, state: ApiState) -> Result<Route
 
 #[cfg(test)]
 mod tests {
-    use super::{openapi_document, project_and_session, ShareDestinationError};
+    use std::path::PathBuf;
+
+    use modama_common::{local_api_messages::APICurrentForegroundShare, messages::Share};
+
+    use crate::share::MountedShare;
+
+    use super::{
+        foreground_response, openapi_document, project_and_session, ShareDestinationError,
+    };
+
+    fn share(id: &str) -> Share {
+        Share {
+            resource: None,
+            share_id: id.to_owned(),
+            share_name: "share".to_owned(),
+            dest_path: "/project/session".to_owned(),
+            created_timestamp: 0,
+            username: "user".to_owned(),
+            password: "password".to_owned(),
+            uid: 1000,
+            gid: 1000,
+        }
+    }
 
     #[test]
     fn project_and_session_uses_the_final_non_empty_components() {
@@ -431,6 +501,63 @@ mod tests {
                 dest_path: "/session/".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn foreground_state_distinguishes_none_mounting_unmounting_and_mounted() {
+        assert_eq!(
+            foreground_response(None, None),
+            Ok(APICurrentForegroundShare::None)
+        );
+
+        let desired = share("foreground");
+        assert_eq!(
+            foreground_response(Some(desired.clone()), None),
+            Ok(APICurrentForegroundShare::Mounting {
+                share_id: "foreground".to_owned(),
+                project: "project".to_owned(),
+                session: "session".to_owned(),
+                dest_path: "/project/session".to_owned(),
+            })
+        );
+
+        let mounted = MountedShare {
+            share: desired.clone(),
+            mount_path: PathBuf::from("/mnt/session"),
+        };
+        assert_eq!(
+            foreground_response(None, Some(mounted.clone())),
+            Ok(APICurrentForegroundShare::Unmounting {
+                share_id: "foreground".to_owned(),
+                project: "project".to_owned(),
+                session: "session".to_owned(),
+                dest_path: "/project/session".to_owned(),
+                mount_path: "/mnt/session".to_owned(),
+            })
+        );
+        assert_eq!(
+            foreground_response(Some(desired), Some(mounted)),
+            Ok(APICurrentForegroundShare::Share {
+                share_id: "foreground".to_owned(),
+                project: "project".to_owned(),
+                session: "session".to_owned(),
+                dest_path: "/project/session".to_owned(),
+                mount_path: "/mnt/session".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn desired_foreground_wins_over_a_different_mounted_share() {
+        let desired = share("new");
+        let mounted = MountedShare {
+            share: share("old"),
+            mount_path: PathBuf::from("/mnt/old"),
+        };
+        assert!(matches!(
+            foreground_response(Some(desired), Some(mounted)),
+            Ok(APICurrentForegroundShare::Mounting { share_id, .. }) if share_id == "new"
+        ));
     }
 
     #[test]

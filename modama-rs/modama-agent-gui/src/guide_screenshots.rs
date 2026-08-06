@@ -12,7 +12,7 @@ use crate::{
         PageSelectCreateSession, PageSelectProject,
     },
     service::ConnectedAgent,
-    state::{ActiveSession, AgentIdentity, Credentials},
+    state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession},
     styles,
 };
 
@@ -101,7 +101,7 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
                         identity: AgentIdentity::Anonymous {
                             hostname: "guide-host".to_owned(),
                         },
-                        session: None,
+                        foreground: ForegroundSession::None,
                     }
                 },
                 ctx.clone(),
@@ -145,7 +145,7 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
         }
         GuideScene::ActiveSession => {
             seed_logged_in(&mut app);
-            app.app_state.session = Some(ActiveSession {
+            app.app_state.foreground = ForegroundSession::Mounted(ActiveSession {
                 share_id: "guide-share".to_owned(),
                 project: PROJECT.to_owned(),
                 session: SESSION.to_owned(),

@@ -17,10 +17,39 @@ pub enum APIAgentIdentity {
 /// Local system users can ask the agent for the current foreground share. This
 /// doesn't have to contain credentials, most important is some kind of identity
 /// and the path where the share is mounted.
-#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
 #[serde(tag = "type")]
 pub enum APICurrentForegroundShare {
     None,
+    Mounting {
+        /// Stable identifier used to close this share.
+        share_id: String,
+
+        /// Project derived from the share destination.
+        project: String,
+
+        /// Session derived from the share destination.
+        session: String,
+
+        /// The path in the data management that is exported with this Share.
+        dest_path: String,
+    },
+    Unmounting {
+        /// Stable identifier used to close this share.
+        share_id: String,
+
+        /// Project derived from the share destination.
+        project: String,
+
+        /// Session derived from the share destination.
+        session: String,
+
+        /// The path in the data management that is exported with this Share.
+        dest_path: String,
+
+        /// Where the share is still mounted on the local system.
+        mount_path: String,
+    },
     Share {
         /// Stable identifier used to close this share.
         share_id: String,

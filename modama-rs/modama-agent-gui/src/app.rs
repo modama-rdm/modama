@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::{
     actions::{Action, RetryAction, TaskFailure},
     components::toast::{ToastAction, ToastState},
+    foreground_monitor::ForegroundMonitor,
     navigation_progress::NavigationProgress,
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
@@ -21,6 +22,8 @@ pub struct AgentGuiApp {
     top_bar: TopBar,
     navigation_progress: NavigationProgress,
     service: Arc<dyn AgentService>,
+    foreground_monitor: Option<ForegroundMonitor>,
+    monitor_enabled: bool,
 }
 
 impl Default for AgentGuiApp {
@@ -31,10 +34,18 @@ impl Default for AgentGuiApp {
 
 impl AgentGuiApp {
     pub fn new() -> Self {
-        Self::with_service(StubAgentService::shared())
+        Self::build(StubAgentService::shared(), false)
     }
 
     pub fn with_service(service: Arc<dyn AgentService>) -> Self {
+        Self::build(service, true)
+    }
+
+    pub fn with_service_without_monitor(service: Arc<dyn AgentService>) -> Self {
+        Self::build(service, false)
+    }
+
+    fn build(service: Arc<dyn AgentService>, monitor_enabled: bool) -> Self {
         Self {
             page: Page::Connecting(PageConnecting::with_service(Arc::clone(&service))),
             app_state: AgentAppState::new(),
@@ -42,6 +53,8 @@ impl AgentGuiApp {
             top_bar: TopBar::default(),
             navigation_progress: NavigationProgress::default(),
             service,
+            foreground_monitor: None,
+            monitor_enabled,
         }
     }
 
@@ -107,29 +120,56 @@ impl AgentGuiApp {
                     self.page = page;
                 }
             }
-            Action::SelectSession { session } => {
+            Action::IngestCreated { session } => {
                 self.toast.clear();
-                self.app_state.session = Some(session);
+                self.app_state.pending_start = Some(session);
                 self.page = self.overview_page();
+            }
+            Action::ForegroundChanged(foreground) => {
+                if self
+                    .app_state
+                    .pending_start
+                    .as_ref()
+                    .is_some_and(|pending| foreground.share_id() == Some(&pending.share_id))
+                {
+                    self.app_state.pending_start = None;
+                }
+                if self
+                    .app_state
+                    .pending_close
+                    .as_deref()
+                    .is_some_and(|share_id| {
+                        foreground.is_unmounting(share_id)
+                            || foreground
+                                .share_id()
+                                .is_none_or(|current| current != share_id)
+                    })
+                {
+                    self.app_state.pending_close = None;
+                }
+                self.app_state.foreground = foreground;
             }
             Action::GoToOverview => {
                 self.toast.clear();
                 self.page = self.overview_page();
             }
-            Action::CloseSessionSuccess => {
+            Action::CloseSessionSuccess { share_id } => {
                 self.toast.clear();
-                self.app_state.session = None;
+                self.app_state.pending_close = Some(share_id);
             }
             Action::LogoutSuccess => {
                 self.toast.clear();
                 self.app_state.creds = None;
                 self.page = self.overview_page();
             }
-            Action::Connected { identity, session } => {
+            Action::Connected {
+                identity,
+                foreground,
+            } => {
                 self.toast.clear();
                 self.page = self.overview_page();
                 self.app_state.identity = Some(identity);
-                self.app_state.session = session;
+                self.app_state.foreground = foreground;
             }
             Action::TaskFailed(failure) => match failure {
                 TaskFailure::Stay { message, retry } => {
@@ -140,6 +180,29 @@ impl AgentGuiApp {
                     self.toast.show_error(message, retry);
                 }
             },
+        }
+    }
+
+    fn start_monitor_if_needed(&mut self, ctx: &egui::Context) {
+        if self.monitor_enabled
+            && self.foreground_monitor.is_none()
+            && self.app_state.identity.is_some()
+        {
+            self.foreground_monitor = Some(ForegroundMonitor::start(
+                Arc::clone(&self.service),
+                self.app_state.foreground.clone(),
+                ctx.clone(),
+            ));
+        }
+    }
+
+    fn poll_foreground_monitor(&mut self) {
+        while let Some(update) = self
+            .foreground_monitor
+            .as_ref()
+            .and_then(|monitor| monitor.try_recv().ok())
+        {
+            self.handle_action(Action::ForegroundChanged(update));
         }
     }
 
@@ -199,6 +262,8 @@ impl eframe::App for AgentGuiApp {
         // Poll current page for async completions
         let poll_action = self.page.poll();
         self.handle_action(poll_action);
+        self.start_monitor_if_needed(ui.ctx());
+        self.poll_foreground_monitor();
         let top_bar_action = self.top_bar.poll();
         self.handle_action(top_bar_action);
 
@@ -227,9 +292,14 @@ impl eframe::App for AgentGuiApp {
             .frame(central_panel_frame)
             .show(ui, |ui| {
                 if matches!(self.page, Page::Login(_)) {
-                    let ui_action =
-                        self.page
-                            .ui(ui, frame, &self.app_state.session, &self.app_state.creds);
+                    let ui_action = self.page.ui(
+                        ui,
+                        frame,
+                        &self.app_state.foreground,
+                        &self.app_state.pending_start,
+                        &self.app_state.pending_close,
+                        &self.app_state.creds,
+                    );
                     self.handle_action(ui_action);
                 } else {
                     egui::Frame::default()
@@ -238,7 +308,9 @@ impl eframe::App for AgentGuiApp {
                             let ui_action = self.page.ui(
                                 ui,
                                 frame,
-                                &self.app_state.session,
+                                &self.app_state.foreground,
+                                &self.app_state.pending_start,
+                                &self.app_state.pending_close,
                                 &self.app_state.creds,
                             );
                             self.handle_action(ui_action);
@@ -290,34 +362,45 @@ mod tests {
             username: "user".to_string(),
             password: "pass".to_string(),
         });
-        app.app_state.session = Some(crate::state::ActiveSession {
-            share_id: "share".to_owned(),
-            project: "project".to_string(),
-            session: "session".to_string(),
-            mount_path: None,
-        });
+        app.app_state.foreground =
+            crate::state::ForegroundSession::Mounted(crate::state::ActiveSession {
+                share_id: "share".to_owned(),
+                project: "project".to_string(),
+                session: "session".to_string(),
+                mount_path: None,
+            });
 
         app.handle_action(Action::LogoutSuccess);
 
         assert!(app.app_state.creds.is_none());
-        assert!(app.app_state.session.is_some());
+        assert!(matches!(
+            app.app_state.foreground,
+            crate::state::ForegroundSession::Mounted(_)
+        ));
         assert!(matches!(app.page, Page::Overview(_)));
     }
 
     #[test]
-    fn test_close_session_clears_session_and_stays_on_overview() {
+    fn test_close_session_waits_for_authoritative_update_and_stays_on_overview() {
         let mut app = AgentGuiApp::new();
         app.page = Page::Overview(PageOverview::new());
-        app.app_state.session = Some(crate::state::ActiveSession {
+        app.app_state.foreground =
+            crate::state::ForegroundSession::Mounted(crate::state::ActiveSession {
+                share_id: "share".to_owned(),
+                project: "project".to_string(),
+                session: "session".to_string(),
+                mount_path: None,
+            });
+
+        app.handle_action(Action::CloseSessionSuccess {
             share_id: "share".to_owned(),
-            project: "project".to_string(),
-            session: "session".to_string(),
-            mount_path: None,
         });
 
-        app.handle_action(Action::CloseSessionSuccess);
-
-        assert!(app.app_state.session.is_none());
+        assert_eq!(app.app_state.pending_close.as_deref(), Some("share"));
+        assert!(matches!(
+            app.app_state.foreground,
+            crate::state::ForegroundSession::Mounted(_)
+        ));
         assert!(matches!(app.page, Page::Overview(_)));
     }
 
@@ -335,10 +418,146 @@ mod tests {
             identity: crate::state::AgentIdentity::Anonymous {
                 hostname: "workstation".to_owned(),
             },
-            session: Some(session.clone()),
+            foreground: crate::state::ForegroundSession::Mounted(session.clone()),
         });
 
-        assert_eq!(app.app_state.session, Some(session));
+        assert_eq!(
+            app.app_state.foreground,
+            crate::state::ForegroundSession::Mounted(session)
+        );
         assert!(matches!(app.page, Page::Overview(_)));
+    }
+
+    #[test]
+    fn monitor_update_replaces_foreground_and_completes_matching_start() {
+        let mut app = AgentGuiApp::new();
+        let pending = crate::state::PendingSession {
+            share_id: "share".to_owned(),
+            project: "project".to_owned(),
+            session: "session".to_owned(),
+        };
+        app.handle_action(Action::IngestCreated {
+            session: pending.clone(),
+        });
+
+        app.handle_action(Action::ForegroundChanged(
+            crate::state::ForegroundSession::Mounting(pending.clone()),
+        ));
+
+        assert_eq!(app.app_state.pending_start, None);
+        assert_eq!(
+            app.app_state.foreground,
+            crate::state::ForegroundSession::Mounting(pending)
+        );
+    }
+
+    #[test]
+    fn monitor_update_detects_external_session_deletion() {
+        let mut app = AgentGuiApp::new();
+        app.app_state.foreground =
+            crate::state::ForegroundSession::Mounted(crate::state::ActiveSession {
+                share_id: "external".to_owned(),
+                project: "project".to_owned(),
+                session: "session".to_owned(),
+                mount_path: Some("/mnt/session".to_owned()),
+            });
+
+        app.handle_action(Action::ForegroundChanged(
+            crate::state::ForegroundSession::None,
+        ));
+
+        assert_eq!(
+            app.app_state.foreground,
+            crate::state::ForegroundSession::None
+        );
+    }
+
+    #[test]
+    fn pending_start_survives_unrelated_authoritative_updates() {
+        let mut app = AgentGuiApp::new();
+        app.handle_action(Action::IngestCreated {
+            session: crate::state::PendingSession {
+                share_id: "share".to_owned(),
+                project: "project".to_owned(),
+                session: "session".to_owned(),
+            },
+        });
+        app.handle_action(Action::ForegroundChanged(
+            crate::state::ForegroundSession::None,
+        ));
+
+        assert_eq!(
+            app.app_state
+                .pending_start
+                .as_ref()
+                .map(|session| session.share_id.as_str()),
+            Some("share")
+        );
+        assert_eq!(
+            app.app_state.foreground,
+            crate::state::ForegroundSession::None
+        );
+    }
+
+    #[test]
+    fn authoritative_unmounting_replaces_local_close_progress() {
+        let mut app = AgentGuiApp::new();
+        let session = crate::state::ActiveSession {
+            share_id: "share".to_owned(),
+            project: "project".to_owned(),
+            session: "session".to_owned(),
+            mount_path: Some("/mnt/session".to_owned()),
+        };
+        app.app_state.foreground = crate::state::ForegroundSession::Mounted(session.clone());
+        app.handle_action(Action::CloseSessionSuccess {
+            share_id: session.share_id.clone(),
+        });
+
+        app.handle_action(Action::ForegroundChanged(
+            crate::state::ForegroundSession::Unmounting(session.clone()),
+        ));
+
+        assert_eq!(app.app_state.pending_close, None);
+        assert_eq!(
+            app.app_state.foreground,
+            crate::state::ForegroundSession::Unmounting(session)
+        );
+    }
+
+    #[test]
+    #[ignore = "reproduces a monitor/start-task ordering race"]
+    fn mounted_monitor_update_before_start_completion_does_not_leave_stale_pending_state() {
+        let mut app = AgentGuiApp::new();
+        let pending = crate::state::PendingSession {
+            share_id: "share".to_owned(),
+            project: "project".to_owned(),
+            session: "session".to_owned(),
+        };
+        let mounted = crate::state::ActiveSession {
+            share_id: pending.share_id.clone(),
+            project: pending.project.clone(),
+            session: pending.session.clone(),
+            mount_path: Some("/mnt/session".to_owned()),
+        };
+
+        // The permanent monitor wins the race and observes the completed mount first.
+        app.handle_action(Action::ForegroundChanged(
+            crate::state::ForegroundSession::Mounted(mounted),
+        ));
+
+        // The page task is polled afterward and must not recreate local pending state.
+        app.handle_action(Action::IngestCreated { session: pending });
+
+        // Once the mounted share disappears, stale command state must not make the
+        // overview fall back to "Waiting for agent…".
+        app.handle_action(Action::ForegroundChanged(
+            crate::state::ForegroundSession::None,
+        ));
+
+        assert_eq!(app.app_state.pending_start, None);
+        assert_eq!(
+            app.app_state.foreground,
+            crate::state::ForegroundSession::None
+        );
     }
 }

@@ -14,8 +14,12 @@
 - [x] BUG: keep the connecting state active and automatically retry until the agent is available
 - [ ] re-examine polling for status updates
     - expose websocket from modama-agent and have a background thread continuously listen on that?
-- [ ] need to also get updates when we are not waiting for an ingest share to mount
+- [x] need to also get updates when we are not waiting for an ingest share to mount
     - someone else might create or delete an ingest share from another authenticated agent
+- [ ] continuously reconcile desired and mounted shares so failed mount and unmount
+      operations retry without requiring another WebSocket state update
+- [ ] avoid restoring stale GUI pending-start state when the foreground monitor
+      observes the matching share before the start task completes
 
 ## GUI
 

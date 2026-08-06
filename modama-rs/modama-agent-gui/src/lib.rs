@@ -4,6 +4,7 @@ pub mod app;
 pub mod async_state;
 pub mod components;
 pub mod config;
+mod foreground_monitor;
 #[cfg(feature = "guide-screenshots")]
 pub mod guide_screenshots;
 mod navigation_progress;

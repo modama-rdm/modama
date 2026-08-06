@@ -89,7 +89,7 @@ impl PageConnecting {
                 if let Some(connected) = task.take_ready() {
                     return Action::Connected {
                         identity: connected.identity,
-                        session: connected.session,
+                        foreground: connected.foreground,
                     };
                 }
             }
