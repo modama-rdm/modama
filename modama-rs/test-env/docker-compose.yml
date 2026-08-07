@@ -18,7 +18,7 @@ services:
   smbdrop-init:
     image: debian:13-slim
     container_name: smbdrop-init
-    command: "bash -c 'mkdir -p /data/adhoc/testproject/session{1,2,3,4,5}/raw/'"
+    command: "bash -c 'rm -rf /data/adhoc/ && mkdir -p /data/adhoc/testproject/session{1,2,3,4,5}/raw/'"
     volumes:
       - type: bind
         source: "./testfolder/data/"
