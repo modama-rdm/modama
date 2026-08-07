@@ -8,6 +8,10 @@
       operations retry without requiring another WebSocket state update
 - [ ] avoid restoring stale GUI pending-start state when the foreground monitor
       observes the matching share before the start task completes
+- [ ] goal: make modama agent plus the gui work well in the test-env
+    - right now, after the integration tests have run, the GUI shows that the agent is continuously trying to
+      mount some share. quite possibly fixed by state reconciliation in modama-agent?
+    - reproduce: `./run.sh` on ptycho, forward 3003 to laptop, run modama-agent-gui
 
 ## GUI
 
