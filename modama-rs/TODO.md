@@ -29,10 +29,11 @@
     - [x] Check disabled-element color consistency
 - [ ] test long project and ingest-share session names against backend limits
 - [ ] general design fixes
-    - [ ] Review vertical and horizontal flow
+    - [ ] Review vertical and horizontal flow: pixel peep a bit and check typographic baselines of horizontally aligned items, and horizontal guide lines where text starts (or stops at the right edge!!!!)
     - [x] Fix hovered card rows overlaying the top border
 - [x] set up logging in the main entry point
 - [x] ensure important errors are logged (any of the errors that result in a "dismiss"/"retry" dialog for example)
 - [x] BUG: scrollbar color is not distinguishable from background
 - [x] extra binary for generating screnshots for the user documentation
 - [x] port the busy indicator from the react UI - the lil spinner is too subtle IMHO
+- [ ] logged out: clicking on the "Close session" button "redirects" to create flow; need a "next page" kinda state which determines which action is emitted when the login succeeds
