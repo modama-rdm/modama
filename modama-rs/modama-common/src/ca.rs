@@ -31,7 +31,10 @@ fn set_perms_priv(path: &Path) -> Result<(), CAError> {
     Ok(())
 }
 
-use pkcs8::{der::EncodePem, DecodePrivateKey, LineEnding, PrivateKeyInfoOwned};
+use pkcs8::{
+    der::{referenced::RefToOwned, EncodePem},
+    EncryptedPrivateKeyInfoRef, LineEnding, PrivateKeyInfoRef, SecretDocument,
+};
 use rcgen::{
     string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
     ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
@@ -130,13 +133,15 @@ impl Ca {
 
         let privkey_enc = String::from_utf8(privkey_enc)?;
 
-        let privkey = PrivateKeyInfoOwned::from_pkcs8_encrypted_pem(&privkey_enc, password)
-            .map_err(|e| match e {
-                pkcs8::Error::EncryptedPrivateKey(pkcs8::pkcs5::Error::DecryptFailed) => {
-                    CAError::InvalidPassword
-                }
-                e => e.into(),
-            })?;
+        let (_, encrypted_doc) = SecretDocument::from_pem(&privkey_enc)?;
+        let encrypted = EncryptedPrivateKeyInfoRef::try_from(encrypted_doc.as_bytes())?;
+        let decrypted_doc = encrypted.decrypt(password).map_err(|e| match e {
+            pkcs8::Error::EncryptedPrivateKey(pkcs8::pkcs5::Error::DecryptFailed) => {
+                CAError::InvalidPassword
+            }
+            e => e.into(),
+        })?;
+        let privkey = PrivateKeyInfoRef::try_from(decrypted_doc.as_bytes())?.ref_to_owned();
 
         let mut pubkey = Vec::new();
         opts.open(Self::get_pubkey_path(&prefix))?
@@ -359,8 +364,9 @@ impl Ca {
         let pubkey_serialized = self.key_pair.public_key_pem();
         let privkey_serialized = self.key_pair.serialize_pem();
 
-        let pk_info = PrivateKeyInfoOwned::from_pkcs8_pem(&privkey_serialized)?;
-        let pk_encrypted = pk_info.encrypt(&self.password)?;
+        let (_, key_doc) = SecretDocument::from_pem(&privkey_serialized)?;
+        let pk_info = PrivateKeyInfoRef::try_from(key_doc.as_bytes())?.ref_to_owned();
+        let pk_encrypted = pk_info.encrypt(&mut rand::rng(), &self.password)?;
         let privkey_encrypted = pk_encrypted.to_pem("ENCRYPTED PRIVATE KEY", LineEnding::LF)?;
 
         let prefix = &self.get_path_prefix()?;
