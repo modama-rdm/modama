@@ -187,8 +187,10 @@ fn cleanup_mount_points(config: &AgentConfig, desired_shares: &[Share]) {
         }
     };
 
-    let desired_share_paths: HashSet<PathBuf> =
-        desired_shares.iter().map(|s| target_for_share(s, config)).collect();
+    let desired_share_paths: HashSet<PathBuf> = desired_shares
+        .iter()
+        .map(|s| target_for_share(s, config))
+        .collect();
 
     dir_contents
         .flatten()

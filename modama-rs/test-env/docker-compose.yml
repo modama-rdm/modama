@@ -12,7 +12,8 @@ services:
         source: "./testfolder/data/"
         target: "/data/"
     depends_on:
-      - smbdrop
+      smbdrop:
+        condition: service_healthy
     stop_signal: SIGKILL
 
   smbdrop-init:
@@ -43,6 +44,12 @@ services:
         target: "/data/"
     networks:
       - modama-network
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "http://127.0.0.1:5051/health/"]
+      interval: 5s
+      timeout: 15s
+      start_period: 5m
+      retries: 12
     command:
       - "cargo"
       - "run"
@@ -66,7 +73,8 @@ services:
     privileged: true  # for mount support
     container_name: modama-agent-1
     depends_on:
-      - smbdrop
+      smbdrop:
+        condition: service_healthy
     networks:
       - modama-network
     volumes:
@@ -93,7 +101,8 @@ services:
     privileged: true  # for mount support
     container_name: modama-agent-2
     depends_on:
-      - smbdrop
+      smbdrop:
+        condition: service_healthy
     networks:
       - modama-network
     volumes:
@@ -118,7 +127,8 @@ services:
     privileged: true  # for mount support
     container_name: modama-agent-untrusted
     depends_on:
-      - smbdrop
+      smbdrop:
+        condition: service_healthy
     networks:
       - modama-network
     volumes:
@@ -154,8 +164,10 @@ services:
         target: "/certs/ca/pub/"
         read_only: true
     depends_on:
-      - "smbdrop"
-      - "permissions"
+      smbdrop:
+        condition: service_healthy
+      permissions:
+        condition: service_started
     working_dir: /
     command: /venv/bin/flask --app mgmtinterface:app run --debug --port 5000 --host 0.0.0.0
     networks:

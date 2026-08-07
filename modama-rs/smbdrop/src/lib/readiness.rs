@@ -12,6 +12,7 @@ use std::{
 
 use log::debug;
 use modama_common::messages::Share;
+use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{watch, Mutex, Semaphore},
     time::{sleep, timeout, Instant},
@@ -87,6 +88,39 @@ enum CacheEntry {
     Checking { started_at: Instant, token: u64 },
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ShareReadinessCounts {
+    pub total: usize,
+    pub ready: usize,
+    pub checking: usize,
+    pub unknown: usize,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GlobalReadinessStatus {
+    Ready,
+    Checking,
+    NotReady,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GlobalReadinessReason {
+    NoShares,
+    ShareReady,
+    ProbeInProgress,
+    NoShareReady,
+    StateUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GlobalReadiness {
+    pub status: GlobalReadinessStatus,
+    pub reason: GlobalReadinessReason,
+    pub shares: ShareReadinessCounts,
+}
+
 struct CacheInner {
     entries: Mutex<HashMap<String, CacheEntry>>,
     probe: Arc<dyn ShareProbe>,
@@ -160,6 +194,74 @@ impl ShareReadinessCache {
             .await
             .insert(share_id.to_owned(), CacheEntry::Ready);
         self.signal_change();
+    }
+
+    pub async fn snapshot(&self, shares: &[Share]) -> ShareReadinessCounts {
+        let entries = self.inner.entries.lock().await;
+        let now = Instant::now();
+        let mut counts = ShareReadinessCounts {
+            total: shares.len(),
+            ..ShareReadinessCounts::default()
+        };
+
+        for share in shares {
+            match entries.get(&share.share_id) {
+                Some(CacheEntry::Ready) => counts.ready += 1,
+                Some(CacheEntry::Checking { started_at, .. })
+                    if now.duration_since(*started_at) < self.inner.stale_check_after =>
+                {
+                    counts.checking += 1;
+                }
+                Some(CacheEntry::Checking { .. }) | None => counts.unknown += 1,
+            }
+        }
+
+        counts
+    }
+
+    pub async fn global_readiness(&self, shares: &[Share]) -> GlobalReadiness {
+        let mut counts = self.snapshot(shares).await;
+        if counts.total == 0 {
+            return GlobalReadiness {
+                status: GlobalReadinessStatus::Ready,
+                reason: GlobalReadinessReason::NoShares,
+                shares: counts,
+            };
+        }
+        if counts.ready > 0 {
+            return GlobalReadiness {
+                status: GlobalReadinessStatus::Ready,
+                reason: GlobalReadinessReason::ShareReady,
+                shares: counts,
+            };
+        }
+
+        let health_window = self
+            .inner
+            .probe_timeout
+            .saturating_sub(Duration::from_millis(1));
+        let _ = timeout(health_window, self.wait_until_any_ready(shares)).await;
+        counts = self.snapshot(shares).await;
+
+        if counts.ready > 0 {
+            GlobalReadiness {
+                status: GlobalReadinessStatus::Ready,
+                reason: GlobalReadinessReason::ShareReady,
+                shares: counts,
+            }
+        } else if counts.checking > 0 {
+            GlobalReadiness {
+                status: GlobalReadinessStatus::Checking,
+                reason: GlobalReadinessReason::ProbeInProgress,
+                shares: counts,
+            }
+        } else {
+            GlobalReadiness {
+                status: GlobalReadinessStatus::NotReady,
+                reason: GlobalReadinessReason::NoShareReady,
+                shares: counts,
+            }
+        }
     }
 
     pub async fn wait_until_ready(&self, share: Share) -> Result<(), ShareReadinessError> {
@@ -272,6 +374,14 @@ impl ShareReadinessCache {
                     if changed.is_err() {
                         return;
                     }
+                    let entries = self.inner.entries.lock().await;
+                    if shares.iter().any(|share| {
+                        matches!(entries.get(&share.share_id), Some(CacheEntry::Ready))
+                    }) {
+                        return;
+                    }
+                    drop(entries);
+                    sleep(self.inner.retry_interval).await;
                 }
                 _ = sleep(self.inner.retry_interval) => {}
             }
@@ -403,6 +513,72 @@ mod tests {
     async fn empty_share_list_is_ready() {
         let cache = ShareReadinessCache::new(Arc::new(NoopShareProbe));
         cache.wait_until_any_ready(&[]).await;
+    }
+
+    #[tokio::test]
+    async fn global_readiness_is_immediate_without_shares() {
+        let cache = ShareReadinessCache::new(Arc::new(NoopShareProbe));
+        assert_eq!(
+            cache.global_readiness(&[]).await,
+            GlobalReadiness {
+                status: GlobalReadinessStatus::Ready,
+                reason: GlobalReadinessReason::NoShares,
+                shares: ShareReadinessCounts::default(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn global_readiness_probes_an_unknown_share() {
+        let cache = ShareReadinessCache::new(Arc::new(NoopShareProbe));
+        assert_eq!(
+            cache.global_readiness(&[share(1)]).await,
+            GlobalReadiness {
+                status: GlobalReadinessStatus::Ready,
+                reason: GlobalReadinessReason::ShareReady,
+                shares: ShareReadinessCounts {
+                    total: 1,
+                    ready: 1,
+                    checking: 0,
+                    unknown: 0,
+                },
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn global_readiness_reports_an_active_probe() {
+        let release = Arc::new(Notify::new());
+        let probe = Arc::new(CountingProbe::new(0, Some(release)));
+        let cache = ShareReadinessCache::with_config(
+            Arc::new(Arc::clone(&probe)),
+            30,
+            Duration::from_millis(20),
+            Duration::from_secs(1),
+            Duration::from_millis(1),
+        );
+
+        let readiness = cache.global_readiness(&[share(1)]).await;
+        assert_eq!(readiness.status, GlobalReadinessStatus::Checking);
+        assert_eq!(readiness.reason, GlobalReadinessReason::ProbeInProgress);
+        assert_eq!(readiness.shares.checking, 1);
+    }
+
+    #[tokio::test]
+    async fn global_readiness_reports_failed_probes() {
+        let probe = Arc::new(CountingProbe::new(usize::MAX, None));
+        let cache = ShareReadinessCache::with_config(
+            Arc::new(Arc::clone(&probe)),
+            30,
+            Duration::from_millis(10),
+            Duration::from_secs(1),
+            Duration::from_millis(100),
+        );
+
+        let readiness = cache.global_readiness(&[share(1)]).await;
+        assert_eq!(readiness.status, GlobalReadinessStatus::NotReady);
+        assert_eq!(readiness.reason, GlobalReadinessReason::NoShareReady);
+        assert_eq!(readiness.shares.unknown, 1);
     }
 
     #[tokio::test]

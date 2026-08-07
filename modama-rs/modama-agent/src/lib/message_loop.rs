@@ -67,7 +67,9 @@ async fn update_share_list(
     );
 
     backend.umount_old_shares(config, &next_shares.shares).await;
-    backend.cleanup_mount_points(config, &desired_shares.shares).await;
+    backend
+        .cleanup_mount_points(config, &desired_shares.shares)
+        .await;
 
     Ok(next_shares)
 }

@@ -1,7 +1,7 @@
 //! Deterministic scenes shared by the user-guide generator and visual tests.
 
-use time::{Date, Month};
 use std::sync::{Arc, Barrier};
+use time::{Date, Month};
 
 use eframe::egui;
 use egui_kittest::{kittest::Queryable, Harness};
