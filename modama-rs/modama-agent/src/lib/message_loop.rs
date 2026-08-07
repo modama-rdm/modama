@@ -42,7 +42,7 @@ async fn update_share_list(
         }
     }
     next_shares.set_shares(
-        join_all(desired_shares.shares.into_iter().map(|s| async {
+        join_all(desired_shares.shares.clone().into_iter().map(|s| async {
             let s2 = s;
             backend.ensure_mounted(&s2, config).await
         }))
@@ -67,7 +67,7 @@ async fn update_share_list(
     );
 
     backend.umount_old_shares(config, &next_shares.shares).await;
-    backend.cleanup_mount_points(config).await;
+    backend.cleanup_mount_points(config, &desired_shares.shares).await;
 
     Ok(next_shares)
 }
@@ -240,7 +240,7 @@ mod tests {
     }
 
     impl MountBackend for MockMountBackend {
-        async fn cleanup_mount_points(&self, _config: &AgentConfig) {}
+        async fn cleanup_mount_points(&self, _config: &AgentConfig, _desired_shares: &[Share]) {}
 
         async fn ensure_mounted(
             &self,
@@ -274,7 +274,7 @@ mod tests {
     }
 
     impl MountBackend for BlockingMountBackend {
-        async fn cleanup_mount_points(&self, _config: &AgentConfig) {}
+        async fn cleanup_mount_points(&self, _config: &AgentConfig, _desired_shares: &[Share]) {}
 
         async fn ensure_mounted(
             &self,

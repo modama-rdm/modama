@@ -1,6 +1,6 @@
 use modama_common::messages::Share;
 
-use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
+use crate::{agent_state::ShareState, config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
 
 pub trait MountBackend {
     fn initialize(&self, config: &AgentConfig) -> impl std::future::Future<Output = ()> + Send;
@@ -8,6 +8,7 @@ pub trait MountBackend {
     fn cleanup_mount_points(
         &self,
         config: &AgentConfig,
+        desired_shares: &[Share],
     ) -> impl std::future::Future<Output = ()> + Send;
 
     fn ensure_mounted(

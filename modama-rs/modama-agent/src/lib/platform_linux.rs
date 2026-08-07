@@ -169,8 +169,9 @@ fn get_mounts_in_prefix(config: &AgentConfig) -> Result<HashSet<PathBuf>, MountL
 /// Clean up ingest mount prefix directory,
 /// remove all directories that are not currently active mount points.
 /// Best-effort; ignores and logs errors and continues to hopefully converge
-/// in a clean situation eventually.
-fn cleanup_mount_points(config: &AgentConfig) {
+/// in a clean situation eventually. Don't remove directories that are
+/// in the desired-shares list; they are to be used soon.
+fn cleanup_mount_points(config: &AgentConfig, desired_shares: &[Share]) {
     let mounts_in_prefix = match get_mounts_in_prefix(config) {
         Ok(m) => m,
         Err(e) => {
@@ -186,6 +187,9 @@ fn cleanup_mount_points(config: &AgentConfig) {
         }
     };
 
+    let desired_share_paths: HashSet<PathBuf> =
+        desired_shares.iter().map(|s| target_for_share(s, config)).collect();
+
     dir_contents
         .flatten()
         .filter(|dir_entry| {
@@ -198,6 +202,7 @@ fn cleanup_mount_points(config: &AgentConfig) {
         .map(|dir_entry| dir_entry.path())
         .flat_map(|path| path.canonicalize().ok())
         .filter(|path| !mounts_in_prefix.contains(path))
+        .filter(|path| !desired_share_paths.contains(path))
         .for_each(|path| {
             if let Err(err) = std::fs::remove_dir(&path) {
                 warn!("Cannot clean up {}: {err}", path.to_string_lossy());
@@ -249,8 +254,8 @@ impl MountBackend for CurrentPlatformMountBackend {
         prepare_mountpoint_directory(config).await;
     }
 
-    async fn cleanup_mount_points(&self, config: &AgentConfig) {
-        cleanup_mount_points(config)
+    async fn cleanup_mount_points(&self, config: &AgentConfig, desired_shares: &[Share]) {
+        cleanup_mount_points(config, desired_shares)
     }
 
     async fn ensure_mounted(
