@@ -56,19 +56,11 @@ impl ShareProbe for SmbShareProbe {
     fn check(&self, share: Share) -> ShareProbeFuture {
         let server = self.server.clone();
         Box::pin(async move {
-            let client = smb::Client::new(smb::ClientConfig::default());
-            let target = smb::UncPath::from_str(&format!(r"\\{}\{}", server, share.share_name))
-                .map_err(|e| ShareReadinessError::Check(e.to_string()))?;
-
-            let result = client
-                .share_connect(&target, &share.username, share.password)
-                .await
-                .map_err(|e| ShareReadinessError::Check(e.to_string()));
-            client
-                .close()
+            let addr = format!("{}:445", server);
+            smb2::connect(&addr, &share.username, &share.password)
                 .await
                 .map_err(|e| ShareReadinessError::Check(e.to_string()))?;
-            result
+            Ok(())
         })
     }
 }

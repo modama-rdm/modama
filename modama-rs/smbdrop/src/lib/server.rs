@@ -1,5 +1,5 @@
 use anyhow::Result as AnyResult;
-use std::{future::Future, path::PathBuf, pin::Pin, str::FromStr, sync::Arc, time::Duration};
+use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 
 use axum::{
     extract::{self, State},
@@ -66,19 +66,11 @@ impl Default for SmbShareReadiness {
 
 impl SmbShareReadiness {
     async fn check_once(&self, share: &Share) -> Result<(), ShareReadinessError> {
-        let client = smb::Client::new(smb::ClientConfig::default());
-        let target = smb::UncPath::from_str(&format!(r"\\{}\{}", self.server, share.share_name))
-            .map_err(|e| ShareReadinessError::Check(e.to_string()))?;
-
-        let result = client
-            .share_connect(&target, &share.username, share.password.clone())
-            .await
-            .map_err(|e| ShareReadinessError::Check(e.to_string()));
-        client
-            .close()
+        let addr = format!("{}:445", self.server);
+        smb2::connect(&addr, &share.username, &share.password)
             .await
             .map_err(|e| ShareReadinessError::Check(e.to_string()))?;
-        result
+        Ok(())
     }
 }
 
