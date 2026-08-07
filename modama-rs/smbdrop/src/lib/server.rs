@@ -121,17 +121,6 @@ impl<U: UserProvider, M: MountBackend, P: ProcessManager> ApiState<U, M, P> {
     pub fn new(
         share_manager: ShareManager<U, M, P>,
         state_updates_tx: broadcast::Sender<SmbDropState>,
-    ) -> Self {
-        Self::with_readiness(
-            share_manager,
-            state_updates_tx,
-            Arc::new(SmbShareReadiness::default()),
-        )
-    }
-
-    pub fn with_readiness(
-        share_manager: ShareManager<U, M, P>,
-        state_updates_tx: broadcast::Sender<SmbDropState>,
         readiness: Arc<dyn ShareReadiness>,
     ) -> Self {
         Self {
@@ -239,30 +228,30 @@ async fn list_shares<U: UserProvider, M: MountBackend, P: ProcessManager>(
     Ok(Json(shares).into_response())
 }
 
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
+enum HealthResponse {
+    Healthy,
+    NotAvailable,
+}
+
 async fn health<U: UserProvider, M: MountBackend, P: ProcessManager>(
     State(state): State<ApiState<U, M, P>>,
-) -> impl IntoResponse {
-    let readiness = match state.share_manager.list_shares().await {
+) -> Result<impl IntoResponse, ShareAPIError> {
+    let (status, readiness) = match state.share_manager.list_shares().await {
         Ok(shares) => {
-            let shares = shares.into_values().collect::<Vec<_>>();
-            state.readiness.global_readiness(&shares).await
+            if let Some((_key, share)) = shares.iter().next() {
+                state.readiness.wait_until_ready(share.clone()).await?;
+            }
+            (StatusCode::OK,
+            HealthResponse::Healthy)
         }
         Err(error) => {
             error!("could not read shares for health check: {error}");
-            GlobalReadiness {
-                status: GlobalReadinessStatus::NotReady,
-                reason: GlobalReadinessReason::StateUnavailable,
-                shares: ShareReadinessCounts::default(),
-            }
+            (StatusCode::SERVICE_UNAVAILABLE,
+            HealthResponse::NotAvailable)
         }
     };
-    let status = if readiness.status == GlobalReadinessStatus::Ready {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    };
-
-    (status, Json(readiness))
+    Ok((status, Json(readiness)).into_response())
 }
 
 async fn create_share<U: UserProvider, M: MountBackend, P: ProcessManager>(
@@ -358,7 +347,7 @@ mod tests {
     use url::Url;
 
     use crate::{
-        server::{spawn_smbdrop_task, ApiState, CreateShareResponse, ShareAPIErrorResponse},
+        server::{ApiState, CreateShareResponse, HealthResponse, NoopShareReadiness, ShareAPIErrorResponse, spawn_smbdrop_task},
         share_manager::{ShareManager, SmbDropState, User, UserProvider},
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
@@ -380,56 +369,6 @@ mod tests {
 
         let name: CString = CString::from_str("testuser").unwrap();
         assert!(user_provider.passwd_from_name(name.as_c_str()).is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_health_is_ready_without_shares() {
-        let configs_path = TempDir::new("share_manager_configs");
-        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
-        let shares_config = configs_path.join("shares_config.json");
-        let (events_tx, _events_rx) = broadcast::channel(16);
-        let mut share_manager = ShareManager::new(
-            bind_mount_prefix.to_owned(),
-            shares_config.clone(),
-            configs_path.join("smb_dynamic.conf"),
-            MockUserProvider::new(vec![]),
-            Arc::new(MockMountBackend::new()),
-            MockProcessManager::new(),
-        )
-        .await;
-        share_manager.start().await.unwrap();
-        let api_state = ApiState::with_readiness(
-            share_manager,
-            events_tx,
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
-        );
-        let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
-
-        let response = reqwest::get(format!("http://127.0.0.1:{port}/health/"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.json::<GlobalReadiness>().await.unwrap(),
-            GlobalReadiness {
-                status: GlobalReadinessStatus::Ready,
-                reason: GlobalReadinessReason::NoShares,
-                shares: ShareReadinessCounts::default(),
-            }
-        );
-
-        tokio::fs::write(&shares_config, b"not valid JSON")
-            .await
-            .unwrap();
-        let response = reqwest::get(format!("http://127.0.0.1:{port}/health/"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let readiness = response.json::<GlobalReadiness>().await.unwrap();
-        assert_eq!(readiness.status, GlobalReadinessStatus::NotReady);
-        assert_eq!(readiness.reason, GlobalReadinessReason::StateUnavailable);
-
-        handle.abort();
     }
 
     #[tokio::test]
@@ -457,7 +396,7 @@ mod tests {
 
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::with_readiness(
+        let api_state = ApiState::new(
             share_manager,
             apistate_events_tx,
             Arc::new(NoopShareReadiness),
@@ -552,11 +491,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(health_response.status(), StatusCode::OK);
-        let health = health_response.json::<GlobalReadiness>().await.unwrap();
-        assert_eq!(health.status, GlobalReadinessStatus::Ready);
-        assert_eq!(health.reason, GlobalReadinessReason::ShareReady);
-        assert_eq!(health.shares.total, 1);
-        assert_eq!(health.shares.ready, 1);
+        let health = health_response.json::<HealthResponse>().await.unwrap();
+        assert_eq!(health, HealthResponse::Healthy);
 
         handle.abort();
     }
@@ -586,7 +522,7 @@ mod tests {
 
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::with_readiness(
+        let api_state = ApiState::new(
             share_manager,
             apistate_events_tx,
             Arc::new(NoopShareReadiness),
@@ -643,7 +579,7 @@ mod tests {
 
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::with_readiness(
+        let api_state = ApiState::new(
             share_manager,
             apistate_events_tx,
             Arc::new(NoopShareReadiness),
@@ -731,7 +667,7 @@ mod tests {
 
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::with_readiness(
+        let api_state = ApiState::new(
             share_manager,
             apistate_events_tx,
             Arc::new(NoopShareReadiness),
@@ -787,7 +723,7 @@ mod tests {
 
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::with_readiness(
+        let api_state = ApiState::new(
             share_manager,
             apistate_events_tx,
             Arc::new(NoopShareReadiness),
@@ -886,7 +822,7 @@ mod tests {
 
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::with_readiness(
+        let api_state = ApiState::new(
             share_manager,
             apistate_events_tx,
             Arc::new(NoopShareReadiness),
@@ -996,7 +932,7 @@ mod tests {
 
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::with_readiness(
+        let api_state = ApiState::new(
             share_manager,
             apistate_events_tx,
             Arc::new(NoopShareReadiness),

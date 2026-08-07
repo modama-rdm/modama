@@ -11,7 +11,7 @@ use smbdrop::{
     events::start_event_server,
     mount_manager::LinuxMountBackend,
     process_manager::SambaProcessManager,
-    server::{spawn_smbdrop_task, ApiState},
+    server::{ApiState, SmbShareReadiness, spawn_smbdrop_task},
     share_manager::{DefaultUserProvider, ShareManager},
     token_server::TokenServer,
 };
@@ -79,8 +79,10 @@ async fn main() -> AnyResult<()> {
     .await
     .context("start event server")?;
 
+    let readiness = Arc::new(SmbShareReadiness::default());
+
     let api_state: ApiState<DefaultUserProvider, LinuxMountBackend, SambaProcessManager> =
-        ApiState::new(sm, state_updates_tx);
+        ApiState::new(sm, state_updates_tx, readiness);
 
     let api_listen = args.api_listen.clone();
     let (smbdrop_join_handle, _port) = spawn_smbdrop_task(api_state, &api_listen).await?;
