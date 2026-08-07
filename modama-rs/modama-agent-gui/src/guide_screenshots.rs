@@ -1,5 +1,6 @@
 //! Deterministic scenes shared by the user-guide generator and visual tests.
 
+use time::{Date, Month};
 use std::sync::{Arc, Barrier};
 
 use eframe::egui;
@@ -141,6 +142,7 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
                 .map(|session| (*session).to_owned())
                 .collect();
             page.new_session_input = "2026-06-27-alignment-run".to_owned();
+            page.session_date = Date::from_calendar_date(2026, Month::August, 6).unwrap();
             app.page = Page::SelectCreateSession(page);
         }
         GuideScene::ActiveSession => {
