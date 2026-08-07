@@ -3,7 +3,6 @@ pub mod helpers;
 pub mod mount;
 pub mod mount_manager;
 pub mod process_manager;
-pub mod readiness;
 pub mod samba_config;
 pub mod server;
 pub mod share_manager;

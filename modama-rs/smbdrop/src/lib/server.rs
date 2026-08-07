@@ -1,5 +1,5 @@
 use anyhow::Result as AnyResult;
-use std::{path::PathBuf, sync::Arc};
+use std::{future::Future, path::PathBuf, pin::Pin, str::FromStr, sync::Arc, time::Duration};
 
 use axum::{
     extract::{self, State},
@@ -12,15 +12,16 @@ use log::{error, info};
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
-use tokio::{net::TcpListener, sync::broadcast, task::JoinHandle};
+use tokio::{
+    net::TcpListener,
+    sync::broadcast,
+    task::JoinHandle,
+    time::{sleep, timeout, Instant},
+};
 
 use crate::{
     mount::MountBackend,
     process_manager::ProcessManager,
-    readiness::{
-        GlobalReadiness, GlobalReadinessReason, GlobalReadinessStatus, ShareReadinessCache,
-        ShareReadinessCounts, ShareReadinessError,
-    },
     share_manager::{ShareError, ShareManager, SmbDropState, UserProvider},
 };
 
@@ -28,7 +29,92 @@ use crate::{
 pub struct ApiState<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> {
     share_manager: Arc<ShareManager<U, M, P>>,
     state_updates_tx: broadcast::Sender<SmbDropState>,
-    readiness: Arc<ShareReadinessCache>,
+    readiness: Arc<dyn ShareReadiness>,
+}
+
+const READINESS_DEADLINE: Duration = Duration::from_secs(30);
+const READINESS_RETRY_INTERVAL: Duration = Duration::from_millis(500);
+
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum ShareReadinessError {
+    #[error("SMB share is not ready before the deadline: {0}")]
+    Timeout(String),
+
+    #[error("SMB readiness check failed: {0}")]
+    Check(String),
+}
+
+pub type ShareReadinessFuture =
+    Pin<Box<dyn Future<Output = Result<(), ShareReadinessError>> + Send>>;
+
+pub trait ShareReadiness: Send + Sync {
+    fn wait_until_ready(&self, share: Share) -> ShareReadinessFuture;
+}
+
+#[derive(Debug, Clone)]
+pub struct SmbShareReadiness {
+    server: String,
+}
+
+impl Default for SmbShareReadiness {
+    fn default() -> Self {
+        Self {
+            server: "127.0.0.1".to_owned(),
+        }
+    }
+}
+
+impl SmbShareReadiness {
+    async fn check_once(&self, share: &Share) -> Result<(), ShareReadinessError> {
+        let client = smb::Client::new(smb::ClientConfig::default());
+        let target = smb::UncPath::from_str(&format!(r"\\{}\{}", self.server, share.share_name))
+            .map_err(|e| ShareReadinessError::Check(e.to_string()))?;
+
+        let result = client
+            .share_connect(&target, &share.username, share.password.clone())
+            .await
+            .map_err(|e| ShareReadinessError::Check(e.to_string()));
+        client
+            .close()
+            .await
+            .map_err(|e| ShareReadinessError::Check(e.to_string()))?;
+        result
+    }
+}
+
+impl ShareReadiness for SmbShareReadiness {
+    fn wait_until_ready(&self, share: Share) -> ShareReadinessFuture {
+        let checker = self.clone();
+        Box::pin(async move {
+            let deadline = Instant::now() + READINESS_DEADLINE;
+            let mut last_error = None;
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(ShareReadinessError::Timeout(
+                        last_error.unwrap_or_else(|| share.share_name.clone()),
+                    ));
+                }
+
+                match timeout(remaining, checker.check_once(&share)).await {
+                    Ok(Ok(())) => return Ok(()),
+                    Ok(Err(error)) => last_error = Some(error.to_string()),
+                    Err(_) => return Err(ShareReadinessError::Timeout(share.share_name.clone())),
+                }
+
+                sleep(READINESS_RETRY_INTERVAL.min(remaining)).await;
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NoopShareReadiness;
+
+impl ShareReadiness for NoopShareReadiness {
+    fn wait_until_ready(&self, _share: Share) -> ShareReadinessFuture {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 impl<U: UserProvider, M: MountBackend, P: ProcessManager> ApiState<U, M, P> {
@@ -39,14 +125,14 @@ impl<U: UserProvider, M: MountBackend, P: ProcessManager> ApiState<U, M, P> {
         Self::with_readiness(
             share_manager,
             state_updates_tx,
-            Arc::new(ShareReadinessCache::default()),
+            Arc::new(SmbShareReadiness::default()),
         )
     }
 
     pub fn with_readiness(
         share_manager: ShareManager<U, M, P>,
         state_updates_tx: broadcast::Sender<SmbDropState>,
-        readiness: Arc<ShareReadinessCache>,
+        readiness: Arc<dyn ShareReadiness>,
     ) -> Self {
         Self {
             share_manager: Arc::new(share_manager),
@@ -183,7 +269,6 @@ async fn create_share<U: UserProvider, M: MountBackend, P: ProcessManager>(
     State(state): State<ApiState<U, M, P>>,
     Json(request): Json<CreateShareRequest>,
 ) -> Result<impl IntoResponse, ShareAPIError> {
-    state.readiness.invalidate().await;
     let dest_path = PathBuf::from(&request.dest_path);
     info!("creating share from request {request:?}");
     let share = state
@@ -213,7 +298,6 @@ async fn delete_share<U: UserProvider, M: MountBackend, P: ProcessManager>(
     State(state): State<ApiState<U, M, P>>,
     extract::Path(share_id): extract::Path<String>,
 ) -> Result<impl IntoResponse, ShareAPIError> {
-    state.readiness.invalidate().await;
     state.share_manager.delete_share(&share_id).await?;
     state.send_state_update().await;
     Ok((
@@ -274,10 +358,6 @@ mod tests {
     use url::Url;
 
     use crate::{
-        readiness::{
-            GlobalReadiness, GlobalReadinessReason, GlobalReadinessStatus, NoopShareProbe,
-            ShareReadinessCache, ShareReadinessCounts,
-        },
         server::{spawn_smbdrop_task, ApiState, CreateShareResponse, ShareAPIErrorResponse},
         share_manager::{ShareManager, SmbDropState, User, UserProvider},
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
@@ -380,7 +460,7 @@ mod tests {
         let api_state = ApiState::with_readiness(
             share_manager,
             apistate_events_tx,
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
+            Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
         let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
@@ -509,7 +589,7 @@ mod tests {
         let api_state = ApiState::with_readiness(
             share_manager,
             apistate_events_tx,
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
+            Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
         let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
@@ -566,7 +646,7 @@ mod tests {
         let api_state = ApiState::with_readiness(
             share_manager,
             apistate_events_tx,
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
+            Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
         let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
@@ -654,7 +734,7 @@ mod tests {
         let api_state = ApiState::with_readiness(
             share_manager,
             apistate_events_tx,
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
+            Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
         let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
@@ -710,7 +790,7 @@ mod tests {
         let api_state = ApiState::with_readiness(
             share_manager,
             apistate_events_tx,
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
+            Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
         let api_base_url = Url::parse(format!("http://127.0.0.1:{port}").as_str()).unwrap();
@@ -809,7 +889,7 @@ mod tests {
         let api_state = ApiState::with_readiness(
             share_manager,
             apistate_events_tx,
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
+            Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0")
             .await
@@ -919,7 +999,7 @@ mod tests {
         let api_state = ApiState::with_readiness(
             share_manager,
             apistate_events_tx,
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
+            Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0")
             .await

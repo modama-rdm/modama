@@ -1,8 +1,6 @@
 use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc};
 
-use crate::{
-    readiness::ShareReadinessCache, share_manager::SmbDropState, token_server::LocalTokenVerifier,
-};
+use crate::{share_manager::SmbDropState, token_server::LocalTokenVerifier};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use modama_common::{
@@ -91,26 +89,17 @@ pub struct EventSystemState {
     pub connected_agents: HashSet<AgentId>,
 }
 
-#[derive(Clone)]
-struct EventServerContext {
-    last_state: Arc<Mutex<EventSystemState>>,
-    state_updates_tx: broadcast::Sender<SmbDropState>,
-    readiness: Arc<ShareReadinessCache>,
-}
-
 async fn handle_ws_message(
     msg: &str,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     last_state: Arc<Mutex<EventSystemState>>,
     agent_id: &AgentId,
-    readiness: &ShareReadinessCache,
 ) -> Result<(), HandlerError> {
     let msg: EventChannelRequests = serde_json::from_str(msg)?;
 
     match msg {
         EventChannelRequests::ShareListUpdate => {
             let state = { last_state.lock().await.clone() };
-            wait_for_relevant_shares(readiness, &state, agent_id).await;
             let msg = update_msg_from_state(&state, agent_id).await;
             let json_msg = serde_json::to_string(&msg)?;
             ws_stream
@@ -156,49 +145,6 @@ async fn handle_state_update(
     Ok(())
 }
 
-async fn handle_state_updates_until_ready(
-    mut new_state: SmbDropState,
-    state_updates_rx: &mut broadcast::Receiver<SmbDropState>,
-    last_state: Arc<Mutex<EventSystemState>>,
-    ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
-    agent_id: &AgentId,
-    readiness: &ShareReadinessCache,
-) -> Result<(), HandlerError> {
-    loop {
-        let comp_state = EventSystemState {
-            inner_state: new_state.clone(),
-            connected_agents: last_state.lock().await.connected_agents.clone(),
-        };
-        let readiness_wait = wait_for_relevant_shares(readiness, &comp_state, agent_id);
-        tokio::pin!(readiness_wait);
-
-        select! {
-            _ = &mut readiness_wait => {
-                return handle_state_update(&comp_state, ws_stream, agent_id).await;
-            }
-            msg = ws_stream.next() => {
-                let Some(msg) = msg else {
-                    return Err(tungstenite::Error::ConnectionClosed.into());
-                };
-                let msg = msg?;
-                if let Ok(msg) = msg.into_text() {
-                    handle_ws_message(
-                        &msg,
-                        ws_stream,
-                        Arc::clone(&last_state),
-                        agent_id,
-                        readiness,
-                    )
-                    .await?;
-                }
-            }
-            maybe_state = state_updates_rx.recv() => {
-                new_state = maybe_state.map_err(|_| HandlerError::Disconnected)?;
-            }
-        }
-    }
-}
-
 fn share_list_from_state(state: &EventSystemState, agent_id: &AgentId) -> Vec<Share> {
     state
         .inner_state
@@ -213,16 +159,6 @@ fn share_list_from_state(state: &EventSystemState, agent_id: &AgentId) -> Vec<Sh
         .collect()
 }
 
-async fn wait_for_relevant_shares(
-    readiness: &ShareReadinessCache,
-    state: &EventSystemState,
-    agent_id: &AgentId,
-) {
-    readiness
-        .wait_until_any_ready(&share_list_from_state(state, agent_id))
-        .await;
-}
-
 /// Take care of a single websocket connection. This function has two purposes:
 ///
 /// 1) Receive and reply to websockets sent to us from the agent on the other end
@@ -231,8 +167,8 @@ async fn wait_for_relevant_shares(
 async fn handle_connection(
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     mut state_updates_rx: broadcast::Receiver<SmbDropState>,
+    last_state: Arc<Mutex<EventSystemState>>,
     agent_id: AgentId,
-    context: EventServerContext,
 ) -> Result<(), HandlerError> {
     loop {
         select! {
@@ -240,13 +176,7 @@ async fn handle_connection(
                 let msg = if let Some(msg) = msg { msg? } else { break };
                 if let Ok(msg) = msg.into_text() {
                     info!("Got ws message: {}", msg);
-                    handle_ws_message(
-                        &msg,
-                        ws_stream,
-                        Arc::clone(&context.last_state),
-                        &agent_id,
-                        &context.readiness,
-                    )
+                    handle_ws_message(&msg, ws_stream, Arc::clone(&last_state), &agent_id)
                         .await?;
                 } else {
                     warn!("received non-text ws message or conversion failed");
@@ -254,16 +184,13 @@ async fn handle_connection(
             },
             maybe_state = state_updates_rx.recv() => {
                 let new_state = maybe_state.map_err(|_| HandlerError::Disconnected)?;
+                // compose the update of shares and users with connected shares:
                 info!("propagating state update from channel: {new_state:?}");
-                handle_state_updates_until_ready(
-                    new_state,
-                    &mut state_updates_rx,
-                    Arc::clone(&context.last_state),
-                    ws_stream,
-                    &agent_id,
-                    &context.readiness,
-                )
-                .await?;
+                let comp_state = EventSystemState {
+                    inner_state: new_state,
+                    connected_agents: last_state.lock().await.connected_agents.clone(),
+                };
+                handle_state_update(&comp_state, ws_stream, &agent_id).await?;
             }
         }
     }
@@ -285,8 +212,9 @@ async fn handle_authenticated_connection(
     version: &str,
     mut ws_stream: WebSocketStream<TlsStream<TcpStream>>,
     claims: Claims,
+    last_state: Arc<Mutex<EventSystemState>>,
     state_updates_rx: broadcast::Receiver<SmbDropState>,
-    context: EventServerContext,
+    state_updates_tx: broadcast::Sender<SmbDropState>,
 ) -> Result<(), HandlerError> {
     info!(
         "connection {peer} authenticated with token from {} version {version}",
@@ -297,19 +225,20 @@ async fn handle_authenticated_connection(
 
     // update connected agents and broadcast a state update
     {
-        let mut state_unlocked = context.last_state.lock().await;
+        let mut state_unlocked = last_state.lock().await;
         state_unlocked.connected_agents.insert(agent_id.clone());
-        context
-            .state_updates_tx
+        state_updates_tx
             .send(state_unlocked.inner_state.clone())
             .map_err(|_| HandlerError::Disconnected)?;
     }
 
+    let conn_last_state = Arc::clone(&last_state);
+
     if let Err(e) = handle_connection(
         &mut ws_stream,
         state_updates_rx,
+        conn_last_state,
         agent_id.clone(),
-        context.clone(),
     )
     .await
     {
@@ -326,10 +255,9 @@ async fn handle_authenticated_connection(
     // errors, too
     // TODO: if possible replace with a guard that removes the agent on Drop
     {
-        let mut state_unlocked = context.last_state.lock().await;
+        let mut state_unlocked = last_state.lock().await;
         state_unlocked.connected_agents.remove(&agent_id);
-        context
-            .state_updates_tx
+        state_updates_tx
             .send(state_unlocked.inner_state.clone())
             .map_err(|_| HandlerError::Disconnected)?;
     }
@@ -341,8 +269,9 @@ async fn authenticate_agent_connection(
     peer: SocketAddr,
     stream: TlsStream<TcpStream>,
     token_verifier: &LocalTokenVerifier,
+    last_state: Arc<Mutex<EventSystemState>>,
     state_updates_rx: broadcast::Receiver<SmbDropState>,
-    context: EventServerContext,
+    state_updates_tx: broadcast::Sender<SmbDropState>,
 ) -> Result<(), HandlerError> {
     let mut ws_stream = accept_async(stream).await?;
 
@@ -364,8 +293,9 @@ async fn authenticate_agent_connection(
                                 &version,
                                 ws_stream,
                                 claims,
+                                last_state,
                                 state_updates_rx,
-                                context,
+                                state_updates_tx,
                             )
                             .await?;
                             Ok(())
@@ -388,17 +318,24 @@ async fn accept_agent_connection(
     peer: SocketAddr,
     stream: TcpStream,
     acceptor: TlsAcceptor,
+    last_state: Arc<Mutex<EventSystemState>>,
     state_updates_rx: broadcast::Receiver<SmbDropState>,
+    state_updates_tx: broadcast::Sender<SmbDropState>,
     token_verifier: LocalTokenVerifier,
-    context: EventServerContext,
 ) -> Result<(), AcceptError> {
     let stream: TlsStream<TcpStream> = acceptor.accept(stream).await?;
 
     info!("connection from agent @ {peer}");
 
-    if let Err(e) =
-        authenticate_agent_connection(peer, stream, &token_verifier, state_updates_rx, context)
-            .await
+    if let Err(e) = authenticate_agent_connection(
+        peer,
+        stream,
+        &token_verifier,
+        last_state,
+        state_updates_rx,
+        state_updates_tx,
+    )
+    .await
     {
         error!("error in agent connection: {e:?}");
     } else {
@@ -420,23 +357,6 @@ pub async fn start_event_server(
     tls_config: ServerConfig,
     secret_key: &[u8],
     state: &SmbDropState,
-) -> Result<(JoinHandle<()>, broadcast::Sender<SmbDropState>, u16), ServerStartError> {
-    start_event_server_with_readiness(
-        listen_addr,
-        tls_config,
-        secret_key,
-        state,
-        Arc::new(ShareReadinessCache::default()),
-    )
-    .await
-}
-
-pub async fn start_event_server_with_readiness(
-    listen_addr: &str,
-    tls_config: ServerConfig,
-    secret_key: &[u8],
-    state: &SmbDropState,
-    readiness: Arc<ShareReadinessCache>,
 ) -> Result<(JoinHandle<()>, broadcast::Sender<SmbDropState>, u16), ServerStartError> {
     let state = EventSystemState {
         inner_state: state.clone(),
@@ -475,11 +395,7 @@ pub async fn start_event_server_with_readiness(
         .port();
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
-    let context = EventServerContext {
-        last_state: Arc::clone(&last_state),
-        state_updates_tx: tx.clone(),
-        readiness,
-    };
+    let moved_last_state = Arc::clone(&last_state);
     let local_token_verifier = token_verifier.clone();
     let task = tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
@@ -489,9 +405,10 @@ pub async fn start_event_server_with_readiness(
                     peer,
                     stream,
                     acc,
+                    Arc::clone(&moved_last_state),
                     tx.subscribe(),
+                    tx.clone(),
                     local_token_verifier.clone(),
-                    context.clone(),
                 ));
             } else {
                 error!("no peer addr, dropping client");
@@ -507,10 +424,7 @@ pub async fn start_event_server_with_readiness(
 mod test {
     use std::{
         collections::HashMap,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
+        sync::Arc,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
@@ -531,22 +445,13 @@ mod test {
         server::WebPkiClientVerifier,
         ClientConfig, RootCertStore, ServerConfig,
     };
-    use tokio::{
-        net,
-        sync::{broadcast::Sender, Notify},
-        task::JoinHandle,
-        time::timeout,
-    };
+    use tokio::{net, sync::broadcast::Sender, task::JoinHandle, time::timeout};
     use tokio_tungstenite::{
         connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
     };
     use tungstenite::Message;
 
-    use crate::{
-        events::start_event_server_with_readiness,
-        readiness::{NoopShareProbe, ShareProbe, ShareProbeFuture, ShareReadinessCache},
-        share_manager::SmbDropState,
-    };
+    use crate::{events::start_event_server, share_manager::SmbDropState};
 
     struct CertsForTesting {
         pub server_config: ServerConfig,
@@ -640,22 +545,18 @@ mod test {
         pub token_provider: Arc<dyn TokenProvider>,
     }
 
-    async fn make_test_event_server_with(
-        state: SmbDropState,
-        readiness: Arc<ShareReadinessCache>,
-    ) -> TestEventServer {
+    async fn make_test_event_server() -> TestEventServer {
         let certs = CertsForTesting::generate();
+        let state = SmbDropState {
+            shares: HashMap::new(),
+            users: HashMap::new(),
+        };
         let listen_addr = "localhost:0";
         let secret = &certs.server_secret;
-        let (task, event_server_queue, port) = start_event_server_with_readiness(
-            listen_addr,
-            certs.server_config.clone(),
-            secret,
-            &state,
-            readiness,
-        )
-        .await
-        .unwrap();
+        let (task, event_server_queue, port) =
+            start_event_server(listen_addr, certs.server_config.clone(), secret, &state)
+                .await
+                .unwrap();
 
         let tls_config = Arc::new(certs.client_config_1.clone());
         let ws_url = format!("wss://localhost:{port}");
@@ -692,97 +593,6 @@ mod test {
             token_provider,
             handle: task,
         }
-    }
-
-    async fn make_test_event_server() -> TestEventServer {
-        make_test_event_server_with(
-            SmbDropState {
-                shares: HashMap::new(),
-                users: HashMap::new(),
-            },
-            Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
-        )
-        .await
-    }
-
-    struct BlockingProbe {
-        calls: Arc<AtomicUsize>,
-        release: Arc<Notify>,
-    }
-
-    impl ShareProbe for BlockingProbe {
-        fn check(&self, _share: Share) -> ShareProbeFuture {
-            let calls = Arc::clone(&self.calls);
-            let release = Arc::clone(&self.release);
-            Box::pin(async move {
-                calls.fetch_add(1, Ordering::SeqCst);
-                release.notified().await;
-                Ok(())
-            })
-        }
-    }
-
-    #[tokio::test]
-    async fn test_initial_message_waits_for_smb_readiness() {
-        let share = Share {
-            resource: Some("test_resource".to_owned()),
-            share_id: "share-id".to_owned(),
-            share_name: "share-name".to_owned(),
-            dest_path: "/dest/path".to_owned(),
-            created_timestamp: 0,
-            username: "testuser".to_owned(),
-            password: "testpassword".to_owned(),
-            uid: 1001,
-            gid: 1001,
-        };
-        let state = SmbDropState {
-            shares: HashMap::from([(share.share_id.clone(), share.clone())]),
-            users: HashMap::new(),
-        };
-        let calls = Arc::new(AtomicUsize::new(0));
-        let release = Arc::new(Notify::new());
-        let readiness = Arc::new(ShareReadinessCache::new(Arc::new(BlockingProbe {
-            calls: Arc::clone(&calls),
-            release: Arc::clone(&release),
-        })));
-        let mut server = make_test_event_server_with(state, readiness).await;
-
-        let sign_response = server.token_provider.fetch_token().await.unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
-            token: sign_response.token,
-            version: modama_git_version().to_owned(),
-        })
-        .unwrap();
-        server
-            .ws_write
-            .send(Message::Text(login_msg.into()))
-            .await
-            .unwrap();
-
-        timeout(Duration::from_secs(1), async {
-            while calls.load(Ordering::SeqCst) == 0 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        assert!(timeout(Duration::from_millis(50), server.ws_read.next())
-            .await
-            .is_err());
-
-        release.notify_waiters();
-        let greeting = timeout(Duration::from_secs(1), server.ws_read.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let message: EventChannelMessage =
-            serde_json::from_str(&greeting.into_text().unwrap()).unwrap();
-        assert!(matches!(
-            message,
-            EventChannelMessage::UpdateShareList { shares, .. } if shares == vec![share]
-        ));
-        server.handle.abort();
     }
 
     #[tokio::test]
