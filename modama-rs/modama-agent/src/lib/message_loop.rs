@@ -209,8 +209,11 @@ mod tests {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
-    use smbdrop::events::start_event_server;
     use smbdrop::share_manager::SmbDropState;
+    use smbdrop::{
+        events::start_event_server_with_readiness,
+        readiness::{NoopShareProbe, ShareReadinessCache},
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
     use std::{path::PathBuf, sync::Arc};
     use tokio::sync::broadcast::Sender;
@@ -428,11 +431,12 @@ mod tests {
                 shares: std::collections::HashMap::new(),
                 users: std::collections::HashMap::new(),
             };
-            let (event_server_task, event_queue, port) = start_event_server(
+            let (event_server_task, event_queue, port) = start_event_server_with_readiness(
                 "localhost:0",
                 server_config,
                 server_pk_der.secret_der(),
                 &initial_state,
+                Arc::new(ShareReadinessCache::new(Arc::new(NoopShareProbe))),
             )
             .await
             .expect("start_event_server");

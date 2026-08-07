@@ -8,9 +8,10 @@ use modama_common::{
     logging::init_logging,
 };
 use smbdrop::{
-    events::start_event_server,
+    events::start_event_server_with_readiness,
     mount_manager::LinuxMountBackend,
     process_manager::SambaProcessManager,
+    readiness::ShareReadinessCache,
     server::{spawn_smbdrop_task, ApiState},
     share_manager::{DefaultUserProvider, ShareManager},
     token_server::TokenServer,
@@ -70,17 +71,20 @@ async fn main() -> AnyResult<()> {
     let tls_config = load_tls_server_config(&args.ca_cert, &args.chain, &args.privkey, false)?;
     let secret_key = get_private_key(&args.privkey)?;
 
-    let (_event_server_task, state_updates_tx, _event_server_port) = start_event_server(
-        &args.ws_listen,
-        tls_config,
-        secret_key.secret_der(),
-        &initial_state,
-    )
-    .await
-    .context("start event server")?;
+    let readiness = Arc::new(ShareReadinessCache::default());
+    let (_event_server_task, state_updates_tx, _event_server_port) =
+        start_event_server_with_readiness(
+            &args.ws_listen,
+            tls_config,
+            secret_key.secret_der(),
+            &initial_state,
+            Arc::clone(&readiness),
+        )
+        .await
+        .context("start event server")?;
 
     let api_state: ApiState<DefaultUserProvider, LinuxMountBackend, SambaProcessManager> =
-        ApiState::new(sm, state_updates_tx);
+        ApiState::with_readiness(sm, state_updates_tx, readiness);
 
     let api_listen = args.api_listen.clone();
     let (smbdrop_join_handle, _port) = spawn_smbdrop_task(api_state, &api_listen).await?;
