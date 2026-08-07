@@ -48,7 +48,7 @@ def agent_api() -> str:
 
 @pytest.fixture
 def smbdrop_api() -> str:
-    _ = wait_for_url(SMBDROP_BASE_URL + "/share/", service_name="smbdrop API")
+    _ = wait_for_url(SMBDROP_BASE_URL + "/health/", service_name="smbdrop API")
     return SMBDROP_BASE_URL
 
 

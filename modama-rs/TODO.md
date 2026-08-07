@@ -4,7 +4,7 @@
       keeping smbdrop project-agnostic (deferred until the new mgmtinterface API exists)
 - [ ] re-examine polling for status updates
     - expose websocket from modama-agent and have a background thread continuously listen on that?
-- [ ] continuously reconcile desired and mounted shares so failed mount and unmount
+- [ ] continuously reconcile desired and mounted shares in modama-agent so failed mount and unmount
       operations retry without requiring another WebSocket state update
 - [ ] avoid restoring stale GUI pending-start state when the foreground monitor
       observes the matching share before the start task completes
