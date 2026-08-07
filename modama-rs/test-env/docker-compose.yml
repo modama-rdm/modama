@@ -83,6 +83,8 @@ services:
       - "modama-agent"
       - "--"
       - "--config-path=/certs/agent1.toml"
+    ports:
+      - "3003:3003"
 
   modama-agent-2:
     build:

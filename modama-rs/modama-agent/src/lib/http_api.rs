@@ -252,8 +252,17 @@ async fn api_delete_share(
 )]
 async fn api_login(
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    State(agent_state): State<ApiState>,
 ) -> Result<impl IntoResponse, LocalAPIError> {
     let auth = get_auth(auth).await?;
+
+    let c = MgmtClient::new(
+        &agent_state.state.lock().await.config.mgmt_api_url,
+        auth.username(),
+        auth.password(),
+    )?;
+
+    let _ = c.list_projects().await?;
 
     Ok(Json(APILoginResponse {
         username: auth.username().to_owned(),
