@@ -3,6 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+docker compose down --remove-orphans
+
 # cleanup() {
 #   docker compose down --volumes --remove-orphans || true
 # }
@@ -12,7 +14,6 @@ cd "$(dirname "$0")"
 
 ./prepare.sh
 
-docker compose down smbdrop
 docker compose run --rm smbdrop-init
 docker compose --progress=plain build --pull
 docker compose up -d
