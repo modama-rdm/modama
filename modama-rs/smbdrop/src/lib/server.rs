@@ -8,7 +8,7 @@ use axum::{
     Json, Router,
 };
 use hyper::StatusCode;
-use log::{error, info};
+use log::{debug, error, info};
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
@@ -96,7 +96,10 @@ impl ShareReadiness for SmbShareReadiness {
 
                 match timeout(remaining, checker.check_once(&share)).await {
                     Ok(Ok(())) => return Ok(()),
-                    Ok(Err(error)) => last_error = Some(error.to_string()),
+                    Ok(Err(error)) => {
+                        last_error = Some(error.to_string());
+                        debug!("readiness probe failed: {error}");
+                    }
                     Err(_) => return Err(ShareReadinessError::Timeout(share.share_name.clone())),
                 }
 
