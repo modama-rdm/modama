@@ -26,6 +26,25 @@ impl LinuxMountBackend {
     pub fn new() -> Self {
         Self {}
     }
+
+    fn is_stale_mount_point(&self, mount_point: &Path) -> Result<bool, MountBackendError> {
+        let is_mount_point = Process::myself()
+            .map_err(|e| MountBackendError::List(Box::new(e)))?
+            .mountinfo()
+            .map_err(|e| MountBackendError::List(Box::new(e)))?
+            .into_iter()
+            .any(|mount| mount.mount_point == mount_point);
+
+        if !is_mount_point {
+            return Ok(false);
+        }
+
+        match std::fs::metadata(mount_point) {
+            Ok(metadata) => Ok(metadata.nlink() == 0),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(MountBackendError::List(Box::new(error))),
+        }
+    }
 }
 
 impl Default for LinuxMountBackend {
@@ -36,6 +55,8 @@ impl Default for LinuxMountBackend {
 
 impl MountBackend for LinuxMountBackend {
     fn mount(&self, mount: &BindMount) -> std::result::Result<(), MountBackendError> {
+        // FIXME: Once MountManager::set_state reconciles by mountpoint, make this
+        // reject every already-mounted target instead of only stale targets.
         self.preflight(mount)?;
         // 0) Pre-flight checks: make sure the source is a directory, and it
         //    stays this way. We do this here by setting the immutable flag, and
@@ -90,6 +111,15 @@ impl MountBackend for LinuxMountBackend {
             Err(MountBackendError::Preflight(format!(
                 "source path `{src_path:?}` is not a directory"
             )))?;
+        }
+
+        // FIXME: Once MountManager::set_state reconciles by mountpoint, reject
+        // every already-mounted target here instead of only stale targets.
+        if self.is_stale_mount_point(&mount.mount_point)? {
+            return Err(MountBackendError::Preflight(format!(
+                "mount point `{:?}` contains a stale mount",
+                mount.mount_point
+            )));
         }
 
         Ok(())
@@ -154,9 +184,6 @@ pub enum SetStateError {
 
     #[error("setting state failed: {0}")]
     MountError(#[from] CompoundMountError),
-
-    #[error("could not unmount stale mount points: {0:?}")]
-    StaleCleanup(Vec<PathBuf>),
 }
 
 #[derive(Debug)]
@@ -209,11 +236,12 @@ impl MountManager {
 
         let failed_mount_points =
             self.umount_mount_points(stale_mount_points.iter().map(std::path::PathBuf::as_path));
-        if failed_mount_points.is_empty() {
-            Ok(())
-        } else {
-            Err(SetStateError::StaleCleanup(failed_mount_points))
+        if !failed_mount_points.is_empty() {
+            log::warn!(
+                "continuing reconciliation after stale mount cleanup failed for {failed_mount_points:?}"
+            );
         }
+        Ok(())
     }
 
     fn umount_mount_points<'a>(
@@ -326,13 +354,19 @@ mod test {
     }
 
     impl MountBackend for StaleCleanupBackend {
-        fn mount(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
+        fn mount(&self, mount: &BindMount) -> Result<(), MountBackendError> {
             self.calls.lock().unwrap().push("mount");
-            Ok(())
+            self.preflight(mount)
         }
 
-        fn preflight(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
-            Ok(())
+        fn preflight(&self, mount: &BindMount) -> Result<(), MountBackendError> {
+            if self.fail_umount && mount.mount_point == self.stale_mount_point {
+                Err(MountBackendError::Preflight(
+                    "mount point contains a stale mount".to_owned(),
+                ))
+            } else {
+                Ok(())
+            }
         }
 
         fn umount(&self, _mount_point: &Path) -> Result<(), MountBackendError> {
@@ -380,24 +414,54 @@ mod test {
     }
 
     #[test]
-    fn stale_unmount_failure_stops_reconciliation() {
-        let mount_point = PathBuf::from("/run/modama/shares/stale");
-        let backend = Arc::new(StaleCleanupBackend::new(mount_point.clone(), true));
+    fn stale_unmount_failure_does_not_stop_reconciliation() {
+        let stale_mount_point = PathBuf::from("/run/modama/shares/stale");
+        let healthy_mount_point = PathBuf::from("/run/modama/shares/healthy");
+        let backend = Arc::new(StaleCleanupBackend::new(stale_mount_point.clone(), true));
         let mm = MountManager::new(Path::new("/run/modama"), Arc::clone(&backend));
-        let desired_mount = BindMount {
-            mount_source: PathBuf::from("/source"),
-            mount_point: mount_point.clone(),
+        let stale_mount = BindMount {
+            mount_source: PathBuf::from("/stale-source"),
+            mount_point: stale_mount_point,
+        };
+        let healthy_mount = BindMount {
+            mount_source: PathBuf::from("/healthy-source"),
+            mount_point: healthy_mount_point,
         };
 
-        let result = mm.set_state(HashSet::from([desired_mount]));
+        let result = mm.set_state(HashSet::from([stale_mount.clone(), healthy_mount]));
 
         assert!(matches!(
             result,
-            Err(SetStateError::StaleCleanup(failed)) if failed == vec![mount_point]
+            Err(SetStateError::MountError(CompoundMountError::MultiFailure(failed)))
+                if failed == vec![stale_mount]
         ));
         assert_eq!(
             *backend.calls.lock().unwrap(),
-            ["list_stale_mounts", "umount"]
+            [
+                "list_stale_mounts",
+                "umount",
+                "list_mounts",
+                "mount",
+                "mount"
+            ]
+        );
+    }
+
+    #[test]
+    fn undesired_stale_unmount_failure_does_not_fail_reconciliation() {
+        let stale_mount_point = PathBuf::from("/run/modama/shares/stale");
+        let backend = Arc::new(StaleCleanupBackend::new(stale_mount_point, true));
+        let mm = MountManager::new(Path::new("/run/modama"), Arc::clone(&backend));
+        let healthy_mount = BindMount {
+            mount_source: PathBuf::from("/healthy-source"),
+            mount_point: PathBuf::from("/run/modama/shares/healthy"),
+        };
+
+        mm.set_state(HashSet::from([healthy_mount])).unwrap();
+
+        assert_eq!(
+            *backend.calls.lock().unwrap(),
+            ["list_stale_mounts", "umount", "list_mounts", "mount"]
         );
     }
 
