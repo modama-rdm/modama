@@ -23,8 +23,8 @@ pub struct PageOverview {
     focus_on_entry: bool,
     service: Arc<dyn AgentService>,
     last_close: Option<(Credentials, ActiveSession)>,
-    login_required: bool,  // FIXME: sucks to have this as state, why cant the close confirmation
-                           // thing return the action instead?
+    login_required: bool, // FIXME: sucks to have this as state, why cant the close confirmation
+                          // thing return the action instead?
 }
 
 impl Default for PageOverview {

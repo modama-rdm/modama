@@ -367,7 +367,7 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
 mod tests {
     use super::*;
     use crate::agent_state::RemoteInfo;
-use crate::share::MountedShare;
+    use crate::share::MountedShare;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
@@ -563,7 +563,12 @@ use crate::share::MountedShare;
         };
         {
             let mut state = test_setup.shared_state.lock().await;
-            state.remote_info.as_mut().unwrap().desired_shares.foreground_share = Some(mounted.share.clone());
+            state
+                .remote_info
+                .as_mut()
+                .unwrap()
+                .desired_shares
+                .foreground_share = Some(mounted.share.clone());
             state.current_shares.foreground_share = Some(mounted);
         }
         let req = Request::builder()

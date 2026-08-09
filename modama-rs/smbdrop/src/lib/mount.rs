@@ -24,9 +24,7 @@ impl BindMount {
 }
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
-#[error(
-    "mount reconciliation failed (mounts: {failed_mounts:?}, umounts: {failed_umounts:?})"
-)]
+#[error("mount reconciliation failed (mounts: {failed_mounts:?}, umounts: {failed_umounts:?})")]
 pub struct ReconciliationError {
     pub failed_mounts: Vec<BindMount>,
     pub failed_umounts: Vec<PathBuf>,
