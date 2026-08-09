@@ -19,3 +19,5 @@
 - [ ] general design fixes
     - [ ] Review vertical and horizontal flow: pixel peep a bit and check typographic baselines of horizontally aligned items, and horizontal guide lines where text starts (or stops at the right edge!!!!)
 - [ ] logged out: clicking on the "Close session" button "redirects" to create flow; need a "next page" kinda state which determines which action is emitted when the login succeeds
+- [ ] workflow issues
+    - [ ] if user A creates an ingest share at resource R1, and later user B uses the same resource, B must be able to act

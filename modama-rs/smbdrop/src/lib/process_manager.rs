@@ -150,7 +150,22 @@ impl SambaProcessManagerState {
 
     pub async fn reload(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         if let Some(pid) = self.child.lock().await.id() {
+            // reload the parent process:
             kill(Pid::from_raw(pid as i32), SIGHUP)?;
+
+            // reload all child processes; this is important as multiple mounts on client systems
+            // may share a connection, and if we add a new ingest share, that only becomes available
+            // after an internal reload-config timer in samba expires. manually reloading all
+            // children makes the new configuration available immediately.
+            let status = tokio::process::Command::new("smbcontrol")
+                .args(["all", "reload-config"])
+                .status()
+                .await?;
+
+            if !status.success() {
+                error!("`smbcontrol all reload-config` failed to execute");
+            }
+
             Ok(())
         } else {
             Err(Box::new(PmError::NotRunning))

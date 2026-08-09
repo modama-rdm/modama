@@ -67,10 +67,16 @@ impl Default for SmbShareReadiness {
 impl SmbShareReadiness {
     async fn check_once(&self, share: &Share) -> Result<(), ShareReadinessError> {
         let addr = format!("{}:445", self.server);
-        smb2::connect(&addr, &share.username, &share.password)
-            .await
-            .map_err(|e| ShareReadinessError::Check(e.to_string()))?;
+        let mut conn = smb2::connect(&addr, &share.username, &share.password).await?;
+        conn.connect_share(&share.share_name).await?;
+
         Ok(())
+    }
+}
+
+impl From<smb2::Error> for ShareReadinessError {
+    fn from(value: smb2::Error) -> Self {
+        ShareReadinessError::Check(value.to_string())
     }
 }
 
