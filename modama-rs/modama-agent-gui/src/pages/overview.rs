@@ -153,7 +153,7 @@ impl PageOverview {
                  agent.",
             );
             ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-            let response = ui.add(primary_button("Create Session", ui));
+            let response = ui.add(primary_button("Start Session", ui));
             if self.focus_on_entry && response.enabled() {
                 response.request_focus();
                 self.focus_on_entry = false;
