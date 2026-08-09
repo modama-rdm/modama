@@ -30,4 +30,4 @@ docker compose exec permissions bash -c 'chgrp iff -R /data/adhoc/weberproject/'
 docker compose exec permissions bash -c 'setfacl -m default:user:clausen:rwx /data/adhoc/weberproject/'
 docker compose exec permissions bash -c 'setfacl -Rm user:clausen:rwx /data/adhoc/weberproject/'
 
-docker compose run --rm test-runner bash -lc "/opt/venv/bin/python -m pytest -v tests \"$@\""
+docker compose run --rm test-runner /opt/venv/bin/python -m pytest -v tests "$@"
