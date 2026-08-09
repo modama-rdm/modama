@@ -49,6 +49,7 @@ pub type ShareReadinessFuture =
 
 pub trait ShareReadiness: Send + Sync {
     fn wait_until_ready(&self, share: Share) -> ShareReadinessFuture;
+    fn check_once(&self, share: Share) -> ShareReadinessFuture;
 }
 
 #[derive(Debug, Clone)]
@@ -61,16 +62,6 @@ impl Default for SmbShareReadiness {
         Self {
             server: "127.0.0.1".to_owned(),
         }
-    }
-}
-
-impl SmbShareReadiness {
-    async fn check_once(&self, share: &Share) -> Result<(), ShareReadinessError> {
-        let addr = format!("{}:445", self.server);
-        let mut conn = smb2::connect(&addr, &share.username, &share.password).await?;
-        conn.connect_share(&share.share_name).await?;
-
-        Ok(())
     }
 }
 
@@ -94,17 +85,29 @@ impl ShareReadiness for SmbShareReadiness {
                     ));
                 }
 
-                match timeout(remaining, checker.check_once(&share)).await {
+                match timeout(remaining, checker.check_once(share.clone())).await {
                     Ok(Ok(())) => return Ok(()),
                     Ok(Err(error)) => {
                         last_error = Some(error.to_string());
-                        debug!("readiness probe failed for share {}: {error}", share.share_name);
+                        debug!(
+                            "readiness probe failed for share {}: {error}",
+                            share.share_name
+                        );
                     }
                     Err(_) => return Err(ShareReadinessError::Timeout(share.share_name.clone())),
                 }
 
                 sleep(READINESS_RETRY_INTERVAL.min(remaining)).await;
             }
+        })
+    }
+
+    fn check_once(&self, share: Share) -> ShareReadinessFuture {
+        let server = format!("{}:445", self.server);
+        Box::pin(async move {
+            let mut conn = smb2::connect(&server, &share.username, &share.password).await?;
+            conn.connect_share(&share.share_name).await?;
+            Ok(())
         })
     }
 }
@@ -114,6 +117,10 @@ pub struct NoopShareReadiness;
 
 impl ShareReadiness for NoopShareReadiness {
     fn wait_until_ready(&self, _share: Share) -> ShareReadinessFuture {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn check_once(&self, _share: Share) -> ShareReadinessFuture {
         Box::pin(async { Ok(()) })
     }
 }
@@ -235,15 +242,34 @@ enum HealthResponse {
     NotAvailable,
 }
 
+async fn any_ready<'a, U: UserProvider, M: MountBackend, P: ProcessManager>(
+    state: &ApiState<U, M, P>,
+    shares: impl Iterator<Item = &'a Share>,
+) -> bool {
+    for share in shares {
+        if state.readiness.check_once(share.clone()).await.is_ok() {
+            return true;
+        }
+    }
+
+    false
+}
+
 async fn health<U: UserProvider, M: MountBackend, P: ProcessManager>(
     State(state): State<ApiState<U, M, P>>,
 ) -> Result<impl IntoResponse, ShareAPIError> {
     let (status, readiness) = match state.share_manager.list_shares().await {
         Ok(shares) => {
-            if let Some((_key, share)) = shares.iter().next() {
-                state.readiness.wait_until_ready(share.clone()).await?;
+            let shares = shares.values();
+            let len = shares.len();
+            if any_ready(&state, shares).await || len == 0 {
+                (StatusCode::OK, HealthResponse::Healthy)
+            } else {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    HealthResponse::NotAvailable,
+                )
             }
-            (StatusCode::OK, HealthResponse::Healthy)
         }
         Err(error) => {
             error!("could not read shares for health check: {error}");

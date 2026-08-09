@@ -8,7 +8,9 @@ import pytest
 import requests
 
 
-def create_share(smbdrop_api: str, dest_path: pathlib.Path, resource: str) -> dict[str, Any]:
+def create_share(
+    smbdrop_api: str, dest_path: pathlib.Path, resource: str
+) -> dict[str, Any]:
     response = requests.post(
         f"{smbdrop_api}/share/",
         json={
@@ -92,5 +94,5 @@ def test_stale_share_survives_source_removal(smbdrop_api: str) -> None:
 
     output = smb_output(stale_connection)
     if "STATUS_BAD_NETWORK_NAME" in output:
-        pytest.xfail(f"reproduced lingering-share failure:\n{output}")
-    pytest.fail(f"stale share failed for an unexpected reason:\n{output}")
+        pytest.xfail(f"reproduced lingering-share failure: {output}")
+    pytest.fail(f"stale share failed for an unexpected reason: {output}")

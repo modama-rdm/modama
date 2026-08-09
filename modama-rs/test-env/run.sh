@@ -3,14 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-docker compose down --remove-orphans
-
-# cleanup() {
-#   docker compose down --volumes --remove-orphans || true
-# }
-# trap cleanup EXIT
-
-cd "$(dirname "$0")"
+# docker compose down --remove-orphans
 
 ./prepare.sh
 

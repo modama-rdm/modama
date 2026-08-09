@@ -56,8 +56,8 @@ services:
       timeout: 15s
       start_period: 5m
       retries: 12
-    environment:
-      - "MODAMA_LOG_LEVEL=debug"
+    environment: {}
+    #   - "MODAMA_LOG_LEVEL=debug"
     command:
       - "cargo"
       - "run"
