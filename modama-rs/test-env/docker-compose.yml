@@ -93,6 +93,12 @@ services:
       - "--config-path=/certs/agent1.toml"
     ports:
       - "3003:3003"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version: 1.0.0", "http://127.0.0.1:3003/api/health/"]
+      interval: 5s
+      timeout: 15s
+      start_period: 5m
+      retries: 12
 
   modama-agent-2:
     build:
@@ -119,6 +125,12 @@ services:
       - "modama-agent"
       - "--"
       - "--config-path=/certs/agent2.toml"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version: 1.0.0", "http://127.0.0.1:3003/api/health/"]
+      interval: 5s
+      timeout: 15s
+      start_period: 5m
+      retries: 12
 
   modama-agent-untrusted:
     build:
@@ -145,6 +157,12 @@ services:
       - "modama-agent"
       - "--"
       - "--config-path=/certs/agent-untrusted.toml"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version: 1.0.0", "http://127.0.0.1:3003/api/health/"]
+      interval: 5s
+      timeout: 15s
+      start_period: 5m
+      retries: 12
 
   mgmtinterface:
     hostname: mgmtinterface
