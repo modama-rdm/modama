@@ -70,9 +70,14 @@ async fn ensure_mounted(
         std::fs::create_dir_all(&target)?;
     }
 
-    info!("Mounting {} at {}", source, target.to_string_lossy());
+    info!(
+        "Mounting {} at {} (dest_path={})",
+        source,
+        target.to_string_lossy(),
+        share.dest_path
+    );
 
-    nix::mount::mount::<str, Path, str, str>(
+    let mounted_share = nix::mount::mount::<str, Path, str, str>(
         Some(source.as_ref()),
         &target,
         Some("cifs"),
@@ -83,7 +88,16 @@ async fn ensure_mounted(
         share: share.clone(),
         mount_path: target,
     })
-    .map_err(|e| EnsureMountedError::PlatformError(e.into()))
+    .map_err(|e| EnsureMountedError::PlatformError(e.into()))?;
+
+    info!(
+        "Mounted {} at {} (dest_path={})",
+        source,
+        mounted_share.mount_path.to_string_lossy(),
+        mounted_share.share.get_dest_path().to_string_lossy(),
+    );
+
+    Ok(mounted_share)
 }
 
 #[derive(Error, Debug)]
