@@ -124,7 +124,10 @@ async fn api_shares_foreground(
     let (desired, current) = {
         let state = api_state.state.lock().await;
         (
-            state.desired_shares.foreground_share.clone(),
+            state
+                .remote_info
+                .as_ref()
+                .and_then(|r| r.desired_shares.foreground_share.clone()),
             state.current_shares.foreground_share.clone(),
         )
     };

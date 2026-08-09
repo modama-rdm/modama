@@ -1,9 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result as AnyResult};
+use rand::Rng;
+use tungstenite::Message;
 
 use crate::{
-    agent_state::{AgentState, ConnectionState, ShareState},
+    agent_state::{AgentState, ConnectionState, RemoteInfo, ShareState},
     config::AgentConfig,
     mount_backend::MountBackend,
     share::MountedShare,
@@ -15,7 +17,7 @@ use modama_common::{
     tokens::TokenProvider,
     version::modama_git_version,
 };
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::Instant};
 use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
 
@@ -95,15 +97,72 @@ async fn handle_message(
             };
             let (config, current_shares) = {
                 let mut state = state.lock().await;
-                state.desired_shares = desired_shares.clone();
-                state.connected_agents = connected_agents;
+                state.remote_info = Some(RemoteInfo {
+                    connected_agents,
+                    desired_shares: desired_shares.clone(),
+                });
                 (state.config.clone(), state.current_shares.clone())
             };
-            let current_shares =
+            let new_current_shares =
                 update_share_list(backend, &config, &current_shares, desired_shares).await?;
-            state.lock().await.current_shares = current_shares;
+            {
+                let mut state = state.lock().await;
+                state.current_shares = new_current_shares;
+            }
             Ok(())
         }
+    }
+}
+
+async fn receive_inner(
+    message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
+    backend: &impl MountBackend,
+    state: &Arc<Mutex<AgentState>>,
+) -> ControlFlow<(), ()> {
+    match message {
+        Some(Ok(msg)) => {
+            if let Ok(msg) = msg.into_text() {
+                if let Err(e) = handle_message(backend, state, &msg).await {
+                    error!("Error while handing message: {e}");
+                }
+            } else {
+                warn!("Message is not text, ignoring...");
+            }
+            ControlFlow::Continue(())
+        }
+        Some(Err(e)) => {
+            error!("Could not receive message ({e}), reconnecting...");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            ControlFlow::Break(())
+        }
+        None => {
+            info!("Disconnected, trying to reconnect...");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            ControlFlow::Break(())
+        }
+    }
+}
+
+async fn reconcile(backend: &impl MountBackend, state: &Arc<Mutex<AgentState>>) {
+    let (current, remote_info, config) = {
+        let state = state.lock().await;
+        (
+            state.current_shares.clone(),
+            state.remote_info.clone(),
+            state.config.clone(),
+        )
+    };
+    if let Some(remote_info) = remote_info {
+    match update_share_list(backend, &config, &current, remote_info.desired_shares).await {
+        Ok(new_current_shares) => {
+            state.lock().await.current_shares = new_current_shares;
+        }
+        Err(e) => {
+            error!("error during reconciliation: {e}");
+        }
+    }
+    } else {
+        debug!("will not reconcile as we don't have share info yet");
     }
 }
 
@@ -172,27 +231,25 @@ pub async fn message_loop(
             continue;
         }
 
+        let reconcile_interval =
+            Duration::from_millis(1000u64 + rand::rng().random_range(0..500u64));
+        let timer = tokio::time::sleep(reconcile_interval);
+        tokio::pin!(timer);
+
         state.lock().await.connection = ConnectionState::Connected;
         loop {
-            match ws_read.next().await {
-                Some(Ok(msg)) => {
-                    if let Ok(msg) = msg.into_text() {
-                        if let Err(e) = handle_message(backend, &state, &msg).await {
-                            error!("Error while handing message: {e}");
-                        }
-                    } else {
-                        warn!("Message is not text, ignoring...");
+            tokio::select! {
+                _ = &mut timer => {
+                    reconcile(backend, &state).await;
+                    timer.as_mut().reset(
+                        Instant::now() + reconcile_interval
+                    )
+                }
+                msg = ws_read.next() => {
+                    match receive_inner(msg, backend, &state).await {
+                        ControlFlow::Continue(_) => continue,  // success or ignored message
+                        ControlFlow::Break(_) => break,  // error or disconnected => reconnect
                     }
-                }
-                Some(Err(e)) => {
-                    error!("Could not receive message ({e}), reconnecting...");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    break;
-                }
-                None => {
-                    info!("Disconnected, trying to reconnect...");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    break;
                 }
             }
         }
@@ -367,6 +424,9 @@ mod tests {
             .expect("AgentState remained locked while mounting");
         assert_eq!(
             locked
+                .remote_info
+                .as_ref()
+                .unwrap()
                 .desired_shares
                 .foreground_share
                 .as_ref()

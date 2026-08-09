@@ -6,6 +6,9 @@ design_spec := "../mgmtinterface-new/DESIGN.md"
 fmt:
     cargo fmt
 
+fmt-check:
+    cargo fmt --check
+
 # Validate the shared design specification, treating warnings as failures.
 validate-design:
     #!/usr/bin/env bash

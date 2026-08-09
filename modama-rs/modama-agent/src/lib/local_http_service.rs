@@ -205,8 +205,11 @@ async fn serve_index_page(
             resource_name,
         } => {
             let matching_agents = state
-                .connected_agents
-                .iter()
+                .remote_info
+                .as_ref()
+                .map(|r| r.connected_agents.iter())
+                .into_iter()
+                .flatten()
                 .filter(|a| a.resource == *resource_name);
             result += "Connected agents at this resource: ";
             for a in matching_agents {
@@ -363,7 +366,8 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::share::MountedShare;
+    use crate::agent_state::RemoteInfo;
+use crate::share::MountedShare;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
@@ -429,8 +433,12 @@ mod tests {
                 client_cert: None,
             };
             let mut state_inner = crate::agent_state::AgentState::new(&cfg);
+            state_inner.remote_info = Some(RemoteInfo::default());
 
             state_inner
+                .remote_info
+                .as_mut()
+                .unwrap()
                 .connected_agents
                 .push(modama_common::agent::AgentId {
                     resource: "res".to_string(),
@@ -468,7 +476,13 @@ mod tests {
         };
         {
             let mut state = test_setup.shared_state.lock().await;
-            state.desired_shares.foreground_share = Some(mshare.share.clone());
+            state
+                .remote_info
+                .as_mut()
+                .unwrap()
+                .desired_shares
+                .foreground_share = Some(mshare.share.clone());
+
             state.current_shares.foreground_share = Some(mshare.clone());
         }
         let req = Request::builder()
@@ -549,7 +563,7 @@ mod tests {
         };
         {
             let mut state = test_setup.shared_state.lock().await;
-            state.desired_shares.foreground_share = Some(mounted.share.clone());
+            state.remote_info.as_mut().unwrap().desired_shares.foreground_share = Some(mounted.share.clone());
             state.current_shares.foreground_share = Some(mounted);
         }
         let req = Request::builder()

@@ -1,3 +1,4 @@
+use log::warn;
 use modama_common::{agent::AgentId, messages::Share};
 
 use crate::{config::AgentConfig, share::MountedShare};
@@ -24,7 +25,7 @@ where
 
 impl<T> ShareState<T>
 where
-    T: PartialEq + Clone,
+    T: PartialEq + Clone + std::fmt::Debug,
 {
     pub fn set_foreground_share(&mut self, share: Option<T>) {
         self.foreground_share = share;
@@ -35,6 +36,7 @@ where
         // ensure the foreground share is part of the list of all shares:
         if let Some(share) = &self.foreground_share {
             if !self.shares.contains(share) {
+                warn!("correcting inconsistent state: foreground_share {:?} was not part of the share list", share);
                 self.shares.push(share.clone());
             }
         }
@@ -58,14 +60,36 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct RemoteInfo {
+    pub connected_agents: Vec<AgentId>,
+    pub desired_shares: ShareState<Share>,
+}
+
+impl RemoteInfo {
+    pub fn new() -> Self {
+        Self {
+            connected_agents: Default::default(),
+            desired_shares: Default::default(),
+        }
+    }
+}
+
+impl Default for RemoteInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub struct AgentState {
     pub connection: ConnectionState,
 
+    /// The currently mounted shares, according to the last update
     pub current_shares: ShareState<MountedShare>,
-    pub desired_shares: ShareState<Share>,
 
-    pub connected_agents: Vec<AgentId>,
+    /// Info we received over the event channel; None if we haven't received any yet
+    pub remote_info: Option<RemoteInfo>,
 
     /// Runtime configuration
     pub config: AgentConfig,
@@ -77,8 +101,7 @@ impl AgentState {
         Self {
             connection: Default::default(),
             current_shares: Default::default(),
-            desired_shares: Default::default(),
-            connected_agents: Default::default(),
+            remote_info: None,
             config,
         }
     }

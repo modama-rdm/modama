@@ -11,7 +11,7 @@ use smbdrop::{
     events::start_event_server,
     mount_manager::LinuxMountBackend,
     process_manager::SambaProcessManager,
-    server::{ApiState, SmbShareReadiness, spawn_smbdrop_task},
+    server::{spawn_smbdrop_task, ApiState, SmbShareReadiness},
     share_manager::{DefaultUserProvider, ShareManager},
     token_server::TokenServer,
 };

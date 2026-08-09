@@ -234,13 +234,14 @@ async fn health<U: UserProvider, M: MountBackend, P: ProcessManager>(
             if let Some((_key, share)) = shares.iter().next() {
                 state.readiness.wait_until_ready(share.clone()).await?;
             }
-            (StatusCode::OK,
-            HealthResponse::Healthy)
+            (StatusCode::OK, HealthResponse::Healthy)
         }
         Err(error) => {
             error!("could not read shares for health check: {error}");
-            (StatusCode::SERVICE_UNAVAILABLE,
-            HealthResponse::NotAvailable)
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                HealthResponse::NotAvailable,
+            )
         }
     };
     Ok((status, Json(readiness)).into_response())
@@ -339,7 +340,10 @@ mod tests {
     use url::Url;
 
     use crate::{
-        server::{ApiState, CreateShareResponse, HealthResponse, NoopShareReadiness, ShareAPIErrorResponse, spawn_smbdrop_task},
+        server::{
+            spawn_smbdrop_task, ApiState, CreateShareResponse, HealthResponse, NoopShareReadiness,
+            ShareAPIErrorResponse,
+        },
         share_manager::{ShareManager, SmbDropState, User, UserProvider},
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
