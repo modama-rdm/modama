@@ -30,34 +30,35 @@ async fn update_share_list(
     let mut next_shares = current_shares.clone();
     let new_fg_share: Option<Share> = desired_shares.foreground_share;
     let old_fg_share: Option<&Share> = current_shares.foreground_share.as_ref().map(|ms| &ms.share);
-    if old_fg_share != new_fg_share.as_ref() {
+    let fg_share_to_set = if old_fg_share != new_fg_share.as_ref() {
         if let Some(share) = new_fg_share {
-            next_shares.set_foreground_share(match backend.ensure_mounted(&share, config).await {
+            match backend.ensure_mounted(&share, config).await {
                 Ok(s) => Some(s),
                 Err(e) => {
                     error!("Mount failed: {e}");
                     None
                 }
-            });
-        } else {
-            next_shares.set_foreground_share(None);
-        }
-    }
-    next_shares.set_shares(
-        join_all(desired_shares.shares.clone().into_iter().map(|s| async {
-            let s2 = s;
-            backend.ensure_mounted(&s2, config).await
-        }))
-        .await
-        .into_iter()
-        .flat_map(|res| {
-            if let Err(err) = &res {
-                warn!("Mounting failed: {err}");
             }
-            res
-        })
-        .collect(),
-    );
+        } else {
+            None
+        }
+    } else {
+        current_shares.foreground_share.clone()
+    };
+    let shares_to_set = join_all(desired_shares.shares.clone().into_iter().map(|s| async {
+        let s2 = s;
+        backend.ensure_mounted(&s2, config).await
+    }))
+    .await
+    .into_iter()
+    .flat_map(|res| {
+        if let Err(err) = &res {
+            warn!("Mounting failed: {err}");
+        }
+        res
+    })
+    .collect();
+    next_shares.replace_state(shares_to_set, fg_share_to_set);
 
     debug!(
         "desired mounts: {:?}",
@@ -153,14 +154,14 @@ async fn reconcile(backend: &impl MountBackend, state: &Arc<Mutex<AgentState>>) 
         )
     };
     if let Some(remote_info) = remote_info {
-    match update_share_list(backend, &config, &current, remote_info.desired_shares).await {
-        Ok(new_current_shares) => {
-            state.lock().await.current_shares = new_current_shares;
+        match update_share_list(backend, &config, &current, remote_info.desired_shares).await {
+            Ok(new_current_shares) => {
+                state.lock().await.current_shares = new_current_shares;
+            }
+            Err(e) => {
+                error!("error during reconciliation: {e}");
+            }
         }
-        Err(e) => {
-            error!("error during reconciliation: {e}");
-        }
-    }
     } else {
         debug!("will not reconcile as we don't have share info yet");
     }

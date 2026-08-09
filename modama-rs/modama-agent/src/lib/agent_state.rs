@@ -27,6 +27,7 @@ impl<T> ShareState<T>
 where
     T: PartialEq + Clone + std::fmt::Debug,
 {
+    #[deprecated(note = "replace whole state instead")]
     pub fn set_foreground_share(&mut self, share: Option<T>) {
         self.foreground_share = share;
         self.ensure_consistent();
@@ -42,6 +43,13 @@ where
         }
     }
 
+    pub fn replace_state(&mut self, shares: Vec<T>, foreground_share: Option<T>) {
+        self.shares = shares;
+        self.foreground_share = foreground_share;
+        self.ensure_consistent();
+    }
+
+    #[deprecated(note = "replace whole state instead")]
     pub fn set_shares(&mut self, shares: Vec<T>) {
         self.shares = shares;
         self.ensure_consistent();
