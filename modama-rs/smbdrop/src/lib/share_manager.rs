@@ -28,7 +28,7 @@ use tokio::{
 };
 
 use crate::{
-    mount::{BindMount, CompoundMountError, MountBackend, MountError},
+    mount::{BindMount, MountBackend, MountError},
     mount_manager::{MountManager, SetStateError},
     process_manager::{ProcessManager, ProcessManagerCommand},
     samba_config::{SambaConfigManager, UpdateSharesError},
@@ -676,8 +676,8 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 
         let failed_mounts: HashSet<BindMount> = match self.update_mounts(&state).await {
             Ok(_) => HashSet::default(),
-            Err(SetStateError::MountError(CompoundMountError::MultiFailure(mounts))) => {
-                mounts.iter().cloned().collect()
+            Err(SetStateError::Reconciliation(failures)) => {
+                failures.failed_mounts.into_iter().collect()
             }
             Err(e) => {
                 return Err(ShareError::StateError(e));
@@ -843,8 +843,8 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         debug!("create_share: updating mounts...");
         let failed_mounts: HashSet<BindMount> = match self.update_mounts(&state).await {
             Ok(_) => HashSet::default(),
-            Err(SetStateError::MountError(CompoundMountError::MultiFailure(mounts))) => {
-                mounts.iter().cloned().collect()
+            Err(SetStateError::Reconciliation(failures)) => {
+                failures.failed_mounts.into_iter().collect()
             }
             Err(e) => {
                 return Err(ShareError::StateError(e));
