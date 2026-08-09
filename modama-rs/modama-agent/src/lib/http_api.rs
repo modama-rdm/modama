@@ -394,10 +394,22 @@ async fn api_create_session_in_project(
     path = "/api/health/",
     operation_id = "health",
     params(("X-API-Version" = String, Header, description = "API version")),
-    responses((status = 200, description = "Agent is healthy", body = APIHealthCheckResponse))
+    responses(
+        (status = 200, description = "Agent is healthy", body = APIHealthCheckResponse),
+        (status = 503, description = "Agent is connecting and not yet available", body = APIHealthCheckResponse),
+    )
 )]
-async fn api_health(State(_api_state): State<ApiState>) -> Json<APIHealthCheckResponse> {
-    Json(APIHealthCheckResponse::Ok)
+async fn api_health(State(api_state): State<ApiState>) -> impl IntoResponse {
+    match api_state.state.lock().await.connection {
+        crate::agent_state::ConnectionState::Connecting
+        | crate::agent_state::ConnectionState::Authenticating => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(APIHealthCheckResponse::NotAvailable),
+        ),
+        crate::agent_state::ConnectionState::Connected => {
+            (StatusCode::OK, Json(APIHealthCheckResponse::Ok))
+        }
+    }
 }
 
 fn latest_api_version() -> Version {

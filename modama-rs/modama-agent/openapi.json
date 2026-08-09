@@ -39,6 +39,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Agent is connecting and not yet available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIHealthCheckResponse"
+                }
+              }
+            }
           }
         },
         "x-introduced-in-version": "1.0.0"
@@ -706,6 +716,20 @@
                 "type": "string",
                 "enum": [
                   "Ok"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "NotAvailable"
                 ]
               }
             }

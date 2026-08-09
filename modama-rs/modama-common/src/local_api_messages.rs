@@ -126,4 +126,5 @@ pub struct APILoginResponse {
 #[serde(tag = "type")]
 pub enum APIHealthCheckResponse {
     Ok,
+    NotAvailable,
 }
