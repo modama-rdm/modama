@@ -106,6 +106,7 @@ pub enum MockCalls {
     Preflight { mount: BindMount },
     Umount { mount_point: PathBuf },
     ListMount { path_prefix: PathBuf },
+    ListStaleMount { path_prefix: PathBuf },
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +157,16 @@ impl MountBackend for MockMountBackend {
     ) -> Result<std::collections::HashSet<crate::mount::BindMount>, crate::mount::MountBackendError>
     {
         self.calls.lock().unwrap().push(MockCalls::ListMount {
+            path_prefix: path_prefix.to_owned(),
+        });
+        Ok(Default::default())
+    }
+
+    fn list_stale_mount_points(
+        &self,
+        path_prefix: &std::path::Path,
+    ) -> Result<std::collections::HashSet<PathBuf>, crate::mount::MountBackendError> {
+        self.calls.lock().unwrap().push(MockCalls::ListStaleMount {
             path_prefix: path_prefix.to_owned(),
         });
         Ok(Default::default())

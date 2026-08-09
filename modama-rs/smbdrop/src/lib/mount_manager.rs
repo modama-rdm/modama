@@ -1,13 +1,14 @@
 use std::{
     collections::HashSet,
     fs::create_dir_all,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use anyhow::Result;
 use nix::mount::MsFlags;
-use procfs::process::Process;
+use procfs::process::{MountInfo, Process};
 
 use crate::{
     helpers::{have_trailing_slash, keep_immutable, strip_trailing_slash},
@@ -16,6 +17,10 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub struct LinuxMountBackend {}
+
+fn is_managed_mount(mount: &MountInfo, path_prefix: &Path) -> bool {
+    mount.mount_point.starts_with(path_prefix.join("shares"))
+}
 
 impl LinuxMountBackend {
     pub fn new() -> Self {
@@ -119,6 +124,27 @@ impl MountBackend for LinuxMountBackend {
             .collect();
         Ok(active_mounts)
     }
+
+    fn list_stale_mount_points(
+        &self,
+        path_prefix: &Path,
+    ) -> Result<HashSet<PathBuf>, MountBackendError> {
+        let current_mounts = Process::myself()
+            .map_err(|e| MountBackendError::List(Box::new(e)))?
+            .mountinfo()
+            .map_err(|e| MountBackendError::List(Box::new(e)))?;
+
+        current_mounts
+            .into_iter()
+            .filter(|mount| is_managed_mount(mount, path_prefix))
+            .filter_map(|mount| match std::fs::metadata(&mount.mount_point) {
+                Ok(metadata) if metadata.nlink() == 0 => Some(Ok(mount.mount_point)),
+                Ok(_) => None,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => Some(Err(MountBackendError::List(Box::new(error)))),
+            })
+            .collect()
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -128,6 +154,9 @@ pub enum SetStateError {
 
     #[error("setting state failed: {0}")]
     MountError(#[from] CompoundMountError),
+
+    #[error("could not unmount stale mount points: {0:?}")]
+    StaleCleanup(Vec<PathBuf>),
 }
 
 #[derive(Debug)]
@@ -151,6 +180,8 @@ impl MountManager {
     /// Reconcile state such that the given `desired_mounts` are mounted, and other
     /// mounts in the prefix are umounted.
     pub fn set_state(&self, desired_mounts: HashSet<BindMount>) -> Result<(), SetStateError> {
+        self.cleanup_stale_mounts()?;
+
         let active_mounts = self.backend.list_mounts(&self.path_prefix)?;
         let to_umount = active_mounts.difference(&desired_mounts);
         let to_mount = desired_mounts.difference(&active_mounts);
@@ -170,20 +201,49 @@ impl MountManager {
         Ok(self.backend.preflight(mount)?)
     }
 
+    fn cleanup_stale_mounts(&self) -> Result<(), SetStateError> {
+        let stale_mount_points = self.backend.list_stale_mount_points(&self.path_prefix)?;
+        for mount_point in &stale_mount_points {
+            log::info!("unmounting stale bind mount at {mount_point:?}");
+        }
+
+        let failed_mount_points =
+            self.umount_mount_points(stale_mount_points.iter().map(std::path::PathBuf::as_path));
+        if failed_mount_points.is_empty() {
+            Ok(())
+        } else {
+            Err(SetStateError::StaleCleanup(failed_mount_points))
+        }
+    }
+
+    fn umount_mount_points<'a>(
+        &self,
+        mount_points: impl Iterator<Item = &'a Path>,
+    ) -> Vec<PathBuf> {
+        mount_points
+            .filter_map(|mount_point| {
+                if let Err(error) = self.backend.umount(mount_point) {
+                    log::error!("umount of {mount_point:?} failed: {error}");
+                    Some(mount_point.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     fn umount<'a>(
         &self,
         bind_mounts: impl Iterator<Item = &'a BindMount>,
     ) -> Result<(), CompoundMountError> {
-        // TODO: can probably share some code with `mount` below...
+        let bind_mounts: Vec<&BindMount> = bind_mounts.collect();
+        let failed_mount_points: HashSet<PathBuf> = self
+            .umount_mount_points(bind_mounts.iter().map(|mount| mount.mount_point.as_path()))
+            .into_iter()
+            .collect();
         let failed_mounts: Vec<BindMount> = bind_mounts
-            .filter(|bm| {
-                if let Err(e) = self.backend.umount(&bm.mount_point) {
-                    log::error!("umount of {:?} failed: {e}", bm.mount_point);
-                    true
-                } else {
-                    false
-                }
-            })
+            .into_iter()
+            .filter(|mount| failed_mount_points.contains(&mount.mount_point))
             .cloned()
             .collect();
         if failed_mounts.is_empty() {
@@ -227,13 +287,17 @@ mod test {
         collections::HashSet,
         path::{Path, PathBuf},
         str::FromStr,
-        sync::Arc,
+        sync::{Arc, Mutex},
     };
+
+    use procfs::process::MountInfo;
 
     use crate::{
         mount::{BindMount, CompoundMountError, MountBackend, MountBackendError},
         mount_manager::{MountManager, SetStateError},
     };
+
+    use super::is_managed_mount;
 
     #[derive(Clone, Debug)]
     struct MaybeFailMountBackend {}
@@ -242,6 +306,110 @@ mod test {
     enum FakeError {
         #[error("stuff")]
         Stuff,
+    }
+
+    #[derive(Clone, Debug)]
+    struct StaleCleanupBackend {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        stale_mount_point: PathBuf,
+        fail_umount: bool,
+    }
+
+    impl StaleCleanupBackend {
+        fn new(stale_mount_point: PathBuf, fail_umount: bool) -> Self {
+            Self {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                stale_mount_point,
+                fail_umount,
+            }
+        }
+    }
+
+    impl MountBackend for StaleCleanupBackend {
+        fn mount(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
+            self.calls.lock().unwrap().push("mount");
+            Ok(())
+        }
+
+        fn preflight(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
+            Ok(())
+        }
+
+        fn umount(&self, _mount_point: &Path) -> Result<(), MountBackendError> {
+            self.calls.lock().unwrap().push("umount");
+            if self.fail_umount {
+                Err(MountBackendError::Umount(Box::new(FakeError::Stuff)))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn list_mounts(
+            &self,
+            _path_prefix: &Path,
+        ) -> Result<HashSet<BindMount>, MountBackendError> {
+            self.calls.lock().unwrap().push("list_mounts");
+            Ok(HashSet::new())
+        }
+
+        fn list_stale_mount_points(
+            &self,
+            _path_prefix: &Path,
+        ) -> Result<HashSet<PathBuf>, MountBackendError> {
+            self.calls.lock().unwrap().push("list_stale_mounts");
+            Ok(HashSet::from([self.stale_mount_point.clone()]))
+        }
+    }
+
+    #[test]
+    fn stale_mount_is_cleaned_before_reconciliation() {
+        let mount_point = PathBuf::from("/run/modama/shares/stale");
+        let backend = Arc::new(StaleCleanupBackend::new(mount_point.clone(), false));
+        let mm = MountManager::new(Path::new("/run/modama"), Arc::clone(&backend));
+        let desired_mount = BindMount {
+            mount_source: PathBuf::from("/source"),
+            mount_point,
+        };
+
+        mm.set_state(HashSet::from([desired_mount])).unwrap();
+
+        assert_eq!(
+            *backend.calls.lock().unwrap(),
+            ["list_stale_mounts", "umount", "list_mounts", "mount"]
+        );
+    }
+
+    #[test]
+    fn stale_unmount_failure_stops_reconciliation() {
+        let mount_point = PathBuf::from("/run/modama/shares/stale");
+        let backend = Arc::new(StaleCleanupBackend::new(mount_point.clone(), true));
+        let mm = MountManager::new(Path::new("/run/modama"), Arc::clone(&backend));
+        let desired_mount = BindMount {
+            mount_source: PathBuf::from("/source"),
+            mount_point: mount_point.clone(),
+        };
+
+        let result = mm.set_state(HashSet::from([desired_mount]));
+
+        assert!(matches!(
+            result,
+            Err(SetStateError::StaleCleanup(failed)) if failed == vec![mount_point]
+        ));
+        assert_eq!(
+            *backend.calls.lock().unwrap(),
+            ["list_stale_mounts", "umount"]
+        );
+    }
+
+    #[test]
+    fn managed_mount_is_selected_by_mount_point() {
+        let mount = MountInfo::from_line(
+            "818 573 9:0 /alex/source/data-management-system/modama-rs/test-env/testfolder/data/adhoc/testproject/session2 /run/smbdrop/shares/f923ad36-a557-4d66-b2f4-a0bdc4e49e8a rw,relatime - ext4 /dev/md0 rw,errors=remount-ro,stripe=256",
+        )
+        .unwrap();
+
+        assert!(is_managed_mount(&mount, Path::new("/run/smbdrop")));
+        assert_eq!(mount.mount_source.as_deref(), Some("/dev/md0"));
     }
 
     // fails for mounts with mount_source == /fail/, in mount/umount
@@ -277,6 +445,13 @@ mod test {
                 mount_point: PathBuf::from_str("/success/").unwrap(),
             });
             Ok(existing_mounts)
+        }
+
+        fn list_stale_mount_points(
+            &self,
+            _path_prefix: &Path,
+        ) -> Result<HashSet<PathBuf>, MountBackendError> {
+            Ok(HashSet::new())
         }
 
         fn preflight(&self, _mount: &BindMount) -> Result<(), MountBackendError> {
@@ -394,6 +569,13 @@ mod test {
             &self,
             _path_prefix: &Path,
         ) -> Result<HashSet<BindMount>, MountBackendError> {
+            Ok(HashSet::new())
+        }
+
+        fn list_stale_mount_points(
+            &self,
+            _path_prefix: &Path,
+        ) -> Result<HashSet<PathBuf>, MountBackendError> {
             Ok(HashSet::new())
         }
 

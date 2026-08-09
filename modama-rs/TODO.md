@@ -4,6 +4,9 @@
       keeping smbdrop project-agnostic (deferred until the new mgmtinterface API exists)
 - [ ] re-examine polling for status updates
     - expose websocket from modama-agent and have a background thread continuously listen on that?
+- [ ] handle stacked bind mounts when cleaning up stale smbdrop mounts
+- [ ] refactor `MountManager::set_state()` to reconcile bind mounts by managed mountpoint
+      instead of using the incorrect bind mount source
 - [x] continuously reconcile desired and mounted shares in modama-agent so failed mount and unmount
       operations retry without requiring another WebSocket state update
 - [ ] avoid restoring stale GUI pending-start state when the foreground monitor

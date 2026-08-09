@@ -70,4 +70,10 @@ pub trait MountBackend: std::fmt::Debug + Sync + Send {
 
     /// list existing (bind) mounts in the given prefix
     fn list_mounts(&self, path_prefix: &Path) -> Result<HashSet<BindMount>, MountBackendError>;
+
+    /// list stale bind mount targets in the given prefix
+    fn list_stale_mount_points(
+        &self,
+        path_prefix: &Path,
+    ) -> Result<HashSet<PathBuf>, MountBackendError>;
 }

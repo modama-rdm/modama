@@ -4,7 +4,6 @@ import subprocess
 import tempfile
 from typing import Any
 
-import pytest
 import requests
 
 
@@ -53,10 +52,13 @@ def smb_output(result: subprocess.CompletedProcess[str]) -> str:
     return f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
 
-def test_stale_share_survives_source_removal(smbdrop_api: str) -> None:
+def test_stale_share_recovers_after_source_recreation(smbdrop_api: str) -> None:
     stale_path = pathlib.Path("/data/adhoc/testproject/repro-stale-share")
     healthy_path = pathlib.Path("/data/adhoc/testproject/repro-healthy-share")
-    for path in (stale_path, healthy_path):
+    recovery_trigger_path = pathlib.Path(
+        "/data/adhoc/testproject/repro-recovery-trigger-share"
+    )
+    for path in (stale_path, healthy_path, recovery_trigger_path):
         if path.exists():
             shutil.rmtree(path)
         path.mkdir(parents=True)
@@ -89,10 +91,16 @@ def test_stale_share_survives_source_removal(smbdrop_api: str) -> None:
     assert healthy_connection.returncode == 0, smb_output(healthy_connection)
 
     stale_connection = connect_share(stale_share)
-    if stale_connection.returncode == 0:
-        return
-
     output = smb_output(stale_connection)
-    if "STATUS_BAD_NETWORK_NAME" in output:
-        pytest.xfail(f"reproduced lingering-share failure: {output}")
-    pytest.fail(f"stale share failed for an unexpected reason: {output}")
+    assert stale_connection.returncode != 0, output
+    assert "STATUS_BAD_NETWORK_NAME" in output, output
+
+    stale_path.mkdir(parents=True)
+    create_share(
+        smbdrop_api,
+        recovery_trigger_path,
+        "repro-recovery-trigger-share",
+    )
+
+    recovered_connection = connect_share(stale_share)
+    assert recovered_connection.returncode == 0, smb_output(recovered_connection)

@@ -679,7 +679,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
             Err(SetStateError::MountError(CompoundMountError::MultiFailure(mounts))) => {
                 mounts.iter().cloned().collect()
             }
-            Err(e @ SetStateError::BackendError(_)) => {
+            Err(e) => {
                 return Err(ShareError::StateError(e));
             }
         };
@@ -846,7 +846,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
             Err(SetStateError::MountError(CompoundMountError::MultiFailure(mounts))) => {
                 mounts.iter().cloned().collect()
             }
-            Err(e @ SetStateError::BackendError(_)) => {
+            Err(e) => {
                 return Err(ShareError::StateError(e));
             }
         };
