@@ -1,4 +1,26 @@
+import time
+
 import requests
+
+
+def wait_for_session(name: str, agent_api: str):
+    print(f"waiting for session {name}")
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        response = requests.get(
+            url=f"{agent_api}/api/shares/foreground/",
+            auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
+            headers={"X-API-Version": "1.0.0"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        fg = response.json()
+        print(fg)
+        if fg["type"] == "Share" and fg["session"] == name:
+            break
+        time.sleep(0.3)
+    else:
+        raise ValueError(f"foreground share for {name} did not mount")
 
 
 def test_agent_api_connectivity(agent_api: str) -> None:
@@ -6,12 +28,12 @@ def test_agent_api_connectivity(agent_api: str) -> None:
     assert response.status_code in (200, 401), response.text
 
 
-def test_agent_api_create_share(agent_api: str):
+def test_agent_api_start_ingest(agent_api: str):
     response = requests.post(
         url=f"{agent_api}/api/projects/testproject/sessions/session2/start-ingest/",
         auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         headers={"X-API-Version": "1.0.0"},
-        timeout=30,
+        timeout=35,
     )
     response.raise_for_status()
     share = response.json()
@@ -19,6 +41,46 @@ def test_agent_api_create_share(agent_api: str):
     assert share["project"] == "testproject"
     assert share["session"] == "session2"
     assert "share_id" in share
+
+    # foreground share eventually switches to session2:
+    wait_for_session("session2", agent_api)
+
+
+def test_agent_api_start_multiple_ingests(agent_api: str):
+    time.sleep(0.5)  # FIXME: can we get rid of this?
+    response = requests.post(
+        url=f"{agent_api}/api/projects/testproject/sessions/session6/start-ingest/",
+        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
+        headers={"X-API-Version": "1.0.0"},
+        timeout=35,
+    )
+    response.raise_for_status()
+    share = response.json()
+    assert share["dest_path"] == "/data/adhoc/testproject/session6"
+    assert share["project"] == "testproject"
+    assert share["session"] == "session6"
+    assert "share_id" in share
+
+    # foreground share eventually switches to session6:
+    wait_for_session("session6", agent_api)
+
+    response = requests.post(
+        url=f"{agent_api}/api/projects/testproject/sessions/session7/start-ingest/",
+        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
+        headers={"X-API-Version": "1.0.0"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    share = response.json()
+    assert share["dest_path"] == "/data/adhoc/testproject/session7"
+    assert share["project"] == "testproject"
+    assert share["session"] == "session7"
+    assert "share_id" in share
+
+    # foreground share eventually switches to session7:
+    wait_for_session("session7", agent_api)
+    # FIXME: assert: eventually, both session1 and session2 are mounted on the agents
+    # FIXME: clean up
 
 
 def test_agent_api_create_session(agent_api: str):

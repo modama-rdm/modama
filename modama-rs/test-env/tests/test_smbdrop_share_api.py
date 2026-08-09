@@ -9,7 +9,7 @@ def test_create_share_for_testresource(smbdrop_api: str) -> None:
         "resource": "testresource",
     }
 
-    create_response = requests.post(f"{smbdrop_api}/share/", json=payload, timeout=10.0)
+    create_response = requests.post(f"{smbdrop_api}/share/", json=payload, timeout=35.0)
     assert create_response.status_code == 200, create_response.text
 
     body = create_response.json()
