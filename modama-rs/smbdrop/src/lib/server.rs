@@ -98,7 +98,7 @@ impl ShareReadiness for SmbShareReadiness {
                     Ok(Ok(())) => return Ok(()),
                     Ok(Err(error)) => {
                         last_error = Some(error.to_string());
-                        debug!("readiness probe failed: {error}");
+                        debug!("readiness probe failed for share {}: {error}", share.share_name);
                     }
                     Err(_) => return Err(ShareReadinessError::Timeout(share.share_name.clone())),
                 }
