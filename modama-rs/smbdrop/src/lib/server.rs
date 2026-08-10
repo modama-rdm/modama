@@ -826,7 +826,7 @@ mod tests {
 
         let configs_path = TempDir::new("share_manager_configs");
         let removed_dest_path = TempDir::new("removed_dest_path_for_share");
-        let remaining_dest_path = TempDir::new("remaining_dest_path_for_share");
+        let shared_dest_path = TempDir::new("shared_dest_path_for_shares");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
         let dynamic_config_path = configs_path.join("smb_dynamic.conf");
 
@@ -852,8 +852,9 @@ mod tests {
         let client = ClientBuilder::new().build().unwrap();
 
         let removed_share = create_test_share(&client, &api_base_url, &removed_dest_path).await;
-        let remaining_share = create_test_share(&client, &api_base_url, &remaining_dest_path).await;
-        for _ in 0..2 {
+        let failed_share = create_test_share(&client, &api_base_url, &shared_dest_path).await;
+        let healthy_share = create_test_share(&client, &api_base_url, &shared_dest_path).await;
+        for _ in 0..3 {
             timeout(Duration::from_millis(100), events_rx.recv())
                 .await
                 .unwrap()
@@ -861,7 +862,8 @@ mod tests {
         }
 
         let removed_mount = BindMount::from_share(&removed_share, &bind_mount_prefix);
-        let remaining_mount = BindMount::from_share(&remaining_share, &bind_mount_prefix);
+        let failed_mount = BindMount::from_share(&failed_share, &bind_mount_prefix);
+        let healthy_mount = BindMount::from_share(&healthy_share, &bind_mount_prefix);
         let orphan_mount_point = bind_mount_prefix.join("shares/orphan");
         mount_backend.set_active_mount_points(HashSet::from([
             removed_mount.mount_point.clone(),
@@ -871,7 +873,7 @@ mod tests {
             removed_mount.mount_point,
             orphan_mount_point,
         ]));
-        mount_backend.set_failed_mount_points(HashSet::from([remaining_mount.mount_point.clone()]));
+        mount_backend.set_failed_mount_points(HashSet::from([failed_mount.mount_point.clone()]));
 
         let mut delete_url = api_base_url.clone();
         delete_url.set_path(&format!("/share/{}/", removed_share.share_id));
@@ -879,10 +881,9 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let persisted_state = api_state.share_manager.get_state().await.unwrap();
-        assert_eq!(
-            persisted_state.shares.keys().collect_vec(),
-            vec![&remaining_share.share_id]
-        );
+        assert_eq!(persisted_state.shares.len(), 2);
+        assert!(persisted_state.shares.contains_key(&failed_share.share_id));
+        assert!(persisted_state.shares.contains_key(&healthy_share.share_id));
 
         let published_state = timeout(Duration::from_millis(100), events_rx.recv())
             .await
@@ -894,7 +895,9 @@ mod tests {
             .await
             .unwrap();
         assert!(!dynamic_config.contains(&removed_share.share_name));
-        assert!(!dynamic_config.contains(&remaining_share.share_name));
+        assert!(!dynamic_config.contains(&failed_share.share_name));
+        assert!(dynamic_config.contains(&healthy_share.share_name));
+        assert!(dynamic_config.contains(&healthy_mount.mount_point.to_string_lossy().into_owned()));
 
         handle.abort();
     }

@@ -966,15 +966,15 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         config: &SmbDropState,
         failed_mounts: &HashSet<BindMount>,
     ) -> Result<(), ShareError> {
-        let failed_dest_paths: HashSet<PathBuf> = failed_mounts
+        let failed_mount_points: HashSet<PathBuf> = failed_mounts
             .iter()
             .cloned()
-            .map(|m| m.mount_source)
+            .map(|mount| mount.mount_point)
             .collect();
-        let shares = config
-            .shares
-            .values()
-            .filter(|s| !failed_dest_paths.contains(&s.get_dest_path()));
+        let shares = config.shares.values().filter(|share| {
+            let mount = BindMount::from_share(share, self.mm().get_prefix());
+            !failed_mount_points.contains(&mount.mount_point)
+        });
         self.sm.update_shares(shares).await?;
         Ok(())
     }

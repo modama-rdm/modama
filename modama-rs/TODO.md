@@ -7,7 +7,7 @@
 - [x] handle stacked bind mounts when cleaning up stale smbdrop mounts
 - [x] refactor `MountManager::set_state()` to reconcile bind mounts by managed mountpoint
       instead of using the incorrect bind mount source
-- [ ] associate failed smbdrop mounts with shares by managed mountpoint/share ID rather than
+- [x] associate failed smbdrop mounts with shares by managed mountpoint/share ID rather than
       `dest_path`; multiple shares can export the same destination, so one failed mount currently
       removes healthy shares for that destination from the generated Samba configuration
 - [x] continuously reconcile desired and mounted shares in modama-agent so failed mount and unmount
