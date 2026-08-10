@@ -66,15 +66,19 @@ pub trait MountBackend: std::fmt::Debug + Sync + Send {
     /// pre-flight checks to increase our confidence in a configuration change
     fn preflight(&self, mount: &BindMount) -> Result<(), MountBackendError>;
 
-    /// umount a single bind mount specified by the mount point
+    /// unmount the currently visible bind mount layer at the given mount point
     fn umount(&self, mount_point: &Path) -> Result<(), MountBackendError>;
 
     /// list existing bind mount targets in the given prefix
     fn list_mount_points(&self, path_prefix: &Path) -> Result<HashSet<PathBuf>, MountBackendError>;
 
-    /// list stale bind mount targets in the given prefix
+    /// list targets whose currently visible bind mount layer is stale
+    ///
+    /// Each mount table record must produce one entry. Stacked mounts therefore
+    /// repeat their target path so callers can bound how many layers may need
+    /// to be unmounted.
     fn list_stale_mount_points(
         &self,
         path_prefix: &Path,
-    ) -> Result<HashSet<PathBuf>, MountBackendError>;
+    ) -> Result<Vec<PathBuf>, MountBackendError>;
 }

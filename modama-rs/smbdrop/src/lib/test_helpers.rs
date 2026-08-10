@@ -164,11 +164,11 @@ impl MountBackend for MockMountBackend {
     fn list_stale_mount_points(
         &self,
         path_prefix: &std::path::Path,
-    ) -> Result<std::collections::HashSet<PathBuf>, crate::mount::MountBackendError> {
+    ) -> Result<Vec<PathBuf>, crate::mount::MountBackendError> {
         self.calls.lock().unwrap().push(MockCalls::ListStaleMount {
             path_prefix: path_prefix.to_owned(),
         });
-        Ok(Default::default())
+        Ok(Vec::new())
     }
 }
 
