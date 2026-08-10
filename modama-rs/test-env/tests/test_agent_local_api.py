@@ -47,7 +47,9 @@ def test_agent_api_start_ingest(agent_api: str):
 
 
 def test_agent_api_start_multiple_ingests(agent_api: str):
-    time.sleep(0.5)  # FIXME: can we get rid of this?
+    time.sleep(
+        1.1
+    )  # session creation is recorded in second resolution, so wait a bit to ensure we become the fg share
     response = requests.post(
         url=f"{agent_api}/api/projects/testproject/sessions/session6/start-ingest/",
         auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
@@ -63,6 +65,9 @@ def test_agent_api_start_multiple_ingests(agent_api: str):
 
     # foreground share eventually switches to session6:
     wait_for_session("session6", agent_api)
+    time.sleep(
+        1.1
+    )  # session creation is recorded in second resolution, so wait a bit to ensure we become the fg share
 
     response = requests.post(
         url=f"{agent_api}/api/projects/testproject/sessions/session7/start-ingest/",
