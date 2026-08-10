@@ -1,6 +1,7 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used)]
 use std::{
+    collections::HashSet,
     ffi::{CStr, CString},
     io,
     path::PathBuf,
@@ -12,7 +13,7 @@ use log::warn;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::{
-    mount::{BindMount, MountBackend},
+    mount::{BindMount, MountBackend, MountBackendError},
     process_manager::{ProcessManager, ProcessManagerCommand},
     share_manager::{CreateUserError, UserProvider},
 };
@@ -113,13 +114,37 @@ pub enum MockCalls {
 pub struct MockMountBackend {
     // might be fishy in async context, but we're only using it for testing...
     pub calls: Arc<std::sync::Mutex<Vec<MockCalls>>>,
+    active_mount_points: Arc<std::sync::Mutex<HashSet<PathBuf>>>,
+    failed_mount_points: Arc<std::sync::Mutex<HashSet<PathBuf>>>,
+    failed_umount_points: Arc<std::sync::Mutex<HashSet<PathBuf>>>,
+    fail_listing: Arc<std::sync::Mutex<bool>>,
 }
 
 impl MockMountBackend {
     pub fn new() -> Self {
         Self {
             calls: Default::default(),
+            active_mount_points: Default::default(),
+            failed_mount_points: Default::default(),
+            failed_umount_points: Default::default(),
+            fail_listing: Default::default(),
         }
+    }
+
+    pub fn set_active_mount_points(&self, mount_points: HashSet<PathBuf>) {
+        *self.active_mount_points.lock().unwrap() = mount_points;
+    }
+
+    pub fn set_failed_mount_points(&self, mount_points: HashSet<PathBuf>) {
+        *self.failed_mount_points.lock().unwrap() = mount_points;
+    }
+
+    pub fn set_failed_umount_points(&self, mount_points: HashSet<PathBuf>) {
+        *self.failed_umount_points.lock().unwrap() = mount_points;
+    }
+
+    pub fn set_fail_listing(&self, fail: bool) {
+        *self.fail_listing.lock().unwrap() = fail;
     }
 }
 
@@ -131,7 +156,18 @@ impl MountBackend for MockMountBackend {
         self.calls.lock().unwrap().push(MockCalls::Mount {
             mount: mount.clone(),
         });
-        Ok(())
+        if self
+            .failed_mount_points
+            .lock()
+            .unwrap()
+            .contains(&mount.mount_point)
+        {
+            Err(MountBackendError::Mount(Box::new(io::Error::other(
+                "mock mount failure",
+            ))))
+        } else {
+            Ok(())
+        }
     }
 
     fn preflight(
@@ -148,7 +184,18 @@ impl MountBackend for MockMountBackend {
         self.calls.lock().unwrap().push(MockCalls::Umount {
             mount_point: mount_point.to_owned(),
         });
-        Ok(())
+        if self
+            .failed_umount_points
+            .lock()
+            .unwrap()
+            .contains(mount_point)
+        {
+            Err(MountBackendError::Umount(Box::new(io::Error::other(
+                "mock unmount failure",
+            ))))
+        } else {
+            Ok(())
+        }
     }
 
     fn list_mount_points(
@@ -158,7 +205,13 @@ impl MountBackend for MockMountBackend {
         self.calls.lock().unwrap().push(MockCalls::ListMountPoints {
             path_prefix: path_prefix.to_owned(),
         });
-        Ok(Default::default())
+        if *self.fail_listing.lock().unwrap() {
+            Err(MountBackendError::List(Box::new(io::Error::other(
+                "mock list failure",
+            ))))
+        } else {
+            Ok(self.active_mount_points.lock().unwrap().clone())
+        }
     }
 
     fn list_stale_mount_points(
@@ -168,7 +221,13 @@ impl MountBackend for MockMountBackend {
         self.calls.lock().unwrap().push(MockCalls::ListStaleMount {
             path_prefix: path_prefix.to_owned(),
         });
-        Ok(Vec::new())
+        if *self.fail_listing.lock().unwrap() {
+            Err(MountBackendError::List(Box::new(io::Error::other(
+                "mock list failure",
+            ))))
+        } else {
+            Ok(Vec::new())
+        }
     }
 }
 

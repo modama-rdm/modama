@@ -873,7 +873,24 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 
         self.update_samba(&state, &HashSet::default()).await?;
         self.reload().await?;
-        self.update_mounts(&state).await?;
+        let failed_mounts: HashSet<BindMount> = match self.update_mounts(&state).await {
+            Ok(()) => HashSet::default(),
+            Err(SetStateError::Reconciliation(failures)) => {
+                warn!(
+                    "continuing removal of share {share_id} after mount reconciliation failed: {failures}"
+                );
+                failures.failed_mounts.into_iter().collect()
+            }
+            Err(error) => return Err(ShareError::StateError(error)),
+        };
+
+        // The first update withdraws the removed share before unmounting. If
+        // reconciliation also found unavailable remaining shares, update the
+        // Samba configuration once more so they are not exported either.
+        if !failed_mounts.is_empty() {
+            self.update_samba(&state, &failed_mounts).await?;
+            self.reload().await?;
+        }
 
         // if the number of shares with a matching `uid` is now zero, we can remove the user:
         let share_count = state
