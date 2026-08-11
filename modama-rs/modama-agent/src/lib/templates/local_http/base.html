@@ -4,10 +4,31 @@
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 <title>{{ title }}</title>
+<style type="text/css">
+/* Light-theme colors copied from the background, surface, and on-surface design tokens. */
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #f1f5fd;
+    color: #0f172a;
+}
+#content {
+    width: 90%;
+    max-width: 50em;
+    margin: 1em auto;
+    padding: 1em;
+    background-color: #ffffff;
+}
+h1, h2, h3, h4, h5, h6 {
+    color: #0f172a;
+}
+</style>
 </head>
 <body>
+<div id="content">
 {% block body %}{% endblock %}
 <hr>
 <p><a href="/">Return to overview</a></p>
+</div>
 </body>
 </html>

@@ -1261,7 +1261,12 @@ mod tests {
         assert!(body_str.contains("Select a project to start an ingest"));
         assert!(body_str.contains("href=\"/start-ingest/the%2Dproject/\""));
         assert!(!body_str.contains("<script"));
-        assert!(!body_str.contains("<style"));
+        assert!(body_str.contains("<style type=\"text/css\">"));
+        assert!(body_str.contains("<div id=\"content\">"));
+        assert!(body_str.contains("background-color: #f1f5fd;"));
+        assert!(body_str.contains("background-color: #ffffff;"));
+        assert!(body_str.contains("color: #0f172a;"));
+        assert!(body_str.contains("max-width: 50em;"));
     }
 
     #[test]
