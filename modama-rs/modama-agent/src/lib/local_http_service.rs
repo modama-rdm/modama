@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, sync::Arc, time::Duration};
 use time::{Date, OffsetDateTime};
 use tokio::sync::Mutex;
+use tower_http::csrf::CsrfLayer;
 
 use crate::{
     agent_state::AgentState,
@@ -859,7 +860,7 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
         .route("/close-ingest/{share_id}/", get(close_ingest_confirmation))
         .route("/close-ingest/{share_id}/", post(close_ingest));
 
-    add_api_routes(router, state)
+    Ok(add_api_routes(router, state)?.layer(CsrfLayer::new()))
 }
 
 #[cfg(test)]
@@ -982,6 +983,76 @@ mod tests {
             .desired_shares
             .foreground_share = Some(mounted.share.clone());
         state.current_shares.foreground_share = Some(mounted);
+    }
+
+    #[tokio::test]
+    async fn csrf_layer_rejects_cross_site_unsafe_requests() {
+        let test_setup = TestSetup::start().await;
+        let request = Request::builder()
+            .uri("/close-ingest/share-id/")
+            .method("POST")
+            .header(header::HOST, "localhost:3001")
+            .header("Sec-Fetch-Site", "cross-site")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = test_setup.app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn csrf_layer_rejects_unsafe_requests_from_a_foreign_origin() {
+        let test_setup = TestSetup::start().await;
+        let request = Request::builder()
+            .uri("/close-ingest/share-id/")
+            .method("POST")
+            .header(header::HOST, "localhost:3001")
+            .header(header::ORIGIN, "https://attacker.example")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = test_setup.app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn csrf_layer_allows_same_origin_and_native_unsafe_requests() {
+        for origin in [Some("http://localhost:3001"), None] {
+            let test_setup = TestSetup::start().await;
+            let mut request = Request::builder()
+                .uri("/close-ingest/share-id/")
+                .method("POST")
+                .header(header::HOST, "localhost:3001");
+            if let Some(origin) = origin {
+                request = request.header(header::ORIGIN, origin);
+            }
+
+            let response = test_setup
+                .app
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    #[tokio::test]
+    async fn csrf_layer_allows_cross_site_safe_requests() {
+        let test_setup = TestSetup::start().await;
+        let request = Request::builder()
+            .uri("/")
+            .method("GET")
+            .header(header::HOST, "localhost:3001")
+            .header("Sec-Fetch-Site", "cross-site")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = test_setup.app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     fn project_details(session_names: &[&str]) -> ProjectDetailsResponse {

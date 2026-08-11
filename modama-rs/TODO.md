@@ -37,4 +37,5 @@
 
 - [x] allow creating a new session before opening its ingest share
 - [ ] replace Basic authentication for the minimal HTML UI with cookie-backed sessions and a reliable logout action
-- [ ] add CSRF protection to every state-changing minimal HTML form
+- [ ] add hidden CSRF tokens to every state-changing minimal HTML form for legacy
+      browsers that do not send `Origin` or `Sec-Fetch-Site`
