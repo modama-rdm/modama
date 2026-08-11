@@ -24,7 +24,7 @@ fn enabled_top_bar_controls_use_pointing_hand_cursor() {
 
     harness.remove_cursor();
     harness.run_steps(1);
-    harness.get_by_label("Create Session").hover();
+    harness.get_by_label("Start Session").hover();
     harness.run_steps(1);
     assert_eq!(
         harness.output().platform_output.cursor_icon,
@@ -148,7 +148,7 @@ fn overview_snapshots() {
 #[test]
 fn overview_entry_focuses_primary_session_action() {
     let logged_out = overview_harness(false, false);
-    assert!(logged_out.get_by_label("Create Session").is_focused());
+    assert!(logged_out.get_by_label("Start Session").is_focused());
 
     let logged_in = overview_harness(false, true);
     assert!(logged_in.get_by_label("Close Session").is_focused());
@@ -158,10 +158,10 @@ fn overview_entry_focuses_primary_session_action() {
 fn overview_actions_are_mutually_exclusive() {
     let active = overview_harness(false, true);
     assert!(active.query_by_label("Close Session").is_some());
-    assert!(active.query_by_label("Create Session").is_none());
+    assert!(active.query_by_label("Start Session").is_none());
 
     let inactive = overview_harness(false, false);
-    assert!(inactive.query_by_label("Create Session").is_some());
+    assert!(inactive.query_by_label("Start Session").is_some());
     assert!(inactive.query_by_label("Close Session").is_none());
     assert!(inactive
         .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
@@ -384,7 +384,7 @@ fn confirming_close_waits_for_the_authoritative_update() {
         ));
     harness.run_steps(1);
 
-    assert!(harness.query_by_label("Create Session").is_some());
+    assert!(harness.query_by_label("Start Session").is_some());
     assert!(harness.query_by_label("Close Session").is_none());
 }
 
