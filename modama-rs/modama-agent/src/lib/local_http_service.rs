@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Form, Path, State},
     http::{header, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -19,7 +19,7 @@ use modama_common::{
     tokens::{TokenError, TokenProvider},
 };
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{error::Error, sync::Arc};
 use tokio::sync::Mutex;
 
@@ -63,6 +63,11 @@ fn create_env() -> Environment<'static> {
 struct LinkItem {
     name: String,
     href: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateSessionForm {
+    session_name: String,
 }
 
 #[derive(Serialize)]
@@ -171,6 +176,53 @@ fn message_page(
         status,
         context! { title => heading, heading, message },
     )
+}
+
+fn render_session_list(
+    agent_state: &ApiState,
+    status: StatusCode,
+    project_name: &str,
+    session_names: &[String],
+    create_error: Option<&str>,
+    new_session_name: &str,
+) -> Result<Response, LocalAPIError> {
+    let sessions = session_names
+        .iter()
+        .map(|session_name| LinkItem {
+            href: Some(format!(
+                "/start-ingest/{}/{}/",
+                encode_path_segment(project_name),
+                encode_path_segment(session_name)
+            )),
+            name: session_name.clone(),
+        })
+        .collect::<Vec<_>>();
+    let create_action = format!("/start-ingest/{}/", encode_path_segment(project_name));
+
+    render_html(
+        &agent_state.jinja_env,
+        "session_list.html",
+        status,
+        context! {
+            title => "Select or create a session",
+            project => project_name,
+            sessions,
+            create_action,
+            create_error,
+            new_session_name,
+        },
+    )
+}
+
+fn validate_session_name(input: &str) -> Result<String, &'static str> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        Err("Please enter a session name.")
+    } else if trimmed.contains('/') {
+        Err("Session name cannot contain a slash (/).")
+    } else {
+        Ok(trimmed.to_owned())
+    }
 }
 
 async fn local_snapshot(
@@ -437,29 +489,95 @@ async fn start_ingest_step1(
     };
 
     let details = c.project_details(&project_name).await?;
-    let sessions = details
+    let session_names = details
         .datasets
         .into_iter()
-        .map(|session| LinkItem {
-            href: Some(format!(
-                "/start-ingest/{}/{}/",
-                encode_path_segment(&project_name),
-                encode_path_segment(&session.name)
-            )),
-            name: session.name,
-        })
+        .map(|session| session.name)
         .collect::<Vec<_>>();
 
-    render_html(
-        &agent_state.jinja_env,
-        "session_list.html",
+    render_session_list(
+        &agent_state,
         StatusCode::OK,
-        context! {
-            title => "Select a session",
-            project => project_name,
-            sessions,
-        },
+        &project_name,
+        &session_names,
+        None,
+        "",
     )
+}
+
+async fn create_session(
+    Path(project_name): Path<String>,
+    State(agent_state): State<ApiState>,
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    Form(form): Form<CreateSessionForm>,
+) -> Result<Response, LocalAPIError> {
+    let auth = get_auth(auth).await?;
+
+    if !foreground_state(&agent_state).await.is_idle() {
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::CONFLICT,
+            "Ingest already active",
+            "Close the current ingest before creating another session.",
+        );
+    }
+
+    let mgmt_api_url = agent_state.state.lock().await.config.mgmt_api_url.clone();
+    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
+    let details = c.project_details(&project_name).await?;
+    let session_names = details
+        .datasets
+        .into_iter()
+        .map(|session| session.name)
+        .collect::<Vec<_>>();
+
+    let session_name = match validate_session_name(&form.session_name) {
+        Ok(session_name) => session_name,
+        Err(message) => {
+            return render_session_list(
+                &agent_state,
+                StatusCode::BAD_REQUEST,
+                &project_name,
+                &session_names,
+                Some(message),
+                &form.session_name,
+            );
+        }
+    };
+
+    if !foreground_state(&agent_state).await.is_idle() {
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::CONFLICT,
+            "Ingest already active",
+            "Close the current ingest before creating another session.",
+        );
+    }
+
+    if let Err(error) = c
+        .create_dataset(&project_name, &session_name, auth.username())
+        .await
+    {
+        if let MgmtError::Backend { message, .. } = error {
+            let message = format!("Could not create the session: {message}");
+            return render_session_list(
+                &agent_state,
+                StatusCode::BAD_REQUEST,
+                &project_name,
+                &session_names,
+                Some(&message),
+                &session_name,
+            );
+        }
+        return Err(error.into());
+    }
+
+    let confirmation_url = format!(
+        "/start-ingest/{}/{}/",
+        encode_path_segment(&project_name),
+        encode_path_segment(&session_name)
+    );
+    Ok(Redirect::to(&confirmation_url).into_response())
 }
 
 async fn start_ingest_step2(
@@ -640,7 +758,10 @@ pub async fn serve_local_web_api(
 fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
     let router = Router::new()
         .route("/", get(serve_index_page))
-        .route("/start-ingest/{project_name}/", get(start_ingest_step1))
+        .route(
+            "/start-ingest/{project_name}/",
+            get(start_ingest_step1).post(create_session),
+        )
         .route(
             "/start-ingest/{project_name}/{session_name}/",
             get(start_ingest_step2),
@@ -775,6 +896,31 @@ mod tests {
             .desired_shares
             .foreground_share = Some(mounted.share.clone());
         state.current_shares.foreground_share = Some(mounted);
+    }
+
+    fn project_details(session_names: &[&str]) -> ProjectDetailsResponse {
+        ProjectDetailsResponse {
+            errno: 0,
+            project: AdhocProject {
+                relpath: "the-project".to_owned(),
+                name: "the-project".to_owned(),
+                owner: "testuser".to_owned(),
+                members: vec!["testuser".to_owned()],
+                ctime: 0.0,
+                mtime: 0.0,
+                gid: 1001,
+                usage_bytes: None,
+            },
+            datasets: session_names
+                .iter()
+                .map(|name| DataInProject {
+                    name: (*name).to_owned(),
+                    immutable: false,
+                    ctime: 0.0,
+                    mtime: 0.0,
+                })
+                .collect(),
+        }
     }
 
     #[tokio::test]
@@ -1028,6 +1174,7 @@ mod tests {
         assert!(body_str.contains("x-modama-agent:&#x2f;&#x2f;res#agent"));
         assert!(body_str.contains("agent-name"));
         assert!(body_str.contains("the-project"));
+        assert!(body_str.contains("Select a project to start an ingest"));
         assert!(body_str.contains("href=\"/start-ingest/the%2Dproject/\""));
         assert!(!body_str.contains("<script"));
         assert!(!body_str.contains("<style"));
@@ -1166,7 +1313,162 @@ mod tests {
         let body_str = String::from_utf8(bytes.to_vec()).unwrap();
 
         assert!(body_str.contains("test-session"));
+        assert!(body_str.contains("Select an existing session to start an ingest"));
         assert!(body_str.contains("href=\"/start-ingest/the%2Dproject/test%2Dsession/\""));
+        assert!(body_str.contains("Create a new session"));
+        assert!(body_str.contains("<form action=\"/start-ingest/the%2Dproject/\" method=\"post\""));
+        assert!(body_str.contains("name=\"session_name\""));
+    }
+
+    #[test]
+    fn validates_new_session_names() {
+        assert_eq!(
+            validate_session_name("  2026-08-11-run  "),
+            Ok("2026-08-11-run".to_owned())
+        );
+        assert_eq!(
+            validate_session_name("   "),
+            Err("Please enter a session name.")
+        );
+        assert_eq!(
+            validate_session_name("2026-08-11/run"),
+            Err("Session name cannot contain a slash (/).")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_session_redirects_to_start_confirmation() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/the-project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&project_details(&["existing"])).unwrap())
+            .create_async()
+            .await;
+        let create = server
+            .mock("POST", "/api/project/the-project/dataset/")
+            .match_header("authorization", "Basic dGVzdHVzZXI6cGFzcw==")
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "name": "new-session",
+                "owner": "testuser",
+            })))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"errno":0,"message":null}"#)
+            .create_async()
+            .await;
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
+
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("session_name=++new-session++"))
+            .unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/start-ingest/the%2Dproject/new%2Dsession/"
+        );
+        create.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn invalid_new_session_name_redisplays_the_form_without_creating() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/the-project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&project_details(&["existing"])).unwrap())
+            .create_async()
+            .await;
+        let create = server
+            .mock("POST", "/api/project/the-project/dataset/")
+            .expect(0)
+            .create_async()
+            .await;
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
+
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("session_name=bad%2Fname"))
+            .unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("Session name cannot contain a slash"));
+        assert!(body.contains("value=\"bad&#x2f;name\""));
+        assert!(body.contains("existing"));
+        create.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn session_creation_rejection_is_escaped_and_shown_inline() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/the-project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&project_details(&[])).unwrap())
+            .create_async()
+            .await;
+        server
+            .mock("POST", "/api/project/the-project/dataset/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"errno":17,"message":"session <exists>"}"#)
+            .create_async()
+            .await;
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
+
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("session_name=new-session"))
+            .unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("Could not create the session: session &lt;exists&gt;"));
+        assert!(!body.contains("session <exists>"));
+        assert!(body.contains("value=\"new-session\""));
+    }
+
+    #[tokio::test]
+    async fn active_foreground_ingest_prevents_creating_a_session() {
+        let test_setup = TestSetup::start().await;
+        set_open_foreground(&test_setup, "current-share").await;
+
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("session_name=new-session"))
+            .unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]

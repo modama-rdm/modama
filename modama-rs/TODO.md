@@ -33,4 +33,6 @@
 
 ## Minimal HTML UI
 
-- [ ] allow creating a new session before opening its ingest share
+- [x] allow creating a new session before opening its ingest share
+- [ ] replace Basic authentication for the minimal HTML UI with cookie-backed sessions and a reliable logout action
+- [ ] add CSRF protection to every state-changing minimal HTML form
