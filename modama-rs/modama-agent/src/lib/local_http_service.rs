@@ -1,3 +1,5 @@
+//! Local minimal server-rendered ingest control UI.
+//! Targets especially older browsers (Internet Explorer, ancient Firefox)
 use axum::{
     extract::{Form, Path, State},
     http::{header, StatusCode},
