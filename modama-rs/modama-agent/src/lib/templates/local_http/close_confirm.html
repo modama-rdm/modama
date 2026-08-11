@@ -2,7 +2,7 @@
 {% block body %}
 <h1>Close ingest?</h1>
 <p>Project: {{ project }}<br>Session: {{ session }}</p>
-<form action="{{ action|safe }}" method="post">
+<form action="{{ action }}" method="post">
 <p><input type="submit" value="Close ingest"></p>
 </form>
 {% endblock %}

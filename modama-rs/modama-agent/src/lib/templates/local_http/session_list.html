@@ -3,10 +3,10 @@
 <h1>Open an ingest</h1>
 <p>Project: {{ project }}</p>
 <h2>Select an existing session to start an ingest</h2>
-{% if sessions %}<ul>{% for session in sessions %}<li><a href="{{ session.href|safe }}">{{ session.name }}</a></li>{% endfor %}</ul>{% else %}<p>This project has no sessions.</p>{% endif %}
+{% if sessions %}<ul>{% for session in sessions %}<li><a href="{{ session.href }}">{{ session.name }}</a></li>{% endfor %}</ul>{% else %}<p>This project has no sessions.</p>{% endif %}
 <h2>Create a new session</h2>
 {% if create_error %}<p>{{ create_error }}</p>{% endif %}
-<form action="{{ create_action|safe }}" method="post">
+<form action="{{ create_action }}" method="post">
 <p><label for="session-name">Session name:</label><br>
 <input type="text" name="session_name" id="session-name" value="{{ new_session_name }}"></p>
 <p>Use a descriptive name, for example: 2026-08-11-alignment-run.</p>

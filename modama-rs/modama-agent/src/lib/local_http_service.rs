@@ -62,7 +62,7 @@ fn create_env() -> Environment<'static> {
 #[derive(Serialize)]
 struct LinkItem {
     name: String,
-    href: Option<String>,
+    href: Option<SafeLocalUrl>,
 }
 
 #[derive(Deserialize)]
@@ -75,7 +75,71 @@ struct ForegroundView {
     kind: &'static str,
     project: Option<String>,
     session: Option<String>,
-    close_href: Option<String>,
+    close_href: Option<SafeLocalUrl>,
+    refresh_status: bool,
+}
+
+/// A same-origin path that can be inserted into HTML without further escaping.
+///
+/// This is deliberately not a general-purpose safe HTML string. Values can only
+/// be built by the route-specific constructors below.
+struct SafeLocalUrl(String);
+
+impl SafeLocalUrl {
+    fn start_project(project_name: &str) -> Self {
+        Self::from_encoded_local_path(format!(
+            "/start-ingest/{}/",
+            encode_path_segment(project_name)
+        ))
+    }
+
+    fn start_session(project_name: &str, session_name: &str) -> Self {
+        Self::from_encoded_local_path(format!(
+            "/start-ingest/{}/{}/",
+            encode_path_segment(project_name),
+            encode_path_segment(session_name)
+        ))
+    }
+
+    fn close_ingest(share_id: &str) -> Self {
+        Self::from_encoded_local_path(format!("/close-ingest/{}/", encode_path_segment(share_id)))
+    }
+
+    fn from_encoded_local_path(path: String) -> Self {
+        // HTML-safety: the route constructors contribute only fixed ASCII
+        // path syntax, and every dynamic segment is encoded with
+        // `NON_ALPHANUMERIC`. Therefore the result can contain only ASCII
+        // alphanumerics, '/', '-', and percent escapes. In particular it cannot
+        // contain quotes, angle brackets, ampersands, whitespace, controls, or
+        // ':'; it cannot escape a quoted attribute or name another origin.
+        assert!(path.starts_with('/') && !path.starts_with("//"));
+        assert!(path
+            .bytes()
+            .all(|byte| { byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'%') }));
+        let bytes = path.as_bytes();
+        assert!(bytes.iter().enumerate().all(|(index, byte)| {
+            *byte != b'%'
+                || (bytes.get(index + 1).is_some_and(u8::is_ascii_hexdigit)
+                    && bytes.get(index + 2).is_some_and(u8::is_ascii_hexdigit))
+        }));
+        Self(path)
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Serialize for SafeLocalUrl {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // The constructor invariant above is the proof required before applying
+        // MiniJinja's safe-string marker. Keeping the conversion here ensures
+        // templates cannot opt an ordinary String out of autoescaping.
+        Value::from_safe_string(self.0.clone()).serialize(serializer)
+    }
 }
 
 enum ForegroundState {
@@ -115,25 +179,24 @@ impl ForegroundState {
     }
 
     fn view(&self) -> Result<ForegroundView, LocalAPIError> {
-        let (kind, share, close_href) = match self {
+        let (kind, share, close_href, refresh_status) = match self {
             Self::None => {
                 return Ok(ForegroundView {
                     kind: "none",
                     project: None,
                     session: None,
                     close_href: None,
+                    refresh_status: false,
                 });
             }
-            Self::Opening(share) => ("opening", share, None),
+            Self::Opening(share) => ("opening", share, None, true),
             Self::Open(mounted) => (
                 "open",
                 &mounted.share,
-                Some(format!(
-                    "/close-ingest/{}/",
-                    encode_path_segment(&mounted.share.share_id)
-                )),
+                Some(SafeLocalUrl::close_ingest(&mounted.share.share_id)),
+                false,
             ),
-            Self::Closing(mounted) => ("closing", &mounted.share, None),
+            Self::Closing(mounted) => ("closing", &mounted.share, None, true),
         };
         let (project, session) = project_and_session(&share.dest_path)?;
         Ok(ForegroundView {
@@ -141,6 +204,7 @@ impl ForegroundState {
             project: Some(project),
             session: Some(session),
             close_href,
+            refresh_status,
         })
     }
 }
@@ -189,15 +253,11 @@ fn render_session_list(
     let sessions = session_names
         .iter()
         .map(|session_name| LinkItem {
-            href: Some(format!(
-                "/start-ingest/{}/{}/",
-                encode_path_segment(project_name),
-                encode_path_segment(session_name)
-            )),
+            href: Some(SafeLocalUrl::start_session(project_name, session_name)),
             name: session_name.clone(),
         })
         .collect::<Vec<_>>();
-    let create_action = format!("/start-ingest/{}/", encode_path_segment(project_name));
+    let create_action = SafeLocalUrl::start_project(project_name);
 
     render_html(
         &agent_state.jinja_env,
@@ -445,7 +505,7 @@ async fn serve_index_page(
         .map(|project| LinkItem {
             href: foreground
                 .is_idle()
-                .then(|| format!("/start-ingest/{}/", encode_path_segment(&project.name))),
+                .then(|| SafeLocalUrl::start_project(&project.name)),
             name: project.name,
         })
         .collect::<Vec<_>>();
@@ -572,12 +632,8 @@ async fn create_session(
         return Err(error.into());
     }
 
-    let confirmation_url = format!(
-        "/start-ingest/{}/{}/",
-        encode_path_segment(&project_name),
-        encode_path_segment(&session_name)
-    );
-    Ok(Redirect::to(&confirmation_url).into_response())
+    let confirmation_url = SafeLocalUrl::start_session(&project_name, &session_name);
+    Ok(Redirect::to(confirmation_url.as_str()).into_response())
 }
 
 async fn start_ingest_step2(
@@ -617,11 +673,7 @@ async fn start_ingest_step2(
             resource_name,
         } => resource_name.clone(),
     };
-    let action = format!(
-        "/start-ingest/{}/{}/",
-        encode_path_segment(&project_name),
-        encode_path_segment(&session_name)
-    );
+    let action = SafeLocalUrl::start_session(&project_name, &session_name);
     render_html(
         &agent_state.jinja_env,
         "start_confirm.html",
@@ -703,7 +755,7 @@ async fn close_ingest_confirmation(
         );
     };
     let (project, session) = project_and_session(&mounted.share.dest_path)?;
-    let action = format!("/close-ingest/{}/", encode_path_segment(&share_id));
+    let action = SafeLocalUrl::close_ingest(&share_id);
 
     render_html(
         &agent_state.jinja_env,
@@ -1199,6 +1251,27 @@ mod tests {
             encode_path_segment("old/project & session"),
             "old%2Fproject%20%26%20session"
         );
+
+        for template in [
+            include_str!("templates/local_http/base.html"),
+            include_str!("templates/local_http/index.html"),
+            include_str!("templates/local_http/session_list.html"),
+            include_str!("templates/local_http/start_confirm.html"),
+            include_str!("templates/local_http/close_confirm.html"),
+            include_str!("templates/local_http/message.html"),
+        ] {
+            assert!(!template.contains("|safe"));
+        }
+
+        let url = SafeLocalUrl::start_session(
+            "project\"><script>alert(1)</script>",
+            "session&external=//example.com",
+        );
+        let template_value = minijinja::Value::from_serialize(&url);
+        assert!(template_value.is_safe());
+        assert_eq!(template_value.as_str(), Some(url.as_str()));
+        assert!(url.as_str().starts_with("/start-ingest/"));
+        assert!(!url.as_str().contains(['\"', '<', '>', '&', ':']));
     }
 
     #[tokio::test]
@@ -1243,7 +1316,42 @@ mod tests {
         assert!(body.contains("Status: open"));
         assert!(body.contains("href=\"/close-ingest/share%2D123/\""));
         assert!(!body.contains("href=\"/start-ingest/"));
+        assert!(!body.contains("Reload this page"));
         assert!(!body.contains("secret-password"));
+    }
+
+    #[test]
+    fn transitional_foreground_states_instruct_the_user_to_reload() {
+        let mounted = mounted_foreground_share("share-123");
+        let states = [
+            ForegroundState::Opening(mounted.share.clone()),
+            ForegroundState::Closing(mounted),
+        ];
+
+        for state in states {
+            let foreground = state.view().unwrap();
+            let rendered = create_env()
+                .get_template("index.html")
+                .unwrap()
+                .render(context! {
+                    title => "modama agent",
+                    identity => "agent at resource",
+                    connected_agents => Vec::<String>::new(),
+                    foreground,
+                    projects => vec![LinkItem {
+                        name: "project".to_owned(),
+                        href: None,
+                    }],
+                    start_allowed => false,
+                })
+                .unwrap();
+
+            assert!(rendered.contains("<a href=\"/\">Reload this page</a>"));
+            assert!(rendered.contains("to refresh the status."));
+            assert!(!rendered.contains("Close this ingest"));
+            assert!(!rendered.contains("Close the current ingest"));
+            assert!(!rendered.contains("href=\"/start-ingest/"));
+        }
     }
 
     #[tokio::test]

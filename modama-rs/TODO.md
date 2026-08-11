@@ -18,6 +18,8 @@
     - right now, after the integration tests have run, the GUI shows that the agent is continuously trying to
       mount some share. quite possibly fixed by state reconciliation in modama-agent?
     - reproduce: `./run.sh` on ptycho, forward 3003 to laptop, run modama-agent-gui
+- [ ] smbdrop readiness checks must explicitly close the connection (!)
+    - currently we are leaking FDs/sockets like a sieve
 
 ## GUI
 

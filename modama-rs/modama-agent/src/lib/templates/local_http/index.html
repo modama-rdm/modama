@@ -12,9 +12,10 @@
 {% else %}
 <p>Status: {{ foreground.kind }}.</p>
 <p>Project: {{ foreground.project }}<br>Session: {{ foreground.session }}</p>
-{% if foreground.close_href %}<p><a href="{{ foreground.close_href|safe }}">Close this ingest</a></p>{% endif %}
+{% if foreground.refresh_status %}<p><a href="/">Reload this page</a> to refresh the status.</p>{% endif %}
+{% if foreground.close_href %}<p><a href="{{ foreground.close_href }}">Close this ingest</a></p>{% endif %}
 {% endif %}
 {% if start_allowed %}<h2>Select a project to start an ingest</h2>{% else %}<h2>Projects</h2>{% endif %}
-{% if projects %}<ul>{% for project in projects %}<li>{% if project.href %}<a href="{{ project.href|safe }}">{{ project.name }}</a>{% else %}{{ project.name }}{% endif %}</li>{% endfor %}</ul>{% else %}<p>No accessible projects.</p>{% endif %}
-{% if not start_allowed %}<p>Close the current ingest before opening another one.</p>{% endif %}
+{% if projects %}<ul>{% for project in projects %}<li>{% if project.href %}<a href="{{ project.href }}">{{ project.name }}</a>{% else %}{{ project.name }}{% endif %}</li>{% endfor %}</ul>{% else %}<p>No accessible projects.</p>{% endif %}
+{% if foreground.kind == "open" %}<p>Close the current ingest before opening another one.</p>{% endif %}
 {% endblock %}
