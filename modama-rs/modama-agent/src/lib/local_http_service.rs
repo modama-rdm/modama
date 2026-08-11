@@ -59,7 +59,7 @@ impl ApiState {
 #[derive(thiserror::Error, Debug)]
 pub enum LocalAPIError {
     #[error("API route configuration: {0}")]
-    RouteConfig(#[from] versioned::RouteConfigError),
+    RouteConfig(String),
 
     #[error("error in backend API: {0}")]
     BackendAPI(#[from] MgmtError),
@@ -81,6 +81,12 @@ pub enum LocalAPIError {
 
     #[error("invalid API response: {0}")]
     InvalidResponse(#[from] crate::http_api::ShareDestinationError),
+}
+
+impl From<versioned::RouteConfigError> for LocalAPIError {
+    fn from(value: versioned::RouteConfigError) -> Self {
+        Self::RouteConfig(value.to_string())
+    }
 }
 
 impl IntoResponse for LocalAPIError {

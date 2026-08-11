@@ -450,7 +450,7 @@ fn customize_openapi(mut openapi: utoipa::openapi::OpenApi) -> utoipa::openapi::
 }
 
 /// Generate the canonical OpenAPI document for the local API.
-pub fn openapi_document() -> Result<utoipa::openapi::OpenApi, versioned::RouteConfigError> {
+pub fn openapi_document() -> Result<utoipa::openapi::OpenApi, LocalAPIError> {
     let api_routes = api_routes();
     Ok(customize_openapi(
         api_routes.generate_openapi(latest_api_version())?,
