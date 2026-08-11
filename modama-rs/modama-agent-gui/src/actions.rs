@@ -16,6 +16,12 @@ pub enum TaskFailure {
     ReturnToOverview { message: String, retry: RetryAction },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginDestination {
+    SelectProject,
+    ConfirmClose { share_id: String },
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     None,
@@ -23,10 +29,13 @@ pub enum Action {
         identity: AgentIdentity,
         foreground: ForegroundSession,
     },
-    GoToLogin,
+    GoToLogin {
+        destination: LoginDestination,
+    },
     CreateSession,
     LoginSuccess {
         creds: Credentials,
+        destination: LoginDestination,
     },
     GoToSelectProject,
     SelectProject {

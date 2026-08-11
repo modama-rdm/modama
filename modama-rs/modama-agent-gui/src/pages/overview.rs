@@ -2,7 +2,7 @@ use eframe::egui::{self, Label, RichText};
 use std::sync::Arc;
 
 use crate::{
-    actions::{Action, RetryAction, TaskFailure},
+    actions::{Action, LoginDestination, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
         buttons::{danger_outline_button, loading_button, primary_button, ButtonVariant},
@@ -24,8 +24,6 @@ pub struct PageOverview {
     service: Arc<dyn AgentService>,
     last_close: Option<(Credentials, ActiveSession)>,
     close_operation_id: Option<OperationId>,
-    login_required: bool, // FIXME: sucks to have this as state, why cant the close confirmation
-                          // thing return the action instead?
 }
 
 impl Default for PageOverview {
@@ -48,7 +46,6 @@ impl PageOverview {
             service,
             last_close: None,
             close_operation_id: None,
-            login_required: false,
         }
     }
 
@@ -66,15 +63,35 @@ impl PageOverview {
 
         match foreground {
             ForegroundSession::Mounted(session) => {
-                self.show_active_session_card(
+                let close_clicked = self.show_active_session_card(
                     ui,
                     session,
                     pending_close == Some(&session.share_id),
                 );
+                if close_clicked {
+                    if credentials.is_some() {
+                        self.open_close_confirmation();
+                    } else {
+                        return Action::GoToLogin {
+                            destination: LoginDestination::ConfirmClose {
+                                share_id: session.share_id.clone(),
+                            },
+                        };
+                    }
+                }
                 if self.close_confirmation_open {
-                    let action = self.show_close_confirmation(ui, session, credentials);
-                    if action != Action::None {
-                        return action;
+                    if let Some(credentials) = credentials {
+                        let action = self.show_close_confirmation(ui, session, credentials);
+                        if action != Action::None {
+                            return action;
+                        }
+                    } else {
+                        self.close_confirmation_open = false;
+                        return Action::GoToLogin {
+                            destination: LoginDestination::ConfirmClose {
+                                share_id: session.share_id.clone(),
+                            },
+                        };
                     }
                 }
             }
@@ -100,9 +117,6 @@ impl PageOverview {
     }
 
     pub fn poll(&mut self) -> Action {
-        if std::mem::take(&mut self.login_required) {
-            return Action::GoToLogin;
-        }
         match self.close_task.poll() {
             Ok(task) => {
                 if let Some(result) = task.take_ready() {
@@ -188,7 +202,8 @@ impl PageOverview {
         ui: &mut egui::Ui,
         session: &ActiveSession,
         awaiting_close: bool,
-    ) {
+    ) -> bool {
+        let mut close_clicked = false;
         let is_closing = self.close_task.is_pending() || awaiting_close;
         styles::content_card_frame(ui.visuals()).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -231,10 +246,10 @@ impl PageOverview {
                 self.focus_on_entry = false;
             }
             if response.clicked() {
-                self.close_confirmation_open = true;
-                self.focus_confirmation_cancel = true;
+                close_clicked = true;
             }
         });
+        close_clicked
     }
 
     fn show_unmounting_session_card(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {
@@ -263,7 +278,7 @@ impl PageOverview {
         &mut self,
         ui: &mut egui::Ui,
         session: &ActiveSession,
-        credentials: &Option<Credentials>,
+        credentials: &Credentials,
     ) -> Action {
         let message = format!(
             "This will stop incoming data for session {} in project {}. Data already stored will \
@@ -289,16 +304,20 @@ impl PageOverview {
             }
             ConfirmationDialogAction::Confirm => {
                 self.close_confirmation_open = false;
-                if let Some(credentials) = credentials.clone() {
-                    self.last_close = Some((credentials.clone(), session.clone()));
-                    self.start_close(credentials, session.clone(), ui.ctx().clone())
-                } else {
-                    self.login_required = true;
-                    ui.ctx().request_repaint();
-                    Action::None
-                }
+                self.last_close = Some((credentials.clone(), session.clone()));
+                self.start_close(credentials.clone(), session.clone(), ui.ctx().clone())
             }
         }
+    }
+
+    pub(crate) fn open_close_confirmation(&mut self) {
+        self.close_confirmation_open = true;
+        self.focus_confirmation_cancel = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn close_confirmation_is_open(&self) -> bool {
+        self.close_confirmation_open
     }
 
     fn start_close(

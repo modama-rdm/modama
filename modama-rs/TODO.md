@@ -21,9 +21,11 @@
 
 ## GUI
 
-- [ ] logged out: clicking on the "Close session" button "redirects" to create flow; need a "next page" kinda state which determines which action is emitted when the login succeeds
 - [ ] workflow issues
     - [ ] if user A creates an ingest share at resource R1, and later user B uses the same resource, B must be able to act
+        - this requires non-localized changes to the permission system probably?
+        - must only be allowed to act if the resource of the ingest matches
+        - maybe we need to have a "detach from resource" kind of API call, where a running ingest can be detached from the resource (the ingest itself will continue to be available, but not auto-mounted on any resource; current mounts can continue to exist etc.)
 - [ ] test long project and ingest-share session names against backend limits
 - [ ] general design fixes
     - [ ] Review vertical and horizontal flow: pixel peep a bit and check typographic baselines of horizontally aligned items, and horizontal guide lines where text starts (or stops at the right edge!!!!)

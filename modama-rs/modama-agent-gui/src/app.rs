@@ -2,7 +2,7 @@ use eframe::egui::{self, vec2, Margin};
 use std::sync::Arc;
 
 use crate::{
-    actions::{Action, RetryAction, TaskFailure},
+    actions::{Action, LoginDestination, RetryAction, TaskFailure},
     components::toast::{ToastAction, ToastState},
     foreground_monitor::ForegroundMonitor,
     navigation_progress::NavigationProgress,
@@ -62,8 +62,11 @@ impl AgentGuiApp {
         Page::Overview(PageOverview::with_service(Arc::clone(&self.service)))
     }
 
-    fn login_page(&self) -> Page {
-        Page::Login(PageLogin::with_service(Arc::clone(&self.service)))
+    fn login_page(&self, destination: LoginDestination) -> Page {
+        Page::Login(PageLogin::with_service_and_destination(
+            Arc::clone(&self.service),
+            destination,
+        ))
     }
 
     fn project_page(&self) -> Option<Page> {
@@ -88,25 +91,40 @@ impl AgentGuiApp {
     pub fn handle_action(&mut self, action: Action) {
         match action {
             Action::None => {}
-            Action::GoToLogin => {
+            Action::GoToLogin { destination } => {
                 self.toast.clear();
-                self.page = self.login_page();
+                self.page = self.login_page(destination);
             }
             Action::CreateSession => {
                 self.toast.clear();
                 if let Some(page) = self.project_page() {
                     self.page = page;
                 } else {
-                    self.page = self.login_page();
+                    self.page = self.login_page(LoginDestination::SelectProject);
                 }
             }
-            Action::LoginSuccess { creds } => {
+            Action::LoginSuccess { creds, destination } => {
                 self.toast.clear();
                 self.app_state.creds = Some(creds.clone());
-                self.page = Page::SelectProject(PageSelectProject::with_service(
-                    Arc::clone(&self.service),
-                    creds,
-                ));
+                match destination {
+                    LoginDestination::SelectProject => {
+                        self.page = Page::SelectProject(PageSelectProject::with_service(
+                            Arc::clone(&self.service),
+                            creds,
+                        ));
+                    }
+                    LoginDestination::ConfirmClose { share_id } => {
+                        let mut page = PageOverview::with_service(Arc::clone(&self.service));
+                        if matches!(
+                            &self.app_state.foreground,
+                            crate::state::ForegroundSession::Mounted(session)
+                                if session.share_id == share_id
+                        ) {
+                            page.open_close_confirmation();
+                        }
+                        self.page = Page::Overview(page);
+                    }
+                }
             }
             Action::GoToSelectProject => {
                 self.toast.clear();
@@ -355,6 +373,77 @@ impl eframe::App for AgentGuiApp {
 mod tests {
     use super::*;
     use crate::state::{Credentials, OperationId};
+
+    fn credentials() -> Credentials {
+        Credentials {
+            username: "user".to_owned(),
+            password: "pass".to_owned(),
+        }
+    }
+
+    fn mounted_session(share_id: &str) -> crate::state::ActiveSession {
+        crate::state::ActiveSession {
+            share_id: share_id.to_owned(),
+            project: "project".to_owned(),
+            session: "session".to_owned(),
+            mount_path: None,
+        }
+    }
+
+    #[test]
+    fn ordinary_login_success_opens_project_selection() {
+        let mut app = AgentGuiApp::new();
+
+        app.handle_action(Action::LoginSuccess {
+            creds: credentials(),
+            destination: LoginDestination::SelectProject,
+        });
+
+        assert!(matches!(app.page, Page::SelectProject(_)));
+    }
+
+    #[test]
+    fn close_login_success_reopens_confirmation_for_the_same_mounted_share() {
+        let mut app = AgentGuiApp::new();
+        app.app_state.foreground =
+            crate::state::ForegroundSession::Mounted(mounted_session("share"));
+
+        app.handle_action(Action::LoginSuccess {
+            creds: credentials(),
+            destination: LoginDestination::ConfirmClose {
+                share_id: "share".to_owned(),
+            },
+        });
+
+        let Page::Overview(page) = &app.page else {
+            panic!("close login did not return to the overview");
+        };
+        assert!(page.close_confirmation_is_open());
+    }
+
+    #[test]
+    fn close_login_success_discards_stale_confirmation_destination() {
+        for foreground in [
+            crate::state::ForegroundSession::None,
+            crate::state::ForegroundSession::Mounted(mounted_session("other")),
+            crate::state::ForegroundSession::Unmounting(mounted_session("share")),
+        ] {
+            let mut app = AgentGuiApp::new();
+            app.app_state.foreground = foreground;
+
+            app.handle_action(Action::LoginSuccess {
+                creds: credentials(),
+                destination: LoginDestination::ConfirmClose {
+                    share_id: "share".to_owned(),
+                },
+            });
+
+            let Page::Overview(page) = &app.page else {
+                panic!("close login did not return to the overview");
+            };
+            assert!(!page.close_confirmation_is_open());
+        }
+    }
 
     #[test]
     fn test_create_session_action_logged_out() {

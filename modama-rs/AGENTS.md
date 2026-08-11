@@ -14,6 +14,10 @@ Fixing clippy errors is mandatory.
 
 ## Visual tests for GUI development
 
+Run visual tests via `just`; otherwise, required workaround(s) for issues
+in third-party libraries will not apply and the test run might crash.
+Do **not** speculatively run with `--test-threads=1`.
+
 If at the end of a turn visual differences remain, do not clean them away,
 rather keep them around for inspection and eventual acceptance.
 

@@ -2,6 +2,7 @@ use eframe::egui;
 use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
 use modama_agent_gui::{
     app::AgentGuiApp,
+    async_state::AsyncState,
     guide_screenshots::VIEWPORT,
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
@@ -62,6 +63,13 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
         egui::Theme::Light
     });
     harness.run_steps(3);
+    harness
+}
+
+fn active_logged_out_harness() -> Harness<'static, AgentGuiApp> {
+    let mut harness = overview_harness(false, true);
+    harness.state_mut().app_state.creds = None;
+    harness.run_steps(1);
     harness
 }
 
@@ -342,6 +350,45 @@ fn closing_requires_confirmation_and_can_be_cancelled() {
         ForegroundSession::Mounted(_)
     ));
     assert!(harness.query_by_label("Close ingest session?").is_none());
+}
+
+#[test]
+fn logged_out_close_authenticates_before_showing_confirmation() {
+    let mut harness = active_logged_out_harness();
+
+    harness.get_by_label("Close Session").click();
+    harness.run_steps(2);
+
+    assert!(matches!(harness.state().page, Page::Login(_)));
+    assert!(harness.query_by_label("Close ingest session?").is_none());
+
+    if let Page::Login(login) = &mut harness.state_mut().page {
+        login.login_task = AsyncState::Ready {
+            payload: Ok(Credentials {
+                username: "representative.user".to_owned(),
+                password: "representative-password".to_owned(),
+            }),
+        };
+    }
+    harness.run_steps(2);
+
+    assert!(matches!(harness.state().page, Page::Overview(_)));
+    assert!(harness.query_by_label("Close ingest session?").is_some());
+    assert!(harness.get_by_label("Cancel").is_focused());
+}
+
+#[test]
+fn backing_out_of_close_login_discards_the_confirmation_destination() {
+    let mut harness = active_logged_out_harness();
+    harness.get_by_label("Close Session").click();
+    harness.run_steps(2);
+
+    harness.get_by_label("← Back to overview").click();
+    harness.run_steps(2);
+
+    assert!(matches!(harness.state().page, Page::Overview(_)));
+    assert!(harness.query_by_label("Close ingest session?").is_none());
+    assert!(harness.query_by_label("Close Session").is_some());
 }
 
 #[test]

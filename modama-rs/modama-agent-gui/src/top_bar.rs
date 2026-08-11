@@ -9,7 +9,7 @@ use egui_taffy::{
 };
 
 use crate::{
-    actions::Action,
+    actions::{Action, LoginDestination},
     components::avatar,
     components::buttons::{
         loading_button, primary_button, secondary_button, ButtonVariant, DesignButton,
@@ -119,7 +119,9 @@ impl TopBar {
             } else if show_login_action {
                 ui.add_enabled(!navigation_busy, primary_button("Log in", ui))
                     .clicked()
-                    .then_some(Action::GoToLogin)
+                    .then_some(Action::GoToLogin {
+                        destination: LoginDestination::SelectProject,
+                    })
             } else {
                 None
             }

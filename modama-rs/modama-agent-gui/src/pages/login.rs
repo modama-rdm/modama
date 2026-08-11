@@ -2,7 +2,7 @@ use eframe::egui::{self, RichText, TextEdit};
 use std::sync::Arc;
 
 use crate::{
-    actions::{Action, RetryAction, TaskFailure},
+    actions::{Action, LoginDestination, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
         buttons::{primary_button, primary_loading_button},
@@ -34,6 +34,7 @@ pub struct PageLogin {
     pub login_task: AsyncState<Result<Credentials, ServiceError>>,
     service: Arc<dyn AgentService>,
     focus_username_on_entry: bool,
+    destination: LoginDestination,
 }
 
 impl Default for PageLogin {
@@ -48,6 +49,13 @@ impl PageLogin {
     }
 
     pub fn with_service(service: Arc<dyn AgentService>) -> Self {
+        Self::with_service_and_destination(service, LoginDestination::SelectProject)
+    }
+
+    pub fn with_service_and_destination(
+        service: Arc<dyn AgentService>,
+        destination: LoginDestination,
+    ) -> Self {
         Self {
             username: String::new(),
             password: String::new(),
@@ -55,6 +63,7 @@ impl PageLogin {
             login_task: AsyncState::Idle,
             service,
             focus_username_on_entry: true,
+            destination,
         }
     }
 
@@ -171,7 +180,12 @@ impl PageLogin {
             Ok(task) => {
                 if let Some(res) = task.take_ready() {
                     match res {
-                        Ok(creds) => return Action::LoginSuccess { creds },
+                        Ok(creds) => {
+                            return Action::LoginSuccess {
+                                creds,
+                                destination: self.destination.clone(),
+                            }
+                        }
                         Err(ServiceError::Unauthorized) => {
                             self.login_error = Some("Invalid username or password.".to_owned())
                         }
@@ -267,5 +281,30 @@ mod tests {
             page.login_error.as_deref(),
             Some("transport error: agent unavailable")
         );
+    }
+
+    #[test]
+    fn login_failure_retains_the_destination_for_a_later_success() {
+        let destination = LoginDestination::ConfirmClose {
+            share_id: "share".to_owned(),
+        };
+        let mut page = PageLogin::with_service_and_destination(
+            StubAgentService::shared(),
+            destination.clone(),
+        );
+        page.login_task = AsyncState::Ready {
+            payload: Err(ServiceError::Unauthorized),
+        };
+
+        assert_eq!(page.poll(), Action::None);
+
+        let creds = Credentials {
+            username: "user".to_owned(),
+            password: "pass".to_owned(),
+        };
+        page.login_task = AsyncState::Ready {
+            payload: Ok(creds.clone()),
+        };
+        assert_eq!(page.poll(), Action::LoginSuccess { creds, destination });
     }
 }
