@@ -20,7 +20,7 @@ use modama_common::{
 };
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
-use std::{error::Error, sync::Arc};
+use std::{error::Error, sync::Arc, time::Duration};
 use time::{Date, OffsetDateTime};
 use tokio::sync::Mutex;
 
@@ -763,6 +763,10 @@ async fn start_ingest_step3(
         &sign_response.token,
     )
     .await?;
+
+    // there's a good chance the ingest share is available within 300ms; with this delay
+    // the user doesn't have to refresh the overview page (hopefully in most cases!)
+    tokio::time::sleep(Duration::from_millis(300)).await;
 
     Ok(Redirect::to("/").into_response())
 }
