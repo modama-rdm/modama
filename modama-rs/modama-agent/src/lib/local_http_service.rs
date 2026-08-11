@@ -30,80 +30,28 @@ use crate::{
     share::MountedShare,
 };
 
-const BASE_TEMPLATE: &str = r#"<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
-    "http://www.w3.org/TR/html4/loose.dtd">
-<html>
-<head>
-<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-<title>{{ title }}</title>
-</head>
-<body>
-{% block body %}{% endblock %}
-<hr>
-<p><a href="/">Return to overview</a></p>
-</body>
-</html>"#;
-
-const INDEX_TEMPLATE: &str = r#"{% extends "base.html" %}
-{% block body %}
-<h1>modama agent</h1>
-<p>This agent: {{ identity }}</p>
-{% if connected_agents %}
-<h2>Connected agents at this resource</h2>
-<ul>{% for agent in connected_agents %}<li>{{ agent }}</li>{% endfor %}</ul>
-{% endif %}
-<h2>Foreground ingest</h2>
-{% if foreground.kind == "none" %}
-<p>No ingest is open.</p>
-{% else %}
-<p>Status: {{ foreground.kind }}.</p>
-<p>Project: {{ foreground.project }}<br>Session: {{ foreground.session }}</p>
-{% if foreground.close_href %}<p><a href="{{ foreground.close_href|safe }}">Close this ingest</a></p>{% endif %}
-{% endif %}
-<h2>Projects</h2>
-{% if projects %}<ul>{% for project in projects %}<li>{% if project.href %}<a href="{{ project.href|safe }}">{{ project.name }}</a>{% else %}{{ project.name }}{% endif %}</li>{% endfor %}</ul>{% else %}<p>No accessible projects.</p>{% endif %}
-{% if not start_allowed %}<p>Close the current ingest before opening another one.</p>{% endif %}
-{% endblock %}"#;
-
-const SESSION_LIST_TEMPLATE: &str = r#"{% extends "base.html" %}
-{% block body %}
-<h1>Open an ingest</h1>
-<p>Project: {{ project }}</p>
-<h2>Existing sessions</h2>
-{% if sessions %}<ul>{% for session in sessions %}<li><a href="{{ session.href|safe }}">{{ session.name }}</a></li>{% endfor %}</ul>{% else %}<p>This project has no sessions.</p>{% endif %}
-{% endblock %}"#;
-
-const START_CONFIRM_TEMPLATE: &str = r#"{% extends "base.html" %}
-{% block body %}
-<h1>Open ingest?</h1>
-<p>Project: {{ project }}<br>Session: {{ session }}<br>Resource: {{ resource }}</p>
-<form action="{{ action|safe }}" method="post">
-<p><input type="submit" value="Open ingest"></p>
-</form>
-{% endblock %}"#;
-
-const CLOSE_CONFIRM_TEMPLATE: &str = r#"{% extends "base.html" %}
-{% block body %}
-<h1>Close ingest?</h1>
-<p>Project: {{ project }}<br>Session: {{ session }}</p>
-<form action="{{ action|safe }}" method="post">
-<p><input type="submit" value="Close ingest"></p>
-</form>
-{% endblock %}"#;
-
-const MESSAGE_TEMPLATE: &str = r#"{% extends "base.html" %}
-{% block body %}<h1>{{ heading }}</h1><p>{{ message }}</p>{% endblock %}"#;
-
 fn create_env() -> Environment<'static> {
     let mut env = Environment::new();
 
     env.set_loader(|name| match name {
-        "base.html" => Ok(Some(BASE_TEMPLATE.to_owned())),
-        "index.html" => Ok(Some(INDEX_TEMPLATE.to_owned())),
-        "session_list.html" => Ok(Some(SESSION_LIST_TEMPLATE.to_owned())),
-        "start_confirm.html" => Ok(Some(START_CONFIRM_TEMPLATE.to_owned())),
-        "close_confirm.html" => Ok(Some(CLOSE_CONFIRM_TEMPLATE.to_owned())),
-        "message.html" => Ok(Some(MESSAGE_TEMPLATE.to_owned())),
+        "base.html" => Ok(Some(
+            include_str!("templates/local_http/base.html").to_owned(),
+        )),
+        "index.html" => Ok(Some(
+            include_str!("templates/local_http/index.html").to_owned(),
+        )),
+        "session_list.html" => Ok(Some(
+            include_str!("templates/local_http/session_list.html").to_owned(),
+        )),
+        "start_confirm.html" => Ok(Some(
+            include_str!("templates/local_http/start_confirm.html").to_owned(),
+        )),
+        "close_confirm.html" => Ok(Some(
+            include_str!("templates/local_http/close_confirm.html").to_owned(),
+        )),
+        "message.html" => Ok(Some(
+            include_str!("templates/local_http/message.html").to_owned(),
+        )),
         _ => Ok(None),
     });
     env.set_auto_escape_callback(|_| AutoEscape::Html);

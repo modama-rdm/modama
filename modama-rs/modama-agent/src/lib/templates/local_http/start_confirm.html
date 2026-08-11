@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Open ingest?</h1>
+<p>Project: {{ project }}<br>Session: {{ session }}<br>Resource: {{ resource }}</p>
+<form action="{{ action|safe }}" method="post">
+<p><input type="submit" value="Open ingest"></p>
+</form>
+{% endblock %}

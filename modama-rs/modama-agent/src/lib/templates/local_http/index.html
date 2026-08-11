@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>modama agent</h1>
+<p>This agent: {{ identity }}</p>
+{% if connected_agents %}
+<h2>Connected agents at this resource</h2>
+<ul>{% for agent in connected_agents %}<li>{{ agent }}</li>{% endfor %}</ul>
+{% endif %}
+<h2>Foreground ingest</h2>
+{% if foreground.kind == "none" %}
+<p>No ingest is open.</p>
+{% else %}
+<p>Status: {{ foreground.kind }}.</p>
+<p>Project: {{ foreground.project }}<br>Session: {{ foreground.session }}</p>
+{% if foreground.close_href %}<p><a href="{{ foreground.close_href|safe }}">Close this ingest</a></p>{% endif %}
+{% endif %}
+<h2>Projects</h2>
+{% if projects %}<ul>{% for project in projects %}<li>{% if project.href %}<a href="{{ project.href|safe }}">{{ project.name }}</a>{% else %}{{ project.name }}{% endif %}</li>{% endfor %}</ul>{% else %}<p>No accessible projects.</p>{% endif %}
+{% if not start_allowed %}<p>Close the current ingest before opening another one.</p>{% endif %}
+{% endblock %}

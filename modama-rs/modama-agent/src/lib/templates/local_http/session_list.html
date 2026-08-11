@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Open an ingest</h1>
+<p>Project: {{ project }}</p>
+<h2>Existing sessions</h2>
+{% if sessions %}<ul>{% for session in sessions %}<li><a href="{{ session.href|safe }}">{{ session.name }}</a></li>{% endfor %}</ul>{% else %}<p>This project has no sessions.</p>{% endif %}
+{% endblock %}
