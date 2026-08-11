@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use rand::{distr::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, RngExt};
 
 use crate::tokens::{BoxFutureToken, Claims, LocalTokenSigner, TokenProvider};
 

@@ -78,7 +78,8 @@ pub async fn local_token_proxy(
 
     let listener = std::net::TcpListener::bind((addr, 0))?;
     let listen_port = listener.local_addr()?.port();
-    let server = axum_server::from_tcp(listener);
+    listener.set_nonblocking(true)?;
+    let server = axum_server::from_tcp(listener)?;
 
     let server_handle = tokio::spawn(async move {
         info!("spawning task for token proxy at http://{addr}:{listen_port}");

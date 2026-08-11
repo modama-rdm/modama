@@ -23,6 +23,8 @@
 
 ## GUI
 
+- [ ] upgrade the egui stack to 0.36 once compatible releases of both
+      `egui_taffy` and `egui-phosphor` are available
 - [ ] workflow issues
     - [ ] if user A creates an ingest share at resource R1, and later user B uses the same resource, B must be able to act
         - this requires non-localized changes to the permission system probably?

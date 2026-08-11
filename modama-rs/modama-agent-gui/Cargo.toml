@@ -16,8 +16,8 @@ clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
-reqwest-middleware = { version = "0.4.2", default-features = false }
-base64 = "0.22.1"
+reqwest-middleware = { version = "0.5.2", default-features = false }
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 egui_extras = { version = "0.35.0", features = ["svg"] }
 egui_taffy = "0.13"
 egui-phosphor = "0.13"

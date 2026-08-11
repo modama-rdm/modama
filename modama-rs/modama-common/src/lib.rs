@@ -10,3 +10,9 @@ pub mod requests;
 pub mod test_helpers;
 pub mod tokens;
 pub mod version;
+
+/// Install the workspace's selected rustls provider before constructing clients that defer
+/// provider selection to the application.
+pub fn install_rustls_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}

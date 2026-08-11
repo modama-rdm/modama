@@ -43,9 +43,9 @@ rustls = { workspace = true, features = ["ring"] }
 hyper-util = { workspace = true }
 hyper = { workspace = true }
 tower-service = { workspace = true }
-reqwest = { workspace = true, features = ["rustls-tls-no-provider", "json"], default-features = false }
+reqwest = { workspace = true }
 jsonwebtoken = { workspace = true }
-itertools = "0.14.0"
+itertools = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 procfs = { workspace = true }

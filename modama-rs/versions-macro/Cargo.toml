@@ -9,7 +9,7 @@ description = "Compile-time version range literals for axum-versioning"
 [dependencies]
 proc-macro2 = "1.0.106"
 quote = "1.0.46"
-syn = "2.0.118"
+syn = "3.0.3"
 winnow = "1.0.3"
 version-range = { version = "0.1.0", path = "../version-range" }
 

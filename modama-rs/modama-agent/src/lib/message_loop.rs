@@ -1,7 +1,7 @@
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result as AnyResult};
-use rand::Rng;
+use rand::RngExt;
 use tungstenite::Message;
 
 use crate::{

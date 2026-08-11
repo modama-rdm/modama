@@ -15,7 +15,7 @@ clap = { workspace = true, features = ["derive"] }
 rcgen = { version = "0.14.4", features = ["x509-parser", "ring"] }
 env_logger = { workspace = true }
 log = { workspace = true}
-reqwest = { workspace = true, features = ["rustls-tls", "json"], default-features = false }
+reqwest = { workspace = true }
 rustls = { workspace = true, features=["ring"] }
 rustls-pemfile = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

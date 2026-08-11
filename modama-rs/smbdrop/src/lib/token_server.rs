@@ -99,8 +99,10 @@ impl LocalTokenVerifier {
 
     pub fn verify(&self, token: &str) -> Option<Claims> {
         let key = DecodingKey::from_secret(&self.secret);
-        let mut validation = Validation::default();
-        validation.validate_exp = true; // in case the default _ever_ changes...
+        let validation = Validation {
+            validate_exp: true, // in case the default _ever_ changes...
+            ..Validation::default()
+        };
         match decode::<Claims>(token, &key, &validation) {
             Ok(decode_result) => Some(decode_result.claims),
             Err(e) => {

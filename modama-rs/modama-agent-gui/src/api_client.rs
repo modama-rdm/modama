@@ -27,6 +27,7 @@ pub struct AgentClient {
 
 impl AgentClient {
     pub fn new(base_url: impl Into<String>) -> Self {
+        modama_common::install_rustls_crypto_provider();
         Self {
             inner: GeneratedClient::new().with_base_url(base_url),
         }

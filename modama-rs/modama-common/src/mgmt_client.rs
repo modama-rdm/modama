@@ -3,7 +3,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
 
-use crate::{messages::Share, version::modama_git_version};
+use crate::{install_rustls_crypto_provider, messages::Share, version::modama_git_version};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MgmtError {
@@ -170,6 +170,7 @@ async fn parse_to_response<T: DeserializeOwned>(resp: Response) -> Result<T, Mgm
 
 impl MgmtClient {
     pub fn new(base_url: &Url, username: &str, password: &str) -> Result<Self, MgmtError> {
+        install_rustls_crypto_provider();
         let client = ClientBuilder::new()
             .user_agent(format!("modama-agent/{}", modama_git_version()))
             .build()?;

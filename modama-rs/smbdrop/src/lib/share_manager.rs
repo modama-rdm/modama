@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use modama_common::messages::Share;
-use rand::{distr::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, RngExt};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
