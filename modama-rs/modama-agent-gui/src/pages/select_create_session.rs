@@ -25,7 +25,7 @@ use crate::{
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},
-    state::{Credentials, PendingSession},
+    state::{Credentials, OperationId, PendingSession},
     styles,
 };
 
@@ -71,7 +71,10 @@ pub struct PageSelectCreateSession {
     focused_session: RovingListState,
     focus_target: SessionFocusTarget,
     service: Arc<dyn AgentService>,
-    credentials: Credentials,
+    credentials: Box<Credentials>,
+    /// Operation identity paired with the public async task fields in test fixtures.
+    pub start_operation_id: Option<OperationId>,
+    started_action: Option<Box<Action>>,
 }
 
 impl PageSelectCreateSession {
@@ -106,7 +109,9 @@ impl PageSelectCreateSession {
             focused_session: RovingListState::default(),
             focus_target: SessionFocusTarget::ExistingList,
             service,
-            credentials,
+            credentials: Box::new(credentials),
+            start_operation_id: None,
+            started_action: None,
         }
     }
 
@@ -140,7 +145,7 @@ impl PageSelectCreateSession {
             SessionPageMode::CreateNew => self.show_create_form(ui),
         }
 
-        Action::None
+        self.take_started_action()
     }
 
     fn handle_keyboard_shortcuts(&mut self, ui: &mut egui::Ui) {
@@ -390,6 +395,7 @@ impl PageSelectCreateSession {
         }
         if let Some(session) = self.selected_session.clone() {
             let project = self.project.clone();
+            self.record_start(project.clone(), session.clone());
             let service = Arc::clone(&self.service);
             let credentials = self.credentials.clone();
             self.create_ingest_task.spawn(
@@ -439,9 +445,7 @@ impl PageSelectCreateSession {
                 if let Some(result) = task.take_ready() {
                     match result {
                         Ok(pending_ingest) => {
-                            return Action::IngestCreated {
-                                session: pending_ingest,
-                            }
+                            return self.start_succeeded(pending_ingest);
                         }
                         Err(error) => {
                             log::error!("create-ingest failed: {error}");
@@ -449,13 +453,13 @@ impl PageSelectCreateSession {
                                 .selected_session
                                 .clone()
                                 .unwrap_or_else(|| self.new_session_input.clone());
-                            return Action::TaskFailed(TaskFailure::Stay {
+                            return self.start_failed(Some(TaskFailure::Stay {
                                 message: "Could not start the ingest session.".to_owned(),
                                 retry: RetryAction::CreateIngest {
                                     project: self.project.clone(),
                                     session,
                                 },
-                            });
+                            }));
                         }
                     }
                 }
@@ -463,21 +467,21 @@ impl PageSelectCreateSession {
             Err(error) => {
                 log::error!("create-ingest task failed: {error}");
                 if let Some(session) = self.selected_session.clone() {
-                    return Action::TaskFailed(TaskFailure::Stay {
+                    return self.start_failed(Some(TaskFailure::Stay {
                         message: "Could not start the ingest session.".to_owned(),
                         retry: RetryAction::CreateIngest {
                             project: self.project.clone(),
                             session,
                         },
-                    });
+                    }));
                 }
-                return Action::TaskFailed(TaskFailure::Stay {
+                return self.start_failed(Some(TaskFailure::Stay {
                     message: "Could not start the ingest session.".to_owned(),
                     retry: RetryAction::CreateSession {
                         project: self.project.clone(),
                         session: self.new_session_input.clone(),
                     },
-                });
+                }));
             }
         }
         match self.create_session_task.poll() {
@@ -485,53 +489,68 @@ impl PageSelectCreateSession {
                 if let Some(result) = task.take_ready() {
                     match result {
                         Ok(pending_ingest) => {
-                            return Action::IngestCreated {
-                                session: pending_ingest,
-                            };
+                            return self.start_succeeded(pending_ingest);
                         }
                         Err(error @ CreateSessionError::Start(_)) => {
                             log::error!("create-ingest after session creation failed: {error}");
-                            return Action::TaskFailed(TaskFailure::Stay {
-                                message: "The session was created, but its ingest share could not be started.".to_owned(),
-                                retry: RetryAction::CreateIngest { project: self.project.clone(), session: self.new_session_input.trim().to_owned() },
-                            });
+                            return self.start_failed(Some(TaskFailure::Stay {
+                                    message: "The session was created, but its ingest share could not be started.".to_owned(),
+                                    retry: RetryAction::CreateIngest { project: self.project.clone(), session: self.new_session_input.trim().to_owned() },
+                                }));
                         }
                         Err(error @ CreateSessionError::Server(_)) => {
                             log::error!("create-session failed: {error}");
                             self.create_session_error = Some(error);
+                            return self.start_failed(None);
                         }
-                        Err(error) => self.create_session_error = Some(error),
+                        Err(error) => {
+                            self.create_session_error = Some(error);
+                            return self.start_failed(None);
+                        }
                     }
                 }
             }
             Err(error) => {
                 log::error!("create-session task failed: {error}");
-                return Action::TaskFailed(TaskFailure::Stay {
+                return self.start_failed(Some(TaskFailure::Stay {
                     message: "Could not create the ingest session.".to_owned(),
                     retry: RetryAction::CreateSession {
                         project: self.project.clone(),
                         session: self.new_session_input.clone(),
                     },
-                });
+                }));
             }
         }
         Action::None
     }
 
-    pub fn retry_create_ingest(&mut self, project: String, session: String, ctx: egui::Context) {
+    pub fn retry_create_ingest(
+        &mut self,
+        project: String,
+        session: String,
+        ctx: egui::Context,
+    ) -> Action {
         self.selected_session = Some(session.clone());
         self.create_ingest_task.reset();
+        self.record_start(project.clone(), session.clone());
         let service = Arc::clone(&self.service);
         let credentials = self.credentials.clone();
         self.create_ingest_task.spawn(
             move || service.start_ingest(&credentials, &project, &session),
             ctx,
         );
+        self.take_started_action()
     }
 
-    pub fn retry_create_session(&mut self, project: String, session: String, ctx: egui::Context) {
+    pub fn retry_create_session(
+        &mut self,
+        project: String,
+        session: String,
+        ctx: egui::Context,
+    ) -> Action {
         self.new_session_input = session.clone();
         self.spawn_create_session_task_for_project(project, session, ctx);
+        self.take_started_action()
     }
 
     fn spawn_create_session_task(&mut self, session: String, ctx: egui::Context) {
@@ -552,6 +571,7 @@ impl PageSelectCreateSession {
                 return;
             }
         };
+        self.record_start(project.clone(), session.clone());
         self.create_session_task.reset();
         let service = Arc::clone(&self.service);
         let credentials = self.credentials.clone();
@@ -566,6 +586,44 @@ impl PageSelectCreateSession {
             },
             ctx,
         );
+    }
+
+    fn record_start(&mut self, project: String, session: String) {
+        let operation_id = OperationId::next();
+        self.start_operation_id = Some(operation_id);
+        self.started_action = Some(Box::new(Action::StartRequested {
+            operation_id,
+            project,
+            session,
+        }));
+    }
+
+    fn take_started_action(&mut self) -> Action {
+        self.started_action
+            .take()
+            .map_or(Action::None, |action| *action)
+    }
+
+    fn start_succeeded(&mut self, session: PendingSession) -> Action {
+        let Some(operation_id) = self.start_operation_id.take() else {
+            log::error!("start task completed without an operation ID");
+            return Action::None;
+        };
+        Action::IngestCreated {
+            operation_id,
+            session,
+        }
+    }
+
+    fn start_failed(&mut self, failure: Option<TaskFailure>) -> Action {
+        let Some(operation_id) = self.start_operation_id.take() else {
+            log::error!("start task failed without an operation ID");
+            return Action::None;
+        };
+        Action::StartFailed {
+            operation_id,
+            failure,
+        }
     }
 
     pub fn is_busy(&self) -> bool {
@@ -871,11 +929,19 @@ mod tests {
     #[test]
     fn create_session_server_failures_remain_visible_inline() {
         let mut page = PageSelectCreateSession::new("Holo Stacks".to_owned());
+        let operation_id = OperationId::next();
+        page.start_operation_id = Some(operation_id);
         page.create_session_task = AsyncState::Ready {
             payload: Err(CreateSessionError::Server("request rejected".to_owned())),
         };
 
-        assert_eq!(page.poll(), Action::None);
+        assert_eq!(
+            page.poll(),
+            Action::StartFailed {
+                operation_id,
+                failure: None,
+            }
+        );
         assert_eq!(
             page.create_session_error,
             Some(CreateSessionError::Server("request rejected".to_owned()))
@@ -886,20 +952,25 @@ mod tests {
     fn start_failure_after_creation_retains_the_ingest_retry() {
         let mut page = PageSelectCreateSession::new("Holo Stacks".to_owned());
         page.new_session_input = "  2026-08-06-alignment-run  ".to_owned();
+        let operation_id = OperationId::next();
+        page.start_operation_id = Some(operation_id);
         page.create_session_task = AsyncState::Ready {
             payload: Err(CreateSessionError::Start("mount failed".to_owned())),
         };
 
         assert_eq!(
             page.poll(),
-            Action::TaskFailed(TaskFailure::Stay {
-                message: "The session was created, but its ingest share could not be started."
-                    .to_owned(),
-                retry: RetryAction::CreateIngest {
-                    project: "Holo Stacks".to_owned(),
-                    session: "2026-08-06-alignment-run".to_owned(),
-                },
-            })
+            Action::StartFailed {
+                operation_id,
+                failure: Some(TaskFailure::Stay {
+                    message: "The session was created, but its ingest share could not be started."
+                        .to_owned(),
+                    retry: RetryAction::CreateIngest {
+                        project: "Holo Stacks".to_owned(),
+                        session: "2026-08-06-alignment-run".to_owned(),
+                    },
+                }),
+            }
         );
     }
 }

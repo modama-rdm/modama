@@ -12,7 +12,7 @@
       removes healthy shares for that destination from the generated Samba configuration
 - [x] continuously reconcile desired and mounted shares in modama-agent so failed mount and unmount
       operations retry without requiring another WebSocket state update
-- [ ] avoid restoring stale GUI pending-start state when the foreground monitor
+- [x] avoid restoring stale GUI pending-start state when the foreground monitor
       observes the matching share before the start task completes
 - [ ] goal: make modama agent plus the gui work well in the test-env
     - right now, after the integration tests have run, the GUI shows that the agent is continuously trying to

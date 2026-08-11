@@ -120,42 +120,57 @@ impl AgentGuiApp {
                     self.page = page;
                 }
             }
-            Action::IngestCreated { session } => {
-                self.toast.clear();
-                self.app_state.pending_start = Some(session);
-                self.page = self.overview_page();
+            Action::StartRequested {
+                operation_id,
+                project,
+                session,
+            } => {
+                self.app_state.begin_start(operation_id, project, session);
+            }
+            Action::IngestCreated {
+                operation_id,
+                session,
+            } => {
+                if self.app_state.finish_start(operation_id, session) {
+                    self.toast.clear();
+                    self.page = self.overview_page();
+                }
+            }
+            Action::StartFailed {
+                operation_id,
+                failure,
+            } => {
+                if self.app_state.fail_start(operation_id) {
+                    if let Some(failure) = failure {
+                        self.handle_task_failure(failure);
+                    }
+                }
             }
             Action::ForegroundChanged(foreground) => {
-                if self
-                    .app_state
-                    .pending_start
-                    .as_ref()
-                    .is_some_and(|pending| foreground.share_id() == Some(&pending.share_id))
-                {
-                    self.app_state.pending_start = None;
-                }
-                if self
-                    .app_state
-                    .pending_close
-                    .as_deref()
-                    .is_some_and(|share_id| {
-                        foreground.is_unmounting(share_id)
-                            || foreground
-                                .share_id()
-                                .is_none_or(|current| current != share_id)
-                    })
-                {
-                    self.app_state.pending_close = None;
-                }
-                self.app_state.foreground = foreground;
+                self.app_state.observe_foreground(foreground);
             }
             Action::GoToOverview => {
                 self.toast.clear();
                 self.page = self.overview_page();
             }
-            Action::CloseSessionSuccess { share_id } => {
-                self.toast.clear();
-                self.app_state.pending_close = Some(share_id);
+            Action::CloseRequested {
+                operation_id,
+                share_id,
+            } => {
+                self.app_state.begin_close(operation_id, share_id);
+            }
+            Action::CloseSessionSuccess { operation_id } => {
+                if self.app_state.finish_close(operation_id) {
+                    self.toast.clear();
+                }
+            }
+            Action::CloseFailed {
+                operation_id,
+                failure,
+            } => {
+                if self.app_state.fail_close(operation_id) == Some(true) {
+                    self.handle_task_failure(failure);
+                }
             }
             Action::LogoutSuccess => {
                 self.toast.clear();
@@ -171,15 +186,19 @@ impl AgentGuiApp {
                 self.app_state.identity = Some(identity);
                 self.app_state.foreground = foreground;
             }
-            Action::TaskFailed(failure) => match failure {
-                TaskFailure::Stay { message, retry } => {
-                    self.toast.show_error(message, retry);
-                }
-                TaskFailure::ReturnToOverview { message, retry } => {
-                    self.page = self.overview_page();
-                    self.toast.show_error(message, retry);
-                }
-            },
+            Action::TaskFailed(failure) => self.handle_task_failure(failure),
+        }
+    }
+
+    fn handle_task_failure(&mut self, failure: TaskFailure) {
+        match failure {
+            TaskFailure::Stay { message, retry } => {
+                self.toast.show_error(message, retry);
+            }
+            TaskFailure::ReturnToOverview { message, retry } => {
+                self.page = self.overview_page();
+                self.toast.show_error(message, retry);
+            }
         }
     }
 
@@ -225,17 +244,20 @@ impl AgentGuiApp {
             }
             RetryAction::CreateIngest { project, session } => {
                 if let Page::SelectCreateSession(page) = &mut self.page {
-                    page.retry_create_ingest(project, session, ctx);
+                    let action = page.retry_create_ingest(project, session, ctx);
+                    self.handle_action(action);
                 }
             }
             RetryAction::CreateSession { project, session } => {
                 if let Page::SelectCreateSession(page) = &mut self.page {
-                    page.retry_create_session(project, session, ctx);
+                    let action = page.retry_create_session(project, session, ctx);
+                    self.handle_action(action);
                 }
             }
             RetryAction::CloseSession => {
                 if let Page::Overview(page) = &mut self.page {
-                    page.retry_close_session(ctx);
+                    let action = page.retry_close_session(ctx);
+                    self.handle_action(action);
                 }
             }
         }
@@ -296,8 +318,8 @@ impl eframe::App for AgentGuiApp {
                         ui,
                         frame,
                         &self.app_state.foreground,
-                        &self.app_state.pending_start,
-                        &self.app_state.pending_close,
+                        self.app_state.pending_start(),
+                        self.app_state.pending_close(),
                         &self.app_state.creds,
                     );
                     self.handle_action(ui_action);
@@ -309,8 +331,8 @@ impl eframe::App for AgentGuiApp {
                                 ui,
                                 frame,
                                 &self.app_state.foreground,
-                                &self.app_state.pending_start,
-                                &self.app_state.pending_close,
+                                self.app_state.pending_start(),
+                                self.app_state.pending_close(),
                                 &self.app_state.creds,
                             );
                             self.handle_action(ui_action);
@@ -332,7 +354,7 @@ impl eframe::App for AgentGuiApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Credentials;
+    use crate::state::{Credentials, OperationId};
 
     #[test]
     fn test_create_session_action_logged_out() {
@@ -392,11 +414,14 @@ mod tests {
                 mount_path: None,
             });
 
-        app.handle_action(Action::CloseSessionSuccess {
+        let operation_id = OperationId::next();
+        app.handle_action(Action::CloseRequested {
+            operation_id,
             share_id: "share".to_owned(),
         });
+        app.handle_action(Action::CloseSessionSuccess { operation_id });
 
-        assert_eq!(app.app_state.pending_close.as_deref(), Some("share"));
+        assert_eq!(app.app_state.pending_close(), Some("share"));
         assert!(matches!(
             app.app_state.foreground,
             crate::state::ForegroundSession::Mounted(_)
@@ -436,7 +461,14 @@ mod tests {
             project: "project".to_owned(),
             session: "session".to_owned(),
         };
+        let operation_id = OperationId::next();
+        app.handle_action(Action::StartRequested {
+            operation_id,
+            project: pending.project.clone(),
+            session: pending.session.clone(),
+        });
         app.handle_action(Action::IngestCreated {
+            operation_id,
             session: pending.clone(),
         });
 
@@ -444,7 +476,7 @@ mod tests {
             crate::state::ForegroundSession::Mounting(pending.clone()),
         ));
 
-        assert_eq!(app.app_state.pending_start, None);
+        assert_eq!(app.app_state.pending_start(), None);
         assert_eq!(
             app.app_state.foreground,
             crate::state::ForegroundSession::Mounting(pending)
@@ -475,7 +507,14 @@ mod tests {
     #[test]
     fn pending_start_survives_unrelated_authoritative_updates() {
         let mut app = AgentGuiApp::new();
+        let operation_id = OperationId::next();
+        app.handle_action(Action::StartRequested {
+            operation_id,
+            project: "project".to_owned(),
+            session: "session".to_owned(),
+        });
         app.handle_action(Action::IngestCreated {
+            operation_id,
             session: crate::state::PendingSession {
                 share_id: "share".to_owned(),
                 project: "project".to_owned(),
@@ -488,8 +527,7 @@ mod tests {
 
         assert_eq!(
             app.app_state
-                .pending_start
-                .as_ref()
+                .pending_start()
                 .map(|session| session.share_id.as_str()),
             Some("share")
         );
@@ -509,7 +547,9 @@ mod tests {
             mount_path: Some("/mnt/session".to_owned()),
         };
         app.app_state.foreground = crate::state::ForegroundSession::Mounted(session.clone());
-        app.handle_action(Action::CloseSessionSuccess {
+        let operation_id = OperationId::next();
+        app.handle_action(Action::CloseRequested {
+            operation_id,
             share_id: session.share_id.clone(),
         });
 
@@ -517,7 +557,7 @@ mod tests {
             crate::state::ForegroundSession::Unmounting(session.clone()),
         ));
 
-        assert_eq!(app.app_state.pending_close, None);
+        assert_eq!(app.app_state.pending_close(), None);
         assert_eq!(
             app.app_state.foreground,
             crate::state::ForegroundSession::Unmounting(session)
@@ -525,7 +565,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "reproduces a monitor/start-task ordering race"]
     fn mounted_monitor_update_before_start_completion_does_not_leave_stale_pending_state() {
         let mut app = AgentGuiApp::new();
         let pending = crate::state::PendingSession {
@@ -539,22 +578,30 @@ mod tests {
             session: pending.session.clone(),
             mount_path: Some("/mnt/session".to_owned()),
         };
+        let operation_id = OperationId::next();
+        app.handle_action(Action::StartRequested {
+            operation_id,
+            project: pending.project.clone(),
+            session: pending.session.clone(),
+        });
 
         // The permanent monitor wins the race and observes the completed mount first.
         app.handle_action(Action::ForegroundChanged(
             crate::state::ForegroundSession::Mounted(mounted),
         ));
 
-        // The page task is polled afterward and must not recreate local pending state.
-        app.handle_action(Action::IngestCreated { session: pending });
-
-        // Once the mounted share disappears, stale command state must not make the
-        // overview fall back to "Waiting for agent…".
+        // The mounted share can disappear again before the page task is polled.
         app.handle_action(Action::ForegroundChanged(
             crate::state::ForegroundSession::None,
         ));
 
-        assert_eq!(app.app_state.pending_start, None);
+        // The late task completion must not recreate local pending state.
+        app.handle_action(Action::IngestCreated {
+            operation_id,
+            session: pending,
+        });
+
+        assert_eq!(app.app_state.pending_start(), None);
         assert_eq!(
             app.app_state.foreground,
             crate::state::ForegroundSession::None

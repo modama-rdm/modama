@@ -142,7 +142,8 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
                 .map(|session| (*session).to_owned())
                 .collect();
             page.new_session_input = "2026-06-27-alignment-run".to_owned();
-            page.session_date = Date::from_calendar_date(2026, Month::August, 6).unwrap();
+            page.session_date =
+                Date::from_calendar_date(2026, Month::August, 6).unwrap_or(page.session_date);
             app.page = Page::SelectCreateSession(page);
         }
         GuideScene::ActiveSession => {

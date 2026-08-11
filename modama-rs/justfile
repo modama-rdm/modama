@@ -6,6 +6,9 @@ design_spec := "../mgmtinterface-new/DESIGN.md"
 fmt:
     cargo fmt
 
+clippy:
+    cargo clippy -q --all-targets --all-features
+
 fmt-check:
     cargo fmt --check
 

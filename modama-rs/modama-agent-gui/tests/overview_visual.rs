@@ -372,7 +372,7 @@ fn confirming_close_waits_for_the_authoritative_update() {
     harness.run_steps(3);
 
     assert_eq!(
-        harness.state().app_state.pending_close.as_deref(),
+        harness.state().app_state.pending_close(),
         Some("representative-share")
     );
     assert!(harness.query_by_label("Closing…").is_some());

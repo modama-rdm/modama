@@ -1,4 +1,4 @@
-use crate::state::{AgentIdentity, Credentials, ForegroundSession, PendingSession};
+use crate::state::{AgentIdentity, Credentials, ForegroundSession, OperationId, PendingSession};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetryAction {
@@ -32,13 +32,31 @@ pub enum Action {
     SelectProject {
         project: String,
     },
+    StartRequested {
+        operation_id: OperationId,
+        project: String,
+        session: String,
+    },
     IngestCreated {
+        operation_id: OperationId,
         session: PendingSession,
+    },
+    StartFailed {
+        operation_id: OperationId,
+        failure: Option<TaskFailure>,
     },
     ForegroundChanged(ForegroundSession),
     GoToOverview,
-    CloseSessionSuccess {
+    CloseRequested {
+        operation_id: OperationId,
         share_id: String,
+    },
+    CloseSessionSuccess {
+        operation_id: OperationId,
+    },
+    CloseFailed {
+        operation_id: OperationId,
+        failure: TaskFailure,
     },
     LogoutSuccess,
     TaskFailed(TaskFailure),

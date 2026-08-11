@@ -10,7 +10,7 @@ use crate::{
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},
-    state::{ActiveSession, Credentials, ForegroundSession, PendingSession},
+    state::{ActiveSession, Credentials, ForegroundSession, OperationId, PendingSession},
     styles,
 };
 
@@ -23,6 +23,7 @@ pub struct PageOverview {
     focus_on_entry: bool,
     service: Arc<dyn AgentService>,
     last_close: Option<(Credentials, ActiveSession)>,
+    close_operation_id: Option<OperationId>,
     login_required: bool, // FIXME: sucks to have this as state, why cant the close confirmation
                           // thing return the action instead?
 }
@@ -46,6 +47,7 @@ impl PageOverview {
             focus_on_entry: true,
             service,
             last_close: None,
+            close_operation_id: None,
             login_required: false,
         }
     }
@@ -55,8 +57,8 @@ impl PageOverview {
         ui: &mut egui::Ui,
         _frame: &mut eframe::Frame,
         foreground: &ForegroundSession,
-        pending_start: &Option<PendingSession>,
-        pending_close: &Option<String>,
+        pending_start: Option<&PendingSession>,
+        pending_close: Option<&str>,
         credentials: &Option<Credentials>,
     ) -> Action {
         page_heading(ui, "Overview");
@@ -67,10 +69,13 @@ impl PageOverview {
                 self.show_active_session_card(
                     ui,
                     session,
-                    pending_close.as_deref() == Some(&session.share_id),
+                    pending_close == Some(&session.share_id),
                 );
                 if self.close_confirmation_open {
-                    self.show_close_confirmation(ui, session, credentials);
+                    let action = self.show_close_confirmation(ui, session, credentials);
+                    if action != Action::None {
+                        return action;
+                    }
                 }
             }
             ForegroundSession::Mounting(session) => {
@@ -102,16 +107,10 @@ impl PageOverview {
             Ok(task) => {
                 if let Some(result) = task.take_ready() {
                     match result {
-                        Ok(()) => self
-                            .last_close
-                            .as_ref()
-                            .map(|(_, session)| Action::CloseSessionSuccess {
-                                share_id: session.share_id.clone(),
-                            })
-                            .unwrap_or(Action::None),
+                        Ok(()) => self.close_succeeded(),
                         Err(error) => {
                             log::error!("close-session failed: {error}");
-                            Action::TaskFailed(TaskFailure::Stay {
+                            self.close_failed(TaskFailure::Stay {
                                 message: "Could not close the ingest session.".to_owned(),
                                 retry: RetryAction::CloseSession,
                             })
@@ -123,7 +122,7 @@ impl PageOverview {
             }
             Err(error) => {
                 log::error!("close-session task failed: {error}");
-                Action::TaskFailed(TaskFailure::Stay {
+                self.close_failed(TaskFailure::Stay {
                     message: "Could not close the ingest session.".to_owned(),
                     retry: RetryAction::CloseSession,
                 })
@@ -135,10 +134,12 @@ impl PageOverview {
         self.close_task.is_pending()
     }
 
-    pub fn retry_close_session(&mut self, ctx: egui::Context) {
+    pub fn retry_close_session(&mut self, ctx: egui::Context) -> Action {
         self.close_task.reset();
         if let Some((credentials, session)) = self.last_close.clone() {
-            self.spawn_close(credentials, session, ctx);
+            self.start_close(credentials, session, ctx)
+        } else {
+            Action::None
         }
     }
 
@@ -263,7 +264,7 @@ impl PageOverview {
         ui: &mut egui::Ui,
         session: &ActiveSession,
         credentials: &Option<Credentials>,
-    ) {
+    ) -> Action {
         let message = format!(
             "This will stop incoming data for session {} in project {}. Data already stored will \
              not be deleted.",
@@ -281,32 +282,60 @@ impl PageOverview {
         self.focus_confirmation_cancel = false;
 
         match action {
-            ConfirmationDialogAction::None => {}
+            ConfirmationDialogAction::None => Action::None,
             ConfirmationDialogAction::Cancel => {
                 self.close_confirmation_open = false;
+                Action::None
             }
             ConfirmationDialogAction::Confirm => {
                 self.close_confirmation_open = false;
                 if let Some(credentials) = credentials.clone() {
                     self.last_close = Some((credentials.clone(), session.clone()));
-                    self.spawn_close(credentials, session.clone(), ui.ctx().clone());
+                    self.start_close(credentials, session.clone(), ui.ctx().clone())
                 } else {
                     self.login_required = true;
                     ui.ctx().request_repaint();
+                    Action::None
                 }
             }
         }
     }
 
-    fn spawn_close(
+    fn start_close(
         &mut self,
         credentials: Credentials,
         session: ActiveSession,
         ctx: egui::Context,
-    ) {
+    ) -> Action {
+        let operation_id = OperationId::next();
+        self.close_operation_id = Some(operation_id);
+        let share_id = session.share_id.clone();
         let service = Arc::clone(&self.service);
         self.close_task
             .spawn(move || service.close_session(&credentials, &session), ctx);
+        Action::CloseRequested {
+            operation_id,
+            share_id,
+        }
+    }
+
+    fn close_succeeded(&mut self) -> Action {
+        let Some(operation_id) = self.close_operation_id.take() else {
+            log::error!("close task completed without an operation ID");
+            return Action::None;
+        };
+        Action::CloseSessionSuccess { operation_id }
+    }
+
+    fn close_failed(&mut self, failure: TaskFailure) -> Action {
+        let Some(operation_id) = self.close_operation_id.take() else {
+            log::error!("close task failed without an operation ID");
+            return Action::None;
+        };
+        Action::CloseFailed {
+            operation_id,
+            failure,
+        }
     }
 }
 

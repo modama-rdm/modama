@@ -10,7 +10,7 @@ use modama_agent_gui::{
         select_project::{representative_projects, ProjectSort},
         CreateSessionError, Page, PageSelectCreateSession, PageSelectProject,
     },
-    state::{Credentials, PendingSession},
+    state::{Credentials, OperationId, PendingSession},
     styles,
 };
 use time::{Date, Month};
@@ -24,7 +24,8 @@ const SESSIONS: [&str; 4] = [
 
 fn session_page_at_fixture_date() -> PageSelectCreateSession {
     let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
-    page.session_date = Date::from_calendar_date(2026, Month::July, 30).unwrap();
+    page.session_date =
+        Date::from_calendar_date(2026, Month::July, 30).unwrap_or(page.session_date);
     page
 }
 
@@ -959,7 +960,15 @@ fn session_selection_snapshots() {
     rejected.run_steps(3);
     rejected.get_by_label("Create a new session").click();
     rejected.run_steps(2);
-    if let Page::SelectCreateSession(page) = &mut rejected.state_mut().page {
+    let operation_id = OperationId::next();
+    let app = rejected.state_mut();
+    app.app_state.begin_start(
+        operation_id,
+        "Project Alpha".to_owned(),
+        "2026-07-30-forbidden-run".to_owned(),
+    );
+    if let Page::SelectCreateSession(page) = &mut app.page {
+        page.start_operation_id = Some(operation_id);
         page.create_session_task = AsyncState::Ready {
             payload: Err(CreateSessionError::Server(
                 "Session name was rejected by the server.".to_owned(),
@@ -1153,7 +1162,15 @@ fn asynchronous_session_creation_errors_remain_on_the_form() {
     harness.get_by_label("Create a new session").click();
     harness.run_steps(2);
 
-    if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
+    let operation_id = OperationId::next();
+    let app = harness.state_mut();
+    app.app_state.begin_start(
+        operation_id,
+        "Project Alpha".to_owned(),
+        "2026-07-30-forbidden-run".to_owned(),
+    );
+    if let Page::SelectCreateSession(page) = &mut app.page {
+        page.start_operation_id = Some(operation_id);
         page.create_session_task = AsyncState::Ready {
             payload: Err(CreateSessionError::Server(
                 "Session name was rejected by the server.".to_owned(),
@@ -1187,7 +1204,15 @@ fn successful_session_creation_returns_to_overview_while_waiting_for_the_agent()
     harness.get_by_label("Create a new session").click();
     harness.run_steps(2);
 
-    if let Page::SelectCreateSession(page) = &mut harness.state_mut().page {
+    let operation_id = OperationId::next();
+    let app = harness.state_mut();
+    app.app_state.begin_start(
+        operation_id,
+        "Project Alpha".to_owned(),
+        "2026-07-30-new-run".to_owned(),
+    );
+    if let Page::SelectCreateSession(page) = &mut app.page {
+        page.start_operation_id = Some(operation_id);
         page.create_session_task = AsyncState::Ready {
             payload: Ok(PendingSession {
                 share_id: "created-share".to_owned(),
@@ -1202,8 +1227,7 @@ fn successful_session_creation_returns_to_overview_while_waiting_for_the_agent()
     let pending = harness
         .state()
         .app_state
-        .pending_start
-        .as_ref()
+        .pending_start()
         .expect("successful creation should wait for the agent");
     assert_eq!(pending.project, "Project Alpha");
     assert_eq!(pending.session, "2026-07-30-new-run");

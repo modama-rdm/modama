@@ -47,8 +47,8 @@ impl Page {
         ui: &mut egui::Ui,
         frame: &mut eframe::Frame,
         foreground: &ForegroundSession,
-        pending_start: &Option<PendingSession>,
-        pending_close: &Option<String>,
+        pending_start: Option<&PendingSession>,
+        pending_close: Option<&str>,
         credentials: &Option<Credentials>,
     ) -> Action {
         match self {
