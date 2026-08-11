@@ -9,7 +9,7 @@
 <form action="{{ create_action }}" method="post">
 <p><label for="session-name">Session name:</label><br>
 <input type="text" name="session_name" id="session-name" value="{{ new_session_name }}"></p>
-<p>Use a descriptive name, for example: 2026-08-11-alignment-run.</p>
+<p>Store measurement data and important notes in the raw subfolder. Today's date is pre-filled; add a suffix, e.g. {{ session_name_example }}.</p>
 <p><input type="submit" value="Create session"></p>
 </form>
 {% endblock %}

@@ -21,6 +21,7 @@ use modama_common::{
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, sync::Arc};
+use time::{Date, OffsetDateTime};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -249,6 +250,7 @@ fn render_session_list(
     session_names: &[String],
     create_error: Option<&str>,
     new_session_name: &str,
+    session_date: Date,
 ) -> Result<Response, LocalAPIError> {
     let sessions = session_names
         .iter()
@@ -258,6 +260,7 @@ fn render_session_list(
         })
         .collect::<Vec<_>>();
     let create_action = SafeLocalUrl::start_project(project_name);
+    let session_name_example = session_name_example(session_date);
 
     render_html(
         &agent_state.jinja_env,
@@ -270,8 +273,28 @@ fn render_session_list(
             create_action,
             create_error,
             new_session_name,
+            session_name_example,
         },
     )
+}
+
+fn today() -> Date {
+    OffsetDateTime::now_local()
+        .unwrap_or_else(|_| OffsetDateTime::now_utc())
+        .date()
+}
+
+fn session_name_prefix(date: Date) -> String {
+    format!(
+        "{:04}-{:02}-{:02}-",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    )
+}
+
+fn session_name_example(date: Date) -> String {
+    format!("{}alignment-run", session_name_prefix(date))
 }
 
 fn validate_session_name(input: &str) -> Result<String, &'static str> {
@@ -555,13 +578,16 @@ async fn start_ingest_step1(
         .map(|session| session.name)
         .collect::<Vec<_>>();
 
+    let session_date = today();
+    let default_session_name = session_name_prefix(session_date);
     render_session_list(
         &agent_state,
         StatusCode::OK,
         &project_name,
         &session_names,
         None,
-        "",
+        &default_session_name,
+        session_date,
     )
 }
 
@@ -601,6 +627,7 @@ async fn create_session(
                 &session_names,
                 Some(message),
                 &form.session_name,
+                today(),
             );
         }
     };
@@ -627,6 +654,7 @@ async fn create_session(
                 &session_names,
                 Some(&message),
                 &session_name,
+                today(),
             );
         }
         return Err(error.into());
@@ -1414,7 +1442,9 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
+        let date_before_request = today();
         let resp = test_setup.app.oneshot(req).await.unwrap();
+        let date_after_request = today();
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -1426,6 +1456,12 @@ mod tests {
         assert!(body_str.contains("Create a new session"));
         assert!(body_str.contains("<form action=\"/start-ingest/the%2Dproject/\" method=\"post\""));
         assert!(body_str.contains("name=\"session_name\""));
+        assert!([date_before_request, date_after_request]
+            .into_iter()
+            .any(|date| {
+                body_str.contains(&format!("value=\"{}\"", session_name_prefix(date)))
+                    && body_str.contains(&session_name_example(date))
+            }));
     }
 
     #[test]
@@ -1442,6 +1478,14 @@ mod tests {
             validate_session_name("2026-08-11/run"),
             Err("Session name cannot contain a slash (/).")
         );
+    }
+
+    #[test]
+    fn formats_session_name_defaults() {
+        let date = Date::from_calendar_date(2026, time::Month::January, 3).unwrap();
+
+        assert_eq!(session_name_prefix(date), "2026-01-03-");
+        assert_eq!(session_name_example(date), "2026-01-03-alignment-run");
     }
 
     #[tokio::test]

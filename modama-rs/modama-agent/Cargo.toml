@@ -48,7 +48,7 @@ axum-extra = { workspace = true, features = ["typed-header"] }
 utoipa = { workspace = true, features = ["macros"] }
 versioned = { path = "../versioned" }
 minijinja = { version = "2.12.0", features = ["loader"] }
-time = { version = "0.3.42" }
+time = { version = "0.3.42", features = ["local-offset"] }
 reqwest = { workspace = true }
 itertools = "0.14.0"
 jsonwebtoken = { workspace = true }
