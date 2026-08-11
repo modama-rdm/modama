@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     Router,
 };
@@ -12,27 +12,257 @@ use axum_extra::{
 };
 use axum_macros::debug_handler;
 use log::error;
-use minijinja::{context, Environment};
+use minijinja::{context, AutoEscape, Environment, Value};
 use modama_common::{
+    messages::Share,
     mgmt_client::{MgmtClient, MgmtError},
     tokens::{TokenError, TokenProvider},
 };
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use serde::Serialize;
 use std::{error::Error, sync::Arc};
 use tokio::sync::Mutex;
 
-use crate::{agent_state::AgentState, config::ConfigError, http_api::add_api_routes};
+use crate::{
+    agent_state::AgentState,
+    config::{ConfigError, MTLSIdentity},
+    http_api::{add_api_routes, project_and_session},
+    share::MountedShare,
+};
+
+const BASE_TEMPLATE: &str = r#"<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+    "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>{{ title }}</title>
+</head>
+<body>
+{% block body %}{% endblock %}
+<hr>
+<p><a href="/">Return to overview</a></p>
+</body>
+</html>"#;
+
+const INDEX_TEMPLATE: &str = r#"{% extends "base.html" %}
+{% block body %}
+<h1>modama agent</h1>
+<p>This agent: {{ identity }}</p>
+{% if connected_agents %}
+<h2>Connected agents at this resource</h2>
+<ul>{% for agent in connected_agents %}<li>{{ agent }}</li>{% endfor %}</ul>
+{% endif %}
+<h2>Foreground ingest</h2>
+{% if foreground.kind == "none" %}
+<p>No ingest is open.</p>
+{% else %}
+<p>Status: {{ foreground.kind }}.</p>
+<p>Project: {{ foreground.project }}<br>Session: {{ foreground.session }}</p>
+{% if foreground.close_href %}<p><a href="{{ foreground.close_href|safe }}">Close this ingest</a></p>{% endif %}
+{% endif %}
+<h2>Projects</h2>
+{% if projects %}<ul>{% for project in projects %}<li>{% if project.href %}<a href="{{ project.href|safe }}">{{ project.name }}</a>{% else %}{{ project.name }}{% endif %}</li>{% endfor %}</ul>{% else %}<p>No accessible projects.</p>{% endif %}
+{% if not start_allowed %}<p>Close the current ingest before opening another one.</p>{% endif %}
+{% endblock %}"#;
+
+const SESSION_LIST_TEMPLATE: &str = r#"{% extends "base.html" %}
+{% block body %}
+<h1>Open an ingest</h1>
+<p>Project: {{ project }}</p>
+<h2>Existing sessions</h2>
+{% if sessions %}<ul>{% for session in sessions %}<li><a href="{{ session.href|safe }}">{{ session.name }}</a></li>{% endfor %}</ul>{% else %}<p>This project has no sessions.</p>{% endif %}
+{% endblock %}"#;
+
+const START_CONFIRM_TEMPLATE: &str = r#"{% extends "base.html" %}
+{% block body %}
+<h1>Open ingest?</h1>
+<p>Project: {{ project }}<br>Session: {{ session }}<br>Resource: {{ resource }}</p>
+<form action="{{ action|safe }}" method="post">
+<p><input type="submit" value="Open ingest"></p>
+</form>
+{% endblock %}"#;
+
+const CLOSE_CONFIRM_TEMPLATE: &str = r#"{% extends "base.html" %}
+{% block body %}
+<h1>Close ingest?</h1>
+<p>Project: {{ project }}<br>Session: {{ session }}</p>
+<form action="{{ action|safe }}" method="post">
+<p><input type="submit" value="Close ingest"></p>
+</form>
+{% endblock %}"#;
+
+const MESSAGE_TEMPLATE: &str = r#"{% extends "base.html" %}
+{% block body %}<h1>{{ heading }}</h1><p>{{ message }}</p>{% endblock %}"#;
 
 fn create_env() -> Environment<'static> {
     let mut env = Environment::new();
 
     env.set_loader(|name| match name {
-        "start_ingest_step2.html" => Ok(Some(
-            "<html><form action='.' method='post'><input type='submit'></form></html>".to_owned(),
-        )),
+        "base.html" => Ok(Some(BASE_TEMPLATE.to_owned())),
+        "index.html" => Ok(Some(INDEX_TEMPLATE.to_owned())),
+        "session_list.html" => Ok(Some(SESSION_LIST_TEMPLATE.to_owned())),
+        "start_confirm.html" => Ok(Some(START_CONFIRM_TEMPLATE.to_owned())),
+        "close_confirm.html" => Ok(Some(CLOSE_CONFIRM_TEMPLATE.to_owned())),
+        "message.html" => Ok(Some(MESSAGE_TEMPLATE.to_owned())),
         _ => Ok(None),
     });
+    env.set_auto_escape_callback(|_| AutoEscape::Html);
 
     env
+}
+
+#[derive(Serialize)]
+struct LinkItem {
+    name: String,
+    href: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ForegroundView {
+    kind: &'static str,
+    project: Option<String>,
+    session: Option<String>,
+    close_href: Option<String>,
+}
+
+enum ForegroundState {
+    None,
+    Opening(Share),
+    Open(MountedShare),
+    Closing(MountedShare),
+}
+
+impl ForegroundState {
+    fn from_agent_state(state: &AgentState) -> Self {
+        let desired = state
+            .remote_info
+            .as_ref()
+            .and_then(|remote| remote.desired_shares.foreground_share.clone());
+        let current = state.current_shares.foreground_share.clone();
+
+        match (desired, current) {
+            (None, None) => Self::None,
+            (None, Some(current)) => Self::Closing(current),
+            (Some(desired), Some(current)) if desired.share_id == current.share.share_id => {
+                Self::Open(current)
+            }
+            (Some(desired), _) => Self::Opening(desired),
+        }
+    }
+
+    fn is_idle(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    fn open_share(&self, share_id: &str) -> Option<&MountedShare> {
+        match self {
+            Self::Open(share) if share.share.share_id == share_id => Some(share),
+            _ => None,
+        }
+    }
+
+    fn view(&self) -> Result<ForegroundView, LocalAPIError> {
+        let (kind, share, close_href) = match self {
+            Self::None => {
+                return Ok(ForegroundView {
+                    kind: "none",
+                    project: None,
+                    session: None,
+                    close_href: None,
+                });
+            }
+            Self::Opening(share) => ("opening", share, None),
+            Self::Open(mounted) => (
+                "open",
+                &mounted.share,
+                Some(format!(
+                    "/close-ingest/{}/",
+                    encode_path_segment(&mounted.share.share_id)
+                )),
+            ),
+            Self::Closing(mounted) => ("closing", &mounted.share, None),
+        };
+        let (project, session) = project_and_session(&share.dest_path)?;
+        Ok(ForegroundView {
+            kind,
+            project: Some(project),
+            session: Some(session),
+            close_href,
+        })
+    }
+}
+
+fn encode_path_segment(value: &str) -> String {
+    utf8_percent_encode(value, NON_ALPHANUMERIC).to_string()
+}
+
+fn render_html(
+    env: &Environment<'static>,
+    template_name: &str,
+    status: StatusCode,
+    context: Value,
+) -> Result<Response, LocalAPIError> {
+    let body = env.get_template(template_name)?.render(context)?;
+    Ok((
+        status,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        body,
+    )
+        .into_response())
+}
+
+fn message_page(
+    env: &Environment<'static>,
+    status: StatusCode,
+    heading: &str,
+    message: &str,
+) -> Result<Response, LocalAPIError> {
+    render_html(
+        env,
+        "message.html",
+        status,
+        context! { title => heading, heading, message },
+    )
+}
+
+async fn local_snapshot(
+    agent_state: &ApiState,
+) -> (url::Url, String, Vec<String>, ForegroundState) {
+    let state = agent_state.state.lock().await;
+    let (identity, resource_name) = match &state.config.identity {
+        MTLSIdentity::Anonymous { hostname } => {
+            (format!("Anonymous running on {hostname}"), hostname.clone())
+        }
+        MTLSIdentity::AgentId {
+            agent_name,
+            resource_name,
+        } => (
+            format!("{agent_name} at {resource_name}"),
+            resource_name.clone(),
+        ),
+    };
+    let agents = state
+        .remote_info
+        .as_ref()
+        .map(|remote| {
+            remote
+                .connected_agents
+                .iter()
+                .filter(|agent| agent.resource == resource_name)
+                .map(|agent| agent.san_encoded.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    (
+        state.config.mgmt_api_url.clone(),
+        identity,
+        agents,
+        ForegroundState::from_agent_state(&state),
+    )
+}
+
+async fn foreground_state(agent_state: &ApiState) -> ForegroundState {
+    ForegroundState::from_agent_state(&*agent_state.state.lock().await)
 }
 
 /// Wrapper around the AgentState for the local API server
@@ -196,62 +426,62 @@ pub async fn get_auth(
 async fn serve_index_page(
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<impl IntoResponse, LocalAPIError> {
-    let mut result = String::new();
+) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
-
-    let state = agent_state.state.lock().await;
-
-    match &state.config.identity {
-        crate::config::MTLSIdentity::Anonymous { hostname } => {
-            result += &format!("This agent: Anonymous running on {hostname}",);
-        }
-        crate::config::MTLSIdentity::AgentId {
-            agent_name,
-            resource_name,
-        } => {
-            let matching_agents = state
-                .remote_info
-                .as_ref()
-                .map(|r| r.connected_agents.iter())
-                .into_iter()
-                .flatten()
-                .filter(|a| a.resource == *resource_name);
-            result += "Connected agents at this resource: ";
-            for a in matching_agents {
-                result += &(a.san_encoded.to_owned() + " ");
-            }
-            result += "\n";
-            result += &format!("This agent: {} at {}", agent_name, resource_name);
-        }
-    }
-
-    result += "\n";
-
-    let c = MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password())?;
-
-    let projects = c.list_projects().await?;
-
-    result += "Projects:\n";
-
-    for p in projects
+    let (mgmt_api_url, identity, connected_agents, foreground) = local_snapshot(&agent_state).await;
+    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
+    let projects = c
+        .list_projects()
+        .await?
         .projects
-        .iter()
-        .filter(|p| p.members.contains(&auth.username().to_owned()) || p.owner == auth.username())
-    {
-        result += &p.name;
-        result += "\n";
-    }
+        .into_iter()
+        .filter(|project| {
+            project
+                .members
+                .iter()
+                .any(|member| member == auth.username())
+                || project.owner == auth.username()
+        })
+        .map(|project| LinkItem {
+            href: foreground
+                .is_idle()
+                .then(|| format!("/start-ingest/{}/", encode_path_segment(&project.name))),
+            name: project.name,
+        })
+        .collect::<Vec<_>>();
+    let start_allowed = foreground.is_idle();
+    let foreground = foreground.view()?;
 
-    Ok(result.into_response())
+    render_html(
+        &agent_state.jinja_env,
+        "index.html",
+        StatusCode::OK,
+        context! {
+            title => "modama agent",
+            identity,
+            connected_agents,
+            foreground,
+            projects,
+            start_allowed,
+        },
+    )
 }
 
 async fn start_ingest_step1(
     Path(project_name): Path<String>,
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<impl IntoResponse, LocalAPIError> {
+) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
+
+    if !foreground_state(&agent_state).await.is_idle() {
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::CONFLICT,
+            "Ingest already active",
+            "Close the current ingest before opening another one.",
+        );
+    }
 
     let c = {
         let state = agent_state.state.lock().await;
@@ -259,70 +489,124 @@ async fn start_ingest_step1(
     };
 
     let details = c.project_details(&project_name).await?;
-    let mut resp = String::new();
+    let sessions = details
+        .datasets
+        .into_iter()
+        .map(|session| LinkItem {
+            href: Some(format!(
+                "/start-ingest/{}/{}/",
+                encode_path_segment(&project_name),
+                encode_path_segment(&session.name)
+            )),
+            name: session.name,
+        })
+        .collect::<Vec<_>>();
 
-    for d in &details.datasets {
-        resp += &d.name;
-        resp += "\n";
-    }
-
-    Ok(resp.into_response())
+    render_html(
+        &agent_state.jinja_env,
+        "session_list.html",
+        StatusCode::OK,
+        context! {
+            title => "Select a session",
+            project => project_name,
+            sessions,
+        },
+    )
 }
 
 async fn start_ingest_step2(
     Path((project_name, session_name)): Path<(String, String)>,
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<impl IntoResponse, LocalAPIError> {
+) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
 
-    let c = MgmtClient::new(
-        &agent_state.state.lock().await.config.mgmt_api_url,
-        auth.username(),
-        auth.password(),
-    )?;
+    if !foreground_state(&agent_state).await.is_idle() {
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::CONFLICT,
+            "Ingest already active",
+            "Close the current ingest before opening another one.",
+        );
+    }
+
+    let (mgmt_api_url, _, _, _) = local_snapshot(&agent_state).await;
+    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
 
     let details = c.project_details(&project_name).await?;
 
     if !details.datasets.iter().any(|d| d.name == session_name) {
-        return Ok((StatusCode::NOT_FOUND).into_response());
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::NOT_FOUND,
+            "Session not found",
+            "The selected session does not exist in this project.",
+        );
     }
 
-    let tpl = agent_state
-        .jinja_env
-        .get_template("start_ingest_step2.html")?;
     let res_name = match &agent_state.state.lock().await.config.identity {
-        crate::config::MTLSIdentity::Anonymous { hostname } => hostname.clone(),
-        crate::config::MTLSIdentity::AgentId {
+        MTLSIdentity::Anonymous { hostname } => hostname.clone(),
+        MTLSIdentity::AgentId {
             agent_name: _,
             resource_name,
         } => resource_name.clone(),
     };
-    Ok((
-        [(header::CONTENT_TYPE, "text/html")],
-        tpl.render(context! { resource => res_name, session => session_name })?,
+    let action = format!(
+        "/start-ingest/{}/{}/",
+        encode_path_segment(&project_name),
+        encode_path_segment(&session_name)
+    );
+    render_html(
+        &agent_state.jinja_env,
+        "start_confirm.html",
+        StatusCode::OK,
+        context! {
+            title => "Open ingest",
+            project => project_name,
+            session => session_name,
+            resource => res_name,
+            action,
+        },
     )
-        .into_response())
 }
 
 async fn start_ingest_step3(
     Path((project_name, session_name)): Path<(String, String)>,
     State(agent_state): State<ApiState>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<impl IntoResponse, LocalAPIError> {
+) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
 
-    let c = MgmtClient::new(
-        &agent_state.state.lock().await.config.mgmt_api_url,
-        auth.username(),
-        auth.password(),
-    )?;
+    if !foreground_state(&agent_state).await.is_idle() {
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::CONFLICT,
+            "Ingest already active",
+            "Close the current ingest before opening another one.",
+        );
+    }
+
+    let mgmt_api_url = agent_state.state.lock().await.config.mgmt_api_url.clone();
+    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
 
     let details = c.project_details(&project_name).await?;
-    let mut resp = String::new();
 
     if !details.datasets.iter().any(|d| d.name == session_name) {
-        return Ok((StatusCode::NOT_FOUND).into_response());
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::NOT_FOUND,
+            "Session not found",
+            "The selected session does not exist in this project.",
+        );
+    }
+
+    if !foreground_state(&agent_state).await.is_idle() {
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::CONFLICT,
+            "Ingest already active",
+            "Close the current ingest before opening another one.",
+        );
     }
 
     let sign_response = agent_state.token_provider.fetch_token().await?;
@@ -334,9 +618,61 @@ async fn start_ingest_step3(
     )
     .await?;
 
-    resp += "share created!";
+    Ok(Redirect::to("/").into_response())
+}
 
-    Ok(resp.into_response())
+async fn close_ingest_confirmation(
+    Path(share_id): Path<String>,
+    State(agent_state): State<ApiState>,
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+) -> Result<Response, LocalAPIError> {
+    let _auth = get_auth(auth).await?;
+    let foreground = foreground_state(&agent_state).await;
+    let Some(mounted) = foreground.open_share(&share_id) else {
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::CONFLICT,
+            "Ingest cannot be closed",
+            "This ingest is not the currently open foreground ingest.",
+        );
+    };
+    let (project, session) = project_and_session(&mounted.share.dest_path)?;
+    let action = format!("/close-ingest/{}/", encode_path_segment(&share_id));
+
+    render_html(
+        &agent_state.jinja_env,
+        "close_confirm.html",
+        StatusCode::OK,
+        context! {
+            title => "Close ingest",
+            project,
+            session,
+            action,
+        },
+    )
+}
+
+async fn close_ingest(
+    Path(share_id): Path<String>,
+    State(agent_state): State<ApiState>,
+    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+) -> Result<Response, LocalAPIError> {
+    let auth = get_auth(auth).await?;
+    let foreground = foreground_state(&agent_state).await;
+    if foreground.open_share(&share_id).is_none() {
+        return message_page(
+            &agent_state.jinja_env,
+            StatusCode::CONFLICT,
+            "Ingest cannot be closed",
+            "This ingest is not the currently open foreground ingest.",
+        );
+    }
+
+    let mgmt_api_url = agent_state.state.lock().await.config.mgmt_api_url.clone();
+    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
+    c.delete_share(&share_id).await?;
+
+    Ok(Redirect::to("/").into_response())
 }
 
 pub async fn serve_local_web_api(
@@ -364,7 +700,9 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
         .route(
             "/start-ingest/{project_name}/{session_name}/",
             post(start_ingest_step3),
-        );
+        )
+        .route("/close-ingest/{share_id}/", get(close_ingest_confirmation))
+        .route("/close-ingest/{share_id}/", post(close_ingest));
 
     add_api_routes(router, state)
 }
@@ -460,6 +798,35 @@ mod tests {
 
             Self { app, shared_state }
         }
+    }
+
+    fn mounted_foreground_share(share_id: &str) -> MountedShare {
+        MountedShare {
+            share: MessageShare {
+                resource: Some("res".to_owned()),
+                share_id: share_id.to_owned(),
+                share_name: "share-name".to_owned(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: "share-user".to_owned(),
+                password: "secret-password".to_owned(),
+                uid: 1001,
+                gid: 1001,
+            },
+            mount_path: PathBuf::from("/mnt/ingest"),
+        }
+    }
+
+    async fn set_open_foreground(test_setup: &TestSetup, share_id: &str) {
+        let mounted = mounted_foreground_share(share_id);
+        let mut state = test_setup.shared_state.lock().await;
+        state
+            .remote_info
+            .as_mut()
+            .unwrap()
+            .desired_shares
+            .foreground_share = Some(mounted.share.clone());
+        state.current_shares.foreground_share = Some(mounted);
     }
 
     #[tokio::test]
@@ -703,12 +1070,85 @@ mod tests {
 
         let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let body_str = String::from_utf8(bytes.to_vec()).unwrap();
-        assert!(body_str.contains("x-modama-agent://res#agent"));
+        assert!(body_str.contains("x-modama-agent:&#x2f;&#x2f;res#agent"));
         assert!(body_str.contains("agent-name"));
         assert!(body_str.contains("the-project"));
+        assert!(body_str.contains("href=\"/start-ingest/the%2Dproject/\""));
+        assert!(!body_str.contains("<script"));
+        assert!(!body_str.contains("<style"));
+    }
+
+    #[test]
+    fn html_values_are_escaped_and_route_segments_are_encoded() {
+        let env = create_env();
+        let rendered = env
+            .get_template("message.html")
+            .unwrap()
+            .render(context! {
+                title => "Unsafe <title>",
+                heading => "Unsafe <heading>",
+                message => "<script>alert('unsafe')</script>",
+            })
+            .unwrap();
+
+        assert!(!rendered.contains("<script>"));
+        assert!(rendered.contains("&lt;script&gt;"));
+        assert_eq!(
+            encode_path_segment("old/project & session"),
+            "old%2Fproject%20%26%20session"
+        );
+    }
+
+    #[tokio::test]
+    async fn index_only_offers_close_for_an_open_foreground_ingest() {
+        let test_setup = TestSetup::start().await;
+        set_open_foreground(&test_setup, "share-123").await;
+
+        let projects = ListProjectsResponse {
+            errno: 0,
+            projects: vec![AdhocProject {
+                relpath: "the-project".to_owned(),
+                name: "the-project".to_owned(),
+                owner: "testuser".to_owned(),
+                members: vec![],
+                ctime: 0.0,
+                mtime: 0.0,
+                gid: 1001,
+                usage_bytes: None,
+            }],
+        };
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/project/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&projects).unwrap())
+            .create_async()
+            .await;
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
+
+        let req = Request::builder()
+            .uri("/")
+            .method("GET")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8_lossy(&body);
+
+        assert!(body.contains("Status: open"));
+        assert!(body.contains("href=\"/close-ingest/share%2D123/\""));
+        assert!(!body.contains("href=\"/start-ingest/"));
+        assert!(!body.contains("secret-password"));
     }
 
     #[tokio::test]
@@ -778,6 +1218,7 @@ mod tests {
         let body_str = String::from_utf8(bytes.to_vec()).unwrap();
 
         assert!(body_str.contains("test-session"));
+        assert!(body_str.contains("href=\"/start-ingest/the%2Dproject/test%2Dsession/\""));
     }
 
     #[tokio::test]
@@ -910,7 +1351,12 @@ mod tests {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let body_str = String::from_utf8(bytes.to_vec()).unwrap();
 
-        assert!(body_str.contains("<form action='.' method='post'"));
+        assert!(body_str.contains(
+            "<form action=\"/start-ingest/the%2Dproject/test%2Dsession/\" method=\"post\""
+        ));
+        assert!(body_str.contains("Project: the-project"));
+        assert!(body_str.contains("Session: test-session"));
+        assert!(body_str.contains("Resource: res"));
     }
 
     #[tokio::test]
@@ -1014,12 +1460,8 @@ mod tests {
         let resp = test_setup.app.oneshot(req).await.unwrap();
         mock_details.assert_async().await;
         mock_create_share.assert_async().await;
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
-
-        assert!(body_str.contains("share created!"));
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/");
     }
 
     #[tokio::test]
@@ -1093,6 +1535,84 @@ mod tests {
         mock_details.assert_async().await;
         mock_create_share.assert_async().await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn active_foreground_ingest_prevents_starting_another() {
+        let test_setup = TestSetup::start().await;
+        set_open_foreground(&test_setup, "current-share").await;
+
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/test-session/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert!(String::from_utf8_lossy(&body).contains("Close the current ingest"));
+    }
+
+    #[tokio::test]
+    async fn close_ingest_requires_confirmation_and_redirects_after_deletion() {
+        let test_setup = TestSetup::start().await;
+        set_open_foreground(&test_setup, "share-123").await;
+
+        let mut server = mockito::Server::new_async().await;
+        let delete = server
+            .mock("DELETE", "/api/share/share-123/")
+            .match_header("authorization", "Basic dGVzdHVzZXI6cGFzcw==")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"ok"}"#)
+            .create_async()
+            .await;
+        test_setup.shared_state.lock().await.config.mgmt_api_url =
+            Url::parse(&server.url()).unwrap();
+
+        let req = Request::builder()
+            .uri("/close-ingest/share-123/")
+            .method("GET")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+        let resp = test_setup.app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("Project: the-project"));
+        assert!(body.contains("Session: test-session"));
+        assert!(body.contains("<form action=\"/close-ingest/share%2D123/\" method=\"post\""));
+        assert!(!body.contains("secret-password"));
+
+        let req = Request::builder()
+            .uri("/close-ingest/share-123/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/");
+        delete.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn stale_close_link_does_not_delete_a_share() {
+        let test_setup = TestSetup::start().await;
+        set_open_foreground(&test_setup, "current-share").await;
+
+        let req = Request::builder()
+            .uri("/close-ingest/stale-share/")
+            .method("POST")
+            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .body(Body::empty())
+            .unwrap();
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]

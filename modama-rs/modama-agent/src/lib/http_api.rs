@@ -37,7 +37,9 @@ pub enum ShareDestinationError {
     MissingProject { dest_path: String },
 }
 
-fn project_and_session(dest_path: &str) -> Result<(String, String), ShareDestinationError> {
+pub(crate) fn project_and_session(
+    dest_path: &str,
+) -> Result<(String, String), ShareDestinationError> {
     let mut components = dest_path.split('/').filter(|part| !part.is_empty()).rev();
     let session = components
         .next()
