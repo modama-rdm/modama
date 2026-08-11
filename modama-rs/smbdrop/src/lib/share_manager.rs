@@ -619,6 +619,39 @@ impl<U: UserProvider> ShareConfigFile<U> {
 
 static PATH_RE: OnceCell<Regex> = OnceCell::const_new();
 
+const SHARE_NAME_HUMAN_PART_MAX_LEN: usize = 47;
+
+fn sanitize_share_name_human_part(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .filter_map(|character| match character {
+            ' ' => Some('-'),
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => Some(character),
+            _ => None,
+        })
+        .collect();
+
+    if sanitized.is_empty() {
+        "share".to_owned()
+    } else {
+        sanitized
+    }
+}
+
+fn make_share_name(dest_path: &Path, share_id: &uuid::Uuid) -> String {
+    let human_part = dest_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(sanitize_share_name_human_part)
+        .unwrap_or_else(|| "share".to_owned());
+    let human_part: String = human_part
+        .chars()
+        .take(SHARE_NAME_HUMAN_PART_MAX_LEN)
+        .collect();
+
+    format!("{human_part}-{}", share_id.simple())
+}
+
 async fn get_path_re() -> &'static Regex {
     PATH_RE
         .get_or_init(|| async {
@@ -794,6 +827,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         }
 
         let share_id = uuid::Uuid::new_v4();
+        let share_name = make_share_name(Path::new(dest_path), &share_id);
         let share_id = share_id.hyphenated().to_string();
 
         let config_file = self.config_file.lock().await;
@@ -813,7 +847,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         let share = Share {
             resource,
             share_id: share_id.clone(),
-            share_name: format!("share-{share_id}"),
+            share_name,
             dest_path: dest_path.to_owned(),
             username: user.username.clone(),
             password: user.password.clone(),
@@ -1052,15 +1086,59 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::{collections::HashMap, path::Path, sync::Arc};
 
     use log::debug;
     use modama_common::{logging::init_logging, messages::Share, test_helpers::TempDir};
 
     use crate::{
-        share_manager::{ShareConfigFile, ShareError, ShareManager, SmbDropState},
+        share_manager::{
+            make_share_name, sanitize_share_name_human_part, ShareConfigFile, ShareError,
+            ShareManager, SmbDropState,
+        },
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
+
+    #[test]
+    fn test_sanitize_share_name_human_part() {
+        assert_eq!(
+            sanitize_share_name_human_part("Session 01-A_b"),
+            "Session-01-A_b"
+        );
+        assert_eq!(sanitize_share_name_human_part("Session  01"), "Session--01");
+        assert_eq!(sanitize_share_name_human_part("résumé.v1\t[x]"), "rsumv1x");
+        assert_eq!(sanitize_share_name_human_part("\n\r\t.é"), "share");
+    }
+
+    #[test]
+    fn test_make_share_name() {
+        let share_id = uuid::Uuid::parse_str("123e4567-e89b-42d3-a456-426614174000").unwrap();
+
+        assert_eq!(
+            make_share_name(Path::new("/adhoc/project/My Session/"), &share_id),
+            "My-Session-123e4567e89b42d3a456426614174000"
+        );
+        assert_eq!(
+            make_share_name(Path::new("/"), &share_id),
+            "share-123e4567e89b42d3a456426614174000"
+        );
+    }
+
+    #[test]
+    fn test_make_share_name_truncates_to_windows_limit() {
+        let share_id = uuid::Uuid::parse_str("123e4567-e89b-42d3-a456-426614174000").unwrap();
+        let path = format!("/adhoc/project/{}/", "A".repeat(48));
+        let share_name = make_share_name(Path::new(&path), &share_id);
+
+        assert_eq!(share_name.len(), 80);
+        assert_eq!(
+            share_name,
+            format!("{}-123e4567e89b42d3a456426614174000", "A".repeat(47))
+        );
+        assert!(share_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
+    }
 
     #[tokio::test]
     async fn test_smbdrop_state_get_or_create_user() {
