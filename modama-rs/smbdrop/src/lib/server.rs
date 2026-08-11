@@ -106,7 +106,8 @@ impl ShareReadiness for SmbShareReadiness {
         let server = format!("{}:445", self.server);
         Box::pin(async move {
             let mut conn = smb2::connect(&server, &share.username, &share.password).await?;
-            conn.connect_share(&share.share_name).await?;
+            let tree = conn.connect_share(&share.share_name).await?;
+            conn.disconnect_share(&tree).await?;
             Ok(())
         })
     }

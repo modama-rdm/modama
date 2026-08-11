@@ -31,7 +31,7 @@
 - [ ] test long project and ingest-share session names against backend limits
 - [ ] general design fixes
     - [ ] Review vertical and horizontal flow: pixel peep a bit and check typographic baselines of horizontally aligned items, and horizontal guide lines where text starts (or stops at the right edge!!!!)
-- [ ] show a lil indicator/spinner in overview or top bar if foreground state polling fails
+- [ ] show a lil indicator/spinner in overview or top bar if last foreground share polling failed
 
 ## Minimal HTML UI
 
