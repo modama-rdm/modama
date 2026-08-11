@@ -6,7 +6,7 @@ use std::{
 use crate::{
     api_client::{
         generated::client::ApiOpError, APIAgentIdentity, APICreateSessionRequest,
-        APICurrentForegroundShare, AgentClient,
+        APICurrentForegroundShare, APIHealthCheckResponse, AgentClient,
     },
     state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession, PendingSession},
 };
@@ -43,6 +43,7 @@ pub enum ServiceError {
 
 pub trait AgentService: Send + Sync {
     fn connect(&self) -> Result<ConnectedAgent, ServiceError>;
+    fn health(&self) -> Result<(), ServiceError>;
     fn foreground(&self) -> Result<ForegroundSession, ServiceError>;
     fn login(&self, credentials: &Credentials) -> Result<(), ServiceError>;
     fn list_projects(&self, credentials: &Credentials)
@@ -167,6 +168,19 @@ impl AgentService for HttpAgentService {
             identity,
             foreground: self.foreground()?,
         })
+    }
+
+    fn health(&self) -> Result<(), ServiceError> {
+        match self
+            .runtime
+            .block_on(self.client.health())
+            .map_err(map_api_error)?
+        {
+            APIHealthCheckResponse::APIHealthCheckResponseVariant(_) => Ok(()),
+            APIHealthCheckResponse::APIHealthCheckResponseVariant2(_) => Err(
+                ServiceError::InvalidResponse("agent reported that it is not available".to_owned()),
+            ),
+        }
     }
 
     fn foreground(&self) -> Result<ForegroundSession, ServiceError> {
@@ -329,6 +343,10 @@ impl AgentService for StubAgentService {
         })
     }
 
+    fn health(&self) -> Result<(), ServiceError> {
+        Ok(())
+    }
+
     fn foreground(&self) -> Result<ForegroundSession, ServiceError> {
         Ok(self
             .state
@@ -462,6 +480,81 @@ mod tests {
             service.create_session(&credentials("user"), "project", "forbidden-session"),
             Err(ServiceError::Server { status: 400, .. })
         ));
+    }
+
+    #[test]
+    fn http_service_accepts_healthy_agent() -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/health/")
+            .match_header("x-api-version", "1.0.0")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"type":"Ok"}"#)
+            .create();
+
+        HttpAgentService::new(server.url())?.health()?;
+        mock.assert();
+        Ok(())
+    }
+
+    #[test]
+    fn http_service_rejects_unhealthy_success_response() -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/health/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"type":"NotAvailable"}"#)
+            .create();
+
+        assert!(matches!(
+            HttpAgentService::new(server.url())?.health(),
+            Err(ServiceError::InvalidResponse(_))
+        ));
+        mock.assert();
+        Ok(())
+    }
+
+    #[test]
+    fn http_service_maps_unavailable_and_malformed_health() -> Result<(), Box<dyn std::error::Error>>
+    {
+        for (status, body, expected_status) in [
+            (503, r#"{"type":"NotAvailable"}"#, Some(503)),
+            (200, "not json", None),
+        ] {
+            let mut server = mockito::Server::new();
+            let mock = server
+                .mock("GET", "/api/health/")
+                .with_status(status)
+                .with_header("content-type", "application/json")
+                .with_body(body)
+                .create();
+
+            let error = HttpAgentService::new(server.url())?.health().unwrap_err();
+            if let Some(expected_status) = expected_status {
+                assert!(matches!(
+                    error,
+                    ServiceError::Server {
+                        status,
+                        ..
+                    } if status == expected_status
+                ));
+            } else {
+                assert!(matches!(error, ServiceError::InvalidResponse(_)));
+            }
+            mock.assert();
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn http_service_maps_health_transport_error() -> Result<(), Box<dyn std::error::Error>> {
+        assert!(matches!(
+            HttpAgentService::new("not a URL")?.health(),
+            Err(ServiceError::Transport(_))
+        ));
+        Ok(())
     }
 
     #[test]

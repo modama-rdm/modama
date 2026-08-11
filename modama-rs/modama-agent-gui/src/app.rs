@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::{
     actions::{Action, LoginDestination, RetryAction, TaskFailure},
     components::toast::{ToastAction, ToastState},
-    foreground_monitor::ForegroundMonitor,
+    foreground_monitor::{ForegroundMonitor, ForegroundMonitorUpdate},
     navigation_progress::NavigationProgress,
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
@@ -171,6 +171,12 @@ impl AgentGuiApp {
             Action::ForegroundChanged(foreground) => {
                 self.app_state.observe_foreground(foreground);
             }
+            Action::ConnectionDropped => {
+                self.app_state.connection_dropped = true;
+            }
+            Action::ConnectionRestored => {
+                self.app_state.connection_dropped = false;
+            }
             Action::GoToOverview => {
                 self.toast.clear();
                 self.page = self.overview_page();
@@ -207,6 +213,7 @@ impl AgentGuiApp {
                 self.page = self.overview_page();
                 self.app_state.identity = Some(identity);
                 self.app_state.foreground = foreground;
+                self.app_state.connection_dropped = false;
             }
             Action::TaskFailed(failure) => self.handle_task_failure(failure),
         }
@@ -238,12 +245,28 @@ impl AgentGuiApp {
     }
 
     fn poll_foreground_monitor(&mut self) {
-        while let Some(update) = self
+        while let Some(result) = self
             .foreground_monitor
             .as_ref()
-            .and_then(|monitor| monitor.try_recv().ok())
+            .map(ForegroundMonitor::try_recv)
         {
-            self.handle_action(Action::ForegroundChanged(update));
+            match result {
+                Ok(ForegroundMonitorUpdate::ForegroundChanged(foreground)) => {
+                    self.handle_action(Action::ForegroundChanged(foreground));
+                }
+                Ok(ForegroundMonitorUpdate::ConnectionDropped) => {
+                    self.handle_action(Action::ConnectionDropped);
+                }
+                Ok(ForegroundMonitorUpdate::ConnectionRestored) => {
+                    self.handle_action(Action::ConnectionRestored);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.foreground_monitor = None;
+                    self.handle_action(Action::ConnectionDropped);
+                    break;
+                }
+            }
         }
     }
 
@@ -369,7 +392,11 @@ impl eframe::App for AgentGuiApp {
             }
         }
 
-        self.navigation_progress.show(ui.ctx(), self.page.is_busy());
+        self.navigation_progress.show(
+            ui.ctx(),
+            self.page.is_busy(),
+            self.app_state.connection_dropped,
+        );
     }
 }
 
@@ -595,6 +622,17 @@ mod tests {
             app.app_state.foreground,
             crate::state::ForegroundSession::None
         );
+    }
+
+    #[test]
+    fn monitor_connection_events_track_the_latest_attempt() {
+        let mut app = AgentGuiApp::new();
+
+        app.handle_action(Action::ConnectionDropped);
+        assert!(app.app_state.connection_dropped);
+
+        app.handle_action(Action::ConnectionRestored);
+        assert!(!app.app_state.connection_dropped);
     }
 
     #[test]

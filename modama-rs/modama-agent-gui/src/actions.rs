@@ -56,6 +56,8 @@ pub enum Action {
         failure: Option<TaskFailure>,
     },
     ForegroundChanged(ForegroundSession),
+    ConnectionDropped,
+    ConnectionRestored,
     GoToOverview,
     CloseRequested {
         operation_id: OperationId,

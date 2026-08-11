@@ -91,6 +91,9 @@ pub struct AgentAppState {
     /// Foreground ingest state reported by the local agent.
     pub foreground: ForegroundSession,
 
+    /// Whether the most recent background monitor cycle failed.
+    pub connection_dropped: bool,
+
     session_operations: SessionOperations,
 
     /// Agent mTLS identity, should be set once we are connected

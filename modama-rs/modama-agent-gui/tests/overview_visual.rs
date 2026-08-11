@@ -156,7 +156,32 @@ fn overview_snapshots() {
     error_toast.snapshot("overview_error_toast");
     results.extend_harness(&mut error_toast);
 
+    let mut connection_dropped = overview_harness(false, true);
+    connection_dropped.state_mut().app_state.connection_dropped = true;
+    connection_dropped.run_steps(2);
+    connection_dropped.snapshot("overview_connection_dropped");
+    results.extend_harness(&mut connection_dropped);
+
     results.unwrap();
+}
+
+#[test]
+fn dropped_connection_indicator_does_not_disable_controls() {
+    let mut harness = overview_harness(false, true);
+    harness.state_mut().app_state.connection_dropped = true;
+    harness.run_steps(2);
+
+    assert!(harness
+        .query_by_role_and_label(
+            egui::accesskit::Role::ProgressIndicator,
+            "Connection dropped; retrying"
+        )
+        .is_some());
+    for label in ["go to Overview", "Close Session", "Log out"] {
+        assert!(harness
+            .query_by(|node| node.label().as_deref() == Some(label) && !node.is_disabled())
+            .is_some());
+    }
 }
 
 #[test]

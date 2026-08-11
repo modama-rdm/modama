@@ -8,28 +8,34 @@ const SHOW_DELAY_SECONDS: f64 = 0.150;
 const SWEEP_SECONDS: f64 = 1.1;
 const SEGMENT_FRACTION: f32 = 1.0 / 3.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProgressKind {
+    Busy,
+    ConnectionDropped,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ProgressStatus {
     Hidden,
     Delayed { remaining_seconds: f64 },
-    Visible { phase: f32 },
+    Visible { phase: f32, kind: ProgressKind },
 }
 
 #[derive(Default)]
 pub(crate) struct NavigationProgress {
-    busy_since: Option<f64>,
+    active: Option<(ProgressKind, f64)>,
 }
 
 impl NavigationProgress {
-    pub(crate) fn show(&mut self, ctx: &egui::Context, busy: bool) {
+    pub(crate) fn show(&mut self, ctx: &egui::Context, busy: bool, connection_dropped: bool) {
         let now = ctx.input(|input| input.time);
-        let phase = match self.advance(now, busy) {
+        let (phase, kind) = match self.advance(now, busy, connection_dropped) {
             ProgressStatus::Hidden => return,
             ProgressStatus::Delayed { remaining_seconds } => {
                 ctx.request_repaint_after(Duration::from_secs_f64(remaining_seconds));
                 return;
             }
-            ProgressStatus::Visible { phase } => phase,
+            ProgressStatus::Visible { phase, kind } => (phase, kind),
         };
 
         ctx.request_repaint();
@@ -44,38 +50,66 @@ impl NavigationProgress {
                     styles::components::navigation_progress::height::EGUI_POINTS,
                 );
                 let (track, response) = ui.allocate_exact_size(size, Sense::hover());
+                let label = match kind {
+                    ProgressKind::Busy => "Loading",
+                    ProgressKind::ConnectionDropped => "Connection dropped; retrying",
+                };
                 response.widget_info(|| {
-                    WidgetInfo::labeled(WidgetType::ProgressIndicator, true, "Loading")
+                    WidgetInfo::labeled(WidgetType::ProgressIndicator, true, label)
                 });
 
-                let primary = styles::color::primary::VALUE.resolve(ui.visuals());
+                let color = match kind {
+                    ProgressKind::Busy => styles::color::primary::VALUE.resolve(ui.visuals()),
+                    ProgressKind::ConnectionDropped => {
+                        styles::color::error::VALUE.resolve(ui.visuals())
+                    }
+                };
                 ui.painter()
-                    .rect_filled(track, 0.0, primary.gamma_multiply(0.20));
+                    .rect_filled(track, 0.0, color.gamma_multiply(0.20));
                 ui.painter().with_clip_rect(track).rect_filled(
                     segment_rect(track, phase),
                     0.0,
-                    primary,
+                    color,
                 );
             });
     }
 
-    fn advance(&mut self, now: f64, busy: bool) -> ProgressStatus {
-        if !busy {
-            self.busy_since = None;
+    fn advance(&mut self, now: f64, busy: bool, connection_dropped: bool) -> ProgressStatus {
+        let kind = if connection_dropped {
+            Some(ProgressKind::ConnectionDropped)
+        } else if busy {
+            Some(ProgressKind::Busy)
+        } else {
+            None
+        };
+        let Some(kind) = kind else {
+            self.active = None;
             return ProgressStatus::Hidden;
-        }
+        };
 
-        let busy_since = *self.busy_since.get_or_insert(now);
-        let elapsed = (now - busy_since).max(0.0);
-        if elapsed < SHOW_DELAY_SECONDS {
+        let active_since = match self.active {
+            Some((active_kind, since)) if active_kind == kind => since,
+            _ => {
+                self.active = Some((kind, now));
+                now
+            }
+        };
+        let elapsed = (now - active_since).max(0.0);
+        if kind == ProgressKind::Busy && elapsed < SHOW_DELAY_SECONDS {
             return ProgressStatus::Delayed {
                 remaining_seconds: SHOW_DELAY_SECONDS - elapsed,
             };
         }
 
-        let phase = ((elapsed - SHOW_DELAY_SECONDS) % SWEEP_SECONDS) / SWEEP_SECONDS;
+        let animation_elapsed = if kind == ProgressKind::Busy {
+            elapsed - SHOW_DELAY_SECONDS
+        } else {
+            elapsed
+        };
+        let phase = (animation_elapsed % SWEEP_SECONDS) / SWEEP_SECONDS;
         ProgressStatus::Visible {
             phase: phase as f32,
+            kind,
         }
     }
 }
@@ -99,22 +133,25 @@ mod tests {
         let mut progress = NavigationProgress::default();
 
         assert_eq!(
-            progress.advance(10.0, true),
+            progress.advance(10.0, true, false),
             ProgressStatus::Delayed {
                 remaining_seconds: SHOW_DELAY_SECONDS
             }
         );
         assert!(matches!(
-            progress.advance(10.149, true),
+            progress.advance(10.149, true, false),
             ProgressStatus::Delayed { .. }
         ));
         assert!(matches!(
-            progress.advance(10.150, true),
+            progress.advance(10.150, true, false),
             ProgressStatus::Visible { .. }
         ));
-        assert_eq!(progress.advance(10.151, false), ProgressStatus::Hidden);
         assert_eq!(
-            progress.advance(20.0, true),
+            progress.advance(10.151, false, false),
+            ProgressStatus::Hidden
+        );
+        assert_eq!(
+            progress.advance(20.0, true, false),
             ProgressStatus::Delayed {
                 remaining_seconds: SHOW_DELAY_SECONDS
             }
@@ -124,9 +161,9 @@ mod tests {
     #[test]
     fn animation_repeats_and_segment_geometry_stays_constant() {
         let mut progress = NavigationProgress::default();
-        let _ = progress.advance(5.0, true);
-        let ProgressStatus::Visible { phase } =
-            progress.advance(5.0 + SHOW_DELAY_SECONDS + SWEEP_SECONDS, true)
+        let _ = progress.advance(5.0, true, false);
+        let ProgressStatus::Visible { phase, .. } =
+            progress.advance(5.0 + SHOW_DELAY_SECONDS + SWEEP_SECONDS, true, false)
         else {
             panic!("the progress bar should be visible");
         };
@@ -139,5 +176,19 @@ mod tests {
         assert_eq!(end.width(), 100.0);
         assert_eq!(start.right(), track.left());
         assert_eq!(end.left(), track.right());
+    }
+
+    #[test]
+    fn connection_error_is_immediate_and_takes_precedence() {
+        let mut progress = NavigationProgress::default();
+
+        assert_eq!(
+            progress.advance(10.0, true, true),
+            ProgressStatus::Visible {
+                phase: 0.0,
+                kind: ProgressKind::ConnectionDropped,
+            }
+        );
+        assert_eq!(progress.advance(10.1, false, false), ProgressStatus::Hidden);
     }
 }

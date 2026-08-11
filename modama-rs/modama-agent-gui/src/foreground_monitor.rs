@@ -6,13 +6,25 @@ use std::{
 use eframe::egui;
 
 use crate::{
-    service::{AgentService, POLL_INTERVAL},
+    service::{AgentService, ServiceError, POLL_INTERVAL},
     state::ForegroundSession,
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ForegroundMonitorUpdate {
+    ForegroundChanged(ForegroundSession),
+    ConnectionDropped,
+    ConnectionRestored,
+}
+
 pub struct ForegroundMonitor {
-    updates: mpsc::Receiver<ForegroundSession>,
+    updates: mpsc::Receiver<ForegroundMonitorUpdate>,
     stop: mpsc::Sender<()>,
+}
+
+fn poll_service(service: &dyn AgentService) -> Result<ForegroundSession, ServiceError> {
+    service.health()?;
+    service.foreground()
 }
 
 impl ForegroundMonitor {
@@ -25,17 +37,33 @@ impl ForegroundMonitor {
         let (stop, stop_rx) = mpsc::channel();
         thread::spawn(move || {
             let mut last = initial;
+            let mut connection_dropped = false;
             loop {
-                match service.foreground() {
-                    Ok(foreground) if foreground != last => {
-                        last = foreground.clone();
-                        if update_tx.send(foreground).is_err() {
-                            break;
+                let mut updates = Vec::with_capacity(2);
+                match poll_service(service.as_ref()) {
+                    Ok(foreground) => {
+                        if connection_dropped {
+                            connection_dropped = false;
+                            updates.push(ForegroundMonitorUpdate::ConnectionRestored);
                         }
-                        ctx.request_repaint();
+                        if foreground != last {
+                            last = foreground.clone();
+                            updates.push(ForegroundMonitorUpdate::ForegroundChanged(foreground));
+                        }
                     }
-                    Ok(_) => {}
-                    Err(error) => log::warn!("foreground-state poll failed: {error}"),
+                    Err(error) => {
+                        log::warn!("agent monitor poll failed: {error}");
+                        if !connection_dropped {
+                            connection_dropped = true;
+                            updates.push(ForegroundMonitorUpdate::ConnectionDropped);
+                        }
+                    }
+                }
+                for update in updates {
+                    if update_tx.send(update).is_err() {
+                        return;
+                    }
+                    ctx.request_repaint();
                 }
                 if stop_rx.recv_timeout(POLL_INTERVAL).is_ok() {
                     break;
@@ -45,7 +73,7 @@ impl ForegroundMonitor {
         Self { updates, stop }
     }
 
-    pub fn try_recv(&self) -> Result<ForegroundSession, mpsc::TryRecvError> {
+    pub fn try_recv(&self) -> Result<ForegroundMonitorUpdate, mpsc::TryRecvError> {
         self.updates.try_recv()
     }
 }
@@ -68,7 +96,8 @@ mod tests {
     use super::*;
 
     struct ForegroundOnlyService {
-        foreground: Mutex<ForegroundSession>,
+        health: Mutex<Result<(), ServiceError>>,
+        foreground: Mutex<Result<ForegroundSession, ServiceError>>,
     }
 
     impl AgentService for ForegroundOnlyService {
@@ -76,8 +105,12 @@ mod tests {
             unreachable!()
         }
 
+        fn health(&self) -> Result<(), ServiceError> {
+            self.health.lock().unwrap().clone()
+        }
+
         fn foreground(&self) -> Result<ForegroundSession, ServiceError> {
-            Ok(self.foreground.lock().unwrap().clone())
+            self.foreground.lock().unwrap().clone()
         }
 
         fn login(&self, _credentials: &Credentials) -> Result<(), ServiceError> {
@@ -126,6 +159,22 @@ mod tests {
         }
     }
 
+    fn recv_before_deadline(
+        monitor: &ForegroundMonitor,
+        timeout: Duration,
+    ) -> ForegroundMonitorUpdate {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match monitor.try_recv() {
+                Ok(update) => return update,
+                Err(mpsc::TryRecvError::Empty) if std::time::Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => panic!("monitor did not forward state: {result:?}"),
+            }
+        }
+    }
+
     #[test]
     fn monitor_forwards_changed_foreground_state() {
         let expected = ForegroundSession::Mounting(PendingSession {
@@ -134,23 +183,57 @@ mod tests {
             session: "session".to_owned(),
         });
         let service: Arc<dyn AgentService> = Arc::new(ForegroundOnlyService {
-            foreground: Mutex::new(expected.clone()),
+            health: Mutex::new(Ok(())),
+            foreground: Mutex::new(Ok(expected.clone())),
         });
         let monitor =
             ForegroundMonitor::start(service, ForegroundSession::None, egui::Context::default());
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(1);
-        loop {
-            match monitor.try_recv() {
-                Ok(update) => {
-                    assert_eq!(update, expected);
-                    break;
-                }
-                Err(mpsc::TryRecvError::Empty) if std::time::Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                result => panic!("monitor did not forward state: {result:?}"),
-            }
-        }
+        assert_eq!(
+            recv_before_deadline(&monitor, Duration::from_secs(1)),
+            ForegroundMonitorUpdate::ForegroundChanged(expected)
+        );
+    }
+
+    #[test]
+    fn monitor_reports_failure_once_and_recovers_without_foreground_change() {
+        let service = Arc::new(ForegroundOnlyService {
+            health: Mutex::new(Err(ServiceError::Server {
+                status: 503,
+                message: "not available".to_owned(),
+            })),
+            foreground: Mutex::new(Ok(ForegroundSession::None)),
+        });
+        let monitor = ForegroundMonitor::start(
+            Arc::clone(&service) as Arc<dyn AgentService>,
+            ForegroundSession::None,
+            egui::Context::default(),
+        );
+
+        assert_eq!(
+            recv_before_deadline(&monitor, Duration::from_secs(1)),
+            ForegroundMonitorUpdate::ConnectionDropped
+        );
+        thread::sleep(POLL_INTERVAL + Duration::from_millis(50));
+        assert_eq!(monitor.try_recv(), Err(mpsc::TryRecvError::Empty));
+
+        *service.health.lock().unwrap() = Ok(());
+        assert_eq!(
+            recv_before_deadline(&monitor, Duration::from_secs(1)),
+            ForegroundMonitorUpdate::ConnectionRestored
+        );
+    }
+
+    #[test]
+    fn foreground_error_makes_the_combined_poll_fail() {
+        let service = ForegroundOnlyService {
+            health: Mutex::new(Ok(())),
+            foreground: Mutex::new(Err(ServiceError::Transport("dropped".to_owned()))),
+        };
+
+        assert_eq!(
+            poll_service(&service),
+            Err(ServiceError::Transport("dropped".to_owned()))
+        );
     }
 }
