@@ -124,6 +124,10 @@ impl AgentGuiApp {
                         }
                         self.page = Page::Overview(page);
                     }
+                    LoginDestination::Overview => {
+                        self.page =
+                            Page::Overview(PageOverview::with_service(Arc::clone(&self.service)))
+                    }
                 }
             }
             Action::GoToSelectProject => {

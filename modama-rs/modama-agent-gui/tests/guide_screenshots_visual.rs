@@ -8,6 +8,12 @@ fn guide_image_dir() -> PathBuf {
 }
 
 #[test]
+fn sentinel_wgpu_debug_disabled() {
+    let val = std::env::var("WGPU_DEBUG").expect("WGPU_DEBUG should be set");
+    assert_eq!(val, "0");
+}
+
+#[test]
 fn guide_screenshots_match_the_mdbook_assets() {
     let options = SnapshotOptions::new().output_path(guide_image_dir());
     let mut results = SnapshotResults::new();

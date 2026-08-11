@@ -12,6 +12,12 @@ use modama_agent_gui::{
 use std::sync::{Arc, Barrier};
 
 #[test]
+fn sentinel_wgpu_debug_disabled() {
+    let val = std::env::var("WGPU_DEBUG").expect("WGPU_DEBUG should be set");
+    assert_eq!(val, "0");
+}
+
+#[test]
 fn enabled_top_bar_controls_use_pointing_hand_cursor() {
     let mut harness = overview_harness(false, false);
     harness.run_steps(3);

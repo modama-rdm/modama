@@ -11,6 +11,12 @@ use std::sync::{Arc, Barrier};
 
 const VIEWPORT: egui::Vec2 = egui::vec2(1024.0, 1024.0);
 
+#[test]
+fn sentinel_wgpu_debug_disabled() {
+    let val = std::env::var("WGPU_DEBUG").expect("WGPU_DEBUG should be set");
+    assert_eq!(val, "0");
+}
+
 fn login_harness(dark: bool) -> Harness<'static, AgentGuiApp> {
     let mut harness = Harness::new_eframe(|cc| {
         egui_extras::install_image_loaders(&cc.egui_ctx);

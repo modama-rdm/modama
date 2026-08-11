@@ -120,7 +120,7 @@ impl TopBar {
                 ui.add_enabled(!navigation_busy, primary_button("Log in", ui))
                     .clicked()
                     .then_some(Action::GoToLogin {
-                        destination: LoginDestination::SelectProject,
+                        destination: LoginDestination::Overview,
                     })
             } else {
                 None

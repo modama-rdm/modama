@@ -18,6 +18,7 @@ pub enum TaskFailure {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoginDestination {
+    Overview,
     SelectProject,
     ConfirmClose { share_id: String },
 }

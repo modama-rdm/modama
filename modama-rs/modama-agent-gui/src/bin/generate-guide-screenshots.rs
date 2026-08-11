@@ -1,5 +1,6 @@
 use std::{error::Error, path::PathBuf};
 
+use anyhow::Context;
 use clap::Parser;
 use modama_agent_gui::guide_screenshots::{self, GuideScene};
 
@@ -42,6 +43,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let val = std::env::var("WGPU_DEBUG").context("WGPU_DEBUG should be set to 0")?;
+    assert_eq!(val, "0");
+
     run(Cli::parse())
 }
 

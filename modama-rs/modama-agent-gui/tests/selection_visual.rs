@@ -68,6 +68,12 @@ fn strings(values: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn sentinel_wgpu_debug_disabled() {
+    let val = std::env::var("WGPU_DEBUG").expect("WGPU_DEBUG should be set");
+    assert_eq!(val, "0");
+}
+
+#[test]
 fn enabled_custom_rows_use_pointing_hand_cursor_and_disabled_actions_do_not() {
     let mut project_page = PageSelectProject::new();
     project_page.available_projects = representative_projects();
