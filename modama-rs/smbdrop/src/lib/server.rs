@@ -12,14 +12,13 @@ use log::{error, info};
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    net::TcpListener,
-    sync::broadcast,
-    task::JoinHandle,
-};
+use tokio::{net::TcpListener, sync::broadcast, task::JoinHandle};
 
 use crate::{
-    mount::MountBackend, process_manager::ProcessManager, readiness::{ShareReadiness, ShareReadinessError}, share_manager::{ShareError, ShareManager, SmbDropState, UserProvider}
+    mount::MountBackend,
+    process_manager::ProcessManager,
+    readiness::{ShareReadiness, ShareReadinessError},
+    share_manager::{ShareError, ShareManager, SmbDropState, UserProvider},
 };
 
 #[derive(Clone)]
@@ -286,9 +285,14 @@ mod tests {
     use url::Url;
 
     use crate::{
-        mount::BindMount, readiness::NoopShareReadiness, server::{
-            ApiState, CreateShareResponse, HealthResponse, ShareAPIErrorResponse, spawn_smbdrop_task
-        }, share_manager::{ShareManager, SmbDropState, User, UserProvider}, test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider}
+        mount::BindMount,
+        readiness::NoopShareReadiness,
+        server::{
+            spawn_smbdrop_task, ApiState, CreateShareResponse, HealthResponse,
+            ShareAPIErrorResponse,
+        },
+        share_manager::{ShareManager, SmbDropState, User, UserProvider},
+        test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
 
     async fn create_test_share(client: &reqwest::Client, api_base_url: &Url, path: &Path) -> Share {
