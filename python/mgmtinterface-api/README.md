@@ -2,7 +2,7 @@
 
 FastAPI service backing the React UI in `mgmtinterface-new/`, tracked as GitLab
 #172. It runs as its own container (`mgmtinterface-api`, uvicorn on port 8000)
-and `mgmtinterface-proxy` routes **`/api/v2/`** to it.
+and `mgmtinterface-proxy` routes **`/mgmt-api/`** to it.
 
 ## Why a second API
 
@@ -102,15 +102,67 @@ service is merely down sends them off resetting credentials that were fine.
 Session *refresh* takes the opposite line and keeps the session, since failing
 closed there would sign everyone out during a restart of that service.
 
+## API versions
+
+**The version is a header, not a path.** A caller states the contract it was
+built against in `X-Modama-API-Version: 1`, and the URL never carries a version
+— which is why the prefix is `/mgmt-api/` and not `/api/v2/`.
+
+That is a decision about *clients*, not aesthetics. `modama-agent` and anything
+like it is installed locally on lab machines and updated on the lab's schedule,
+not ours. So the server has to answer several contracts at once, and a client
+has to be able to pin one in a single config value instead of rewriting every
+URL it builds. It also stops "version 3" from ever meaning "a rewrite at a new
+set of paths".
+
+**The server never guesses.** No header is a `400 missing_api_version`; an
+unknown version is a `400 unsupported_api_version` (400, not 404, so a lab log
+says *why*). It deliberately does not fall back to the newest version: silently
+moving a two-year-old client onto a new contract at our next deploy is the exact
+failure this design exists to prevent. `/mgmt-api/healthz` and
+`/mgmt-api/versions` are the only routes that answer without one — the probe
+predates the notion, and a client calls `versions` precisely because it does not
+yet know what exists.
+
+Every response carries `X-Modama-API-Versions-Supported`, and a versioned one
+also echoes `X-Modama-API-Version` and names it in `Vary` (same URL, different
+bodies per version — a shared cache must not mix them up). A deprecated version
+additionally carries `Deprecation` (RFC 9745) and `Sunset` (RFC 8594), so a
+client can warn its own operator months ahead.
+
+**Adding a version.** Append to `SUPPORTED_VERSIONS` in `versioning.py`; branch
+in a handler on the `api_version` dependency where the shape actually differs.
+Additive changes — a new field, a new endpoint, a new optional request field —
+do *not* get a new version; clients are expected to ignore what they do not know
+(the Rust structs in `modama-common` do, none of them being
+`deny_unknown_fields`).
+
+**Removing one is an observation, not a calendar promise.** The service logs one
+line per `(version, client)` pair per boot, and `modama-agent` identifies itself
+as `modama-agent/<git-version>`, so "is any lab still on version 1" is a log
+query:
+
+```bash
+docker compose logs mgmtinterface-api | grep "First request this boot"
+```
+
+A version leaves `SUPPORTED_VERSIONS` only after that has been empty for a good
+while, and after its `Sunset` date has passed.
+
+**The frozen-test rule.** Once a version ships, the tests for it do not change.
+A behaviour change that makes an old test fail *is* the breaking change the
+version exists to isolate, so it belongs behind a new number.
+
 ## Endpoints
 
 | | |
 |---|---|
-| `POST /api/v2/auth/login` | credentials in, session cookie out |
-| `POST /api/v2/auth/logout` | 204; clears the cookie |
-| `GET /api/v2/auth/session` | the signed-in user, or 401 |
-| `GET /api/v2/projects` | every project, unfiltered |
-| `GET /api/v2/healthz` | liveness probe |
+| `POST /mgmt-api/auth/login` | credentials in, session cookie out |
+| `POST /mgmt-api/auth/logout` | 204; clears the cookie |
+| `GET /mgmt-api/auth/session` | the signed-in user, or 401 |
+| `GET /mgmt-api/projects` | every project, unfiltered |
+| `GET /mgmt-api/versions` | which contract versions this server speaks |
+| `GET /mgmt-api/healthz` | liveness probe |
 
 `GET /projects` returns `{"projects": [...]}` rather than a bare array so that
 pagination fields (Theme A / #90) can arrive without breaking callers. The
@@ -129,10 +181,12 @@ this into a filtered query.
         errors.py     APIError + the single error handler
         session.py    cookie signing/verification, cookie attributes
         security.py   CSRF origin/referer check, current-session dependency
+        versioning.py   the X-Modama-API-Version contract
         throttle.py   in-process failed-login counter
         permissions.py  calls into the permissions service
         routes/auth.py      login / logout / session
         routes/projects.py  project list
+        routes/versions.py  supported versions, unauthenticated
     tests/
 
 The app is built by `create_app()`; `main.py` is the only place that calls it at

@@ -8,6 +8,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = logging.getLogger(__name__)
 
+# Every route of this service lives under this prefix; nginx routes it here and
+# forwards the full path. Deliberately carries no version number: the contract
+# version travels in the `X-Modama-API-Version` header instead (see
+# `versioning.py`), so this path never has to change again. It lives here rather
+# than in the package root because both the app factory and the versioning layer
+# need it, and importing the root from a submodule would be a cycle.
+API_PREFIX = "/mgmt-api"
+
 
 class Settings(BaseSettings):
     """

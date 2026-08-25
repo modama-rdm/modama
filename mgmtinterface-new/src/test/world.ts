@@ -20,7 +20,7 @@ export interface WorldOptions {
  * `FIXTURE_PROJECTS` list entry for any other name — real projects that were
  * only ever captured at list-shape, not queried individually.
  *
- * Handlers here span both APIs while the migration runs: `/api/v2/*` answers
+ * Handlers here span both APIs while the migration runs: `/mgmt-api/*` answers
  * without an `errno` envelope, the legacy `/api/*` ones still carry it.
  */
 export function baseWorld({shares = {}}: WorldOptions = {}): ApiHandler[] {
@@ -30,7 +30,7 @@ export function baseWorld({shares = {}}: WorldOptions = {}): ApiHandler[] {
             // status codes. The project shape itself is unchanged, so the same
             // fixture serves both.
             method: 'GET',
-            path: '/api/v2/projects',
+            path: '/mgmt-api/projects',
             respond: () => ({body: {projects: FIXTURE_PROJECTS}}),
         },
         {

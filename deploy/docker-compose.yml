@@ -110,7 +110,7 @@ services:
       dockerfile: mgmtinterface-new/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-new:latest
 
-  mgmtinterface-api:  # new FastAPI API (#172), served at /api/v2/
+  mgmtinterface-api:  # new FastAPI API (#172), served at /mgmt-api/
     hostname: mgmtinterface-api
     restart: always
     build:

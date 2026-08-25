@@ -35,7 +35,7 @@ describe('login', () => {
 
         expect(result).toEqual({ok: true})
         expect(fetchFn).toHaveBeenCalledWith(
-            '/api/v2/auth/login',
+            '/mgmt-api/auth/login',
             expect.objectContaining({method: 'POST', credentials: 'same-origin'}),
         )
         // The session cookie is httpOnly, so nothing is asserted about it here —
@@ -124,7 +124,7 @@ describe('logout', () => {
         await logout()
 
         expect(fetchFn).toHaveBeenCalledWith(
-            '/api/v2/auth/logout',
+            '/mgmt-api/auth/logout',
             expect.objectContaining({method: 'POST'}),
         )
         expect(isAuthenticated()).toBe(false)

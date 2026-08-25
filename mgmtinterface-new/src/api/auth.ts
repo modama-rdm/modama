@@ -1,20 +1,20 @@
 /**
  * Client-side authentication, mid-migration between two APIs (GitLab #172).
  *
- * Signing in now happens against `POST /api/v2/auth/login`, which authenticates
- * and sets an **httpOnly session cookie** the browser attaches to every `/api/v2`
+ * Signing in now happens against `POST /mgmt-api/auth/login`, which authenticates
+ * and sets an **httpOnly session cookie** the browser attaches to every `/mgmt-api`
  * request on its own. JS never sees that cookie.
  *
  * The Basic token below has *not* gone away yet, because most screens still call
  * the legacy Flask `/api/*` endpoints, and those accept nothing but
  * `Authorization: Basic`. So one sign-in establishes both credentials, and the
- * token is retired when the last screen moves to `/api/v2` — at which point
+ * token is retired when the last screen moves to `/mgmt-api` — at which point
  * `tokenStore`, `getToken`, and the backend's `xBasic` handler all go together.
  *
  * SECURITY (known, accepted, and shrinking — GitLab #156, #172): the Basic token
  * is base64(username:password), i.e. reversible encoding of the user's reusable
  * IFF/ER-C Unix password, held in `localStorage` where any XSS can read it. The
- * cookie has no such exposure. Every endpoint migrated to `/api/v2` is one less
+ * cookie has no such exposure. Every endpoint migrated to `/mgmt-api` is one less
  * reason for the token to exist.
  */
 

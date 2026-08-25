@@ -1,4 +1,5 @@
 import pytest
+from conftest import api_client
 from fastapi.testclient import TestClient
 from mgmtinterface_api import API_PREFIX, create_app
 from mgmtinterface_api.config import Settings
@@ -13,7 +14,7 @@ def client(settings: Settings) -> TestClient:
     def boom() -> None:
         raise APIError(403, "not_a_member", "You are not a member of this project.")
 
-    return TestClient(app)
+    return api_client(app)
 
 
 def test_healthz(client: TestClient):
@@ -60,7 +61,7 @@ def test_unconfigured_session_secret_is_generated_not_defaulted():
 
 def test_app_starts_without_any_session_configuration():
     app = create_app(Settings(session_secret="", session_secret_file=""))
-    assert TestClient(app).get(f"{API_PREFIX}/healthz").status_code == 200
+    assert api_client(app).get(f"{API_PREFIX}/healthz").status_code == 200
 
 
 def test_session_secret_read_from_file(tmp_path):

@@ -1,5 +1,5 @@
 /**
- * Fetch wrapper for the new FastAPI endpoints under `/api/v2` (GitLab #172).
+ * Fetch wrapper for the new FastAPI endpoints under `/mgmt-api` (GitLab #172).
  *
  * Deliberately separate from `apiFetch`, which speaks the legacy Flask dialect:
  * that API answers HTTP 200 with an `{errno}` envelope and authenticates with a
@@ -13,7 +13,18 @@
 
 import {ApiError, Unauthorized} from './client'
 
-export const API_V2 = '/api/v2'
+export const MGMT_API = '/mgmt-api'
+
+/**
+ * The API contract this build was written against, sent on every request.
+ *
+ * The server refuses a request that does not state one rather than guessing —
+ * it serves several contracts at once for the sake of clients (modama-agent and
+ * friends) that are installed on lab machines and updated slowly. This app is
+ * served by the same deployment as the API, so it can simply move with it: bump
+ * this constant in the same commit that starts using a newer contract.
+ */
+export const API_VERSION = 1
 
 /** Error body this API promises: a stable `code` plus a displayable `message`. */
 interface ErrorBody {
@@ -62,7 +73,7 @@ export function parseError(status: number, body: unknown): ErrorBody {
 }
 
 /**
- * Request to an `/api/v2` path, returning the parsed JSON body.
+ * Request to a `/mgmt-api` path, returning the parsed JSON body.
  *
  * Throws `Unauthorized` on 401 so existing loaders keep redirecting to /login
  * unchanged, and `ApiError` carrying the API's own message on any other non-2xx
@@ -73,8 +84,9 @@ export async function apiFetchV2<T>(path: string, init: RequestInit = {}): Promi
     if (init.body && !headers.has('Content-Type')) {
         headers.set('Content-Type', 'application/json')
     }
+    headers.set('X-Modama-API-Version', String(API_VERSION))
 
-    const res = await fetch(`${API_V2}${path}`, {
+    const res = await fetch(`${MGMT_API}${path}`, {
         ...init,
         headers,
         // The session cookie is httpOnly, so JS never sees it; the browser has

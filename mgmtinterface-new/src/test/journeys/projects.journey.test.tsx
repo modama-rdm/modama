@@ -61,7 +61,7 @@ describe('journey: projects list', () => {
         renderApp({route: '/projects'})
         await screen.findByText('My Projects')
 
-        expect(api.matching('GET', '/api/v2/projects')).toHaveLength(1)
+        expect(api.matching('GET', '/mgmt-api/projects')).toHaveLength(1)
         expect(api.matching('GET', '/api/project/')).toHaveLength(0)
         expect(api.matching('GET', '/api/share/')).toHaveLength(1)
     })

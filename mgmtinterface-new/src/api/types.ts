@@ -50,7 +50,7 @@ export interface ListProjectsResponse extends OkEnvelope {
 }
 
 /**
- * `GET /api/v2/projects` — the same project shape without the `errno` envelope,
+ * `GET /mgmt-api/projects` — the same project shape without the `errno` envelope,
  * since that API reports failure with the status code (GitLab #172). An object
  * rather than a bare array so pagination fields can arrive without breaking
  * callers.

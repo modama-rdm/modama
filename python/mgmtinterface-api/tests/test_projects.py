@@ -1,5 +1,6 @@
 import pytest
 import requests
+from conftest import api_client
 from fastapi.testclient import TestClient
 from mgmtinterface_api import API_PREFIX, create_app
 from mgmtinterface_api.config import Settings
@@ -29,7 +30,7 @@ def signed_in(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> TestClient
         lambda self: {"errno": 0, "projects": [FIXTURE]},
     )
     app = create_app(settings)
-    client = TestClient(app)
+    client = api_client(app)
     client.cookies.set(
         settings.effective_cookie_name, app.state.session_codec.issue("user1")
     )
@@ -43,7 +44,7 @@ def test_lists_projects(signed_in: TestClient):
 
 
 def test_requires_a_session(settings: Settings):
-    response = TestClient(create_app(settings)).get(PROJECTS)
+    response = api_client(create_app(settings)).get(PROJECTS)
     assert response.status_code == 401
     assert response.json()["code"] == "not_authenticated"
 
@@ -56,7 +57,7 @@ def test_reports_an_unreachable_permissions_service(
 
     monkeypatch.setattr(PermissionsClient, "list_projects", unreachable)
     app = create_app(settings)
-    client = TestClient(app)
+    client = api_client(app)
     client.cookies.set(
         settings.effective_cookie_name, app.state.session_codec.issue("user1")
     )
@@ -75,7 +76,7 @@ def test_reports_an_upstream_errno(settings: Settings, monkeypatch: pytest.Monke
         lambda self: {"errno": 1, "message": "backend exploded"},
     )
     app = create_app(settings)
-    client = TestClient(app)
+    client = api_client(app)
     client.cookies.set(
         settings.effective_cookie_name, app.state.session_codec.issue("user1")
     )

@@ -2,6 +2,7 @@ import time
 from http.cookies import SimpleCookie
 
 import pytest
+from conftest import api_client
 from fastapi.testclient import TestClient
 from mgmtinterface_api import API_PREFIX, create_app
 from mgmtinterface_api.config import Settings
@@ -37,7 +38,7 @@ def upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
 
 @pytest.fixture
 def client(settings: Settings, upstream: dict[str, int]) -> TestClient:
-    return TestClient(create_app(settings))
+    return api_client(create_app(settings))
 
 
 def test_login_sets_a_session_cookie(client: TestClient, settings: Settings):
@@ -79,7 +80,7 @@ def test_host_prefixed_cookie_carries_the_attributes_the_prefix_requires(
     upstream: dict[str, int],
 ):
     app = create_app(Settings(session_secret="x", session_cookie_secure=True))
-    client = TestClient(app, base_url="https://testserver")
+    client = api_client(app, base_url="https://testserver")
     set_cookie = client.post(LOGIN, json=GOOD).headers["set-cookie"]
     assert set_cookie.startswith("__Host-modama_session=")
     assert "Secure" in set_cookie
@@ -158,7 +159,7 @@ def test_stale_cookie_is_refreshed_and_revalidated(
     settings: Settings, upstream: dict[str, int]
 ):
     app = create_app(always_refreshing(settings))
-    client = TestClient(app)
+    client = api_client(app)
     issued = int(time.time()) - 60
     client.cookies.set(
         settings.effective_cookie_name,
@@ -185,7 +186,7 @@ def test_session_ends_when_the_account_disappears(
         "mgmtinterface_api.security.user_exists", lambda settings, username: False
     )
     app = create_app(always_refreshing(settings))
-    client = TestClient(app)
+    client = api_client(app)
     client.cookies.set(
         settings.effective_cookie_name, app.state.session_codec.issue("mmustermann")
     )
@@ -242,7 +243,7 @@ def test_configured_extra_origin_is_accepted(
             **{**settings.model_dump(), "csrf_extra_origins": "http://localhost:5180"}
         )
     )
-    response = TestClient(app).post(
+    response = api_client(app).post(
         LOGIN, json=GOOD, headers={"Origin": "http://localhost:5180"}
     )
     assert response.status_code == 200
@@ -256,7 +257,7 @@ def test_extra_origins_do_not_open_the_door_to_anything_else(
             **{**settings.model_dump(), "csrf_extra_origins": "http://localhost:5180"}
         )
     )
-    response = TestClient(app).post(
+    response = api_client(app).post(
         LOGIN, json=GOOD, headers={"Origin": "https://evil.example"}
     )
     assert response.status_code == 403
@@ -280,7 +281,7 @@ def test_same_origin_referer_is_allowed(client: TestClient):
 
 def test_repeated_failures_are_throttled(settings: Settings, upstream: dict[str, int]):
     app = create_app(Settings(**{**settings.model_dump(), "login_max_failures": 3}))
-    client = TestClient(app)
+    client = api_client(app)
     bad = {**GOOD, "password": "wrong"}
 
     for _i in range(3):
@@ -300,7 +301,7 @@ def test_repeated_failures_are_throttled(settings: Settings, upstream: dict[str,
 
 def test_throttle_counts_only_failures(settings: Settings, upstream: dict[str, int]):
     app = create_app(Settings(**{**settings.model_dump(), "login_max_failures": 3}))
-    client = TestClient(app)
+    client = api_client(app)
     bad = {**GOOD, "password": "wrong"}
 
     # Two typos then a success must leave the user with a clean slate.
@@ -316,7 +317,7 @@ def test_throttle_key_ignores_case_and_padding(
     settings: Settings, upstream: dict[str, int]
 ):
     app = create_app(Settings(**{**settings.model_dump(), "login_max_failures": 2}))
-    client = TestClient(app)
+    client = api_client(app)
 
     assert client.post(LOGIN, json={**GOOD, "password": "wrong"}).status_code == 401
     assert (

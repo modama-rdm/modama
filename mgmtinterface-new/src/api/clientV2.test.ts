@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest'
 import {ApiError, Unauthorized} from './client'
-import {apiFetchV2, parseError} from './clientV2'
+import {API_VERSION, apiFetchV2, parseError} from './clientV2'
 
 function mockFetchOnce(
     body: unknown,
@@ -58,8 +58,21 @@ describe('apiFetchV2', () => {
         await apiFetchV2('/auth/session')
 
         expect(fetchFn).toHaveBeenCalledWith(
-            '/api/v2/auth/session',
+            '/mgmt-api/auth/session',
             expect.objectContaining({credentials: 'same-origin'}),
+        )
+    })
+
+    it('states the API version this build was written against', async () => {
+        // The server refuses a request that does not, rather than guessing a
+        // version for it — see the FastAPI service's versioning.py.
+        const fetchFn = mockFetchOnce({username: 'barthel'})
+
+        await apiFetchV2('/auth/session')
+
+        const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+        expect(new Headers(init.headers).get('X-Modama-API-Version')).toBe(
+            String(API_VERSION),
         )
     })
 
