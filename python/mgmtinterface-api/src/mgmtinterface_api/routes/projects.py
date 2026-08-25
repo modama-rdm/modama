@@ -4,10 +4,13 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from ..permissions import list_projects
-from ..security import current_session, settings_of
+from ..security import AUTH_ERROR_RESPONSES, current_session, settings_of
 from ..session import SessionData
+from ..versioning import VERSION_ERROR_RESPONSES
 
-router = APIRouter(prefix="/projects", tags=["projects"])
+router = APIRouter(
+    prefix="/projects", tags=["projects"], responses={**VERSION_ERROR_RESPONSES}
+)
 
 
 class Project(BaseModel):
@@ -37,7 +40,11 @@ class ProjectList(BaseModel):
 
 
 # Sync `def`: the permissions call is blocking, so let FastAPI thread it.
-@router.get("")
+@router.get(
+    "",
+    summary="List every project",
+    responses={**AUTH_ERROR_RESPONSES},
+)
 def read_projects(
     request: Request,
     session: Annotated[SessionData, Depends(current_session)],

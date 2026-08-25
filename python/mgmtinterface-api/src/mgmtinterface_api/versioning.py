@@ -39,11 +39,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import format_datetime
+from typing import Annotated
 
-from fastapi import Request, Response
+from fastapi import Header, Request, Response
 
 from .config import API_PREFIX
-from .errors import APIError
+from .errors import APIError, error_responses
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +100,41 @@ def supported_versions_header() -> str:
     return ", ".join(str(version) for version in SUPPORTED_VERSIONS)
 
 
-def require_api_version(request: Request) -> None:
+#: What the OpenAPI document says about the 400 this layer produces. Attached to
+#: the routers whose endpoints are versioned, so a caller reads the requirement
+#: from the document rather than discovering it as a failed request.
+VERSION_ERROR_RESPONSES = error_responses(
+    {
+        400: (
+            f"The `{API_VERSION_HEADER}` header is missing, or names a version "
+            "this server does not support."
+        )
+    }
+)
+
+#: Declared as a typed header parameter rather than read off the raw request, so
+#: that it appears in the OpenAPI document — otherwise a generated client omits
+#: the one header without which nothing works, and "Try it out" in the docs
+#: always 400s. Optional in the signature on purpose: a *missing* header has to
+#: reach the check below, which answers with this API's error shape, instead of
+#: being turned into FastAPI's 422 validation body. Typed `str`, not `int`, for
+#: the same reason — an unparseable value is this layer's 400 to explain.
+ApiVersionHeader = Annotated[
+    str | None,
+    Header(
+        alias=API_VERSION_HEADER,
+        description=(
+            "The contract version the client was built against, as a bare "
+            "integer. Required on every endpoint except the unversioned ones "
+            "(`/versions`, `/healthz`); those exist to be called before a "
+            "client knows what to pin."
+        ),
+        examples=[str(LATEST_VERSION)],
+    ),
+]
+
+
+def require_api_version(request: Request, raw: ApiVersionHeader = None) -> None:
     """
     Resolve the caller's contract version, or refuse the request.
 
@@ -109,7 +144,6 @@ def require_api_version(request: Request) -> None:
     if request.url.path.rstrip("/") in UNVERSIONED_PATHS:
         return
 
-    raw = request.headers.get(API_VERSION_HEADER)
     if raw is None:
         log.warning(
             "Request to %s with no %s header (client: %s)",

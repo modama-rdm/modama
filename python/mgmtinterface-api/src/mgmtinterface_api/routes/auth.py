@@ -3,14 +3,23 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 
-from ..errors import APIError
+from ..errors import APIError, error_responses
 from ..permissions import authenticate
-from ..security import codec_of, current_session, settings_of, throttle_of
+from ..security import (
+    AUTH_ERROR_RESPONSES,
+    CSRF_ERROR_RESPONSES,
+    codec_of,
+    current_session,
+    settings_of,
+    throttle_of,
+)
 from ..session import SessionData, clear_session_cookie, set_session_cookie
+from ..versioning import VERSION_ERROR_RESPONSES
 
 # The CSRF origin check is applied app-wide in `create_app`, so a new router
-# cannot forget it.
-router = APIRouter(prefix="/auth", tags=["auth"])
+# cannot forget it. `responses` documents what that app-wide layer can return,
+# once for the whole router instead of on each route.
+router = APIRouter(prefix="/auth", tags=["auth"], responses={**VERSION_ERROR_RESPONSES})
 
 
 class LoginRequest(BaseModel):
@@ -30,7 +39,22 @@ def _no_store(response: Response) -> None:
 
 # Sync `def`: authenticating calls the permissions service over blocking HTTP,
 # so FastAPI should run this in a threadpool rather than on the event loop.
-@router.post("/login")
+@router.post(
+    "/login",
+    summary="Sign in and receive a session cookie",
+    responses={
+        **CSRF_ERROR_RESPONSES,
+        **error_responses(
+            {
+                401: "Wrong username or password.",
+                429: (
+                    "Too many failed attempts for this username. "
+                    "`Retry-After` says how long to wait."
+                ),
+            }
+        ),
+    },
+)
 def login(request: Request, response: Response, body: LoginRequest) -> SessionInfo:
     settings = settings_of(request)
     _no_store(response)
@@ -60,7 +84,12 @@ def login(request: Request, response: Response, body: LoginRequest) -> SessionIn
     return SessionInfo(username=body.username)
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Clear the session cookie",
+    responses={**CSRF_ERROR_RESPONSES},
+)
 def logout(request: Request, response: Response) -> None:
     # No session required: logging out of an already-expired session should
     # succeed quietly rather than 401.
@@ -68,7 +97,11 @@ def logout(request: Request, response: Response) -> None:
     clear_session_cookie(response, settings_of(request))
 
 
-@router.get("/session")
+@router.get(
+    "/session",
+    summary="The signed-in user",
+    responses={**AUTH_ERROR_RESPONSES},
+)
 def read_session(
     response: Response,
     session: Annotated[SessionData, Depends(current_session)],

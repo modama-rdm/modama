@@ -163,6 +163,18 @@ version exists to isolate, so it belongs behind a new number.
 | `GET /mgmt-api/projects` | every project, unfiltered |
 | `GET /mgmt-api/versions` | which contract versions this server speaks |
 | `GET /mgmt-api/healthz` | liveness probe |
+| `GET /mgmt-api/docs` | Swagger UI over the generated OpenAPI document |
+| `GET /mgmt-api/openapi.json` | that document, for generated clients |
+
+The table is the summary; the generated document at `/mgmt-api/docs` is the
+reference, and it is generated rather than written so it cannot drift. What
+makes it usable is described alongside the code that produces it: request and
+response models on every route, the `X-Modama-API-Version` header declared as a
+parameter (`versioning.py`) so a generated client actually sends it, the session
+cookie declared as a security scheme (`security.py`) so authenticated endpoints
+are marked as such, and the `{code, message}` error body attached per status via
+`error_responses` (`errors.py`). Both paths are unversioned and unauthenticated,
+and nginx forwards the full path so the prefix stays intact through the proxy.
 
 `GET /projects` returns `{"projects": [...]}` rather than a bare array so that
 pagination fields (Theme A / #90) can arrive without breaking callers. The

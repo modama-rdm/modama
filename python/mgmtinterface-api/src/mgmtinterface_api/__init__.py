@@ -19,9 +19,61 @@ from .routes import auth, projects, versions
 from .security import enforce_same_origin
 from .session import SessionCodec
 from .throttle import FailureThrottle
-from .versioning import LATEST_VERSION, add_version_headers, require_api_version
+from .versioning import (
+    API_VERSION_HEADER,
+    LATEST_VERSION,
+    add_version_headers,
+    require_api_version,
+    supported_versions_header,
+)
 
 __all__ = ["API_PREFIX", "create_app"]
+
+# Shown at the top of the generated documentation. The rules a client author has
+# to know before writing a single request live here rather than only in the
+# source, since the document is all an author of `modama-agent` — or of the next
+# instrument script — is going to read.
+DESCRIPTION = f"""
+The API behind the new management interface. It is *not* the legacy `/api/`
+surface, which stays frozen for existing clients.
+
+### Versioning
+
+Every request must state the contract version it was written against, as a bare
+integer in the `{API_VERSION_HEADER}` header. There is no default: a request
+without the header is refused, so a deploy can never silently move an installed
+client onto a newer contract. Currently supported: {{versions}}.
+
+The resolved version comes back on the response, along with
+`X-Modama-API-Versions-Supported`. A version that is going away is announced
+with `Deprecation` and `Sunset` headers well before it stops working, and
+`GET /versions` lists the same information — call it before pinning.
+
+### Errors
+
+Failures use real HTTP status codes with a body of `{{{{"code", "message"}}}}`.
+`code` is stable and safe to branch on; `message` is for people. The one
+exception is HTTP 422, which carries FastAPI's own field-level `detail` list for
+a malformed request body.
+
+### Authentication
+
+`POST /auth/login` sets an `HttpOnly` session cookie; the browser sends it back
+on its own. State-changing requests are additionally checked against the request
+`Origin`. Endpoints that need a session are marked with a lock below.
+""".strip()
+
+TAGS_METADATA = [
+    {"name": "auth", "description": "Signing in, signing out, and who you are."},
+    {"name": "projects", "description": "Project listings."},
+    {
+        "name": "versions",
+        "description": (
+            "Which contract versions this server speaks. Unauthenticated and "
+            "itself unversioned — a client calls this before it can pin one."
+        ),
+    },
+]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -31,6 +83,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # The contract version this document describes. Not a release number:
         # what a client pins is this integer, in the X-Modama-API-Version header.
         version=str(LATEST_VERSION),
+        summary="Management interface API for the ER-C data management system.",
+        description=DESCRIPTION.format(versions=supported_versions_header()),
+        openapi_tags=TAGS_METADATA,
         # nginx forwards the full path, so the docs have to live under the
         # prefix too or they 404 through the proxy.
         docs_url=f"{API_PREFIX}/docs",
@@ -69,7 +124,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(projects.router, prefix=API_PREFIX)
     app.include_router(versions.router, prefix=API_PREFIX)
 
-    @app.get(f"{API_PREFIX}/healthz")
+    @app.get(
+        f"{API_PREFIX}/healthz",
+        tags=["versions"],
+        summary="Liveness probe",
+    )
     def healthz() -> dict[str, str]:
         """Liveness probe, and the smallest end-to-end check of the route."""
         return {"status": "ok"}

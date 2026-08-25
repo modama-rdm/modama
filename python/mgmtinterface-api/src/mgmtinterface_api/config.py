@@ -16,6 +16,17 @@ log = logging.getLogger(__name__)
 # need it, and importing the root from a submodule would be a cycle.
 API_PREFIX = "/mgmt-api"
 
+# Default name of the session cookie, module-level because the OpenAPI security
+# scheme in `security.py` has to name a cookie at import time, before any
+# `Settings` instance exists. A deployment can still override the setting; the
+# document then describes the default deployment rather than that one.
+DEFAULT_SESSION_COOKIE_NAME = "modama_session"
+
+#: The `__Host-` prefixed spelling, i.e. the name as actually sent whenever the
+#: cookie is Secure. See `Settings.effective_cookie_name` for why the prefix is
+#: there and when it is dropped.
+HOST_PREFIXED_SESSION_COOKIE_NAME = f"__Host-{DEFAULT_SESSION_COOKIE_NAME}"
+
 
 class Settings(BaseSettings):
     """
@@ -36,7 +47,7 @@ class Settings(BaseSettings):
     # Signed-cookie session. The name must differ from the Flask app's
     # `mgmtinterface_session` — both are live on the same origin until the
     # cutover (#170).
-    session_cookie_name: str = "modama_session"
+    session_cookie_name: str = DEFAULT_SESSION_COOKIE_NAME
     session_secret: str = ""
     session_secret_file: str = ""
     # Two lifetimes: `max_age` caps the session no matter how active the user is,

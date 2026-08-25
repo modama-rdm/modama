@@ -1,5 +1,8 @@
+from typing import Any
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 
 class APIError(Exception):
@@ -47,3 +50,41 @@ async def api_error_handler(request: Request, exc: Exception) -> JSONResponse:
         content={"code": exc.code, "message": exc.message},
         headers=headers,
     )
+
+
+class ErrorResponse(BaseModel):
+    """
+    The documented body of every error this API returns, HTTP 422 excepted.
+
+    Kept as a model rather than described inline so that `error_responses`
+    below can point every operation at the same schema, and a generated client
+    ends up with one error type instead of one per endpoint.
+    """
+
+    code: str = Field(
+        description=(
+            "Stable, machine-readable reason. Safe to branch on: it is part of "
+            "the contract and only changes with the API version."
+        ),
+        examples=["not_authenticated"],
+    )
+    message: str = Field(
+        description="Human-readable explanation, safe to show to the user.",
+        examples=["Sign in to continue."],
+    )
+
+
+def error_responses(descriptions: dict[int, str]) -> dict[int | str, dict[str, Any]]:
+    """
+    Build the ``responses=`` argument documenting a set of error statuses.
+
+    Without this the OpenAPI document would advertise only the success model
+    (plus FastAPI's own 422), leaving the statuses callers actually have to
+    handle — 400, 401, 403, 429 — undocumented. Each layer that can raise
+    exports its own set, so a route lists what it adds rather than restating
+    what its dependencies already do.
+    """
+    return {
+        status: {"model": ErrorResponse, "description": description}
+        for status, description in descriptions.items()
+    }

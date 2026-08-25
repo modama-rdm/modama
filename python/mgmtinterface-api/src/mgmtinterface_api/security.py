@@ -1,9 +1,11 @@
+from typing import Annotated
 from urllib.parse import urlsplit
 
-from fastapi import Request, Response
+from fastapi import Request, Response, Security
+from fastapi.security import APIKeyCookie
 
-from .config import Settings
-from .errors import APIError
+from .config import HOST_PREFIXED_SESSION_COOKIE_NAME, Settings
+from .errors import APIError, error_responses
 from .permissions import user_exists
 from .session import (
     SessionCodec,
@@ -15,6 +17,37 @@ from .session import (
 from .throttle import FailureThrottle
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+#: The session cookie, declared as an OpenAPI security scheme so that endpoints
+#: needing a session are marked as such in the document — a reader sees which
+#: ones require signing in, and a generated client knows there is credentialed
+#: state to carry rather than treating every route as public.
+#:
+#: `auto_error=False` because the 401 this API sends is `APIError`'s shape, not
+#: the one FastAPI's security helpers raise; `current_session` below still owns
+#: the refusal. The name is the `__Host-` prefixed one, i.e. what a real
+#: deployment sends — a plain-http development instance drops the prefix, which
+#: is why the value is read through `settings` rather than from this dependency.
+session_cookie_scheme = APIKeyCookie(
+    name=HOST_PREFIXED_SESSION_COOKIE_NAME,
+    scheme_name="session",
+    description=(
+        "Signed session cookie, set by `POST /auth/login` and sent back "
+        "automatically by the browser. Requests without a usable one get 401."
+    ),
+    auto_error=False,
+)
+
+#: What the OpenAPI document says about the errors this layer raises. Split in
+#: two because they apply to different routes: any endpoint behind
+#: `current_session` can 401, while only state-changing ones reach the CSRF
+#: check.
+AUTH_ERROR_RESPONSES = error_responses(
+    {401: "No session, or the session has expired. Sign in again."}
+)
+CSRF_ERROR_RESPONSES = error_responses(
+    {403: "Rejected: the request came from another origin."}
+)
 
 
 def settings_of(request: Request) -> Settings:
@@ -77,7 +110,13 @@ def _expected_origin(request: Request) -> str:
 # Declared `def`, not `async def`, on purpose: the refresh path makes a blocking
 # HTTP call to the permissions service, and FastAPI runs sync dependencies in a
 # threadpool instead of on the event loop.
-def current_session(request: Request, response: Response) -> SessionData:
+def current_session(
+    request: Request,
+    response: Response,
+    # Documentation-carrying, not load-bearing: the value is read from
+    # `request.cookies` below under the deployment's configured name.
+    _scheme: Annotated[str | None, Security(session_cookie_scheme)] = None,
+) -> SessionData:
     """
     The signed-in user, refreshing the cookie when it has gone stale.
 
