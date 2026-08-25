@@ -97,6 +97,9 @@ A short overview how `modama-agent` communicates:
 - `modama-agent -> smbdrop token API`: HTTPS
 - `modama-agent <-> modama-agent`: HTTP (local lab network), UDP multicast for service discovery
 
+In addition, the operating system on which `modama-agent` is running will
+communicate over CIFS with the Samba that is managed by `smbdrop` for ingest.
+
 The backend part, `smbdrop`, provides three distinct services:
 
 - Internal API (HTTP) - low-level API to manage shares, not concerned with auth{n,z}
@@ -141,15 +144,16 @@ MII....==
 """
 ```
 
-A more complete configuration would look like this (TODO: sensible service URLs):
+A more complete configuration would look like this (URLs filled in for the deployment at ER-C,
+when used via the JuNet):
 
 ```toml
 listen_local_api = "localhost:3003"
 
 [services]
-event_url = "wss://localhost:5052"
-token_service_url = "https://localhost:5053"
-mgmt_api_url = "http://localhost:5001"
+event_url = "wss://er-c-smbdrop.fz-juelich.de:5052"
+token_service_url = "https://er-c-smbdrop.fz-juelich.de:5053"
+mgmt_api_url = "http://er-c-data-mgmt.fz-juelich.de:5001"
 smb_hostname = "moellenstedt.iff.kfa-juelich.de"
 smb_port = 445
 smb_domain = "ER-C-INGEST"
