@@ -158,24 +158,24 @@ impl PageOverview {
     }
 
     fn show_create_card(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut clicked = false;
-        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            card_heading(ui, "Start an ingest session");
-            card_description(
-                ui,
-                "Choose a project and session to open an ingest share for incoming data on this \
-                 agent.",
-            );
-            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-            let response = ui.add(primary_button("Start Session", ui));
-            if self.focus_on_entry && response.enabled() {
-                response.request_focus();
-                self.focus_on_entry = false;
-            }
-            clicked = response.clicked();
-        });
-        clicked
+        styles::content_card_frame(ui.visuals())
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                card_heading(ui, "Start an ingest session");
+                card_description(
+                    ui,
+                    "Choose a project and session to open an ingest share for incoming data on \
+                     this agent.",
+                );
+                ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+                let response = ui.add(primary_button("Start Session", ui));
+                if self.focus_on_entry && response.enabled() {
+                    response.request_focus();
+                    self.focus_on_entry = false;
+                }
+                response.clicked()
+            })
+            .inner
     }
 
     fn show_mounting_session_card(
@@ -203,53 +203,51 @@ impl PageOverview {
         session: &ActiveSession,
         awaiting_close: bool,
     ) -> bool {
-        let mut close_clicked = false;
         let is_closing = self.close_task.is_pending() || awaiting_close;
-        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
-            ui.set_width(ui.available_width());
+        styles::content_card_frame(ui.visuals())
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
 
-            card_heading(ui, "Active ingest session");
-            session_detail(ui, "Project", &session.project);
-            session_detail(ui, "Session", &session.session);
-            session_detail(
-                ui,
-                "Mount path on this agent",
-                session
-                    .mount_path
-                    .as_deref()
-                    .unwrap_or("Not available on this agent"),
-            );
-
-            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-            ui.separator();
-            ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-
-            card_heading(ui, "Close the ingest session");
-            card_description(
-                ui,
-                "Stop the ingest share when you are finished transferring data. Existing project \
-                 and session data will remain available.",
-            );
-            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-            let response = if is_closing {
-                loading_button(
+                card_heading(ui, "Active ingest session");
+                session_detail(ui, "Project", &session.project);
+                session_detail(ui, "Session", &session.session);
+                session_detail(
                     ui,
-                    "Closing…",
-                    egui::Vec2::ZERO,
-                    ButtonVariant::DangerOutline,
-                )
-            } else {
-                ui.add(danger_outline_button("Close Session", ui))
-            };
-            if self.focus_on_entry && response.enabled() {
-                response.request_focus();
-                self.focus_on_entry = false;
-            }
-            if response.clicked() {
-                close_clicked = true;
-            }
-        });
-        close_clicked
+                    "Mount path on this agent",
+                    session
+                        .mount_path
+                        .as_deref()
+                        .unwrap_or("Not available on this agent"),
+                );
+
+                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+                ui.separator();
+                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+
+                card_heading(ui, "Close the ingest session");
+                card_description(
+                    ui,
+                    "Stop the ingest share when you are finished transferring data. Existing \
+                     project and session data will remain available.",
+                );
+                ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+                let response = if is_closing {
+                    loading_button(
+                        ui,
+                        "Closing…",
+                        egui::Vec2::ZERO,
+                        ButtonVariant::DangerOutline,
+                    )
+                } else {
+                    ui.add(danger_outline_button("Close Session", ui))
+                };
+                if self.focus_on_entry && response.enabled() {
+                    response.request_focus();
+                    self.focus_on_entry = false;
+                }
+                response.clicked()
+            })
+            .inner
     }
 
     fn show_unmounting_session_card(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {

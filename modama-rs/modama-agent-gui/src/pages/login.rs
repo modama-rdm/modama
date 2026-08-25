@@ -76,7 +76,6 @@ impl PageLogin {
     }
 
     fn show_login_block(&mut self, ui: &mut egui::Ui) -> Action {
-        let mut action = Action::None;
         let is_logging_in = self.login_task.is_pending();
         let card_width = styles::components::login_card::width::EGUI_POINTS;
 
@@ -100,11 +99,12 @@ impl PageLogin {
             let response = ui.add_enabled(!is_logging_in, link);
             styles::paint_focus_ring(ui, &response);
             if response.clicked() {
-                action = Action::GoToOverview;
+                Action::GoToOverview
+            } else {
+                Action::None
             }
-        });
-
-        action
+        })
+        .inner
     }
 
     fn show_card_content(&mut self, ui: &mut egui::Ui) {

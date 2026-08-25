@@ -216,7 +216,6 @@ impl PageSelectProject {
         state: ProjectListState,
         selected_is_visible: bool,
     ) -> Action {
-        let mut action = Action::None;
         let mut available_rect = ui.available_rect_before_wrap();
         // The former bottom-up layout included the surrounding vertical item gaps in its extent.
         // Keep those token-derived bounds while letting Taffy control widget creation order.
@@ -225,51 +224,53 @@ impl PageSelectProject {
             .with_allocated_rect(available_rect)
             .style(results_layout_style())
             .show(|tui| {
-                tui.id("project-results")
+                let list_action = tui
+                    .id("project-results")
                     .style(project_list_layout_style())
                     .ui_manual(|ui, container| {
-                        if let Some(list_action) = self.show_project_list(
+                        let inner = self.show_project_list(
                             ui,
                             projects,
                             container.full_container().height()
                                 - styles::spacing::form_field_gap::EGUI_POINTS
                                 + styles::components::standard_border::width::EGUI_POINTS,
                             state,
-                        ) {
-                            action = list_action;
-                        }
+                        );
                         TuiContainerResponse {
-                            inner: (),
+                            inner,
                             min_size: ui.min_size(),
                             intrinsic_size: None,
                             max_size: ui.min_size(),
                             infinite: egui::Vec2b::TRUE,
                         }
                     });
-                tui.id("project-action")
+                let button_action = tui
+                    .id("project-action")
                     .style(project_action_layout_style())
                     .ui(|ui| {
                         ui.horizontal(|ui| {
                             ui.add_space(content_guide_widget_offset(
                                 styles::spacing::button_padding_x::EGUI_POINTS,
                             ));
-                            if ui
+                            let clicked = ui
                                 .add_enabled(
                                     selected_is_visible,
                                     primary_button("Select Project", ui),
                                 )
-                                .clicked()
-                            {
+                                .clicked();
+                            if clicked {
                                 if let Some(project) = &self.selected_project {
-                                    action = Action::SelectProject {
+                                    return Some(Action::SelectProject {
                                         project: project.clone(),
-                                    };
+                                    });
                                 }
                             }
-                        });
+                            None
+                        })
+                        .inner
                     });
-            });
-        action
+                button_action.or(list_action).unwrap_or(Action::None)
+            })
     }
 
     fn show_project_list(

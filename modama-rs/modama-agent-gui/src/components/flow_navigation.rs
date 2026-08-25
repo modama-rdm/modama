@@ -31,7 +31,6 @@ pub(crate) fn flow_navigation(
     current: FlowStage,
     navigation_enabled: bool,
 ) -> Option<FlowStage> {
-    let mut selected = None;
     let current_index = FlowStage::ALL
         .into_iter()
         .position(|candidate| candidate == current)
@@ -41,41 +40,46 @@ pub(crate) fn flow_navigation(
         ui.add_space(styles::content_card_inset());
         ui.spacing_mut().item_spacing.x = styles::spacing::flow_navigation_gap::EGUI_POINTS;
 
-        for (index, stage) in FlowStage::ALL.into_iter().enumerate() {
-            if index > 0 {
-                ui.label(
-                    RichText::new("›")
-                        .font(styles::typography::supporting_text::font_id())
-                        .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
-                );
-            }
-
-            let text_color = if index < current_index {
-                styles::color::primary::VALUE.resolve(ui.visuals())
-            } else if stage == current {
-                styles::color::on_surface::VALUE.resolve(ui.visuals())
-            } else {
-                styles::color::on_surface_dim::VALUE.resolve(ui.visuals())
-            };
-            let mut text = RichText::new(stage.label())
-                .font(styles::typography::supporting_text::font_id())
-                .color(text_color);
-            if stage == current {
-                text = text.strong();
-            }
-
-            if index < current_index {
-                let response =
-                    ui.add_enabled(navigation_enabled, egui::Button::new(text).frame(false));
-                styles::paint_focus_ring(ui, &response);
-                if response.clicked() {
-                    selected = Some(stage);
+        FlowStage::ALL
+            .into_iter()
+            .enumerate()
+            .fold(None, |selected, (index, stage)| {
+                if index > 0 {
+                    ui.label(
+                        RichText::new("›")
+                            .font(styles::typography::supporting_text::font_id())
+                            .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+                    );
                 }
-            } else {
-                ui.label(text);
-            }
-        }
-    });
 
-    selected
+                let text_color = if index < current_index {
+                    styles::color::primary::VALUE.resolve(ui.visuals())
+                } else if stage == current {
+                    styles::color::on_surface::VALUE.resolve(ui.visuals())
+                } else {
+                    styles::color::on_surface_dim::VALUE.resolve(ui.visuals())
+                };
+                let mut text = RichText::new(stage.label())
+                    .font(styles::typography::supporting_text::font_id())
+                    .color(text_color);
+                if stage == current {
+                    text = text.strong();
+                }
+
+                if index < current_index {
+                    let response =
+                        ui.add_enabled(navigation_enabled, egui::Button::new(text).frame(false));
+                    styles::paint_focus_ring(ui, &response);
+                    if response.clicked() {
+                        Some(stage)
+                    } else {
+                        selected
+                    }
+                } else {
+                    ui.label(text);
+                    selected
+                }
+            })
+    })
+    .inner
 }

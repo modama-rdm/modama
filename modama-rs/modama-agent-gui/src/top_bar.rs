@@ -68,7 +68,6 @@ impl TopBar {
         page_busy: bool,
         show_login_action: bool,
     ) -> Action {
-        let mut action = Action::None;
         let is_logging_out = false;
         let navigation_busy = page_busy || is_logging_out;
         let layout_state = (username.is_some(), show_login_action);
@@ -76,27 +75,21 @@ impl TopBar {
             .reserve_available_space()
             .style(content_layout_style(username.is_some()))
             .show(|tui| {
-                tui.id("top-bar-brand").ui(|ui| {
-                    if let Some(next_action) =
-                        show_brand(ui, agent_identity.as_ref(), !navigation_busy)
-                    {
-                        action = next_action;
-                    }
-                });
+                let brand_action = tui
+                    .id("top-bar-brand")
+                    .ui(|ui| show_brand(ui, agent_identity.as_ref(), !navigation_busy));
 
-                tui.id(controls_id(username, show_login_action)).ui(|ui| {
-                    if let Some(next_action) = self.show_controls(
+                let controls_action = tui.id(controls_id(username, show_login_action)).ui(|ui| {
+                    self.show_controls(
                         ui,
                         username,
                         navigation_busy,
                         is_logging_out,
                         show_login_action,
-                    ) {
-                        action = next_action;
-                    }
+                    )
                 });
-            });
-        action
+                controls_action.or(brand_action).unwrap_or(Action::None)
+            })
     }
 
     fn show_controls(

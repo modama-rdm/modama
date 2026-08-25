@@ -23,7 +23,6 @@ pub fn destructive_confirmation_dialog(
     confirm_label: &str,
     focus_cancel: bool,
 ) -> ConfirmationDialogAction {
-    let mut action = ConfirmationDialogAction::None;
     let response = egui::Modal::new(egui::Id::new(id))
         .frame(styles::card_frame(visuals))
         .show(ctx, |ui| {
@@ -44,22 +43,25 @@ pub fn destructive_confirmation_dialog(
             );
             ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.add(danger_button(confirm_label, ui)).clicked() {
-                    action = ConfirmationDialogAction::Confirm;
-                }
+                let confirm_clicked = ui.add(danger_button(confirm_label, ui)).clicked();
                 let cancel = ui.add(secondary_button("Cancel", ui));
                 if focus_cancel {
                     cancel.request_focus();
                 }
                 if cancel.clicked() {
-                    action = ConfirmationDialogAction::Cancel;
+                    ConfirmationDialogAction::Cancel
+                } else if confirm_clicked {
+                    ConfirmationDialogAction::Confirm
+                } else {
+                    ConfirmationDialogAction::None
                 }
-            });
+            })
+            .inner
         });
 
-    if action == ConfirmationDialogAction::None && response.should_close() {
+    if response.inner == ConfirmationDialogAction::None && response.should_close() {
         ConfirmationDialogAction::Cancel
     } else {
-        action
+        response.inner
     }
 }
