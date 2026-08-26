@@ -162,3 +162,26 @@ def test_clients_are_logged_once_per_boot(app, caplog: pytest.LogCaptureFixture)
     lines = [r for r in caplog.records if "First request this boot" in r.message]
     assert len(lines) == 1
     assert "modama-agent/1.2.3" in lines[0].getMessage()
+
+
+@pytest.mark.parametrize("spelling", ["+1", "01", "1_0", "1.0", "v1", "1 1", ""])
+def test_only_one_spelling_of_a_version_is_accepted(app, spelling: str):
+    """
+    Anything but a bare integer is an unsupported version, not a value to
+    interpret.
+
+    `int()` on its own would read most of these as 1 or 10 — and a client that
+    half-works on a form we happen to tolerate today is exactly what breaks when
+    the parsing is later tightened. Rejecting them now costs nothing: no client
+    can already depend on a spelling the server never accepted.
+    """
+    client = TestClient(app, headers={API_VERSION_HEADER: spelling})
+    response = client.get(ECHO)
+    assert response.status_code == 400
+    assert response.json()["code"] == "unsupported_api_version"
+
+
+def test_the_supported_version_is_still_accepted_plainly(app):
+    """The guard above must not have narrowed the one spelling that counts."""
+    client = TestClient(app, headers={API_VERSION_HEADER: str(LATEST_VERSION)})
+    assert client.get(ECHO).status_code == 200

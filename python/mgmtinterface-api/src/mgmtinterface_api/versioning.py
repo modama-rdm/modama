@@ -35,11 +35,12 @@ long while.
 """
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import format_datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Header, Request, Response
 
@@ -94,6 +95,17 @@ UNVERSIONED_PATHS = frozenset(
 # Bound on the per-boot "first request" log: a runaway User-Agent must not turn
 # into an unbounded set. In practice there are a handful of distinct clients.
 _MAX_TRACKED_CLIENTS = 200
+
+#: The one accepted spelling of a version: a bare non-negative integer, no sign
+#: and no leading zeros. Anything else is an unsupported version rather than a
+#: value we quietly interpret.
+_VERSION_SPELLING = re.compile(r"0|[1-9][0-9]*")
+
+#: HTTP methods an OpenAPI path item may carry. Everything else under a path
+#: (`summary`, shared `parameters`) is not an operation.
+_OPENAPI_METHODS = frozenset(
+    {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+)
 
 
 def supported_versions_header() -> str:
@@ -158,13 +170,12 @@ def require_api_version(request: Request, raw: ApiVersionHeader = None) -> None:
             f"Supported versions: {supported_versions_header()}.",
         )
 
-    version: int | None
-    try:
-        version = int(raw.strip())
-    except ValueError:
-        # A bare integer only — no "v1". One accepted spelling means a client
-        # cannot half-work by sending a form we happen to tolerate today.
-        version = None
+    # A bare integer only — no "v1". One accepted spelling means a client cannot
+    # half-work by sending a form we happen to tolerate today and tighten later.
+    # `int()` alone is not that check: it also reads "+1", "01" and "1_0", so the
+    # spelling is matched explicitly first.
+    spelling = _VERSION_SPELLING.fullmatch(raw.strip())
+    version = int(spelling.group()) if spelling else None
 
     if version is None or version not in SUPPORTED_VERSIONS:
         log.warning(
@@ -254,3 +265,62 @@ def _append_vary(response: Response, field: str) -> None:
     if field.lower() in {part.strip().lower() for part in existing.split(",")}:
         return
     response.headers["vary"] = f"{existing}, {field}"
+
+
+def document_version_header(schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    Correct how the version header appears in the generated document.
+
+    `require_api_version` declares the header *optional* in Python on purpose: a
+    missing one has to reach its own check, which answers with this API's
+    ``{code, message}`` 400, rather than being turned into FastAPI's 422
+    validation body. The document must not repeat that — a generated client
+    reading ``required: false`` would be entitled to omit the one header without
+    which nothing works, which is the failure declaring the parameter was meant
+    to prevent in the first place.
+
+    So the requirement is stated here instead, after generation: marked required
+    on the routes that enforce it, and removed from the two that ignore it.
+    Idempotent, because FastAPI caches the document and hands back the same one.
+    """
+    for path, path_item in schema.get("paths", {}).items():
+        exempt = path.rstrip("/") in UNVERSIONED_PATHS
+        for method, operation in path_item.items():
+            if method.lower() not in _OPENAPI_METHODS:
+                continue
+            parameters = operation.get("parameters")
+            if not parameters:
+                continue
+            kept: list[dict[str, Any]] = []
+            for parameter in parameters:
+                if parameter.get("name") != API_VERSION_HEADER:
+                    kept.append(parameter)
+                elif not exempt:
+                    parameter["required"] = True
+                    parameter["schema"] = _without_null(parameter.get("schema", {}))
+                    kept.append(parameter)
+            if kept:
+                operation["parameters"] = kept
+            else:
+                del operation["parameters"]
+    return schema
+
+
+def _without_null(schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    Drop the null branch `str | None` generates: a required header is never null.
+
+    Left alone if the shape is anything other than one concrete branch beside
+    the null one, so a future change to the annotation degrades to a document
+    that is merely imprecise rather than wrong.
+    """
+    branches = schema.get("anyOf")
+    if not branches:
+        return schema
+    concrete = [branch for branch in branches if branch.get("type") != "null"]
+    if len(concrete) != 1:
+        return schema
+    return {
+        **{key: value for key, value in schema.items() if key != "anyOf"},
+        **concrete[0],
+    }

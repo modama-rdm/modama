@@ -11,6 +11,8 @@ locally installed clients can stay on an older contract while the server moves
 on; see `versioning.py`.
 """
 
+from typing import Any
+
 from fastapi import Depends, FastAPI
 
 from .config import API_PREFIX, Settings, get_settings
@@ -23,6 +25,7 @@ from .versioning import (
     API_VERSION_HEADER,
     LATEST_VERSION,
     add_version_headers,
+    document_version_header,
     require_api_version,
     supported_versions_header,
 )
@@ -132,5 +135,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def healthz() -> dict[str, str]:
         """Liveness probe, and the smallest end-to-end check of the route."""
         return {"status": "ok"}
+
+    # The generated document needs one correction the route decorators cannot
+    # express; see `document_version_header`. FastAPI caches into
+    # `openapi_schema`, so this runs once and every later call sees the result.
+    generate = app.openapi
+
+    def openapi() -> dict[str, Any]:
+        return document_version_header(generate())
+
+    app.openapi = openapi
 
     return app
