@@ -117,8 +117,9 @@ services:
       context: ..
       dockerfile: deploy/mgmtinterface-api/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-api:latest
-    # The session signing secret is mounted with the auth slice; the scaffold has
-    # no endpoints that need it.
+    # Sessions are signed with a key generated at startup unless one is mounted;
+    # see the commented-out block in docker-compose.prod.yml for how to make
+    # them survive a restart of this container.
     depends_on:
       - "permissions"
 
