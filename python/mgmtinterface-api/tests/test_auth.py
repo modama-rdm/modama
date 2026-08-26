@@ -136,6 +136,61 @@ def test_forged_cookie_is_rejected(client: TestClient, settings: Settings):
     assert response.json()["code"] == "session_expired"
 
 
+def expired_cookie_directives(response) -> str:
+    """The `Set-Cookie` that deletes the session, or "" if there is none."""
+    for value in response.headers.get_list("set-cookie"):
+        # A deletion is an empty value plus an expiry in the past.
+        if "Max-Age=0" in value or "Expires=Thu, 01 Jan 1970" in value:
+            return value
+    return ""
+
+
+def test_a_dead_session_is_cleared_from_the_browser(
+    client: TestClient, settings: Settings
+):
+    """
+    The 401 has to carry the deletion, not just report the problem.
+
+    It is raised, and an exception handler builds its own response — so a
+    `Set-Cookie` written to the handler's injected `Response` would be silently
+    dropped and the browser would keep sending a cookie that can never work.
+    """
+    other = create_app(Settings(session_secret="other", session_cookie_secure=False))
+    client.cookies.set(
+        settings.effective_cookie_name, other.state.session_codec.issue("mmustermann")
+    )
+
+    response = client.get(SESSION)
+
+    assert response.status_code == 401
+    deletion = expired_cookie_directives(response)
+    assert deletion, "the dead session cookie was not cleared"
+    assert settings.effective_cookie_name in deletion
+    # Attributes have to match the ones it was set with, or the browser keeps
+    # the original cookie alongside the deletion.
+    assert "Path=/" in deletion
+    assert "HttpOnly" in deletion
+
+
+def test_a_session_whose_account_vanished_is_also_cleared(
+    settings: Settings, upstream: dict[str, int], monkeypatch: pytest.MonkeyPatch
+):
+    """The other 401 path out of `current_session` — same requirement."""
+    monkeypatch.setattr(
+        "mgmtinterface_api.security.user_exists", lambda settings, username: False
+    )
+    app = create_app(always_refreshing(settings))
+    client = api_client(app)
+    client.cookies.set(
+        settings.effective_cookie_name, app.state.session_codec.issue("mmustermann")
+    )
+
+    response = client.get(SESSION)
+
+    assert response.status_code == 401
+    assert expired_cookie_directives(response), "the cookie was not cleared"
+
+
 def test_fresh_session_does_not_call_the_permissions_service(
     client: TestClient, upstream: dict[str, int]
 ):

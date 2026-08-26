@@ -112,3 +112,19 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
         samesite="lax",
         path=_COOKIE_PATH,
     )
+
+
+def clear_session_cookie_header(settings: Settings) -> dict[str, str]:
+    """
+    The same deletion, rendered as a header mapping for `APIError`.
+
+    A dead session is refused by *raising*, and headers written to a handler's
+    injected `Response` are dropped once an exception handler builds its own
+    response — so the deletion has to travel with the error instead. Rendering
+    it through a throwaway `Response` keeps one definition of the cookie's
+    attributes; they must match the ones it was set with or the browser keeps
+    the original cookie alongside the deletion.
+    """
+    carrier = Response()
+    clear_session_cookie(carrier, settings)
+    return {"set-cookie": carrier.headers["set-cookie"]}

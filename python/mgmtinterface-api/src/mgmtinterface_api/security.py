@@ -11,7 +11,7 @@ from .session import (
     SessionCodec,
     SessionData,
     SessionInvalid,
-    clear_session_cookie,
+    clear_session_cookie_header,
     set_session_cookie,
 )
 from .throttle import FailureThrottle
@@ -129,16 +129,28 @@ def current_session(
     if not token:
         raise APIError(401, "not_authenticated", "Sign in to continue.")
 
+    # The deletion rides on the error rather than on `response`: an exception
+    # handler builds its own response, and anything written to the injected one
+    # is discarded. Same reason `APIError` carries `Retry-After` for the login
+    # throttle.
     try:
         data, age_seconds = codec_of(request).read(token)
     except SessionInvalid as exc:
-        clear_session_cookie(response, settings)
-        raise APIError(401, "session_expired", "Your session has expired.") from exc
+        raise APIError(
+            401,
+            "session_expired",
+            "Your session has expired.",
+            headers=clear_session_cookie_header(settings),
+        ) from exc
 
     if age_seconds >= settings.session_refresh_seconds:
         if not user_exists(settings, data["username"]):
-            clear_session_cookie(response, settings)
-            raise APIError(401, "session_expired", "Your session has expired.")
+            raise APIError(
+                401,
+                "session_expired",
+                "Your session has expired.",
+                headers=clear_session_cookie_header(settings),
+            )
         set_session_cookie(
             response,
             settings,
