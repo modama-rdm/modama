@@ -280,6 +280,45 @@ def test_origin_is_compared_against_the_forwarded_scheme(client: TestClient):
     assert response.status_code == 200
 
 
+def test_origin_keeps_a_non_default_port(client: TestClient):
+    """
+    The test deployment answers on :5001, so the browser's Origin carries that
+    port. nginx must forward it ($http_host, not $host) or every POST 403s —
+    which is exactly how a wrong-looking password once turned out to be CSRF.
+    """
+    response = client.post(
+        LOGIN,
+        json=GOOD,
+        headers={"Origin": "http://localhost:5001", "Host": "localhost:5001"},
+    )
+    assert response.status_code == 200
+
+
+def test_explicit_default_port_still_matches(client: TestClient):
+    # The mirror image: a Host spelling out :443 must not stop matching the
+    # port-less Origin the browser sends for https.
+    response = client.post(
+        LOGIN,
+        json=GOOD,
+        headers={
+            "Origin": "https://er-c-data-mgmt.fz-juelich.de",
+            "Host": "er-c-data-mgmt.fz-juelich.de:443",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_a_different_port_is_still_cross_origin(client: TestClient):
+    response = client.post(
+        LOGIN,
+        json=GOOD,
+        headers={"Origin": "http://localhost:9999", "Host": "localhost:5001"},
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "bad_origin"
+
+
 def test_missing_origin_is_allowed(client: TestClient):
     # curl, scripts and the test suite send no Origin; browsers always do on
     # cross-site state-changing requests.

@@ -99,12 +99,34 @@ def _origin_of(url: str) -> str | None:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+#: Ports a URL of each scheme is spelled *without*. A browser omits these from
+#: `Origin`, so an authority carrying one has to be normalized before comparing.
+_DEFAULT_PORTS = {"http": "80", "https": "443"}
+
+
 def _expected_origin(request: Request) -> str:
     # nginx sets both headers; falling back to the request URL keeps this
     # working when the service is hit directly (local dev, container probes).
+    # The Host header must carry the port the browser used (nginx: $http_host,
+    # not $host) — the test deployment is on :5001, and an origin missing that
+    # port matches nothing the browser ever sends.
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("host", request.url.netloc)
-    return f"{scheme}://{host}"
+    return f"{scheme}://{_without_default_port(scheme, host)}"
+
+
+def _without_default_port(scheme: str, host: str) -> str:
+    """
+    ``example.org:443`` -> ``example.org`` for https, and likewise :80 for http.
+
+    Only an explicit *default* port is dropped: a caller that spells it out
+    would otherwise never match the port-less `Origin` its own browser sends.
+    Any other port is significant and stays.
+    """
+    prefix, sep, port = host.rpartition(":")
+    if sep and port == _DEFAULT_PORTS.get(scheme):
+        return prefix
+    return host
 
 
 # Declared `def`, not `async def`, on purpose: the refresh path makes a blocking
