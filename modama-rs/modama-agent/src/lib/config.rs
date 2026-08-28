@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use modama_common::{
     agent::{AgentId, ClientCertError},
     cert_helpers::{
@@ -21,8 +21,37 @@ use crate::local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider};
 
 #[derive(Parser, Debug)]
 pub struct CliArgs {
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub config_path: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+pub enum Command {
+    /// Run under an operating-system service manager.
+    RunService,
+
+    /// Install and start the Windows service.
+    #[cfg(windows)]
+    InstallAsService,
+
+    /// Stop and unregister the Windows service, preserving installed files.
+    #[cfg(windows)]
+    UninstallService,
+
+    /// Start the installed Windows service.
+    #[cfg(windows)]
+    StartService,
+
+    /// Stop the installed Windows service.
+    #[cfg(windows)]
+    StopService,
+
+    /// Print the installed Windows service status.
+    #[cfg(windows)]
+    ServiceStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -286,5 +315,31 @@ impl AgentConfig {
                 token_provider
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn foreground_invocation_remains_compatible() -> Result<(), clap::Error> {
+        let args = CliArgs::try_parse_from(["modama-agent", "--config-path", "agent.toml"])?;
+        assert_eq!(args.config_path, Some(PathBuf::from("agent.toml")));
+        assert!(args.command.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn run_service_accepts_global_config_after_subcommand() -> Result<(), clap::Error> {
+        let args = CliArgs::try_parse_from([
+            "modama-agent",
+            "run-service",
+            "--config-path",
+            "agent.toml",
+        ])?;
+        assert!(matches!(args.command, Some(Command::RunService)));
+        assert_eq!(args.config_path, Some(PathBuf::from("agent.toml")));
+        Ok(())
     }
 }

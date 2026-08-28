@@ -8,3 +8,4 @@ test-env/target
 test-env/report-target
 test-env/certs
 test-env/cargo-cache/
+.xwin-cache/

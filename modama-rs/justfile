@@ -2,6 +2,10 @@ agent_gui_package := "modama-agent-gui"
 snapshot_dir := "modama-agent-gui/tests/snapshots"
 guide_image_dir := "../docs/guide/src/user/images/agent"
 design_spec := "../mgmtinterface-new/DESIGN.md"
+win7_toolchain := "nightly-2025-09-28"
+xwin_cache := justfile_directory() + "/.xwin-cache"
+xwin_sdk := xwin_cache + "/splat"
+xwin_cflags := "/imsvc" + xwin_sdk + "/crt/include /imsvc" + xwin_sdk + "/sdk/include/ucrt /imsvc" + xwin_sdk + "/sdk/include/shared /imsvc" + xwin_sdk + "/sdk/include/um"
 
 fmt:
     cargo fmt
@@ -50,3 +54,37 @@ update-snapshots:
 # Remove generated visual-test review artifacts.
 clean:
     find {{ snapshot_dir }} {{ guide_image_dir }} -maxdepth 1 -type f \( -name '*.new.png' -o -name '*.diff.png' -o -name '*.old.png' \) -delete
+
+# Download and package the Microsoft CRT and Windows SDK used by the legacy build.
+win7-xwin-splat:
+    xwin --accept-license --arch x86_64 --cache-dir "{{ xwin_cache }}" splat --output "{{ xwin_sdk }}"
+
+# Build the production Windows 7 SP1 x64 agent with the dedicated Tier 3 target.
+win7-build-agent:
+    test -d "{{ xwin_sdk }}/crt/lib/x86_64" || { echo "xwin sysroot missing; run: just win7-xwin-splat" >&2; exit 1; }
+    CARGO_TARGET_X86_64_WIN7_WINDOWS_MSVC_LINKER=lld-link \
+    CC_x86_64_win7_windows_msvc=clang-cl-19 \
+    CXX_x86_64_win7_windows_msvc=clang-cl-19 \
+    AR_x86_64_win7_windows_msvc=llvm-lib \
+    CFLAGS_x86_64_win7_windows_msvc="{{ xwin_cflags }}" \
+    RUSTFLAGS="--cfg windows_slim_errors -C panic=abort -C target-feature=+crt-static -L native={{ xwin_sdk }}/crt/lib/x86_64 -L native={{ xwin_sdk }}/sdk/lib/um/x86_64 -L native={{ xwin_sdk }}/sdk/lib/ucrt/x86_64" \
+    cargo +{{ win7_toolchain }} build -q -Z build-std=std,panic_abort -p modama-agent --bin modama-agent --target x86_64-win7-windows-msvc --release --locked
+    cargo +{{ win7_toolchain }} build -q -Z build-std=std,panic_abort -p modama-agent-gui --bin modama-agent-gui --target x86_64-win7-windows-msvc --release --locked
+
+# Require the agent's DLL imports to match the reviewed Windows 7 allowlist.
+win7-check-agent-imports: win7-build-agent
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for binary in "target/x86_64-win7-windows-msvc/release/modama-agent{,-gui}.exe"; do
+        allowlist="windows-7-dlls.txt"
+        imports="$(llvm-readobj --coff-imports "$binary")"
+        if ! diff -u "$allowlist" <(printf '%s\n' "$imports" | sed -n 's/^  Name: //p' | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort -u); then
+            echo "Unexpected Windows DLL imports. Verify Windows 7 availability, then update $allowlist deliberately." >&2
+            exit 1
+        fi
+        if rg -q 'Symbol: (RoOriginateErrorW|SetThreadDescription|GetSystemTimePreciseAsFileTime|WaitOnAddress|WakeByAddressSingle|CoTaskMemFree)' <<<"$imports"; then
+            echo "The agent imports a known post-Windows-7 API." >&2
+            exit 1
+        fi
+        echo "Windows 7 import allowlist passed for $binary"
+    done

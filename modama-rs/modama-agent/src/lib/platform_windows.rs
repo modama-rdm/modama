@@ -38,7 +38,7 @@ pub async fn ensure_mounted(
     // - check if a drive is already mapped for the given share
     // - perform the `net use` equivalent win32 call
 
-    let resource_string = format!("\\\\{}\\{}", &config.smb_hostname, share.share_name);
+    let resource_string = format!("\\\\{}\\{}", config.smb_hostname, share.share_name);
     let mapped_drives =
         internal::get_mapped_drives().map_err(|e| EnsureMountedError::MountFailed(e.message()))?;
     let mapped_remote_shares: HashMap<String, internal::MappedDrive> = mapped_drives
@@ -49,10 +49,7 @@ pub async fn ensure_mounted(
 
     // already mounted? okay!
     if let Some(md) = mapped_remote_shares.get(&resource_string) {
-        info!(
-            "share {} already mounted at {}",
-            &share.share_name, &md.drive
-        );
+        info!("share {} already mounted at {}", share.share_name, md.drive);
         return Ok(MountedShare {
             share: share.clone(),
             mount_path: PathBuf::from(&md.drive),
@@ -102,7 +99,7 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
             return;
         }
     };
-    let our_prefix = format!("\\\\{}", &config.smb_hostname);
+    let our_prefix = format!("\\\\{}", config.smb_hostname);
     let our_drives: Vec<_> = all_drives
         .iter()
         .filter(|md| md.remote_share.starts_with(&our_prefix))

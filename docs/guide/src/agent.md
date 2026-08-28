@@ -183,6 +183,8 @@ The configuration is read from the following locations:
 
 TODO: add system-wide locations, and other platforms
 
+#### Linux
+
 On Linux, the service can be automatically managed by systemd. An example systemd unit follows:
 
 ```
@@ -207,4 +209,40 @@ Save this file as `/etc/systemd/system/modama-agent.service`, enable and start t
 ```bash
 systemctl enable modama-agent
 systemctl start modama-agent
+```
+
+#### Windows
+
+`modama-agent` can run as a Windows service in the background. To install it,
+run:
+
+```
+modama-agent.exe install-as-service --config-path modama-agent.toml
+```
+
+The installation uses these machine-wide locations:
+
+```text
+%ProgramFiles%\fz-juelich\modama-agent\modama-agent.exe
+%ProgramData%\fz-juelich\modama-agent\modama-agent.toml
+%ProgramData%\fz-juelich\modama-agent\logs\modama-agent.log
+```
+
+The service is named `modama-agent`, starts automatically, and runs as the
+passwordless virtual account `NT SERVICE\modama-agent`. The config including the
+embedded mTLS private key are readable only by that service, SYSTEM,
+and Administrators. Logs rotate at 10 MiB with five old files retained.
+
+The service starts immediately after installation. A restrictive domain policy
+can remove `Log on as a service` from virtual accounts; in that case grant the
+right to `NT SERVICE\modama-agent` or `NT SERVICE\ALL SERVICES` through the
+applicable policy.
+
+You can later manage the service with the following commands:
+
+```text
+modama-agent.exe service-status
+modama-agent.exe stop-service
+modama-agent.exe start-service
+modama-agent.exe uninstall-service
 ```

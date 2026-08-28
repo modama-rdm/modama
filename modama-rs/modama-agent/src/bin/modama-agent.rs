@@ -1,98 +1,102 @@
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
-use anyhow::{Result as AnyResult, anyhow};
+use anyhow::Result;
 use clap::Parser;
-use log::info;
 use modama_agent::{
-    agent_state::AgentState,
-    config::{AgentConfig, CliArgs},
-    local_http_service::serve_local_web_api,
-    local_net_token_proxy::token_publisher_loop,
-    message_loop::message_loop,
-    mount_backend::MountBackend,
-    platform::CurrentPlatformMountBackend,
+    config::{CliArgs, Command},
+    message_loop::MountPolicy,
+    runtime::run_agent,
 };
 use modama_common::logging::init_logging;
-use tokio::{select, spawn, sync::Mutex};
 
 #[cfg(unix)]
-use tokio::signal::unix::SignalKind;
+async fn shutdown_signal() {
+    use tokio::signal::unix::SignalKind;
 
-#[cfg(unix)]
-async fn termination_signal() -> std::io::Result<()> {
-    let mut stream = tokio::signal::unix::signal(SignalKind::terminate())?;
-    stream.recv().await;
-    Ok(())
+    let terminate = async {
+        match tokio::signal::unix::signal(SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                log::error!("could not register SIGTERM handler: {error}");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => {
+            if let Err(error) = result {
+                log::error!("could not wait for Ctrl-C: {error}");
+            }
+        }
+        _ = terminate => {}
+    }
 }
 
 #[cfg(windows)]
-async fn termination_signal() -> std::io::Result<()> {
-    std::future::pending().await
+async fn shutdown_signal() {
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        log::error!("could not wait for Ctrl-C: {error}");
+    }
 }
 
-fn config_path(args: &CliArgs) -> AnyResult<PathBuf> {
-    Ok(match &args.config_path {
-        Some(path) => path.clone(),
-        None => {
-            // FIXME: add more paths where we search for config? /etc/modama-agent.toml?
-
-            directories::ProjectDirs::from("de", "fz-juelich", "modama-agent")
-                .map(|p| p.config_dir().join("modama-agent.toml"))
-                .ok_or(anyhow!(
-                    "could not find project directories for configuration"
-                ))?
-        }
-    })
+#[cfg(not(windows))]
+fn default_config_path() -> Result<PathBuf> {
+    directories::ProjectDirs::from("de", "fz-juelich", "modama-agent")
+        .map(|paths| paths.config_dir().join("modama-agent.toml"))
+        .ok_or_else(|| anyhow::anyhow!("could not find project directories for configuration"))
 }
 
-#[tokio::main]
-async fn main() -> AnyResult<()> {
+#[cfg(windows)]
+fn default_config_path() -> Result<PathBuf> {
+    modama_agent::windows_service::user_config_path()
+}
+
+fn config_path(args: &CliArgs) -> Result<PathBuf> {
+    args.config_path
+        .clone()
+        .map_or_else(default_config_path, Ok)
+}
+
+fn run_foreground(path: PathBuf) -> Result<()> {
     init_logging();
+    tokio::runtime::Runtime::new()?.block_on(run_agent(
+        &path,
+        MountPolicy::Enabled,
+        shutdown_signal(),
+        || Ok(()),
+    ))
+}
 
+fn main() -> Result<()> {
     let args = CliArgs::parse();
-    let path = config_path(&args)?;
-    info!("looking for config at {path:?}");
-    let config = AgentConfig::from_file(&path).await?;
-
-    info!("This is modama-agent `{:?}`", config.identity);
-
-    let state: Arc<Mutex<AgentState>> = Arc::new(Mutex::new(AgentState::new(&config)));
-
-    let token_provider = config.make_token_provider().await?;
-
-    let another_token_provider = Arc::clone(&token_provider);
-    let _local_token_server_handle = config.client_cert.as_ref().map(|_client_cert| {
-        spawn(async move {
-            token_publisher_loop(another_token_provider).await;
-        })
-    });
-
-    let state_for_api = Arc::clone(&state);
-    let cloned_token_provider = Arc::clone(&token_provider);
-    let listen_local_api = config.listen_local_api.clone();
-    let local_api_handle = tokio::spawn(async move {
-        serve_local_web_api(state_for_api, &listen_local_api, cloned_token_provider).await
-    });
-
-    let mount_backend = CurrentPlatformMountBackend {};
-    mount_backend.initialize(&config).await;
-
-    select! {
-        _ = tokio::signal::ctrl_c() => {
-            eprintln!("SIGINT received, exiting");
-            Ok(())
-        },
-        _ = termination_signal() => {
-            eprintln!("SIGTERM received, exiting");
-            Ok(())
+    match args.command {
+        None => run_foreground(config_path(&args)?),
+        Some(Command::RunService) => {
+            let path = config_path(&args)?;
+            #[cfg(windows)]
+            {
+                modama_agent::windows_service::run_service_dispatcher(path)
+            }
+            #[cfg(not(windows))]
+            {
+                run_foreground(path)
+            }
         }
-        _ = message_loop(&mount_backend, Arc::clone(&state), Arc::clone(&config.client_config), Arc::clone(&token_provider)) => {
-            Ok(())
+        #[cfg(windows)]
+        Some(Command::InstallAsService) => {
+            let source =
+                modama_agent::windows_service::resolve_install_config(args.config_path.as_deref())?;
+            modama_agent::windows_service::install(&source)
         }
-        res = local_api_handle => {
-            res?
-        }
-    }?;
-
-    Ok(())
+        #[cfg(windows)]
+        Some(Command::UninstallService) => modama_agent::windows_service::uninstall(),
+        #[cfg(windows)]
+        Some(Command::StartService) => modama_agent::windows_service::start(),
+        #[cfg(windows)]
+        Some(Command::StopService) => modama_agent::windows_service::stop(),
+        #[cfg(windows)]
+        Some(Command::ServiceStatus) => modama_agent::windows_service::status(),
+    }
 }

@@ -21,12 +21,22 @@ use tokio::{sync::Mutex, time::Instant};
 use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MountPolicy {
+    Enabled,
+    Disabled,
+}
+
 async fn update_share_list(
     backend: &impl MountBackend,
     config: &AgentConfig,
     current_shares: &ShareState<MountedShare>,
     desired_shares: ShareState<Share>,
+    mount_policy: MountPolicy,
 ) -> AnyResult<ShareState<MountedShare>> {
+    if mount_policy == MountPolicy::Disabled {
+        return Ok(ShareState::default());
+    }
     let mut next_shares = current_shares.clone();
     let new_fg_share: Option<Share> = desired_shares.foreground_share;
     let old_fg_share: Option<&Share> = current_shares.foreground_share.as_ref().map(|ms| &ms.share);
@@ -81,6 +91,7 @@ async fn handle_message(
     backend: &impl MountBackend,
     state: &Arc<Mutex<AgentState>>,
     msg: &str,
+    mount_policy: MountPolicy,
 ) -> AnyResult<()> {
     let event_msg: EventChannelMessage = serde_json::from_str(msg)
         .with_context(|| format!("Invalid message encountered: {}", msg))?;
@@ -104,8 +115,14 @@ async fn handle_message(
                 });
                 (state.config.clone(), state.current_shares.clone())
             };
-            let new_current_shares =
-                update_share_list(backend, &config, &current_shares, desired_shares).await?;
+            let new_current_shares = update_share_list(
+                backend,
+                &config,
+                &current_shares,
+                desired_shares,
+                mount_policy,
+            )
+            .await?;
             {
                 let mut state = state.lock().await;
                 state.current_shares = new_current_shares;
@@ -119,11 +136,12 @@ async fn receive_inner(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
     backend: &impl MountBackend,
     state: &Arc<Mutex<AgentState>>,
+    mount_policy: MountPolicy,
 ) -> ControlFlow<(), ()> {
     match message {
         Some(Ok(msg)) => {
             if let Ok(msg) = msg.into_text() {
-                if let Err(e) = handle_message(backend, state, &msg).await {
+                if let Err(e) = handle_message(backend, state, &msg, mount_policy).await {
                     error!("Error while handing message: {e}");
                 }
             } else {
@@ -144,7 +162,11 @@ async fn receive_inner(
     }
 }
 
-async fn reconcile(backend: &impl MountBackend, state: &Arc<Mutex<AgentState>>) {
+async fn reconcile(
+    backend: &impl MountBackend,
+    state: &Arc<Mutex<AgentState>>,
+    mount_policy: MountPolicy,
+) {
     let (current, remote_info, config) = {
         let state = state.lock().await;
         (
@@ -154,7 +176,15 @@ async fn reconcile(backend: &impl MountBackend, state: &Arc<Mutex<AgentState>>) 
         )
     };
     if let Some(remote_info) = remote_info {
-        match update_share_list(backend, &config, &current, remote_info.desired_shares).await {
+        match update_share_list(
+            backend,
+            &config,
+            &current,
+            remote_info.desired_shares,
+            mount_policy,
+        )
+        .await
+        {
             Ok(new_current_shares) => {
                 state.lock().await.current_shares = new_current_shares;
             }
@@ -172,6 +202,7 @@ pub async fn message_loop(
     state: Arc<Mutex<AgentState>>,
     tls_config: Arc<ClientConfig>,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
+    mount_policy: MountPolicy,
 ) {
     let config = state.lock().await.config.clone();
 
@@ -241,13 +272,13 @@ pub async fn message_loop(
         loop {
             tokio::select! {
                 _ = &mut timer => {
-                    reconcile(backend, &state).await;
+                    reconcile(backend, &state, mount_policy).await;
                     timer.as_mut().reset(
                         Instant::now() + reconcile_interval
                     )
                 }
                 msg = ws_read.next() => {
-                    match receive_inner(msg, backend, &state).await {
+                    match receive_inner(msg, backend, &state, mount_policy).await {
                         ControlFlow::Continue(_) => continue,  // success or ignored message
                         ControlFlow::Break(_) => break,  // error or disconnected => reconnect
                     }
@@ -410,10 +441,9 @@ mod tests {
         });
         let task_state = Arc::clone(&state);
         let task_backend = Arc::clone(&backend);
-        let task =
-            tokio::spawn(
-                async move { handle_message(&*task_backend, &task_state, &message).await },
-            );
+        let task = tokio::spawn(async move {
+            handle_message(&*task_backend, &task_state, &message, MountPolicy::Enabled).await
+        });
 
         tokio::time::timeout(Duration::from_secs(1), entered_rx.recv())
             .await
@@ -449,6 +479,43 @@ mod tests {
                 .map(|mounted| mounted.share.share_id.as_str()),
             Some("foreground-share")
         );
+    }
+
+    #[tokio::test]
+    async fn disabled_mount_policy_does_not_invoke_backend() {
+        let share = messages::Share {
+            resource: Some("test-resource".to_owned()),
+            share_id: "share-id".to_owned(),
+            share_name: "share".to_owned(),
+            dest_path: "/project/session".to_owned(),
+            created_timestamp: 0,
+            username: "user".to_owned(),
+            password: "password".to_owned(),
+            uid: 1000,
+            gid: 1000,
+        };
+        let desired = ShareState {
+            foreground_share: Some(share.clone()),
+            shares: vec![share],
+        };
+        let (ensure_tx, mut ensure_rx) = mpsc::channel(1);
+        let (umount_tx, mut umount_rx) = mpsc::channel(1);
+        let backend = MockMountBackend::new(ensure_tx, umount_tx, std::env::temp_dir());
+
+        let result = update_share_list(
+            &backend,
+            &test_agent_config(),
+            &ShareState::default(),
+            desired,
+            MountPolicy::Disabled,
+        )
+        .await
+        .unwrap();
+
+        assert!(result.shares.is_empty());
+        assert!(result.foreground_share.is_none());
+        assert!(ensure_rx.try_recv().is_err());
+        assert!(umount_rx.try_recv().is_err());
     }
 
     struct MessageLoopTestSetup {
@@ -573,6 +640,7 @@ mod tests {
                     message_loop_state,
                     client_config,
                     Arc::clone(&token_provider),
+                    MountPolicy::Enabled,
                 )
                 .await;
             });

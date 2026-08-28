@@ -834,8 +834,16 @@ pub async fn serve_local_web_api(
     listen_addr: &str,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) -> Result<(), LocalAPIError> {
-    let app = make_app(ApiState::new(&state, &token_provider))?;
     let listener = tokio::net::TcpListener::bind(listen_addr).await?;
+    serve_local_web_api_on(listener, state, token_provider).await
+}
+
+pub async fn serve_local_web_api_on(
+    listener: tokio::net::TcpListener,
+    state: Arc<Mutex<AgentState>>,
+    token_provider: Arc<dyn TokenProvider + Sync + Send>,
+) -> Result<(), LocalAPIError> {
+    let app = make_app(ApiState::new(&state, &token_provider))?;
 
     #[allow(clippy::unwrap_used)] // infallible
     axum::serve(listener, app).await.unwrap();
