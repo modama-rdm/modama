@@ -4,6 +4,7 @@
       keeping smbdrop project-agnostic (deferred until the new mgmtinterface API exists)
 - [ ] re-examine polling for status updates
     - expose websocket from modama-agent and have a background thread continuously listen on that?
+- [ ] Monitor critical background tasks and restart them internally or propagate their failure.
 
 ## GUI
 

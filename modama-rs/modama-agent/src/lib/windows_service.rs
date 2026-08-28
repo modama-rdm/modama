@@ -363,7 +363,9 @@ pub fn install(source_config: &Path) -> Result<()> {
         )?;
 
         // Description and recovery policy are ChangeServiceConfig2W information
-        // levels. Restart only crashes, with bounded retries and a daily reset.
+        // levels. Restart crashes and reported nonzero exits after 5s, 30s,
+        // then 60s; Windows repeats the final action until 24 failure-free hours
+        // reset the failure count.
         // https://learn.microsoft.com/windows/win32/api/winsvc/nf-winsvc-changeserviceconfig2w
         // https://learn.microsoft.com/windows/win32/api/winsvc/ns-winsvc-service_failure_actionsw
         // https://learn.microsoft.com/windows/win32/api/winsvc/ns-winsvc-service_failure_actions_flag
@@ -385,13 +387,12 @@ pub fn install(source_config: &Path) -> Result<()> {
                     action_type: ServiceActionType::Restart,
                     delay: Duration::from_secs(60),
                 },
-                ServiceAction {
-                    action_type: ServiceActionType::None,
-                    delay: Duration::ZERO,
-                },
             ]),
         })?;
-        service.set_failure_actions_on_non_crash_failures(false)?;
+        // Include failures that the service reports through SERVICE_STOPPED
+        // with a nonzero exit code, not just crashes or abrupt termination.
+        // https://learn.microsoft.com/windows/win32/api/winsvc/ns-winsvc-service_failure_actions_flag
+        service.set_failure_actions_on_non_crash_failures(true)?;
         Ok(())
     })();
     if let Err(error) = configuration_result {
@@ -552,7 +553,11 @@ pub fn uninstall() -> Result<()> {
     Ok(())
 }
 
-fn service_status(state: ServiceState, exit_code: ServiceExitCode) -> ServiceStatus {
+fn service_status(
+    state: ServiceState,
+    exit_code: ServiceExitCode,
+    checkpoint: u32,
+) -> ServiceStatus {
     let controls_accepted = if state == ServiceState::Running {
         ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN
     } else {
@@ -563,7 +568,14 @@ fn service_status(state: ServiceState, exit_code: ServiceExitCode) -> ServiceSta
         current_state: state,
         controls_accepted,
         exit_code,
-        checkpoint: 0,
+        checkpoint: if matches!(
+            state,
+            ServiceState::StartPending | ServiceState::StopPending
+        ) {
+            checkpoint
+        } else {
+            0
+        },
         wait_hint: if matches!(
             state,
             ServiceState::StartPending | ServiceState::StopPending
@@ -576,11 +588,27 @@ fn service_status(state: ServiceState, exit_code: ServiceExitCode) -> ServiceSta
     }
 }
 
-fn set_status(handle: ServiceStatusHandle, state: ServiceState, exit_code: ServiceExitCode) {
+fn set_status(
+    handle: ServiceStatusHandle,
+    state: ServiceState,
+    exit_code: ServiceExitCode,
+    checkpoint: u32,
+) -> Result<()> {
     // ServiceStatusHandle::set_service_status wraps SetServiceStatus. The SCM
     // uses these updates to gate controls and diagnose startup/shutdown delays.
     // https://learn.microsoft.com/windows/win32/api/winsvc/nf-winsvc-setservicestatus
-    if let Err(status_error) = handle.set_service_status(service_status(state, exit_code)) {
+    handle
+        .set_service_status(service_status(state, exit_code, checkpoint))
+        .with_context(|| format!("could not report service state {state:?}"))
+}
+
+fn set_status_best_effort(
+    handle: ServiceStatusHandle,
+    state: ServiceState,
+    exit_code: ServiceExitCode,
+    checkpoint: u32,
+) {
+    if let Err(status_error) = set_status(handle, state, exit_code, checkpoint) {
         error!("could not report service state {state:?}: {status_error}");
     }
 }
@@ -637,7 +665,12 @@ fn service_main_inner() -> Result<()> {
         ServiceControl::Stop | ServiceControl::Shutdown => {
             if let Ok(status) = handler_status.lock() {
                 if let Some(handle) = *status {
-                    set_status(handle, ServiceState::StopPending, ServiceExitCode::NO_ERROR);
+                    set_status_best_effort(
+                        handle,
+                        ServiceState::StopPending,
+                        ServiceExitCode::NO_ERROR,
+                        1,
+                    );
                 }
             }
             let _ = shutdown_sender.send(true);
@@ -657,11 +690,24 @@ fn service_main_inner() -> Result<()> {
         status_handle,
         ServiceState::StartPending,
         ServiceExitCode::NO_ERROR,
-    );
+        1,
+    )?;
 
     let result = (|| -> Result<()> {
         init_service_logging(&config_path)?;
+        set_status(
+            status_handle,
+            ServiceState::StartPending,
+            ServiceExitCode::NO_ERROR,
+            2,
+        )?;
         let runtime = tokio::runtime::Runtime::new()?;
+        set_status(
+            status_handle,
+            ServiceState::StartPending,
+            ServiceExitCode::NO_ERROR,
+            3,
+        )?;
         runtime.block_on(run_agent(
             &config_path,
             // Services run in noninteractive Session 0, so WNet mappings made
@@ -678,7 +724,8 @@ fn service_main_inner() -> Result<()> {
                     status_handle,
                     ServiceState::Running,
                     ServiceExitCode::NO_ERROR,
-                );
+                    0,
+                )?;
                 info!("Windows service entered the running state");
                 Ok(())
             },
@@ -693,6 +740,9 @@ fn service_main_inner() -> Result<()> {
     if let Err(runtime_error) = &result {
         error!("agent runtime stopped with an error: {runtime_error:#}");
     }
-    set_status(status_handle, ServiceState::Stopped, exit_code);
+    // Once shutdown is already committed there is no useful local recovery
+    // from a final SetServiceStatus failure; process termination still lets the
+    // SCM observe that the service is gone.
+    set_status_best_effort(status_handle, ServiceState::Stopped, exit_code, 0);
     result
 }
