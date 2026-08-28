@@ -56,7 +56,6 @@ rust-tests:
       - .cargo-home/bin/
       - .cargo-home/registry/index/
       - .cargo-home/registry/cache/
-      - .cargo-home/git/db/
 
 # the `ring` crate doesn't build on the gnu toolchain, so while we can still
 # run clippy as a basic smoke test, the full build is not enabled here.
@@ -78,7 +77,6 @@ windows-7-gnu-experimental:
       - .cargo-home/bin/
       - .cargo-home/registry/index/
       - .cargo-home/registry/cache/
-      - .cargo-home/git/db/
 
 windows-7-llvm:
   stage: build
@@ -113,7 +111,6 @@ windows-7-llvm:
       - .cargo-home/bin/
       - .cargo-home/registry/index/
       - .cargo-home/registry/cache/
-      - .cargo-home/git/db/
 
 lint-and-format:
   stage: test
