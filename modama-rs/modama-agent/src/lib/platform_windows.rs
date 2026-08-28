@@ -8,7 +8,10 @@ use log::{debug, error, info, warn};
 use modama_common::messages::Share;
 use widestring::U16CString;
 
-use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
+use crate::{
+    config::AgentConfig, mount_backend::MountBackend, platform_common::EnsureMountedError,
+    share::MountedShare,
+};
 
 // TODO:
 // - double-check the unsafe blocks (miri?)
@@ -19,7 +22,7 @@ use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::Mou
 /// remove all directories that are not currently active mount points.
 /// Best-effort; ignores and logs errors and continues to hopefully converge
 /// in a clean situation eventually.
-pub fn cleanup_mount_points(_config: &AgentConfig) {
+pub fn cleanup_mount_points(_config: &AgentConfig, _desired_shares: &[Share]) {
     debug!("cleanup_mount_points: nothing to do on windows; mapped drives are used instead of mount points");
 }
 
@@ -111,7 +114,7 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
             .clone()
             .into_iter()
             .filter(|m| !should_be_mapped.contains(&PathBuf::from(&m.drive)))
-            .map(|m| async move { internal::ensure_umounted(&m.drive, &config).await }),
+            .map(|m| async move { internal::ensure_umounted(&m.drive, config).await }),
     )
     .await
     .into_iter()
@@ -162,10 +165,10 @@ pub mod internal {
         let used_drives: HashSet<_> = drives.into_iter().map(|md| md.drive).collect();
         let all_drives: HashSet<_> = ('A'..='Z').map(|c| format!("{c}:")).collect();
 
-        Ok(all_drives
+        all_drives
             .difference(&used_drives)
             .max()
-            .map_or_else(|| Err(FreeDriveError::NoFreeDrive), |i| Ok(i.to_owned()))?)
+            .map_or_else(|| Err(FreeDriveError::NoFreeDrive), |i| Ok(i.to_owned()))
     }
 
     pub async fn ensure_umounted(
@@ -184,7 +187,7 @@ pub mod internal {
         let name: U16CString = U16CString::from_str_truncate(drive);
         let name_ptr = name.as_ptr();
         Ok(unsafe {
-            WNetCancelConnection2W(PCWSTR::from_raw(name_ptr), CONNECT_UPDATE_PROFILE.0, force)
+            WNetCancelConnection2W(PCWSTR::from_raw(name_ptr), CONNECT_UPDATE_PROFILE, force)
         }
         .to_hresult()
         .map(|| ())?)
@@ -247,7 +250,7 @@ pub mod internal {
                 resource_ptr,
                 PWSTR::from_raw(params.password.as_mut_ptr()),
                 PWSTR::from_raw(params.username.as_mut_ptr()),
-                CONNECT_TEMPORARY.0,
+                CONNECT_TEMPORARY,
             )
         };
 
@@ -294,9 +297,7 @@ pub mod internal {
     impl Drop for MappedDriveIter {
         fn drop(&mut self) {
             unsafe {
-                let res = WNetCloseEnum(*&mut self.enum_handle)
-                    .to_hresult()
-                    .map(|| ());
+                let res = WNetCloseEnum(self.enum_handle).to_hresult().map(|| ());
                 if let Err(e) = res {
                     error!("WNetCloseEnum failed: {e}");
                 }
@@ -318,7 +319,7 @@ pub mod internal {
                 let lpbuffer_c_void: *mut c_void = transmute(lpbuffer_ptr);
 
                 let res = WNetEnumResourceW(
-                    *&mut self.enum_handle,
+                    self.enum_handle,
                     std::ptr::from_mut(&mut count),
                     lpbuffer_c_void,
                     std::ptr::from_mut(&mut buffer_size),
@@ -349,10 +350,10 @@ pub mod internal {
                 let remote_share = res.lpRemoteName.to_string().inspect_err(|e| {
                     error!("invalid utf16 encountered in remote name, returning dummy value! ({e})");
                 }).unwrap_or("".to_owned());
-                return Some(Ok(MappedDrive {
+                Some(Ok(MappedDrive {
                     drive,
                     remote_share,
-                }));
+                }))
             }
         }
     }
@@ -367,12 +368,12 @@ pub mod internal {
 pub struct CurrentPlatformMountBackend {}
 
 impl MountBackend for CurrentPlatformMountBackend {
-    async fn initialize(&self, config: &AgentConfig) {
+    async fn initialize(&self, _config: &AgentConfig) {
         // nothing to do yet
     }
 
-    async fn cleanup_mount_points(&self, config: &AgentConfig) {
-        cleanup_mount_points(config)
+    async fn cleanup_mount_points(&self, config: &AgentConfig, desired_shares: &[Share]) {
+        cleanup_mount_points(config, desired_shares)
     }
 
     async fn ensure_mounted(

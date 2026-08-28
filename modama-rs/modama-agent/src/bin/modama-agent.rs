@@ -13,7 +13,22 @@ use modama_agent::{
     platform::CurrentPlatformMountBackend,
 };
 use modama_common::logging::init_logging;
-use tokio::{select, signal::unix::SignalKind, spawn, sync::Mutex};
+use tokio::{select, spawn, sync::Mutex};
+
+#[cfg(unix)]
+use tokio::signal::unix::SignalKind;
+
+#[cfg(unix)]
+async fn termination_signal() -> std::io::Result<()> {
+    let mut stream = tokio::signal::unix::signal(SignalKind::terminate())?;
+    stream.recv().await;
+    Ok(())
+}
+
+#[cfg(windows)]
+async fn termination_signal() -> std::io::Result<()> {
+    std::future::pending().await
+}
 
 fn config_path(args: &CliArgs) -> AnyResult<PathBuf> {
     Ok(match &args.config_path {
@@ -63,15 +78,12 @@ async fn main() -> AnyResult<()> {
     let mount_backend = CurrentPlatformMountBackend {};
     mount_backend.initialize(&config).await;
 
-    #[cfg(unix)]
-    let mut term_stream = tokio::signal::unix::signal(SignalKind::terminate())?;
-
     select! {
         _ = tokio::signal::ctrl_c() => {
             eprintln!("SIGINT received, exiting");
             Ok(())
         },
-        _ = term_stream.recv() => {
+        _ = termination_signal() => {
             eprintln!("SIGTERM received, exiting");
             Ok(())
         }

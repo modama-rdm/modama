@@ -9,6 +9,8 @@ members = [
     "versioned",
 ]
 package.edition = "2021"
+# 1.92 for slightly fixed win7 build
+package.rust-version = "1.92"
 resolver = "2"
 
 [workspace.dependencies]

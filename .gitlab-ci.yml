@@ -42,6 +42,58 @@ rust-tests:
     - cargo check --all-targets --all-features && cargo clippy --all-targets --all-features && cargo test
     - just visual-tests
 
+rust-msrv-check:
+  stage: test
+  image: rust:1.92-slim-trixie
+  script:
+    - apt-get -y update && apt-get -y install build-essential lld
+    - cd modama-rs/
+    - cargo check --workspace --all-targets --all-features --locked
+
+windows-7-gnu:
+  stage: build
+  image: rust:1-slim-trixie
+  script:
+    - apt-get -y update && apt-get -y install gcc-mingw-w64-x86-64-win32
+    - rustup toolchain install nightly-2025-09-28 --profile minimal --component rust-src --component clippy
+    - cd modama-rs/
+    - export RUSTFLAGS="--cfg windows_slim_errors -C target-feature=+crt-static"
+    - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-gnu -p modama-agent -p modama-agent-gui --lib --bins --all-features --locked -- -D warnings
+    - cargo +nightly-2025-09-28 build -q -Z build-std=std,panic_abort --target x86_64-win7-windows-gnu --release --locked -p modama-agent --bin modama-agent -p modama-agent-gui --bin modama-agent-gui
+    - for binary in modama-agent modama-agent-gui; do if x86_64-w64-mingw32-objdump -p "target/x86_64-win7-windows-gnu/release/${binary}.exe" | grep -Fq RoOriginateErrorW; then echo "${binary} imports unsupported RoOriginateErrorW" >&2; exit 1; fi; done
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - modama-rs/target/x86_64-win7-windows-gnu/release/modama-agent.exe
+      - modama-rs/target/x86_64-win7-windows-gnu/release/modama-agent-gui.exe
+
+windows-7-llvm:
+  stage: build
+  image: rust:1-slim-trixie
+  cache:
+    key: windows-7-xwin-x86_64
+    paths:
+      - modama-rs/.xwin-cache/
+  script:
+    - apt-get -y update && apt-get -y install clang-tools-19 lld llvm
+    - rustup toolchain install nightly-2025-09-28 --profile minimal --component rust-src --component clippy
+    - cargo install xwin --locked
+    - cd modama-rs/
+    - xwin --accept-license --arch x86_64 splat --output .xwin-cache/splat
+    - export CARGO_TARGET_X86_64_WIN7_WINDOWS_MSVC_LINKER=lld-link
+    - export CC_x86_64_win7_windows_msvc=clang-cl-19
+    - export CXX_x86_64_win7_windows_msvc=clang-cl-19
+    - export AR_x86_64_win7_windows_msvc=llvm-lib
+    - export RUSTFLAGS="--cfg windows_slim_errors -C target-feature=+crt-static -L native=$PWD/.xwin-cache/splat/crt/lib/x86_64 -L native=$PWD/.xwin-cache/splat/sdk/lib/um/x86_64 -L native=$PWD/.xwin-cache/splat/sdk/lib/ucrt/x86_64"
+    - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent -p modama-agent-gui --lib --bins --all-features --locked -- -D warnings
+    - cargo +nightly-2025-09-28 build -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc --release --locked -p modama-agent --bin modama-agent -p modama-agent-gui --bin modama-agent-gui
+    - for binary in modama-agent modama-agent-gui; do if llvm-readobj --coff-imports "target/x86_64-win7-windows-msvc/release/${binary}.exe" | grep -Fq RoOriginateErrorW; then echo "${binary} imports unsupported RoOriginateErrorW" >&2; exit 1; fi; done
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent.exe
+      - modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent-gui.exe
+
 lint-and-format:
   stage: test
   image: ghcr.io/astral-sh/uv:debian

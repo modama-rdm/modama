@@ -2,6 +2,7 @@
 name = "modama-agent-gui"
 version = "0.1.0"
 edition.workspace = true
+rust-version.workspace = true
 
 [features]
 guide-screenshots = ["dep:egui_kittest", "dep:image"]

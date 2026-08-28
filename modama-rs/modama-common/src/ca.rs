@@ -1,16 +1,24 @@
 use std::{
-    fs::{create_dir_all, File, Permissions},
+    fs::{create_dir_all, File},
     io::{Read, Write},
     path::{Path, PathBuf},
     str::FromStr,
     string::FromUtf8Error,
 };
 
+#[cfg(target_os = "windows")]
+use std::fs::OpenOptions;
+
 #[cfg(target_os = "linux")]
 use std::{
-    fs::set_permissions,
+    fs::{set_permissions, Permissions},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
 };
+
+#[cfg(target_os = "windows")]
+trait NoopMode {
+    fn mode(&mut self, mode: u32) -> &mut Self;
+}
 
 #[cfg(target_os = "windows")]
 impl NoopMode for OpenOptions {
@@ -27,7 +35,7 @@ fn set_perms_priv(path: &Path) -> Result<(), CAError> {
 }
 
 #[cfg(target_os = "windows")]
-fn set_perms_priv(path: &Path) -> Result<(), CAError> {
+fn set_perms_priv(_path: &Path) -> Result<(), CAError> {
     Ok(())
 }
 
@@ -104,6 +112,7 @@ impl Ca {
         &self.ca_cert_pem
     }
 
+    #[cfg(target_os = "linux")]
     fn check_priv_perms(path_prefix: &Path) -> Result<(), CAError> {
         let priv_path = Self::get_ca_priv_path(path_prefix);
         let mode = std::fs::metadata(&priv_path)?.mode();
@@ -113,6 +122,11 @@ impl Ca {
                 mode & 0o777
             )));
         }
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn check_priv_perms(_path_prefix: &Path) -> Result<(), CAError> {
         Ok(())
     }
 
@@ -391,7 +405,10 @@ impl Ca {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::{os::unix::fs::MetadataExt, path::Path};
+    use std::path::Path;
+
+    #[cfg(target_os = "linux")]
+    use std::os::unix::fs::MetadataExt;
 
     use x509_parser::{
         pem::{self, Pem},
@@ -434,13 +451,16 @@ mod tests {
         ca_files_priv.sort();
         assert_eq!(ca_files_priv, &["ca.priv.pem"]);
 
-        let d = &*tmpdir.join("ca").join("priv");
-        let mode = d.metadata().unwrap().mode();
-        assert_eq!(mode & 0o777, 0o700);
+        #[cfg(target_os = "linux")]
+        {
+            let d = &*tmpdir.join("ca").join("priv");
+            let mode = d.metadata().unwrap().mode();
+            assert_eq!(mode & 0o777, 0o700);
 
-        let d = &*tmpdir.join("ca").join("priv").join("ca.priv.pem");
-        let mode = d.metadata().unwrap().mode();
-        assert_eq!(mode & 0o777, 0o600);
+            let d = &*tmpdir.join("ca").join("priv").join("ca.priv.pem");
+            let mode = d.metadata().unwrap().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 
     #[test]
@@ -511,8 +531,11 @@ mod tests {
             .join("servers")
             .join("localhost")
             .join("localhost.priv.pem");
-        let mode = d.metadata().unwrap().mode();
-        assert_eq!(mode & 0o777, 0o600);
+        #[cfg(target_os = "linux")]
+        {
+            let mode = d.metadata().unwrap().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
 
         let clients_dir =
             std::fs::read_dir(&*tmpdir.join("clients").join("test_resource")).unwrap();
@@ -536,8 +559,11 @@ mod tests {
             .join("clients")
             .join("test_resource")
             .join("test_agent.priv.pem");
-        let mode = d.metadata().unwrap().mode();
-        assert_eq!(mode & 0o777, 0o600);
+        #[cfg(target_os = "linux")]
+        {
+            let mode = d.metadata().unwrap().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 
     #[test]
