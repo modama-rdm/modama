@@ -31,7 +31,10 @@ unit-tests:
 
 rust-tests:
   stage: test
-  image: rust:1-slim-trixie
+  parallel:
+    matrix:
+      - RUST_VERSION: ['1', '1.92']
+  image: rust:${RUST_VERSION}-slim-trixie
   script:
     - apt-get -y update && apt-get -y install lld build-essential git libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
     - vulkaninfo --summary
@@ -39,16 +42,8 @@ rust-tests:
     - cargo install just
     - git fetch --tags
     - cd modama-rs/
-    - cargo check --all-targets --all-features && cargo clippy --all-targets --all-features && cargo test
+    - cargo check --workspace --all-targets --all-features --locked && cargo clippy --all-targets --all-features --locked && cargo test --locked
     - just visual-tests
-
-rust-msrv-check:
-  stage: test
-  image: rust:1.92-slim-trixie
-  script:
-    - apt-get -y update && apt-get -y install build-essential lld
-    - cd modama-rs/
-    - cargo check --workspace --all-targets --all-features --locked
 
 windows-7-gnu:
   stage: build
