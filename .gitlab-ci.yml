@@ -15,6 +15,10 @@ variables:
   GIT_SUBMODULE_STRATEGY: recursive
   GIT_SUBMODULE_FORCE_HTTPS: "true"
   GIT_DEPTH: 250
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
+
+before_script:
+  - export PATH="$CARGO_HOME/bin:$PATH"
 
 unit-tests:
   stage: test
@@ -39,12 +43,24 @@ rust-tests:
     - apt-get -y update && apt-get -y install lld build-essential git libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
     - vulkaninfo --summary
     - rustup component add clippy
-    - cargo install just
+    - cargo install just --locked
     - git fetch --tags
     - cd modama-rs/
     - cargo check --workspace --all-targets --all-features --locked && cargo clippy --all-targets --all-features --locked && cargo test --locked
     - just visual-tests
+  cache:
+    key:
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo-home/bin/
+      - .cargo-home/registry/index/
+      - .cargo-home/registry/cache/
+      - .cargo-home/git/db/
 
+# the `ring` crate doesn't build on the gnu toolchain, so while we can still
+# run clippy as a basic smoke test, the full build is not enabled here.
+# might be worth it to remove this once we have a building and running configuration.
 windows-7-gnu-experimental:
   stage: test
   image: rust:1-slim-trixie
@@ -54,14 +70,19 @@ windows-7-gnu-experimental:
     - cd modama-rs/
     - export RUSTFLAGS="--cfg windows_slim_errors -C target-feature=+crt-static"
     - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-gnu -p modama-agent -p modama-agent-gui --lib --bins --all-features --locked -- -D warnings
+  cache:
+    key:
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo-home/bin/
+      - .cargo-home/registry/index/
+      - .cargo-home/registry/cache/
+      - .cargo-home/git/db/
 
 windows-7-llvm:
   stage: build
   image: rust:1-slim-trixie
-  cache:
-    key: windows-7-xwin-x86_64
-    paths:
-      - modama-rs/.xwin-cache/
   script:
     - apt-get -y update && apt-get -y install clang-tools-19 lld llvm
     - rustup toolchain install nightly-2025-09-28 --profile minimal --component rust-src --component clippy
@@ -83,6 +104,15 @@ windows-7-llvm:
     paths:
       - modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent.exe
       - modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent-gui.exe
+  cache:
+    key:
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo-home/bin/
+      - .cargo-home/registry/index/
+      - .cargo-home/registry/cache/
+      - .cargo-home/git/db/
 
 lint-and-format:
   stage: test
