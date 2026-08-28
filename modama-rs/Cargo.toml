@@ -56,3 +56,6 @@ expect_used = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
+
+[patch.crates-io]
+dirs-sys = { path = "vendor/dirs-sys-rs" }

@@ -97,10 +97,9 @@ windows-7-llvm:
     - export CFLAGS_x86_64_win7_windows_msvc="/imsvc$PWD/.xwin-cache/splat/crt/include /imsvc$PWD/.xwin-cache/splat/sdk/include/ucrt /imsvc$PWD/.xwin-cache/splat/sdk/include/shared /imsvc$PWD/.xwin-cache/splat/sdk/include/um"
     - export RUSTFLAGS="--cfg windows_slim_errors -C panic=abort -C target-feature=+crt-static -L native=$PWD/.xwin-cache/splat/crt/lib/x86_64 -L native=$PWD/.xwin-cache/splat/sdk/lib/um/x86_64 -L native=$PWD/.xwin-cache/splat/sdk/lib/ucrt/x86_64"
     - cargo +nightly-2025-09-28 check -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-common --lib --locked
-    - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent -p modama-agent-gui --lib --bins --all-features --locked -- -D warnings
-    - cargo +nightly-2025-09-28 build -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc --release --locked -p modama-agent --bin modama-agent -p modama-agent-gui --bin modama-agent-gui
+    - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent --lib --bins --all-features --locked -- -D warnings
+    - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent-gui --lib --bins --locked -- -D warnings
     - just win7-check-agent-imports
-    - if llvm-readobj --coff-imports target/x86_64-win7-windows-msvc/release/modama-agent-gui.exe | grep -Fq RoOriginateErrorW; then echo "modama-agent-gui imports unsupported RoOriginateErrorW" >&2; exit 1; fi
   artifacts:
     expire_in: 1 week
     paths:

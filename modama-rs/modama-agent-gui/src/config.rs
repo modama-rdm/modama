@@ -97,19 +97,30 @@ fn native_machine_config_paths() -> Vec<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn windows_program_data() -> Option<PathBuf> {
-    use windows::Win32::{
-        System::Com::CoTaskMemFree,
-        UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath},
-    };
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+    use windows::Win32::UI::Shell::{SHGetFolderPathW, CSIDL_COMMON_APPDATA, SHGFP_TYPE_CURRENT};
 
-    // SAFETY: SHGetKnownFolderPath allocates a null-terminated path with the COM allocator.
-    // We copy it into an owned Rust path and release that exact pointer with CoTaskMemFree.
+    let mut path = [0u16; 260];
+    // SAFETY: `path` is a live, writable MAX_PATH-sized UTF-16 buffer for the
+    // duration of the call. The window and token may be NULL. The API writes a
+    // NUL-terminated path and does not retain the buffer pointer.
+    // SHGetFolderPathW avoids SHGetKnownFolderPath's combase.dll import on Win7.
+    // https://learn.microsoft.com/windows/win32/api/shlobj_core/nf-shlobj_core-shgetfolderpathw
     unsafe {
-        let path = SHGetKnownFolderPath(&FOLDERID_ProgramData, KF_FLAG_DEFAULT, None).ok()?;
-        let owned = path.to_string().ok().map(PathBuf::from);
-        CoTaskMemFree(Some(path.0.cast()));
-        owned
+        SHGetFolderPathW(
+            None,
+            CSIDL_COMMON_APPDATA as i32,
+            None,
+            SHGFP_TYPE_CURRENT.0 as u32,
+            &mut path,
+        )
+        .ok()?;
     }
+    let length = path
+        .iter()
+        .position(|character| *character == 0)
+        .unwrap_or(path.len());
+    Some(PathBuf::from(OsString::from_wide(&path[..length])))
 }
 
 fn read_config(path: &Path) -> Result<GuiConfig, ConfigError> {

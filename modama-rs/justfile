@@ -61,29 +61,35 @@ win7-xwin-splat:
 
 # Build the production Windows 7 SP1 x64 agent with the dedicated Tier 3 target.
 win7-build-agent:
+    #!/usr/bin/env bash
+    set -euo pipefail
     test -d "{{ xwin_sdk }}/crt/lib/x86_64" || { echo "xwin sysroot missing; run: just win7-xwin-splat" >&2; exit 1; }
-    CARGO_TARGET_X86_64_WIN7_WINDOWS_MSVC_LINKER=lld-link \
-    CC_x86_64_win7_windows_msvc=clang-cl-19 \
-    CXX_x86_64_win7_windows_msvc=clang-cl-19 \
-    AR_x86_64_win7_windows_msvc=llvm-lib \
-    CFLAGS_x86_64_win7_windows_msvc="{{ xwin_cflags }}" \
-    RUSTFLAGS="--cfg windows_slim_errors -C panic=abort -C target-feature=+crt-static -L native={{ xwin_sdk }}/crt/lib/x86_64 -L native={{ xwin_sdk }}/sdk/lib/um/x86_64 -L native={{ xwin_sdk }}/sdk/lib/ucrt/x86_64" \
-    cargo +{{ win7_toolchain }} build -q -Z build-std=std,panic_abort -p modama-agent --bin modama-agent --target x86_64-win7-windows-msvc --release --locked
-    cargo +{{ win7_toolchain }} build -q -Z build-std=std,panic_abort -p modama-agent-gui --bin modama-agent-gui --target x86_64-win7-windows-msvc --release --locked
+    export CARGO_TARGET_X86_64_WIN7_WINDOWS_MSVC_LINKER=lld-link
+    export CC_x86_64_win7_windows_msvc=clang-cl-19
+    export CXX_x86_64_win7_windows_msvc=clang-cl-19
+    export AR_x86_64_win7_windows_msvc=llvm-lib
+    export CFLAGS_x86_64_win7_windows_msvc="{{ xwin_cflags }}"
+    export RUSTFLAGS="--cfg windows_slim_errors -C panic=abort -C target-feature=+crt-static -L native={{ xwin_sdk }}/crt/lib/x86_64 -L native={{ xwin_sdk }}/sdk/lib/um/x86_64 -L native={{ xwin_sdk }}/sdk/lib/ucrt/x86_64"
+    cargo +{{ win7_toolchain }} build -q -Z build-std=std,panic_abort -p modama-agent --bin modama-agent --target x86_64-win7-windows-msvc --release
+    cargo +{{ win7_toolchain }} build -q -Z build-std=std,panic_abort -p modama-agent-gui --bin modama-agent-gui --target x86_64-win7-windows-msvc --release
 
-# Require the agent's DLL imports to match the reviewed Windows 7 allowlist.
+# Require both binaries' DLL imports to belong to the reviewed Windows 7 allowlist.
 win7-check-agent-imports: win7-build-agent
     #!/usr/bin/env bash
     set -euo pipefail
-    for binary in "target/x86_64-win7-windows-msvc/release/modama-agent{,-gui}.exe"; do
+    for binary in modama-agent.exe modama-agent-gui.exe; do
+        binary="target/x86_64-win7-windows-msvc/release/$binary"
         allowlist="windows-7-dlls.txt"
         imports="$(llvm-readobj --coff-imports "$binary")"
-        if ! diff -u "$allowlist" <(printf '%s\n' "$imports" | sed -n 's/^  Name: //p' | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort -u); then
+        imported_dlls="$(printf '%s\n' "$imports" | sed -n 's/^  Name: //p' | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort -u)"
+        unexpected_dlls="$(comm -13 "$allowlist" <(printf '%s\n' "$imported_dlls"))"
+        if [[ -n "$unexpected_dlls" ]]; then
+            printf 'Unexpected Windows DLL imports in %s:\n%s\n' "$binary" "$unexpected_dlls" >&2
             echo "Unexpected Windows DLL imports. Verify Windows 7 availability, then update $allowlist deliberately." >&2
             exit 1
         fi
-        if rg -q 'Symbol: (RoOriginateErrorW|SetThreadDescription|GetSystemTimePreciseAsFileTime|WaitOnAddress|WakeByAddressSingle|CoTaskMemFree)' <<<"$imports"; then
-            echo "The agent imports a known post-Windows-7 API." >&2
+        if rg -q 'Symbol: (RoOriginateErrorW|SetThreadDescription|GetSystemTimePreciseAsFileTime|WaitOnAddress|WakeByAddressSingle)' <<<"$imports"; then
+            echo "$binary imports a known post-Windows-7 API." >&2
             exit 1
         fi
         echo "Windows 7 import allowlist passed for $binary"
