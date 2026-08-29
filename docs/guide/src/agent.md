@@ -223,9 +223,9 @@ modama-agent.exe install-as-service --config-path modama-agent.toml
 The installation uses these machine-wide locations:
 
 ```text
-%ProgramFiles%\fz-juelich\modama-agent\modama-agent.exe
-%ProgramData%\fz-juelich\modama-agent\modama-agent.toml
-%ProgramData%\fz-juelich\modama-agent\logs\modama-agent.log
+%ProgramFiles%\modama\modama-agent\modama-agent.exe
+%ProgramData%\modama\modama-agent\modama-agent.toml
+%ProgramData%\modama\modama-agent\logs\modama-agent.log
 ```
 
 The service is named `modama-agent`, starts automatically, and runs as the

@@ -93,11 +93,11 @@ fn known_folder(csidl: u32) -> Result<PathBuf> {
 
 fn installation_paths() -> Result<(PathBuf, PathBuf, PathBuf)> {
     let executable = known_folder(CSIDL_PROGRAM_FILES)?
-        .join("fz-juelich")
+        .join("modama")
         .join("modama-agent")
         .join(EXECUTABLE_FILE);
     let data_dir = known_folder(CSIDL_COMMON_APPDATA)?
-        .join("fz-juelich")
+        .join("modama")
         .join("modama-agent");
     let config = data_dir.join(CONFIG_FILE);
     Ok((executable, config, data_dir.join("logs")))
@@ -116,7 +116,7 @@ pub fn resolve_install_config(explicit: Option<&Path>) -> Result<PathBuf> {
 
 pub fn user_config_path() -> Result<PathBuf> {
     Ok(known_folder(CSIDL_APPDATA)?
-        .join("fz-juelich")
+        .join("modama")
         .join("modama-agent")
         .join("config")
         .join(CONFIG_FILE))

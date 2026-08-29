@@ -66,14 +66,14 @@ pub fn machine_config_paths(
             .collect(),
         ConfigPlatform::Windows => program_data
             .map(|root| {
-                root.join("fz-juelich")
+                root.join("modama")
                     .join("modama-agent-gui")
                     .join(CONFIG_FILE)
             })
             .into_iter()
             .collect(),
         ConfigPlatform::MacOs => vec![PathBuf::from(
-            "/Library/Application Support/de.fz-juelich.modama-agent-gui/modama-agent-gui.toml",
+            "/Library/Application Support/modama.modama-agent-gui/modama-agent-gui.toml",
         )],
     }
 }
@@ -138,7 +138,7 @@ pub fn load_config(
     explicit_path: Option<&Path>,
     agent_url_override: Option<String>,
 ) -> Result<GuiConfig, ConfigError> {
-    let project_dirs = ProjectDirs::from("de", "fz-juelich", "modama-agent-gui")
+    let project_dirs = ProjectDirs::from("", "modama", "modama-agent-gui")
         .ok_or(ConfigError::UserDirectoryUnavailable)?;
     let discovered = std::iter::once(user_config_path(&project_dirs))
         .chain(native_machine_config_paths())
@@ -186,13 +186,13 @@ mod tests {
                 Some(Path::new("C:/ProgramData"))
             ),
             vec![PathBuf::from(
-                "C:/ProgramData/fz-juelich/modama-agent-gui/modama-agent-gui.toml"
+                "C:/ProgramData/modama/modama-agent-gui/modama-agent-gui.toml"
             )]
         );
         assert_eq!(
             machine_config_paths(ConfigPlatform::MacOs, None, None),
             vec![PathBuf::from(
-                "/Library/Application Support/de.fz-juelich.modama-agent-gui/modama-agent-gui.toml"
+                "/Library/Application Support/modama.modama-agent-gui/modama-agent-gui.toml"
             )]
         );
     }

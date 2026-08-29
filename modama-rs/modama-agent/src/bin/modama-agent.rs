@@ -43,7 +43,7 @@ async fn shutdown_signal() {
 
 #[cfg(not(windows))]
 fn default_config_path() -> Result<PathBuf> {
-    directories::ProjectDirs::from("de", "fz-juelich", "modama-agent")
+    directories::ProjectDirs::from("", "modama", "modama-agent")
         .map(|paths| paths.config_dir().join("modama-agent.toml"))
         .ok_or_else(|| anyhow::anyhow!("could not find project directories for configuration"))
 }
