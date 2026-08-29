@@ -8,30 +8,30 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use env_logger::Target;
-use file_rotate::{compression::Compression, suffix::AppendCount, ContentLimit, FileRotate};
+use file_rotate::{ContentLimit, FileRotate, compression::Compression, suffix::AppendCount};
 use log::{error, info};
 use widestring::U16CString;
 use windows::{
-    core::{PCWSTR, PWSTR},
     Win32::{
         Foundation::{
-            LocalFree, ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_MARKED_FOR_DELETE, HLOCAL,
+            ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SERVICE_MARKED_FOR_DELETE, HLOCAL, LocalFree,
         },
         Security::{
             Authorization::{
                 ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
                 SDDL_REVISION_1,
             },
-            LookupAccountNameW, SetFileSecurityW, DACL_SECURITY_INFORMATION,
-            PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID_NAME_USE,
+            DACL_SECURITY_INFORMATION, LookupAccountNameW, PROTECTED_DACL_SECURITY_INFORMATION,
+            PSECURITY_DESCRIPTOR, PSID, SID_NAME_USE, SetFileSecurityW,
         },
         UI::Shell::{
-            SHGetFolderPathW, CSIDL_APPDATA, CSIDL_COMMON_APPDATA, CSIDL_PROGRAM_FILES,
-            SHGFP_TYPE_CURRENT,
+            CSIDL_APPDATA, CSIDL_COMMON_APPDATA, CSIDL_PROGRAM_FILES, SHGFP_TYPE_CURRENT,
+            SHGetFolderPathW,
         },
     },
+    core::{PCWSTR, PWSTR},
 };
 use windows_service::{
     define_windows_service,
@@ -663,15 +663,15 @@ fn service_main_inner() -> Result<()> {
     let handler_status = Arc::clone(&shared_status);
     let event_handler = move |event| match event {
         ServiceControl::Stop | ServiceControl::Shutdown => {
-            if let Ok(status) = handler_status.lock() {
-                if let Some(handle) = *status {
-                    set_status_best_effort(
-                        handle,
-                        ServiceState::StopPending,
-                        ServiceExitCode::NO_ERROR,
-                        1,
-                    );
-                }
+            if let Ok(status) = handler_status.lock()
+                && let Some(handle) = *status
+            {
+                set_status_best_effort(
+                    handle,
+                    ServiceState::StopPending,
+                    ServiceExitCode::NO_ERROR,
+                    1,
+                );
             }
             let _ = shutdown_sender.send(true);
             ServiceControlHandlerResult::NoError

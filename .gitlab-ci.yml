@@ -66,9 +66,9 @@ windows-7-gnu-experimental:
   script:
     - apt-get -y update && apt-get -y install gcc-mingw-w64-x86-64-win32
     - rustup toolchain install nightly-2025-09-28 --profile minimal --component rust-src --component clippy
+    - just --version || cargo install just --locked -q
     - cd modama-rs/
-    - export RUSTFLAGS="--cfg windows_slim_errors -C target-feature=+crt-static"
-    - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-gnu -p modama-agent -p modama-agent-gui --lib --bins --all-features --locked -- -D warnings
+    - just win-clippy-gnu
   cache:
     key:
       files:

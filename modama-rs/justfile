@@ -94,3 +94,10 @@ win7-check-agent-imports: win7-build-agent
         fi
         echo "Windows 7 import allowlist passed for $binary"
     done
+
+win-clippy-gnu:
+    #!/usr/bin/env bash
+    # needs gcc-mingw-w64-x86-64-win32
+    set -euo pipefail
+    export RUSTFLAGS="--cfg windows_slim_errors -C target-feature=+crt-static"
+    cargo +{{ win7_toolchain }} clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-gnu -p modama-agent -p modama-agent-gui --lib --bins --all-features --locked -- -D warnings
