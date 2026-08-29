@@ -88,7 +88,7 @@ win7-check-agent-imports: win7-build-agent
             echo "Unexpected Windows DLL imports. Verify Windows 7 availability, then update $allowlist deliberately." >&2
             exit 1
         fi
-        if rg -q 'Symbol: (RoOriginateErrorW|SetThreadDescription|GetSystemTimePreciseAsFileTime|WaitOnAddress|WakeByAddressSingle)' <<<"$imports"; then
+        if grep -Eq 'Symbol: (RoOriginateErrorW|SetThreadDescription|GetSystemTimePreciseAsFileTime|WaitOnAddress|WakeByAddressSingle)' <<<"$imports"; then
             echo "$binary imports a known post-Windows-7 API." >&2
             exit 1
         fi
