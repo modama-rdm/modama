@@ -46,7 +46,7 @@ rust-tests:
     - just --version || cargo install just --locked
     - git fetch --tags
     - cd modama-rs/
-    - cargo check --workspace --all-targets --all-features --locked && cargo clippy --all-targets --all-features --locked && cargo test --locked -- -D warnings
+    - cargo check --workspace --all-targets --all-features --locked && cargo clippy --all-targets --all-features --locked -- -D warnings && cargo test --locked
     - just visual-tests
   cache:
     key:
