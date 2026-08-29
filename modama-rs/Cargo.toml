@@ -8,7 +8,7 @@ members = [
     "versions-macro",
     "versioned",
 ]
-package.edition = "2021"
+package.edition = "2024"
 # 1.92 for slightly fixed win7 build
 package.rust-version = "1.92"
 resolver = "2"
