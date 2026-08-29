@@ -13,7 +13,7 @@ COPY ./python/PyInotify /PyInotify
 
 RUN --mount=type=cache,target=/root/.cache python3 -m venv /venv/
 
-RUN --mount=type=cache,sharing=private,target=/root/.cache /venv/bin/python -m pip install -e /PyInotify
+RUN --mount=type=cache,sharing=locked,target=/root/.cache /venv/bin/python -m pip install -e /PyInotify
 
 COPY ./python/permissions/watchdog.py /watchdog.py
 

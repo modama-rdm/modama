@@ -185,7 +185,9 @@ container-image-build:
         IMAGE_NAME: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-new
 
   script:
-    - buildah bud
+    - buildah
+        --registries-conf "$CI_PROJECT_DIR/.gitlab/containers-registries.conf"
+        bud
         --file "$DOCKERFILE"
         --tag "${IMAGE_NAME}:${CI_COMMIT_SHA}"
         "$CONTEXT"

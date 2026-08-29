@@ -4,7 +4,7 @@ FROM rust:slim-trixie AS builder
 
 WORKDIR /usr/src/modama-rs/
 
-RUN --mount=type=cache,sharing=private,target=/var/cache/apt apt-get update && apt-get -y install clang lld
+RUN --mount=type=cache,sharing=locked,target=/var/cache/apt apt-get update && apt-get -y install clang lld
 
 COPY . .
 
