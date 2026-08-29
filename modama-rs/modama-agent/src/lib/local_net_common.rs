@@ -84,22 +84,20 @@ pub async fn create_mcast_socket(
     group: Ipv4Addr,
     local: Ipv4Addr,
 ) -> Result<UdpSocket, std::io::Error> {
-    let group_w_port = format!("{group}:{port}", group = group, port = port);
-
     #[cfg(target_os = "linux")]
-    let bind_addr = &group_w_port;
+    let bind_addr = format!("{group}:{port}", group = group, port = port);
 
     #[cfg(target_os = "windows")]
-    let bind_addr = &local;
+    let bind_addr = format!("{local}:{port}", local = local, port = port);
 
-    let socket = UdpSocket::bind(bind_addr).await?;
+    let socket = UdpSocket::bind(&bind_addr).await?;
 
     socket.join_multicast_v4(group, local)?;
     Ok(socket)
 }
 
 pub async fn create_mcast_socket_for_sending(
-    group: Ipv4Addr,
+    _group: Ipv4Addr,
     local: Ipv4Addr,
 ) -> Result<UdpSocket, std::io::Error> {
     let socket = UdpSocket::bind((local, 0)).await?;
