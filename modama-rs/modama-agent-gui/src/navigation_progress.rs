@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use eframe::egui::{self, emath::easing::cubic_in_out, Sense, WidgetInfo, WidgetType};
+use eframe::egui::{self, Sense, WidgetInfo, WidgetType, emath::easing::cubic_in_out};
 
 use crate::styles;
 

@@ -10,7 +10,7 @@ use crate::{
     mount_backend::MountBackend,
     share::MountedShare,
 };
-use futures_util::{future::join_all, SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt, future::join_all};
 use log::{debug, error, info, warn};
 use modama_common::{
     messages::{EventChannelInitialMessages, EventChannelMessage, Share},
@@ -268,13 +268,13 @@ mod tests {
     use modama_common::tokens::{Claims, LocalTokenSigner};
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore};
+    use rustls::{ClientConfig, RootCertStore, server::WebPkiClientVerifier};
     use smbdrop::events::start_event_server;
     use smbdrop::share_manager::SmbDropState;
     use std::time::{SystemTime, UNIX_EPOCH};
     use std::{path::PathBuf, sync::Arc};
     use tokio::sync::broadcast::Sender;
-    use tokio::sync::{mpsc, Mutex, Notify};
+    use tokio::sync::{Mutex, Notify, mpsc};
     use tokio::task::JoinHandle;
     use url::Url;
 

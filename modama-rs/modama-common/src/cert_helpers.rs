@@ -5,13 +5,13 @@ use std::{
 };
 
 use rustls::{
-    server::{VerifierBuilderError, WebPkiClientVerifier},
     ServerConfig,
+    server::{VerifierBuilderError, WebPkiClientVerifier},
 };
 use rustls_pemfile::{certs, private_key};
 use tokio_rustls::rustls::{
-    pki_types::{CertificateDer, PrivateKeyDer},
     RootCertStore,
+    pki_types::{CertificateDer, PrivateKeyDer},
 };
 
 #[derive(thiserror::Error, Debug)]

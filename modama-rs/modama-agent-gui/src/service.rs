@@ -5,8 +5,8 @@ use std::{
 
 use crate::{
     api_client::{
-        generated::client::ApiOpError, APIAgentIdentity, APICreateSessionRequest,
-        APICurrentForegroundShare, APIHealthCheckResponse, AgentClient,
+        APIAgentIdentity, APICreateSessionRequest, APICurrentForegroundShare,
+        APIHealthCheckResponse, AgentClient, generated::client::ApiOpError,
     },
     state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession, PendingSession},
 };
@@ -47,7 +47,7 @@ pub trait AgentService: Send + Sync {
     fn foreground(&self) -> Result<ForegroundSession, ServiceError>;
     fn login(&self, credentials: &Credentials) -> Result<(), ServiceError>;
     fn list_projects(&self, credentials: &Credentials)
-        -> Result<Vec<ProjectSummary>, ServiceError>;
+    -> Result<Vec<ProjectSummary>, ServiceError>;
     fn list_sessions(
         &self,
         credentials: &Credentials,

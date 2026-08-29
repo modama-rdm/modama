@@ -184,7 +184,7 @@ impl PageLogin {
                             return Action::LoginSuccess {
                                 creds,
                                 destination: self.destination.clone(),
-                            }
+                            };
                         }
                         Err(ServiceError::Unauthorized) => {
                             self.login_error = Some("Invalid username or password.".to_owned())

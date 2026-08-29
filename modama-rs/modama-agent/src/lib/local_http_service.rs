@@ -1,26 +1,26 @@
 //! Local minimal server-rendered ingest control UI.
 //! Targets especially older browsers (Internet Explorer, ancient Firefox)
 use axum::{
+    Router,
     extract::{Form, Path, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
-    Router,
 };
 use axum_extra::{
-    headers::{authorization::Basic, Authorization},
-    typed_header::TypedHeaderRejection,
     TypedHeader,
+    headers::{Authorization, authorization::Basic},
+    typed_header::TypedHeaderRejection,
 };
 use axum_macros::debug_handler;
 use log::error;
-use minijinja::{context, AutoEscape, Environment, Value};
+use minijinja::{AutoEscape, Environment, Value, context};
 use modama_common::{
     messages::Share,
     mgmt_client::{MgmtClient, MgmtError},
     tokens::{TokenError, TokenProvider},
 };
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, sync::Arc, time::Duration};
 use time::{Date, OffsetDateTime};
@@ -117,9 +117,10 @@ impl SafeLocalUrl {
         // contain quotes, angle brackets, ampersands, whitespace, controls, or
         // ':'; it cannot escape a quoted attribute or name another origin.
         assert!(path.starts_with('/') && !path.starts_with("//"));
-        assert!(path
-            .bytes()
-            .all(|byte| { byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'%') }));
+        assert!(
+            path.bytes()
+                .all(|byte| { byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'%') })
+        );
         let bytes = path.as_bytes();
         assert!(bytes.iter().enumerate().all(|(index, byte)| {
             *byte != b'%'
@@ -1272,8 +1273,10 @@ mod tests {
         assert!(paths.contains_key("/api/login/"));
         assert!(paths.contains_key("/api/projects/"));
         assert!(paths.contains_key("/api/projects/{project_name}/sessions/"));
-        assert!(paths
-            .contains_key("/api/projects/{project_name}/sessions/{session_name}/start-ingest/"));
+        assert!(
+            paths
+                .contains_key("/api/projects/{project_name}/sessions/{session_name}/start-ingest/")
+        );
         assert!(paths.contains_key("/api/shares/foreground/"));
         assert!(paths.contains_key("/api/shares/{share_id}/"));
         assert!(got["components"]["schemas"]["APIListProjectsResponse"].is_object());
@@ -1538,12 +1541,14 @@ mod tests {
         assert!(body_str.contains("Create a new session"));
         assert!(body_str.contains("<form action=\"/start-ingest/the%2Dproject/\" method=\"post\""));
         assert!(body_str.contains("name=\"session_name\""));
-        assert!([date_before_request, date_after_request]
-            .into_iter()
-            .any(|date| {
-                body_str.contains(&format!("value=\"{}\"", session_name_prefix(date)))
-                    && body_str.contains(&session_name_example(date))
-            }));
+        assert!(
+            [date_before_request, date_after_request]
+                .into_iter()
+                .any(|date| {
+                    body_str.contains(&format!("value=\"{}\"", session_name_prefix(date)))
+                        && body_str.contains(&session_name_example(date))
+                })
+        );
     }
 
     #[test]
@@ -2169,13 +2174,14 @@ mod tests {
 
         let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-        assert!(resp
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes()
-            .is_empty());
+        assert!(
+            resp.into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .is_empty()
+        );
         mock.assert_async().await;
     }
 

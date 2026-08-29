@@ -1,21 +1,21 @@
 use axum::{
+    Json, Router,
     extract::{Path, State},
     response::IntoResponse,
     routing::get,
-    Json, Router,
 };
 use axum_extra::{
-    headers::{authorization::Basic, Authorization},
-    typed_header::TypedHeaderRejection,
     TypedHeader,
+    headers::{Authorization, authorization::Basic},
+    typed_header::TypedHeaderRejection,
 };
 use hyper::StatusCode;
 use log::warn;
 use std::sync::Arc;
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
-use versioned::{semver::Version, versioned_route, versions, VersionedRouterBuilder};
+use versioned::{VersionedRouterBuilder, semver::Version, versioned_route, versions};
 
-use crate::local_http_service::{get_auth, ApiState, LocalAPIError};
+use crate::local_http_service::{ApiState, LocalAPIError, get_auth};
 use crate::share::MountedShare;
 
 use modama_common::{
@@ -88,25 +88,25 @@ fn foreground_response(
                         dest_path: desired.dest_path,
                     }
                 }
-                Some(s) => {
-                    match s.mount_path.to_str() {
-                        None => {
-                            let p = s.mount_path.to_string_lossy();
-                            warn!("Mount path {p} contains invalid unicode, cannot get foreground share!");
-                            APICurrentForegroundShare::None
-                        }
-                        Some(mount_path) => {
-                            let (project, session) = project_and_session(&s.share.dest_path)?;
-                            APICurrentForegroundShare::Share {
-                                share_id: s.share.share_id.clone(),
-                                project,
-                                session,
-                                dest_path: s.share.dest_path.to_owned(),
-                                mount_path: mount_path.to_owned(),
-                            }
+                Some(s) => match s.mount_path.to_str() {
+                    None => {
+                        let p = s.mount_path.to_string_lossy();
+                        warn!(
+                            "Mount path {p} contains invalid unicode, cannot get foreground share!"
+                        );
+                        APICurrentForegroundShare::None
+                    }
+                    Some(mount_path) => {
+                        let (project, session) = project_and_session(&s.share.dest_path)?;
+                        APICurrentForegroundShare::Share {
+                            share_id: s.share.share_id.clone(),
+                            project,
+                            session,
+                            dest_path: s.share.dest_path.to_owned(),
+                            mount_path: mount_path.to_owned(),
                         }
                     }
-                }
+                },
             }
         }
     })
@@ -484,7 +484,7 @@ mod tests {
     use crate::share::MountedShare;
 
     use super::{
-        foreground_response, openapi_document, project_and_session, ShareDestinationError,
+        ShareDestinationError, foreground_response, openapi_document, project_and_session,
     };
 
     fn share(id: &str) -> Share {

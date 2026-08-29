@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use axum::{extract::State, routing::put, Json, Router};
+use axum::{Json, Router, extract::State, routing::put};
 use hyper::StatusCode;
 use log::{debug, error, info, warn};
 use modama_common::tokens::{TokenError, TokenProvider, TokenSignResponse};
@@ -15,8 +15,8 @@ use tokio::{net::UdpSocket, spawn, sync::Mutex, task::JoinHandle, time::sleep};
 use url::Url;
 
 use crate::local_net_common::{
-    create_mcast_socket_for_sending, DiscoveryInnerValidated, DiscoveryMessage,
-    NOTIFY_CURRENT_VERSION, NOTIFY_MCAST_ADDR, NOTIFY_PORT,
+    DiscoveryInnerValidated, DiscoveryMessage, NOTIFY_CURRENT_VERSION, NOTIFY_MCAST_ADDR,
+    NOTIFY_PORT, create_mcast_socket_for_sending,
 };
 
 pub fn get_private_addresses() -> Result<Vec<Ipv4Addr>, network_interface::Error> {
@@ -189,16 +189,15 @@ pub async fn token_publisher_loop(token_fetcher: Arc<dyn TokenProvider + Sync + 
                 // advertisement tasks on them; when interfaces disappear, the
                 // tasks should just kill itself
                 for addr in addrs.iter() {
-                    if !task_exists_and_running(&token_server_tasks, *addr).await {
-                        if let Ok(handle) = local_token_proxy(
+                    if !task_exists_and_running(&token_server_tasks, *addr).await
+                        && let Ok(handle) = local_token_proxy(
                             *addr,
                             Arc::clone(&token_fetcher),
                             Arc::clone(&shared_state),
                         )
                         .await
-                        {
-                            token_server_tasks.insert(*addr, handle);
-                        }
+                    {
+                        token_server_tasks.insert(*addr, handle);
                     }
                     if !task_exists_and_running(&advertisement_tasks, *addr).await {
                         let handle = advertisement_loop(*addr, Arc::clone(&shared_state)).await;

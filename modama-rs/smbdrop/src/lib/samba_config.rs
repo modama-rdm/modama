@@ -2,13 +2,13 @@ use std::path::{Path, PathBuf};
 
 use modama_common::messages::Share;
 use tokio::{
-    fs::{rename, File},
+    fs::{File, rename},
     io::AsyncWriteExt,
 };
 
 use crate::{
     mount::BindMount,
-    share_manager::{make_temporary_fname, TempConfigError},
+    share_manager::{TempConfigError, make_temporary_fname},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -129,6 +129,9 @@ mod tests {
         let mut contents = String::new();
         f.read_to_string(&mut contents).await.unwrap();
 
-        assert_eq!(contents, "\n[share-123]\npath = \"/run/mounts/shares/share-123\"\nread only = no\nforce create mode = 0600\nforce directory mode = 0700\nvalid users = share-user\n")
+        assert_eq!(
+            contents,
+            "\n[share-123]\npath = \"/run/mounts/shares/share-123\"\nread only = no\nforce create mode = 0600\nforce directory mode = 0700\nvalid users = share-user\n"
+        )
     }
 }

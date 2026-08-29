@@ -1,14 +1,14 @@
 use std::sync::{Arc, Barrier};
 
 use eframe::egui::{self, accesskit::Role};
-use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
+use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
     guide_screenshots::VIEWPORT,
     pages::{
-        select_project::{representative_projects, ProjectSort},
         CreateSessionError, Page, PageSelectCreateSession, PageSelectProject,
+        select_project::{ProjectSort, representative_projects},
     },
     state::{Credentials, OperationId, PendingSession},
     styles,
@@ -166,23 +166,29 @@ fn project_selection_snapshots() {
         );
     }
     loading.run_steps(3);
-    assert!(loading
-        .query_by(|node| {
-            node.role() == egui::accesskit::Role::TextInput
-                && node.label().as_deref() == Some("Search")
-                && node.is_disabled()
-        })
-        .is_some());
-    assert!(loading
-        .query_by(|node| {
-            node.role() == egui::accesskit::Role::ComboBox
-                && node.label().as_deref() == Some("Sort by")
-                && node.is_disabled()
-        })
-        .is_some());
-    assert!(loading
-        .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
-        .is_some());
+    assert!(
+        loading
+            .query_by(|node| {
+                node.role() == egui::accesskit::Role::TextInput
+                    && node.label().as_deref() == Some("Search")
+                    && node.is_disabled()
+            })
+            .is_some()
+    );
+    assert!(
+        loading
+            .query_by(|node| {
+                node.role() == egui::accesskit::Role::ComboBox
+                    && node.label().as_deref() == Some("Sort by")
+                    && node.is_disabled()
+            })
+            .is_some()
+    );
+    assert!(
+        loading
+            .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
+            .is_some()
+    );
     let progress = loading
         .get_by(|node| {
             node.role() == egui::accesskit::Role::ProgressIndicator && node.label().is_none()
@@ -352,13 +358,15 @@ fn project_sort_dropdown_options_are_accessible_and_selectable() {
         .click();
     harness.run_steps(2);
 
-    assert!(harness
-        .query_by(|node| {
-            node.role() == egui::accesskit::Role::Button
-                && node.label().as_deref() == Some("Last modified")
-                && node.toggled() == Some(egui::accesskit::Toggled::True)
-        })
-        .is_some());
+    assert!(
+        harness
+            .query_by(|node| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label().as_deref() == Some("Last modified")
+                    && node.toggled() == Some(egui::accesskit::Toggled::True)
+            })
+            .is_some()
+    );
     harness
         .get_by_role_and_label(egui::accesskit::Role::Button, "Name A-Z")
         .click();
@@ -368,9 +376,11 @@ fn project_sort_dropdown_options_are_accessible_and_selectable() {
         panic!("project selection page unexpectedly changed");
     };
     assert_eq!(page.sort, ProjectSort::Name);
-    assert!(harness
-        .query_by_role_and_label(egui::accesskit::Role::Button, "Name A-Z")
-        .is_none());
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::Button, "Name A-Z")
+            .is_none()
+    );
     assert!(
         harness
             .get_by_label_contains("Adaptive Optics, owner")
@@ -393,12 +403,16 @@ fn an_empty_project_fetch_stays_in_the_no_access_state() {
     harness.run_steps(3);
 
     assert!(harness.query_by_label("No projects available").is_some());
-    assert!(harness
-        .query_by_label("You don’t have access to any projects.")
-        .is_some());
-    assert!(harness
-        .query_by_role(egui::accesskit::Role::ProgressIndicator)
-        .is_none());
+    assert!(
+        harness
+            .query_by_label("You don’t have access to any projects.")
+            .is_some()
+    );
+    assert!(
+        harness
+            .query_by_role(egui::accesskit::Role::ProgressIndicator)
+            .is_none()
+    );
 
     harness.run_steps(3);
     let Page::SelectProject(page) = &harness.state().page else {
@@ -415,12 +429,16 @@ fn project_search_sort_and_selection_are_accessible() {
     let mut harness = selection_harness(Page::SelectProject(page));
     harness.run_steps(3);
 
-    assert!(harness
-        .query_by_role_and_label(egui::accesskit::Role::TextInput, "Search")
-        .is_some());
-    assert!(harness
-        .query_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
-        .is_some());
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::TextInput, "Search")
+            .is_some()
+    );
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::ComboBox, "Sort by")
+            .is_some()
+    );
 
     let holo_row = harness.get_by_label_contains("Holo Stacks, owner").rect();
     let edge_click = egui::pos2(holo_row.left() + 2.0, holo_row.center().y);
@@ -435,28 +453,38 @@ fn project_search_sort_and_selection_are_accessible() {
         panic!("project selection page unexpectedly changed");
     };
     assert_eq!(page.selected_project.as_deref(), Some("Holo Stacks"));
-    assert!(harness
-        .get_by_label_contains("Holo Stacks, owner")
-        .is_focused());
+    assert!(
+        harness
+            .get_by_label_contains("Holo Stacks, owner")
+            .is_focused()
+    );
     assert!(harness.query_by_label("Select Project").is_some());
-    assert!(harness
-        .query_by_role(egui::accesskit::Role::RadioButton)
-        .is_none());
-    assert!(harness
-        .query_by(|node| {
-            node.label()
-                .is_some_and(|label| label.starts_with("Holo Stacks, owner"))
-                && node.toggled() == Some(egui::accesskit::Toggled::True)
-        })
-        .is_some());
-    assert!(harness
-        .query_all_by_label("1 additional member")
-        .next()
-        .is_some());
-    assert!(harness
-        .query_all_by_label("2 additional members")
-        .next()
-        .is_some());
+    assert!(
+        harness
+            .query_by_role(egui::accesskit::Role::RadioButton)
+            .is_none()
+    );
+    assert!(
+        harness
+            .query_by(|node| {
+                node.label()
+                    .is_some_and(|label| label.starts_with("Holo Stacks, owner"))
+                    && node.toggled() == Some(egui::accesskit::Toggled::True)
+            })
+            .is_some()
+    );
+    assert!(
+        harness
+            .query_all_by_label("1 additional member")
+            .next()
+            .is_some()
+    );
+    assert!(
+        harness
+            .query_all_by_label("2 additional members")
+            .next()
+            .is_some()
+    );
 }
 
 #[test]
@@ -471,9 +499,11 @@ fn project_page_tab_order_follows_visual_order() {
     assert!(harness.get_by_label("Sort by").is_focused());
 
     press_tab(&mut harness, false);
-    assert!(harness
-        .get_by_label_contains("Holo Stacks, owner")
-        .is_focused());
+    assert!(
+        harness
+            .get_by_label_contains("Holo Stacks, owner")
+            .is_focused()
+    );
 
     press_tab(&mut harness, true);
     assert!(harness.get_by_label("Sort by").is_focused());
@@ -517,9 +547,11 @@ fn project_list_focus_tracks_selection_after_clearing_search() {
     harness.key_press(egui::Key::Space);
     harness.run_steps(2);
 
-    assert!(harness
-        .get_by_label_contains("Wideband Receiver, owner")
-        .is_focused());
+    assert!(
+        harness
+            .get_by_label_contains("Wideband Receiver, owner")
+            .is_focused()
+    );
     harness.get_by_label("Search").focus();
     harness.run();
     harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::A);
@@ -529,9 +561,11 @@ fn project_list_focus_tracks_selection_after_clearing_search() {
     press_tab(&mut harness, false);
     harness.run_steps(2);
 
-    assert!(harness
-        .get_by_label_contains("Wideband Receiver, owner")
-        .is_focused());
+    assert!(
+        harness
+            .get_by_label_contains("Wideband Receiver, owner")
+            .is_focused()
+    );
 }
 
 #[test]
@@ -558,26 +592,32 @@ fn project_list_keeps_focus_after_scrolling_selected_archive_into_view() {
     harness.run_steps(4);
 
     for _ in 0..5 {
-        assert!(harness
-            .get_by_label_contains("Holo Stacks Archive, owner")
-            .is_focused());
+        assert!(
+            harness
+                .get_by_label_contains("Holo Stacks Archive, owner")
+                .is_focused()
+        );
         harness.run();
     }
     press_tab(&mut harness, false);
     assert!(harness.get_by_label("Select Project").is_focused());
     press_tab(&mut harness, true);
-    assert!(harness
-        .get_by_label_contains("Holo Stacks Archive, owner")
-        .is_focused());
+    assert!(
+        harness
+            .get_by_label_contains("Holo Stacks Archive, owner")
+            .is_focused()
+    );
 
     harness.get_by_label("Search").focus();
     harness.run();
     press_tab(&mut harness, false);
     press_tab(&mut harness, false);
     harness.run_steps(5);
-    assert!(harness
-        .get_by_label_contains("Holo Stacks Archive, owner")
-        .is_focused());
+    assert!(
+        harness
+            .get_by_label_contains("Holo Stacks Archive, owner")
+            .is_focused()
+    );
     press_tab(&mut harness, false);
     assert!(harness.get_by_label("Select Project").is_focused());
 }
@@ -594,24 +634,30 @@ fn session_page_tab_order_follows_visual_order() {
     harness.run();
     assert!(harness.get_by_label("Create a new session").is_focused());
     press_tab(&mut harness, false);
-    assert!(harness
-        .get_by_role_and_label(Role::Button, SESSIONS[0])
-        .is_focused());
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, SESSIONS[0])
+            .is_focused()
+    );
 
     harness
         .get_by_role_and_label(Role::Button, SESSIONS[0])
         .focus();
     harness.run();
-    assert!(harness
-        .get_by_role_and_label(Role::Button, SESSIONS[0])
-        .is_focused());
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, SESSIONS[0])
+            .is_focused()
+    );
     press_tab(&mut harness, false);
     assert!(harness.get_by_label("Select Session").is_focused());
 
     press_tab(&mut harness, true);
-    assert!(harness
-        .get_by_role_and_label(Role::Button, SESSIONS[0])
-        .is_focused());
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, SESSIONS[0])
+            .is_focused()
+    );
 }
 
 #[test]
@@ -691,11 +737,13 @@ fn project_list_arrow_down_keeps_focus_while_scrolling() {
     for _ in 0..12 {
         harness.key_press(egui::Key::ArrowDown);
         harness.run_steps(2);
-        assert!(harness
-            .query_by(|node| {
-                node.is_focused() && node.label().is_some_and(|label| label.contains(", owner"))
-            })
-            .is_some());
+        assert!(
+            harness
+                .query_by(|node| {
+                    node.is_focused() && node.label().is_some_and(|label| label.contains(", owner"))
+                })
+                .is_some()
+        );
     }
 }
 
@@ -728,9 +776,11 @@ fn session_command_n_enters_create_mode_and_escape_returns_to_list() {
 
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::N);
     harness.run_steps(2);
-    assert!(harness
-        .get_by_role_and_label(Role::TextInput, "Session name")
-        .is_focused());
+    assert!(
+        harness
+            .get_by_role_and_label(Role::TextInput, "Session name")
+            .is_focused()
+    );
 
     harness.key_press(egui::Key::Escape);
     harness.run_steps(2);
@@ -1098,33 +1148,43 @@ fn session_selection_and_creation_controls_are_accessible() {
     let mut harness = selection_harness(Page::SelectCreateSession(page));
     harness.run_steps(3);
 
-    assert!(harness
-        .query_by_role_and_label(egui::accesskit::Role::Button, "Create a new session")
-        .is_some());
-    assert!(harness
-        .query_by_role(egui::accesskit::Role::RadioButton)
-        .is_none());
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::Button, "Create a new session")
+            .is_some()
+    );
+    assert!(
+        harness
+            .query_by_role(egui::accesskit::Role::RadioButton)
+            .is_none()
+    );
 
     harness
         .get_by_role_and_label(Role::Button, SESSIONS[1])
         .click();
 
     harness.run_steps(2);
-    assert!(harness
-        .query_by(|node| {
-            node.label().as_deref() == Some(SESSIONS[1])
-                && node.toggled() == Some(egui::accesskit::Toggled::True)
-        })
-        .is_some());
-    assert!(harness
-        .get_by_role_and_label(Role::Button, SESSIONS[1])
-        .is_focused());
+    assert!(
+        harness
+            .query_by(|node| {
+                node.label().as_deref() == Some(SESSIONS[1])
+                    && node.toggled() == Some(egui::accesskit::Toggled::True)
+            })
+            .is_some()
+    );
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, SESSIONS[1])
+            .is_focused()
+    );
 
     harness.get_by_label("Create a new session").click();
     harness.run_steps(2);
-    assert!(harness
-        .query_by_role_and_label(egui::accesskit::Role::TextInput, "Session name")
-        .is_some());
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::TextInput, "Session name")
+            .is_some()
+    );
     harness.get_by_label("Cancel").click();
     harness.run_steps(2);
 
@@ -1185,14 +1245,18 @@ fn asynchronous_session_creation_errors_remain_on_the_form() {
     }
     harness.run_steps(2);
 
-    assert!(harness
-        .query_by_label("Session name was rejected by the server.")
-        .is_some());
+    assert!(
+        harness
+            .query_by_label("Session name was rejected by the server.")
+            .is_some()
+    );
     assert!(harness.query_by_label("Create Session").is_some());
     assert!(harness.query_by_label("Cancel").is_some());
-    assert!(harness
-        .query_by_role_and_label(egui::accesskit::Role::TextInput, "Session name")
-        .is_some());
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::TextInput, "Session name")
+            .is_some()
+    );
     let Page::SelectCreateSession(page) = &harness.state().page else {
         panic!("session creation unexpectedly changed the page");
     };

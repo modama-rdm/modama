@@ -2,7 +2,7 @@ use std::{future::Future, pin::Pin, time::Duration};
 
 use log::debug;
 use modama_common::messages::Share;
-use tokio::time::{sleep, timeout, Instant};
+use tokio::time::{Instant, sleep, timeout};
 
 const READINESS_DEADLINE: Duration = Duration::from_secs(30);
 const READINESS_RETRY_INTERVAL: Duration = Duration::from_millis(500);

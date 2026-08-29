@@ -5,13 +5,13 @@ use std::{
 };
 
 use axum::{
+    Json, Router,
     extract::{Request, State},
     routing::put,
-    Json, Router,
 };
-use hyper::{body::Incoming, StatusCode};
+use hyper::{StatusCode, body::Incoming};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use log::{error, warn};
 use modama_common::{
     agent::AgentId,
@@ -19,7 +19,7 @@ use modama_common::{
     tokens::{Claims, LocalTokenSigner, SignError, TokenSignResponse, TokenVerifyResponse},
 };
 use tokio::{net::TcpListener, net::TcpStream, task::JoinHandle};
-use tokio_rustls::{server::TlsStream, TlsAcceptor};
+use tokio_rustls::{TlsAcceptor, server::TlsStream};
 use tower_service::Service;
 
 use crate::events::ServerStartError;

@@ -10,7 +10,7 @@ use std::{
 
 use etc_passwd::Passwd;
 use log::warn;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use crate::{
     mount::{BindMount, MountBackend, MountBackendError},

@@ -203,17 +203,16 @@ impl AgentAppState {
             }
         }
 
-        if let Some(operation) = self.session_operations.close.as_mut() {
-            if foreground.is_unmounting(&operation.share_id)
+        if let Some(operation) = self.session_operations.close.as_mut()
+            && (foreground.is_unmounting(&operation.share_id)
                 || foreground
                     .share_id()
-                    .is_none_or(|current| current != operation.share_id)
-            {
-                if operation.response_received {
-                    self.session_operations.close = None;
-                } else {
-                    operation.observed = true;
-                }
+                    .is_none_or(|current| current != operation.share_id))
+        {
+            if operation.response_received {
+                self.session_operations.close = None;
+            } else {
+                operation.observed = true;
             }
         }
 

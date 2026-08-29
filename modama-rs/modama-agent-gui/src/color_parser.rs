@@ -10,7 +10,7 @@ pub(crate) fn parse_color(value: &str) -> Option<Rgba> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_color, Rgba};
+    use super::{Rgba, parse_color};
 
     #[test]
     fn parses_css_formats_supported_by_csscolorparser() {

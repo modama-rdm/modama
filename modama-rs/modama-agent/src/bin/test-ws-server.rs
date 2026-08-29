@@ -18,14 +18,14 @@ use rustls_pemfile::{certs, private_key};
 use serde::Deserialize;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{
+    TlsAcceptor, TlsStream,
     rustls::{
+        RootCertStore, ServerConfig,
         pki_types::{CertificateDer, PrivateKeyDer},
         server::WebPkiClientVerifier,
-        RootCertStore, ServerConfig,
     },
-    TlsAcceptor, TlsStream,
 };
-use tokio_tungstenite::{accept_async, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, accept_async};
 
 async fn accept_agent_connection(peer: SocketAddr, stream: TcpStream, acceptor: TlsAcceptor) {
     let stream = acceptor.accept(stream).await.unwrap();

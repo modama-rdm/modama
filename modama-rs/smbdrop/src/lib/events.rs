@@ -15,13 +15,13 @@ use tokio::{
     net::{TcpListener, TcpStream},
     select,
     sync::{
-        broadcast::{self, error::RecvError},
         Mutex,
+        broadcast::{self, error::RecvError},
     },
     task::JoinHandle,
 };
-use tokio_rustls::{rustls::server::VerifierBuilderError, server::TlsStream, TlsAcceptor};
-use tokio_tungstenite::{accept_async, WebSocketStream};
+use tokio_rustls::{TlsAcceptor, rustls::server::VerifierBuilderError, server::TlsStream};
+use tokio_tungstenite::{WebSocketStream, accept_async};
 
 #[derive(thiserror::Error, Debug)]
 pub enum ServerStartError {
@@ -123,12 +123,11 @@ async fn update_msg_from_state(
     // re-evaluated.
     let mut connected_agents: Vec<AgentId> = state.connected_agents.iter().cloned().collect();
     connected_agents.sort_by(|id1, id2| id1.san_encoded.cmp(&id2.san_encoded));
-    let msg = EventChannelMessage::UpdateShareList {
+    EventChannelMessage::UpdateShareList {
         shares: shares.clone(),
         foreground_share: shares.iter().last().cloned(),
         connected_agents,
-    };
-    msg
+    }
 }
 
 async fn handle_state_update(
@@ -429,8 +428,8 @@ mod test {
     };
 
     use futures_util::{
-        stream::{SplitSink, SplitStream},
         SinkExt, StreamExt,
+        stream::{SplitSink, SplitStream},
     };
     use modama_common::{
         agent::AgentId,
@@ -441,13 +440,13 @@ mod test {
         version::modama_git_version,
     };
     use rustls::{
-        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
-        server::WebPkiClientVerifier,
         ClientConfig, RootCertStore, ServerConfig,
+        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+        server::WebPkiClientVerifier,
     };
     use tokio::{net, sync::broadcast::Sender, task::JoinHandle, time::timeout};
     use tokio_tungstenite::{
-        connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
+        Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
     };
     use tungstenite::Message;
 

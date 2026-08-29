@@ -7,7 +7,7 @@ use clap::Parser;
 use modama_common::{
     agent::{AgentId, ClientCertError},
     cert_helpers::{
-        cert_chain_from_reader, get_root_cert_store, private_key_from_reader, CertHelperError,
+        CertHelperError, cert_chain_from_reader, get_root_cert_store, private_key_from_reader,
     },
     config::{AgentConfigFile, AgentConfigFileClientCert},
     tokens::{TokenError, TokenFetcher, TokenProvider},

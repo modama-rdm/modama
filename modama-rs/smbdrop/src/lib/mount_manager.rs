@@ -62,13 +62,13 @@ impl MountBackend for LinuxMountBackend {
                 "source path `{src_path:?}` is not a directory"
             )))?;
         }
-        if !mount.mount_point.exists() {
-            if let Err(e) = create_dir_all(&mount.mount_point) {
-                Err(MountBackendError::Preflight(format!(
-                    "could not create mount point `{:?}`: {e}",
-                    mount.mount_point
-                )))?;
-            }
+        if !mount.mount_point.exists()
+            && let Err(e) = create_dir_all(&mount.mount_point)
+        {
+            Err(MountBackendError::Preflight(format!(
+                "could not create mount point `{:?}`: {e}",
+                mount.mount_point
+            )))?;
         }
 
         nix::mount::mount::<Path, Path, str, str>(

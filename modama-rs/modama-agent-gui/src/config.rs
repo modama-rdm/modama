@@ -99,7 +99,7 @@ fn native_machine_config_paths() -> Vec<PathBuf> {
 fn windows_program_data() -> Option<PathBuf> {
     use windows::Win32::{
         System::Com::CoTaskMemFree,
-        UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath, KF_FLAG_DEFAULT},
+        UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath},
     };
 
     // SAFETY: SHGetKnownFolderPath allocates a null-terminated path with the COM allocator.

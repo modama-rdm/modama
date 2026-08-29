@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use modama_common::messages::Share;
-use rand::{distr::Alphanumeric, RngExt};
+use rand::{RngExt, distr::Alphanumeric};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,14 +17,14 @@ use std::{
 };
 
 use tokio::{
-    fs::{rename, File},
+    fs::{File, rename},
     io::{AsyncReadExt, AsyncWriteExt},
     process::Command,
     sync::{
-        mpsc::{error::SendError, Sender},
         Mutex, OnceCell,
+        mpsc::{Sender, error::SendError},
     },
-    task::{spawn_blocking, JoinError},
+    task::{JoinError, spawn_blocking},
 };
 
 use crate::{
@@ -1054,12 +1054,10 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
             for (uid, user) in state.users.iter().sorted() {
                 if let Ok(Some(sys_pwd)) =
                     self.user_provider.passwd_from_name_string(&user.username)
+                    && sys_pwd.uid != user.uid
+                    && let Err(e) = self.remove_system_user(&user.username).await
                 {
-                    if sys_pwd.uid != user.uid {
-                        if let Err(e) = self.remove_system_user(&user.username).await {
-                            error!("cleanup for uid {uid} failed: {e}");
-                        }
-                    }
+                    error!("cleanup for uid {uid} failed: {e}");
                 }
             }
 
@@ -1093,8 +1091,8 @@ mod tests {
 
     use crate::{
         share_manager::{
-            make_share_name, sanitize_share_name_human_part, ShareConfigFile, ShareError,
-            ShareManager, SmbDropState,
+            ShareConfigFile, ShareError, ShareManager, SmbDropState, make_share_name,
+            sanitize_share_name_human_part,
         },
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
@@ -1135,9 +1133,11 @@ mod tests {
             share_name,
             format!("{}-123e4567e89b42d3a456426614174000", "A".repeat(47))
         );
-        assert!(share_name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
+        assert!(
+            share_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        );
     }
 
     #[tokio::test]

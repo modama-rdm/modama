@@ -19,12 +19,12 @@ use tokio::{
     spawn,
     sync::Mutex,
     task::JoinHandle,
-    time::{sleep, Instant},
+    time::{Instant, sleep},
 };
 use url::Url;
 
 use crate::{
-    local_net_common::{create_mcast_socket, DiscoveryMessage, NOTIFY_MCAST_ADDR, NOTIFY_PORT},
+    local_net_common::{DiscoveryMessage, NOTIFY_MCAST_ADDR, NOTIFY_PORT, create_mcast_socket},
     local_net_token_proxy::{get_private_addresses, task_exists_and_running},
 };
 
@@ -285,7 +285,7 @@ mod tests {
     use tokio::{
         sync::Mutex,
         task::JoinHandle,
-        time::{sleep, Instant},
+        time::{Instant, sleep},
     };
     use url::Url;
 
@@ -294,7 +294,7 @@ mod tests {
         local_net_token_provider::{
             DiscoveryAddr, DiscoveryMessage, LocalNetTokenProvider, RemoteAgent,
         },
-        local_net_token_proxy::{advertisement_loop, local_token_proxy, SharedState},
+        local_net_token_proxy::{SharedState, advertisement_loop, local_token_proxy},
     };
 
     static DISCOVERY_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -326,10 +326,12 @@ mod tests {
 
     #[test]
     fn test_disco_parse_invalid_5() {
-        assert!(DiscoveryMessage::try_parse(
-            "stuff\n{\"version\": 1, \"api\": \"http://localhost:1234/api/\"}"
+        assert!(
+            DiscoveryMessage::try_parse(
+                "stuff\n{\"version\": 1, \"api\": \"http://localhost:1234/api/\"}"
+            )
+            .is_none()
         )
-        .is_none())
     }
 
     #[test]
@@ -517,11 +519,13 @@ mod tests {
         let ca_cert = proxy.ca.get_ca_cert_pem();
 
         // the proxy should have inserted itself into the list of URLs by now:
-        assert!(shared_state
-            .lock()
-            .await
-            .api_urls
-            .contains_key(&loopback_addr));
+        assert!(
+            shared_state
+                .lock()
+                .await
+                .api_urls
+                .contains_key(&loopback_addr)
+        );
 
         let receiver = LocalNetTokenProvider::new_with_pem(
             ca_cert.as_bytes(),
@@ -584,11 +588,13 @@ mod tests {
         let ca_cert = proxy.ca.get_ca_cert_pem();
 
         // the proxy should have inserted itself into the list of URLs by now:
-        assert!(shared_state
-            .lock()
-            .await
-            .api_urls
-            .contains_key(&loopback_addr));
+        assert!(
+            shared_state
+                .lock()
+                .await
+                .api_urls
+                .contains_key(&loopback_addr)
+        );
 
         let receiver = LocalNetTokenProvider::new_with_pem(
             ca_cert.as_bytes(),

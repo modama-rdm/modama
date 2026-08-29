@@ -4,13 +4,13 @@ use std::sync::{Arc, Barrier};
 use time::{Date, Month};
 
 use eframe::egui;
-use egui_kittest::{kittest::Queryable, Harness};
+use egui_kittest::{Harness, kittest::Queryable};
 
 use crate::{
     app::AgentGuiApp,
     pages::{
-        select_project::representative_projects, Page, PageConnecting, PageLogin, PageOverview,
-        PageSelectCreateSession, PageSelectProject,
+        Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
+        select_project::representative_projects,
     },
     service::ConnectedAgent,
     state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession},

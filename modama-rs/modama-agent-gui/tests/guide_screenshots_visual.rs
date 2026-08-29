@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use egui_kittest::{try_image_snapshot_options, SnapshotOptions, SnapshotResults};
+use egui_kittest::{SnapshotOptions, SnapshotResults, try_image_snapshot_options};
 use modama_agent_gui::guide_screenshots::{self, GuideScene};
 
 fn guide_image_dir() -> PathBuf {

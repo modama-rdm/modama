@@ -35,11 +35,14 @@ where
 
     pub fn ensure_consistent(&mut self) {
         // ensure the foreground share is part of the list of all shares:
-        if let Some(share) = &self.foreground_share {
-            if !self.shares.contains(share) {
-                warn!("correcting inconsistent state: foreground_share {:?} was not part of the share list", share);
-                self.shares.push(share.clone());
-            }
+        if let Some(share) = &self.foreground_share
+            && !self.shares.contains(share)
+        {
+            warn!(
+                "correcting inconsistent state: foreground_share {:?} was not part of the share list",
+                share
+            );
+            self.shares.push(share.clone());
         }
     }
 

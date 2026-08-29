@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{anyhow, Result as AnyResult};
+use anyhow::{Result as AnyResult, anyhow};
 use clap::Parser;
 use log::info;
 use modama_agent::{
@@ -35,13 +35,12 @@ fn config_path(args: &CliArgs) -> AnyResult<PathBuf> {
         Some(path) => path.clone(),
         None => {
             // FIXME: add more paths where we search for config? /etc/modama-agent.toml?
-            let user_local_config =
-                directories::ProjectDirs::from("de", "fz-juelich", "modama-agent")
-                    .map(|p| p.config_dir().join("modama-agent.toml"))
-                    .ok_or(anyhow!(
-                        "could not find project directories for configuration"
-                    ))?;
-            user_local_config
+
+            directories::ProjectDirs::from("de", "fz-juelich", "modama-agent")
+                .map(|p| p.config_dir().join("modama-agent.toml"))
+                .ok_or(anyhow!(
+                    "could not find project directories for configuration"
+                ))?
         }
     })
 }

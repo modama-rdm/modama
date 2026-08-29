@@ -1,12 +1,12 @@
 use std::{
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
     thread,
 };
 
 use eframe::egui;
 
 use crate::{
-    service::{AgentService, ServiceError, POLL_INTERVAL},
+    service::{AgentService, POLL_INTERVAL, ServiceError},
     state::ForegroundSession,
 };
 

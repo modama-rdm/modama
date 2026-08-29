@@ -23,7 +23,9 @@ use crate::{
 /// Best-effort; ignores and logs errors and continues to hopefully converge
 /// in a clean situation eventually.
 pub fn cleanup_mount_points(_config: &AgentConfig, _desired_shares: &[Share]) {
-    debug!("cleanup_mount_points: nothing to do on windows; mapped drives are used instead of mount points");
+    debug!(
+        "cleanup_mount_points: nothing to do on windows; mapped drives are used instead of mount points"
+    );
 }
 
 /// Ensure that `share` is mounted, and return a `MountedShare` if the mount succeeded.
@@ -132,18 +134,18 @@ pub mod internal {
     use thiserror::Error;
     use widestring::U16CString;
     use windows::{
-        core::{HRESULT, PCWSTR, PWSTR},
         Win32::{
             Foundation::{ERROR_NO_MORE_ITEMS, HANDLE},
             NetworkManagement::{
                 NetManagement::{USE_DISKDEV, USE_INFO_2, USE_OK},
                 WNet::{
-                    WNetCancelConnection2W, WNetCloseEnum, WNetEnumResourceW, WNetOpenEnumW,
-                    CONNECT_TEMPORARY, CONNECT_UPDATE_PROFILE, NETRESOURCEW, RESOURCETYPE_DISK,
-                    RESOURCE_CONNECTED, WNET_OPEN_ENUM_USAGE,
+                    CONNECT_TEMPORARY, CONNECT_UPDATE_PROFILE, NETRESOURCEW, RESOURCE_CONNECTED,
+                    RESOURCETYPE_DISK, WNET_OPEN_ENUM_USAGE, WNetCancelConnection2W, WNetCloseEnum,
+                    WNetEnumResourceW, WNetOpenEnumW,
                 },
             },
         },
+        core::{HRESULT, PCWSTR, PWSTR},
     };
 
     use crate::{config::AgentConfig, platform_common::EnsureMountedError};
@@ -310,7 +312,7 @@ pub mod internal {
 
         fn next(&mut self) -> Option<Self::Item> {
             let mut count: u32 = 1; // docs say this should be -1 for "as many as possible". for a u32. unsigned. yay?
-                                    // WTF microsoft, I don't want that to be mutable! if it is indeed changed, we just throw it away anyway.
+            // WTF microsoft, I don't want that to be mutable! if it is indeed changed, we just throw it away anyway.
             let mut buffer_size: u32 = 32 * 1024;
             let mut buffer_vec: Vec<u8> = vec![0; buffer_size as usize];
 
@@ -347,9 +349,15 @@ pub mod internal {
                         );
                     })
                     .unwrap_or("".to_owned());
-                let remote_share = res.lpRemoteName.to_string().inspect_err(|e| {
-                    error!("invalid utf16 encountered in remote name, returning dummy value! ({e})");
-                }).unwrap_or("".to_owned());
+                let remote_share = res
+                    .lpRemoteName
+                    .to_string()
+                    .inspect_err(|e| {
+                        error!(
+                            "invalid utf16 encountered in remote name, returning dummy value! ({e})"
+                        );
+                    })
+                    .unwrap_or("".to_owned());
                 Some(Ok(MappedDrive {
                     drive,
                     remote_share,

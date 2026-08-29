@@ -4,11 +4,12 @@ use std::{cmp::Ordering, fmt::Display, sync::Arc};
 use eframe::egui::{self, Align, Layout, RichText, Sense, Stroke, TextEdit, WidgetInfo};
 use egui_extras::{Size, StripBuilder};
 use egui_taffy::{
+    TuiBuilderLogic, TuiContainerResponse,
     taffy::{
         self,
-        prelude::{auto, length, percent, AlignItems, FlexDirection, FlexWrap, Position, Style},
+        prelude::{AlignItems, FlexDirection, FlexWrap, Position, Style, auto, length, percent},
     },
-    tui, TuiBuilderLogic, TuiContainerResponse,
+    tui,
 };
 use time::OffsetDateTime;
 
@@ -17,9 +18,9 @@ use crate::{
     async_state::AsyncState,
     components::{
         buttons::primary_button,
-        flow_navigation::{flow_navigation, FlowStage},
+        flow_navigation::{FlowStage, flow_navigation},
         forms::labeled_text_input_with_insets,
-        list_view::{show_roving_list, RovingListState},
+        list_view::{RovingListState, show_roving_list},
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},
@@ -258,12 +259,10 @@ impl PageSelectProject {
                                     primary_button("Select Project", ui),
                                 )
                                 .clicked();
-                            if clicked {
-                                if let Some(project) = &self.selected_project {
-                                    return Some(Action::SelectProject {
-                                        project: project.clone(),
-                                    });
-                                }
+                            if clicked && let Some(project) = &self.selected_project {
+                                return Some(Action::SelectProject {
+                                    project: project.clone(),
+                                });
                             }
                             None
                         })

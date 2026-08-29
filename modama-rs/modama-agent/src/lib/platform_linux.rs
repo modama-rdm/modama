@@ -7,7 +7,7 @@ use futures_util::future::join_all;
 use log::{debug, info, warn};
 use modama_common::messages::Share;
 use nix::mount::MsFlags;
-use procfs::{process::Process, ProcError};
+use procfs::{ProcError, process::Process};
 use thiserror::Error;
 
 use crate::{
@@ -20,10 +20,10 @@ use crate::{
 async fn prepare_mountpoint_directory(config: &AgentConfig) {
     let prefix = config.get_linux_config().mount_point_prefix;
 
-    if !prefix.exists() {
-        if let Err(e) = tokio::fs::create_dir_all(prefix).await {
-            log::error!("could not create mount point directory: {e}");
-        }
+    if !prefix.exists()
+        && let Err(e) = tokio::fs::create_dir_all(prefix).await
+    {
+        log::error!("could not create mount point directory: {e}");
     }
 }
 

@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
+use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
@@ -74,9 +74,11 @@ fn enter_submits_from_each_login_input() {
 #[test]
 fn login_entry_focuses_username() {
     let harness = login_harness(false);
-    assert!(harness
-        .get_by_role_and_label(egui::accesskit::Role::TextInput, "Username")
-        .is_focused());
+    assert!(
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::TextInput, "Username")
+            .is_focused()
+    );
 }
 
 #[test]
@@ -117,11 +119,13 @@ fn login_back_link_stays_visible_but_disabled_while_authenticating() {
     }
     harness.run_steps(1);
 
-    assert!(harness
-        .query_by(|node| {
-            node.label().as_deref() == Some("← Back to overview") && node.is_disabled()
-        })
-        .is_some());
+    assert!(
+        harness
+            .query_by(|node| {
+                node.label().as_deref() == Some("← Back to overview") && node.is_disabled()
+            })
+            .is_some()
+    );
     release.wait();
 }
 

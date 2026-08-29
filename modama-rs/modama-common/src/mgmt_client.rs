@@ -1,5 +1,5 @@
 use reqwest::{Client, ClientBuilder, Response, StatusCode};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use url::Url;
 

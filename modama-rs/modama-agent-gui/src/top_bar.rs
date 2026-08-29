@@ -1,18 +1,19 @@
 use crate::top_bar::avatar::avatar;
 use eframe::egui::{self, Align, Color32, FontFamily, FontId, Layout, RichText, Sense, Stroke};
 use egui_taffy::{
+    TuiBuilderLogic,
     taffy::{
         self,
-        prelude::{length, percent, AlignItems, FlexDirection, FlexWrap, JustifyContent, Style},
+        prelude::{AlignItems, FlexDirection, FlexWrap, JustifyContent, Style, length, percent},
     },
-    tui, TuiBuilderLogic,
+    tui,
 };
 
 use crate::{
     actions::{Action, LoginDestination},
     components::avatar,
     components::buttons::{
-        loading_button, primary_button, secondary_button, ButtonVariant, DesignButton,
+        ButtonVariant, DesignButton, loading_button, primary_button, secondary_button,
     },
     state::AgentIdentity,
     styles,

@@ -3,14 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use modama_common::{
     ca::Ca,
     config::{
+        AgentConfigFile, AgentConfigFileCa, AgentConfigFileClientCert, AgentConfigFileServices,
         default_event_url, default_listen_local_api, default_mgmt_api_url, default_smb_domain,
-        default_smb_host, default_smb_port, default_token_service_url, AgentConfigFile,
-        AgentConfigFileCa, AgentConfigFileClientCert, AgentConfigFileServices,
+        default_smb_host, default_smb_port, default_token_service_url,
     },
     logging::init_logging,
 };

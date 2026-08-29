@@ -5,8 +5,8 @@ use crate::{
     actions::{Action, LoginDestination, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
-        buttons::{danger_outline_button, loading_button, primary_button, ButtonVariant},
-        dialogs::{destructive_confirmation_dialog, ConfirmationDialogAction},
+        buttons::{ButtonVariant, danger_outline_button, loading_button, primary_button},
+        dialogs::{ConfirmationDialogAction, destructive_confirmation_dialog},
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},

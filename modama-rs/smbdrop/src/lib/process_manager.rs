@@ -2,15 +2,15 @@ use std::{error::Error, future::Future, process::Stdio, sync::Arc, time::Duratio
 
 use log::{error, info, warn};
 use nix::{
-    sys::signal::{kill, Signal::SIGHUP},
+    sys::signal::{Signal::SIGHUP, kill},
     unistd::Pid,
 };
 use tokio::{
     process::{Child, Command},
     select,
     sync::{
-        mpsc::{self, Sender},
         Mutex,
+        mpsc::{self, Sender},
     },
 };
 

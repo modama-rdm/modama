@@ -1,4 +1,4 @@
-use eframe::egui::{self, vec2, Margin};
+use eframe::egui::{self, Margin, vec2};
 use std::sync::Arc;
 
 use crate::{
@@ -162,10 +162,10 @@ impl AgentGuiApp {
                 operation_id,
                 failure,
             } => {
-                if self.app_state.fail_start(operation_id) {
-                    if let Some(failure) = failure {
-                        self.handle_task_failure(failure);
-                    }
+                if self.app_state.fail_start(operation_id)
+                    && let Some(failure) = failure
+                {
+                    self.handle_task_failure(failure);
                 }
             }
             Action::ForegroundChanged(foreground) => {

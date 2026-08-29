@@ -15,7 +15,7 @@ pub mod generated {
 pub use generated::client::HttpClient as GeneratedClient;
 pub use generated::types::*;
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 
 pub const API_VERSION: &str = "1.0.0";
 
@@ -159,8 +159,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn identity_sends_api_version_without_credentials(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn identity_sends_api_version_without_credentials()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("GET", "/api/identity/")
@@ -177,8 +177,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_accepts_204_and_sends_auth_and_version(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn delete_accepts_204_and_sends_auth_and_version()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("DELETE", "/api/shares/share-123/")

@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, text::LayoutJob, Align, FontFamily, FontId, Label, Layout, Response, RichText, Sense,
-    Stroke, TextEdit, WidgetInfo, WidgetType,
+    self, Align, FontFamily, FontId, Label, Layout, Response, RichText, Sense, Stroke, TextEdit,
+    WidgetInfo, WidgetType, text::LayoutJob,
 };
 use egui_taffy::{
+    TuiBuilderLogic, TuiContainerResponse,
     taffy::{
         self,
-        prelude::{auto, length, percent, AlignItems, FlexDirection, FlexWrap, Position, Style},
+        prelude::{AlignItems, FlexDirection, FlexWrap, Position, Style, auto, length, percent},
     },
-    tui, TuiBuilderLogic, TuiContainerResponse,
+    tui,
 };
 use time::{Date, OffsetDateTime};
 
@@ -17,11 +18,11 @@ use crate::{
     actions::{Action, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
-        buttons::{loading_button, primary_button, secondary_button, ButtonVariant},
+        buttons::{ButtonVariant, loading_button, primary_button, secondary_button},
         display_error,
-        flow_navigation::{flow_navigation, FlowStage},
+        flow_navigation::{FlowStage, flow_navigation},
         forms::labeled_text_input,
-        list_view::{show_roving_list, RovingListOutput, RovingListState},
+        list_view::{RovingListOutput, RovingListState, show_roving_list},
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},

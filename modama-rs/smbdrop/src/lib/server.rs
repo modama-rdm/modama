@@ -2,10 +2,10 @@ use anyhow::Result as AnyResult;
 use std::{path::PathBuf, sync::Arc};
 
 use axum::{
+    Json, Router,
     extract::{self, State},
     response::IntoResponse,
     routing::{delete, get, post},
-    Json, Router,
 };
 use hyper::StatusCode;
 use log::{error, info};
@@ -288,8 +288,8 @@ mod tests {
         mount::BindMount,
         readiness::NoopShareReadiness,
         server::{
-            spawn_smbdrop_task, ApiState, CreateShareResponse, HealthResponse,
-            ShareAPIErrorResponse,
+            ApiState, CreateShareResponse, HealthResponse, ShareAPIErrorResponse,
+            spawn_smbdrop_task,
         },
         share_manager::{ShareManager, SmbDropState, User, UserProvider},
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
@@ -848,9 +848,11 @@ mod tests {
 
         let persisted_state = api_state.share_manager.get_state().await.unwrap();
         assert!(persisted_state.shares.contains_key(&share.share_id));
-        assert!(timeout(Duration::from_millis(100), events_rx.recv())
-            .await
-            .is_err());
+        assert!(
+            timeout(Duration::from_millis(100), events_rx.recv())
+                .await
+                .is_err()
+        );
 
         handle.abort();
     }

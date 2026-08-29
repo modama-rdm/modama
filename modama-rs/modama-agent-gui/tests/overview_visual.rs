@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui_kittest::{kittest::Queryable, Harness, SnapshotResults};
+use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
@@ -171,16 +171,20 @@ fn dropped_connection_indicator_does_not_disable_controls() {
     harness.state_mut().app_state.connection_dropped = true;
     harness.run_steps(2);
 
-    assert!(harness
-        .query_by_role_and_label(
-            egui::accesskit::Role::ProgressIndicator,
-            "Connection dropped; retrying"
-        )
-        .is_some());
+    assert!(
+        harness
+            .query_by_role_and_label(
+                egui::accesskit::Role::ProgressIndicator,
+                "Connection dropped; retrying"
+            )
+            .is_some()
+    );
     for label in ["go to Overview", "Close Session", "Log out"] {
-        assert!(harness
-            .query_by(|node| node.label().as_deref() == Some(label) && !node.is_disabled())
-            .is_some());
+        assert!(
+            harness
+                .query_by(|node| node.label().as_deref() == Some(label) && !node.is_disabled())
+                .is_some()
+        );
     }
 }
 
@@ -202,9 +206,11 @@ fn overview_actions_are_mutually_exclusive() {
     let inactive = overview_harness(false, false);
     assert!(inactive.query_by_label("Start Session").is_some());
     assert!(inactive.query_by_label("Close Session").is_none());
-    assert!(inactive
-        .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
-        .is_none());
+    assert!(
+        inactive
+            .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
+            .is_none()
+    );
 }
 
 #[test]
@@ -213,9 +219,11 @@ fn active_session_details_include_the_agent_mount_path() {
 
     assert!(active.query_by_label("representative-project").is_some());
     assert!(active.query_by_label("2026-07-29-ingest").is_some());
-    assert!(active
-        .query_by_label("/mnt/modama/representative-project/2026-07-29-ingest")
-        .is_some());
+    assert!(
+        active
+            .query_by_label("/mnt/modama/representative-project/2026-07-29-ingest")
+            .is_some()
+    );
 }
 
 #[test]
@@ -357,9 +365,11 @@ fn missing_agent_mount_path_is_explained() {
     session.mount_path = None;
     active.run_steps(1);
 
-    assert!(active
-        .query_by_label("Not available on this agent")
-        .is_some());
+    assert!(
+        active
+            .query_by_label("Not available on this agent")
+            .is_some()
+    );
 }
 
 #[test]
@@ -495,17 +505,23 @@ fn connecting_snapshot() {
     harness.ctx.set_theme(egui::Theme::Light);
 
     harness.run_steps(3);
-    assert!(harness
-        .query_by(|node| node.label().as_deref() == Some("Log in") && node.is_disabled())
-        .is_some());
-    assert!(harness
-        .query_by(|node| {
-            node.label().as_deref() == Some("go to Overview") && node.is_disabled()
-        })
-        .is_some());
-    assert!(harness
-        .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
-        .is_some());
+    assert!(
+        harness
+            .query_by(|node| node.label().as_deref() == Some("Log in") && node.is_disabled())
+            .is_some()
+    );
+    assert!(
+        harness
+            .query_by(|node| {
+                node.label().as_deref() == Some("go to Overview") && node.is_disabled()
+            })
+            .is_some()
+    );
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
+            .is_some()
+    );
     harness.snapshot("connecting");
     release.wait();
 

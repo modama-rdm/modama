@@ -1,5 +1,5 @@
 use std::{
-    fs::{create_dir_all, File},
+    fs::{File, create_dir_all},
     io::{Read, Write},
     path::{Path, PathBuf},
     str::FromStr,
@@ -11,7 +11,7 @@ use std::fs::OpenOptions;
 
 #[cfg(target_os = "linux")]
 use std::{
-    fs::{set_permissions, Permissions},
+    fs::{Permissions, set_permissions},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
 };
 
@@ -39,10 +39,10 @@ fn set_perms_priv(_path: &Path) -> Result<(), CAError> {
     Ok(())
 }
 
-use pkcs8::{der::EncodePem, DecodePrivateKey, LineEnding, PrivateKeyInfoOwned};
+use pkcs8::{DecodePrivateKey, LineEnding, PrivateKeyInfoOwned, der::EncodePem};
 use rcgen::{
-    string::Ia5String, Certificate, CertificateParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
+    Certificate, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519, string::Ia5String,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -424,8 +424,7 @@ mod tests {
 
     fn read_pem(path: &Path) -> Pem {
         let server_cert = std::fs::read(path).unwrap();
-        let pem_parsed = pem::parse_x509_pem(&server_cert).unwrap().1;
-        pem_parsed
+        pem::parse_x509_pem(&server_cert).unwrap().1
     }
 
     #[test]
