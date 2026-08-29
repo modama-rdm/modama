@@ -43,7 +43,7 @@ rust-tests:
     - apt-get -y update && apt-get -y install lld build-essential git libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
     - vulkaninfo --summary
     - rustup component add clippy
-    - cargo install just --locked
+    - just --version || cargo install just --locked
     - git fetch --tags
     - cd modama-rs/
     - cargo check --workspace --all-targets --all-features --locked && cargo clippy --all-targets --all-features --locked && cargo test --locked
@@ -86,7 +86,7 @@ windows-7-llvm:
   script:
     - apt-get -y update && apt-get -y install clang-tools-19 lld llvm
     - rustup toolchain install nightly-2025-09-28 --profile minimal --component rust-src --component clippy
-    - cargo install xwin --locked
+    - xwin --version || cargo install xwin --locked
     - cd modama-rs/
     - xwin --accept-license --arch x86_64 splat --output .xwin-cache/splat
     - export CARGO_TARGET_X86_64_WIN7_WINDOWS_MSVC_LINKER=lld-link
