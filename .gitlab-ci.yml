@@ -60,7 +60,7 @@ rust-tests:
 # the `ring` crate doesn't build on the gnu toolchain, so while we can still
 # run clippy as a basic smoke test, the full build is not enabled here.
 # might be worth it to remove this once we have a building and running configuration.
-windows-7-gnu-experimental:
+windows-clippy:
   stage: test
   image: rust:1-slim-trixie
   script:
@@ -112,7 +112,7 @@ windows-7-llvm:
       - .cargo-home/registry/index/
       - .cargo-home/registry/cache/
 
-lint-and-format:
+py-lint-and-format:
   stage: test
   image: ghcr.io/astral-sh/uv:debian
   script:

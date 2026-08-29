@@ -369,7 +369,7 @@ pub fn install(source_config: &Path) -> Result<()> {
         // https://learn.microsoft.com/windows/win32/api/winsvc/nf-winsvc-changeserviceconfig2w
         // https://learn.microsoft.com/windows/win32/api/winsvc/ns-winsvc-service_failure_actionsw
         // https://learn.microsoft.com/windows/win32/api/winsvc/ns-winsvc-service_failure_actions_flag
-        service.set_description("Connects this producer to Modama ingest services.")?;
+        service.set_description("Connects this system to Modama ingest services.")?;
         service.update_failure_actions(ServiceFailureActions {
             reset_period: ServiceFailureResetPeriod::After(Duration::from_secs(24 * 60 * 60)),
             reboot_msg: None,
