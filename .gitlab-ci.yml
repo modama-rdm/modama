@@ -134,7 +134,7 @@ mgmtinterface-new-tests:
 container-image-build:
   stage: build
   image:
-    name: quay.io/buildah/stable:v1.45.0
+    name: quay.io/buildah/stable:v1.43.2
   variables:
     STORAGE_DRIVER: vfs
     BUILDAH_ISOLATION: chroot
