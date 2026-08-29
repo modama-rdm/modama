@@ -73,6 +73,7 @@ impl RemoteAgents {
     }
 }
 
+/// Discover token services on the local network and fetch tokens from them.
 #[derive(Debug)]
 pub struct LocalNetTokenProvider {
     http_client: Client,
