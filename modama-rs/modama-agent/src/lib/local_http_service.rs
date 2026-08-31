@@ -30,7 +30,7 @@ use tower_http::csrf::CsrfLayer;
 use crate::{
     agent_state::AgentState,
     config::{ConfigError, MTLSIdentity},
-    http_api::{add_api_routes, project_and_session},
+    http_api::{add_api_routes, add_internal_api, project_and_session},
     share::MountedShare,
 };
 
@@ -869,6 +869,8 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
         .route("/close-ingest/{share_id}/", get(close_ingest_confirmation))
         .route("/close-ingest/{share_id}/", post(close_ingest));
 
+    let router = add_internal_api(router)?;
+
     Ok(add_api_routes(router, state)?.layer(CsrfLayer::new()))
 }
 
@@ -941,10 +943,11 @@ mod tests {
                 ),
                 client_cert: None,
             };
-            let mut state_inner = crate::agent_state::AgentState::new(&cfg);
-            state_inner.remote_info = Some(RemoteInfo::default());
+            let shared_state = crate::agent_state::AgentState::new(&cfg).await;
+            shared_state.lock().await.remote_info = Some(RemoteInfo::default());
 
-            state_inner
+            shared_state
+                .lock().await
                 .remote_info
                 .as_mut()
                 .unwrap()
@@ -954,8 +957,6 @@ mod tests {
                     agent: "agent".to_string(),
                     san_encoded: "x-modama-agent://res#agent".to_string(),
                 });
-
-            let shared_state = Arc::new(Mutex::new(state_inner));
 
             let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
             let api_state = ApiState::new(&shared_state, &token_provider);

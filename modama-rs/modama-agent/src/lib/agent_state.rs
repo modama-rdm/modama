@@ -1,7 +1,14 @@
-use log::warn;
-use modama_common::{agent::AgentId, messages::Share};
+use std::{collections::HashMap, sync::Arc};
 
-use crate::{config::AgentConfig, share::MountedShare};
+use log::{info, warn};
+use modama_common::{agent::AgentId, messages::Share};
+use tokio::sync::{Mutex, broadcast, mpsc};
+
+use crate::{
+    config::AgentConfig,
+    events_api::{SessionBeginEnd, SessionId},
+    share::MountedShare,
+};
 
 #[derive(Debug, Default)]
 pub enum ConnectionState {
@@ -92,6 +99,21 @@ impl Default for RemoteInfo {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum StateUpdate {
+    DesiredState {
+        /// The current foreground share
+        foreground_share_id: Option<String>,
+
+        /// All shares that should be mounted
+        shares: Vec<Share>,
+    },
+    MountUpdate {
+        session_id: SessionId,
+        shares: Vec<MountedShare>,
+    },
+}
+
 #[derive(Debug)]
 pub struct AgentState {
     pub connection: ConnectionState,
@@ -99,21 +121,80 @@ pub struct AgentState {
     /// The currently mounted shares, according to the last update
     pub current_shares: ShareState<MountedShare>,
 
+    pub mounted_shares: HashMap<SessionId, Vec<MountedShare>>,
+
+    /// Counter for active session helper connections
+    /// (to prevent cleanup while there's still an active connection)
+    pub session_connections: HashMap<SessionId, u64>,
+
+    pub session_channel_sender: mpsc::UnboundedSender<SessionBeginEnd>,
+
     /// Info we received over the event channel; None if we haven't received any yet
     pub remote_info: Option<RemoteInfo>,
 
     /// Runtime configuration
     pub config: AgentConfig,
+
+    /// Broadcast channel to update GUI and session helpers
+    pub desired_state_channel: broadcast::Sender<StateUpdate>,
+}
+
+/// Cleanup task: when connections for a session_id drop to zero, clear the session state
+async fn session_bookkeeper(
+    agent_state: Arc<Mutex<AgentState>>,
+    mut channel: mpsc::UnboundedReceiver<SessionBeginEnd>,
+) {
+    loop {
+        match channel.recv().await {
+            Some(SessionBeginEnd::Begin { session_id }) => {
+                let mut state = agent_state.lock().await;
+                state
+                    .session_connections
+                    .entry(session_id.clone())
+                    .and_modify(|c| *c += 1);
+            }
+            Some(SessionBeginEnd::End { session_id }) => {
+                let mut state = agent_state.lock().await;
+                state
+                    .session_connections
+                    .entry(session_id.clone())
+                    .and_modify(|c| *c -= 1);
+                if let Some(c) = state.session_connections.get(&session_id)
+                    && *c == 0
+                {
+                    info!("cleaning up session {session_id:?}");
+                    state.mounted_shares.remove(&session_id);
+                }
+            }
+            None => {
+                info!("session bookkeeper shutting down...");
+                break;
+            }
+        }
+    }
 }
 
 impl AgentState {
-    pub fn new(config: &AgentConfig) -> Self {
+    pub async fn new(config: &AgentConfig) -> Arc<Mutex<Self>> {
         let config = config.clone();
-        Self {
+        let (tx, _rx) = broadcast::channel(16);
+
+        let (sess_tx, sess_rx) = mpsc::unbounded_channel::<SessionBeginEnd>();
+
+        let state = Arc::new(Mutex::new(Self {
             connection: Default::default(),
             current_shares: Default::default(),
             remote_info: None,
             config,
-        }
+            desired_state_channel: tx,
+            mounted_shares: Default::default(),
+            session_connections: Default::default(),
+            session_channel_sender: sess_tx,
+        }));
+
+        // FIXME: error handling for spawning, baby sitting to keep it alive?
+        let _ = tokio::spawn(session_bookkeeper(Arc::clone(&state), sess_rx)).await;
+
+        state
     }
 }

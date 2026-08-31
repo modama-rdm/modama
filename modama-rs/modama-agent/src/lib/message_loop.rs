@@ -5,7 +5,7 @@ use rand::RngExt;
 use tungstenite::Message;
 
 use crate::{
-    agent_state::{AgentState, ConnectionState, RemoteInfo, ShareState},
+    agent_state::{AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdate},
     config::AgentConfig,
     mount_backend::MountBackend,
     share::MountedShare,
@@ -112,6 +112,14 @@ async fn handle_message(
                 state.remote_info = Some(RemoteInfo {
                     connected_agents,
                     desired_shares: desired_shares.clone(),
+                });
+                // forward desired state to session helpers
+                state.desired_state_channel.send(StateUpdate::DesiredState {
+                    foreground_share_id: desired_shares
+                        .foreground_share
+                        .clone()
+                        .map(|share| share.share_id),
+                    shares: desired_shares.shares.clone(),
                 });
                 (state.config.clone(), state.current_shares.clone())
             };
@@ -431,7 +439,7 @@ mod tests {
             connected_agents: Vec::new(),
         })
         .unwrap();
-        let state = Arc::new(Mutex::new(AgentState::new(&test_agent_config())));
+        let state = AgentState::new(&test_agent_config()).await;
         let (entered_tx, mut entered_rx) = mpsc::channel(1);
         let release = Arc::new(Notify::new());
         let backend = Arc::new(BlockingMountBackend {
@@ -594,7 +602,7 @@ mod tests {
                 client_cert: None,
             };
 
-            let state = Arc::new(Mutex::new(AgentState::new(&config)));
+            let state = AgentState::new(&config).await;
 
             let client_cert = ca.client_cert("test_agent", "test_resource").unwrap();
             let client_chain: Vec<CertificateDer> = vec![

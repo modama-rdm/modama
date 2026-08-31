@@ -24,3 +24,8 @@
 - [ ] replace Basic authentication for the minimal HTML UI with cookie-backed sessions and a reliable logout action
 - [ ] add hidden CSRF tokens to every state-changing minimal HTML form for legacy
       browsers that do not send `Origin` or `Sec-Fetch-Site`
+
+## Session helper
+
+- [ ] modama-agent: add internal API: websocket endpoint
+    - basically mirrors the events we get from smbdrop, in addition to our own full-state-on-connect message

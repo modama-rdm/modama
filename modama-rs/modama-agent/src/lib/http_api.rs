@@ -15,8 +15,11 @@ use std::sync::Arc;
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use versioned::{VersionedRouterBuilder, semver::Version, versioned_route, versions};
 
-use crate::local_http_service::{ApiState, LocalAPIError, get_auth};
 use crate::share::MountedShare;
+use crate::{
+    events_api::events_api,
+    local_http_service::{ApiState, LocalAPIError, get_auth},
+};
 
 use modama_common::{
     local_api_messages::{
@@ -473,6 +476,10 @@ pub fn add_api_routes(router: Router<ApiState>, state: ApiState) -> Result<Route
             async move { Json((*openapi).clone()) }
         }),
     ))
+}
+
+pub fn add_internal_api(router: Router<ApiState>) -> Result<Router<ApiState>, LocalAPIError> {
+    Ok(router.route("/internal/events/", get(events_api)))
 }
 
 #[cfg(test)]

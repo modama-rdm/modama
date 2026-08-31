@@ -14,5 +14,6 @@ pub mod mount_backend;
 pub mod platform;
 pub mod platform_common;
 pub mod runtime;
+pub mod events_api;
 #[cfg(windows)]
 pub mod windows_service;

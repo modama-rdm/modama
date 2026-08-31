@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use modama_common::messages::Share;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MountedShare {
     pub share: Share,
 
