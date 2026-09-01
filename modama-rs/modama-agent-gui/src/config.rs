@@ -98,7 +98,7 @@ fn native_machine_config_paths() -> Vec<PathBuf> {
 #[cfg(target_os = "windows")]
 fn windows_program_data() -> Option<PathBuf> {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt};
-    use windows::Win32::UI::Shell::{SHGetFolderPathW, CSIDL_COMMON_APPDATA, SHGFP_TYPE_CURRENT};
+    use windows::Win32::UI::Shell::{CSIDL_COMMON_APPDATA, SHGFP_TYPE_CURRENT, SHGetFolderPathW};
 
     let mut path = [0u16; 260];
     // SAFETY: `path` is a live, writable MAX_PATH-sized UTF-16 buffer for the

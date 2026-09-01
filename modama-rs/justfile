@@ -18,6 +18,40 @@ clippy:
 fmt-check:
     cargo fmt --check
 
+# Run one component's tests with source-based coverage and generate text, HTML, and JSON reports.
+coverage $component:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$component" in
+        modama-agent|modama-agent-gui|smbdrop) ;;
+        *)
+            echo "unknown coverage component: $component" >&2
+            echo "expected one of: modama-agent, modama-agent-gui, smbdrop" >&2
+            exit 2
+            ;;
+    esac
+    report_dir="target/llvm-cov/$component"
+    cargo llvm-cov clean --workspace
+    rm -rf -- "$report_dir"
+    mkdir -p "$report_dir"
+    cargo llvm-cov --package "$component" --no-report --no-fail-fast
+    cargo llvm-cov report --package "$component" --show-missing-lines --color never | tee "$report_dir/summary.txt"
+    cargo llvm-cov report --package "$component" --html --output-dir "$report_dir"
+    cargo llvm-cov report --package "$component" --json --output-path "$report_dir/coverage.json"
+    echo "Coverage reports:"
+    echo "  text: $report_dir/summary.txt"
+    echo "  HTML: $report_dir/html/index.html"
+    echo "  JSON: $report_dir/coverage.json"
+
+coverage-modama-agent:
+    @just coverage modama-agent
+
+coverage-modama-agent-gui:
+    @just coverage modama-agent-gui
+
+coverage-smbdrop:
+    @just coverage smbdrop
+
 # Validate the shared design specification, treating warnings as failures.
 validate-design:
     #!/usr/bin/env bash

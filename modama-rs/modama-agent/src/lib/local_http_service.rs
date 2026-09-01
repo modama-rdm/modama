@@ -947,7 +947,8 @@ mod tests {
             shared_state.lock().await.remote_info = Some(RemoteInfo::default());
 
             shared_state
-                .lock().await
+                .lock()
+                .await
                 .remote_info
                 .as_mut()
                 .unwrap()

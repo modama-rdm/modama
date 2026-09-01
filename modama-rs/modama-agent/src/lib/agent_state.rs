@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use log::{info, warn};
 use modama_common::{agent::AgentId, messages::Share};
+use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::{
@@ -99,6 +100,12 @@ impl Default for RemoteInfo {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SessionShares {
+    NoSesssionHelper,
+    Shares { shares: Vec<MountedShare> },
+}
+
 #[derive(Debug, Clone)]
 pub enum StateUpdateToSession {
     DesiredState {
@@ -110,7 +117,7 @@ pub enum StateUpdateToSession {
     },
     MountUpdate {
         session_id: SessionId,
-        shares: Vec<MountedShare>,
+        shares: SessionShares,
     },
 }
 
@@ -121,7 +128,7 @@ pub struct AgentState {
     /// The currently mounted shares, according to the last update
     pub current_shares: ShareState<MountedShare>,
 
-    pub mounted_shares: HashMap<SessionId, Vec<MountedShare>>,
+    pub mounted_shares: HashMap<SessionId, SessionShares>,
 
     /// Counter for active session helper connections
     /// (to prevent cleanup while there's still an active connection)
@@ -166,12 +173,13 @@ async fn session_bookkeeper(
                 {
                     info!("cleaning up session {session_id:?}");
                     state.mounted_shares.remove(&session_id);
+                    state.session_connections.remove(&session_id);
                     if let Err(_e) =
                         state
                             .desired_state_channel
                             .send(StateUpdateToSession::MountUpdate {
                                 session_id,
-                                shares: vec![],
+                                shares: SessionShares::NoSesssionHelper,
                             })
                     {
                         warn!("tried to send an update on current mounts but no one cared");

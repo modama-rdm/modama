@@ -114,13 +114,17 @@ async fn handle_message(
                     desired_shares: desired_shares.clone(),
                 });
                 // forward desired state to session helpers
-                if let Err(_e) = state.desired_state_channel.send(StateUpdateToSession::DesiredState {
-                    foreground_share_id: desired_shares
-                        .foreground_share
-                        .clone()
-                        .map(|share| share.share_id),
-                    shares: desired_shares.shares.clone(),
-                }) {
+                if let Err(_e) =
+                    state
+                        .desired_state_channel
+                        .send(StateUpdateToSession::DesiredState {
+                            foreground_share_id: desired_shares
+                                .foreground_share
+                                .clone()
+                                .map(|share| share.share_id),
+                            shares: desired_shares.shares.clone(),
+                        })
+                {
                     warn!("tried to update session helpers but no one cared");
                 }
                 (state.config.clone(), state.current_shares.clone())

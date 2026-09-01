@@ -9,7 +9,7 @@ use crate::{
     config::AgentConfig,
     local_http_service::serve_local_web_api_on,
     local_net_token_proxy::token_publisher_loop,
-    message_loop::{message_loop, MountPolicy},
+    message_loop::{MountPolicy, message_loop},
     mount_backend::MountBackend,
     platform::CurrentPlatformMountBackend,
 };

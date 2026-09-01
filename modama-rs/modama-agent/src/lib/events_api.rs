@@ -18,7 +18,7 @@ use tokio::{
 };
 
 use crate::{
-    agent_state::{AgentState, StateUpdateToSession},
+    agent_state::{AgentState, RemoteInfo, SessionShares, StateUpdateToSession},
     local_http_service::ApiState,
     share::MountedShare,
 };
@@ -95,9 +95,10 @@ pub enum InternalMsgToSession {
         share_state: Option<Shares>,
     },
     /// Updated state which sessions are mounted in the given desktop session
-    MountUpdate {
+    DesktopSessionState {
         session_id: SessionId,
-        shares: Vec<MountedShare>,
+        mounted_shares: SessionShares,
+        desired_shares: Option<Shares>,
     },
 }
 
@@ -200,7 +201,10 @@ async fn record_update_from_session_helper(
             Err(EventAPIError::StateError)
         }
         InternalMsgToAgent::SessionUpdate { shares } => {
-            let a = state.mounted_shares.entry(session_id.clone()).or_default();
+            let state_mounted_shares = state
+                .mounted_shares
+                .entry(session_id.clone())
+                .or_insert(SessionShares::NoSesssionHelper);
             let mounted_shares: Vec<MountedShare> = shares
                 .into_iter()
                 .map(|s| MountedShare {
@@ -208,11 +212,15 @@ async fn record_update_from_session_helper(
                     mount_path: s.path,
                 })
                 .collect();
-            *a = mounted_shares.clone();
+            *state_mounted_shares = SessionShares::Shares {
+                shares: mounted_shares.clone(),
+            };
             // forward to the GUI
             tx.send(StateUpdateToSession::MountUpdate {
                 session_id: session_id.clone(),
-                shares: mounted_shares,
+                shares: SessionShares::Shares {
+                    shares: mounted_shares,
+                },
             })?;
             Ok(())
         }
@@ -275,14 +283,13 @@ async fn handle_session_helper_websocket(
             }
         }
     }
-    // TODO: ensure cleanup of session-keyed data on session helper termination (probably need to
-    // wrap around this function and perform cleanup on either normal termination or any error)
 }
 
 async fn send_update_to_gui(
     update: StateUpdateToSession,
     config: &SessionHelperConfig,
     socket: &mut WebSocket,
+    remote_info: Option<RemoteInfo>,
 ) -> Result<(), EventAPIError> {
     let msg = match update {
         StateUpdateToSession::DesiredState {
@@ -296,7 +303,18 @@ async fn send_update_to_gui(
             }),
         },
         StateUpdateToSession::MountUpdate { session_id, shares } => {
-            InternalMsgToSession::MountUpdate { session_id, shares }
+            InternalMsgToSession::DesktopSessionState {
+                session_id,
+                mounted_shares: shares,
+                desired_shares: remote_info.map(|remote| Shares {
+                    foreground_share_id: remote
+                        .desired_shares
+                        .foreground_share
+                        .clone()
+                        .map(|s| s.share_id),
+                    shares: remote.desired_shares.shares.clone(),
+                }),
+            }
         }
     };
     send_obj(socket, &msg).await?;
@@ -308,14 +326,13 @@ async fn handle_gui_websocket(
     mut socket: WebSocket,
     session_id: SessionId,
 ) -> Result<(), EventAPIError> {
-    let (mut rx, _tx, remote_info, smb_hostname, smb_port, mounted_shares) = {
+    let (mut rx, remote_info, smb_hostname, smb_port, mounted_shares) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
         let mounted_shares = agent_state.mounted_shares.get(&session_id).cloned();
 
         (
             receiver,
-            agent_state.desired_state_channel.clone(),
             agent_state.remote_info.clone(),
             agent_state.config.smb_hostname.clone(),
             agent_state.config.smb_port,
@@ -328,12 +345,15 @@ async fn handle_gui_websocket(
         smb_port,
     };
 
+    let mounted_shares = mounted_shares.unwrap_or(SessionShares::NoSesssionHelper);
+
     // initial state
     send_obj(
         &mut socket,
-        &InternalMsgToSession::DesiredState {
-            config: session_config.clone(),
-            share_state: remote_info.map(|remote| Shares {
+        &InternalMsgToSession::DesktopSessionState {
+            session_id,
+            mounted_shares,
+            desired_shares: remote_info.map(|remote| Shares {
                 foreground_share_id: remote
                     .desired_shares
                     .foreground_share
@@ -344,28 +364,18 @@ async fn handle_gui_websocket(
         },
     )
     .await?;
-    if let Some(mounted) = mounted_shares {
-        send_obj(
-            &mut socket,
-            &InternalMsgToSession::MountUpdate {
-                session_id,
-                shares: mounted,
-            },
-        )
-        .await?;
-    }
 
     loop {
         select! {
             state_update = rx.recv() => {
                 let update = state_update?;
-                send_update_to_gui(update, &session_config, &mut socket).await?;
+                let remote_info = state.lock().await.remote_info.clone();
+                send_update_to_gui(update, &session_config, &mut socket, remote_info).await?;
             }
             session_update = recv_obj::<InternalMsgToAgent>(&mut socket) => {
                 // panic! or rather, don't. the GUI isn't supposed to send us anything,
                 // but if it does, just log and continue.
-                // TODO: is this needed to drain the websocket?
-                // TODO: should we just drop "GUI" connections that do unexpected stuff like this?
+                let session_update = session_update?;
                 warn!("GUI sent us something unexpected over the websocket connection: {session_update:?}");
             }
         }
@@ -455,4 +465,446 @@ pub async fn events_api(
         }
     })
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::PathBuf, sync::Arc, time::Duration};
+
+    use axum::{Router, routing::get};
+    use futures_util::{SinkExt, StreamExt};
+    use minijinja::Environment;
+    use modama_common::{
+        messages::Share,
+        tokens::{BoxFutureToken, TokenProvider, TokenSignResponse},
+    };
+    use rustls::{ClientConfig, RootCertStore};
+    use serde::{Serialize, de::DeserializeOwned};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        task::JoinHandle,
+        time::timeout,
+    };
+    use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+    use tungstenite::{
+        Error as WebSocketError, Message as WebSocketMessage, client::IntoClientRequest,
+    };
+    use url::Url;
+
+    use super::*;
+
+    type TestWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+    #[derive(Debug)]
+    struct DummyTokenProvider;
+
+    impl TokenProvider for DummyTokenProvider {
+        fn fetch_token(self: Arc<Self>) -> BoxFutureToken {
+            Box::pin(async move {
+                Ok(TokenSignResponse {
+                    token: "dummy-token".to_owned(),
+                    resource: "resource".to_owned(),
+                    agent_name: "agent-name".to_owned(),
+                    agent_uri: "x-modama-agent://resource#agent-name".to_owned(),
+                })
+            })
+        }
+    }
+
+    struct TestSetup {
+        server_task: JoinHandle<()>,
+        shared_state: Arc<Mutex<AgentState>>,
+        websocket_url: String,
+    }
+
+    impl TestSetup {
+        async fn start() -> Self {
+            let root = RootCertStore::empty();
+            let config = crate::config::AgentConfig {
+                events_api_url: Url::parse("ws://localhost/").unwrap(),
+                mgmt_api_url: Url::parse("http://localhost/").unwrap(),
+                smb_hostname: "smb.example.test".to_owned(),
+                smb_ip: tokio::sync::OnceCell::new(),
+                smb_port: 1445,
+                smb_domain: "WORKGROUP".to_owned(),
+                identity: crate::config::MTLSIdentity::AgentId {
+                    agent_name: "agent-name".to_owned(),
+                    resource_name: "resource".to_owned(),
+                },
+                linux_config: None,
+                listen_local_api: "localhost:0".to_owned(),
+                token_service_url: Url::parse("http://localhost/").unwrap(),
+                ca_root_store: root.clone(),
+                ca_root_cert: String::new(),
+                client_config: Arc::new(
+                    ClientConfig::builder()
+                        .with_root_certificates(root)
+                        .with_no_client_auth(),
+                ),
+                client_cert: None,
+            };
+            let shared_state = AgentState::new(&config).await;
+            let token_provider: Arc<dyn TokenProvider + Send + Sync> = Arc::new(DummyTokenProvider);
+            let api_state = ApiState {
+                state: Arc::clone(&shared_state),
+                token_provider,
+                jinja_env: Environment::new(),
+            };
+            let app = Router::new()
+                .route("/internal/events/", get(events_api))
+                .with_state(api_state);
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server_task = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+
+            Self {
+                server_task,
+                shared_state,
+                websocket_url: format!("ws://{address}/internal/events/"),
+            }
+        }
+
+        async fn connect(&self) -> TestWebSocket {
+            connect_async(&self.websocket_url).await.unwrap().0
+        }
+
+        async fn connect_gui(&self, id: &str) -> TestWebSocket {
+            let mut socket = self.connect().await;
+            send_message(
+                &mut socket,
+                &InternalMsgToAgent::HelloGui {
+                    session_id: session_id(id),
+                },
+            )
+            .await;
+            socket
+        }
+
+        async fn connect_session_helper(&self, id: &str) -> TestWebSocket {
+            let mut socket = self.connect().await;
+            send_message(
+                &mut socket,
+                &InternalMsgToAgent::HelloSessionHelper {
+                    session_id: session_id(id),
+                },
+            )
+            .await;
+            socket
+        }
+
+        async fn wait_for_state(&self, predicate: impl Fn(&AgentState) -> bool) {
+            timeout(Duration::from_secs(1), async {
+                loop {
+                    let state = self.shared_state.lock().await;
+                    if predicate(&state) {
+                        return;
+                    }
+                    drop(state);
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("agent state did not reach the expected value");
+        }
+    }
+
+    impl Drop for TestSetup {
+        fn drop(&mut self) {
+            self.server_task.abort();
+        }
+    }
+
+    fn session_id(id: &str) -> SessionId {
+        SessionId { id: id.to_owned() }
+    }
+
+    fn share(id: &str) -> Share {
+        Share {
+            resource: Some("resource".to_owned()),
+            share_id: id.to_owned(),
+            share_name: format!("share-{id}"),
+            dest_path: format!("/project/{id}"),
+            created_timestamp: 0,
+            username: "share-user".to_owned(),
+            password: "share-password".to_owned(),
+            uid: 1000,
+            gid: 1000,
+        }
+    }
+
+    async fn send_message<T: Serialize>(socket: &mut TestWebSocket, message: &T) {
+        socket
+            .send(WebSocketMessage::Text(
+                serde_json::to_string(message).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    async fn receive_message<T: DeserializeOwned>(socket: &mut TestWebSocket) -> T {
+        let message = timeout(Duration::from_secs(1), socket.next())
+            .await
+            .expect("timed out waiting for websocket message")
+            .expect("websocket closed unexpectedly")
+            .expect("websocket read failed");
+        let text = message
+            .into_text()
+            .expect("expected websocket text message");
+        serde_json::from_str(&text).unwrap()
+    }
+
+    async fn wait_for_pong(socket: &mut TestWebSocket, expected_payload: &[u8]) {
+        timeout(Duration::from_secs(1), async {
+            loop {
+                let message = socket
+                    .next()
+                    .await
+                    .expect("websocket closed before pong arrived")
+                    .expect("websocket read failed while waiting for pong");
+                match message {
+                    WebSocketMessage::Pong(payload) if payload.as_ref() == expected_payload => {
+                        return;
+                    }
+                    WebSocketMessage::Pong(_) => {}
+                    message => {
+                        panic!("unexpected websocket message while waiting for pong: {message:?}")
+                    }
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for websocket pong");
+    }
+
+    #[tokio::test]
+    async fn browser_connections_are_denied() {
+        let test_setup = TestSetup::start().await;
+        let mut request = test_setup
+            .websocket_url
+            .clone()
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .insert("origin", "https://attacker.example".parse().unwrap());
+
+        let error = connect_async(request).await.unwrap_err();
+
+        match error {
+            WebSocketError::Http(response) => {
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            }
+            error => panic!("expected an HTTP rejection, got {error:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_empty_state_gui() {
+        // connect as a GUI client and receive the initial (empty) state update (desired state and current
+        // mount state)
+        let test_setup = TestSetup::start().await;
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+
+        let message: InternalMsgToSession = receive_message(&mut gui).await;
+
+        match message {
+            InternalMsgToSession::DesktopSessionState {
+                session_id: actual_session_id,
+                mounted_shares: SessionShares::NoSesssionHelper,
+                desired_shares: None,
+            } => assert_eq!(actual_session_id, session_id("desktop-1")),
+            message => panic!("unexpected initial GUI message: {message:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_empty_state_session_helper() {
+        let test_setup = TestSetup::start().await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+
+        let message: InternalMsgToSession = receive_message(&mut session_helper).await;
+
+        match message {
+            InternalMsgToSession::DesiredState {
+                config,
+                share_state: None,
+            } => {
+                assert_eq!(config.smb_hostname, "smb.example.test");
+                assert_eq!(config.smb_port, 1445);
+            }
+            message => panic!("unexpected initial session-helper message: {message:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn update_from_session_helper_propagates() {
+        let test_setup = TestSetup::start().await;
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut gui).await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut session_helper).await;
+        let updated_share = share("share-1");
+
+        send_message(
+            &mut session_helper,
+            &InternalMsgToAgent::SessionUpdate {
+                shares: vec![SessionShare {
+                    share: updated_share.clone(),
+                    path: PathBuf::from("/mnt/share-1"),
+                }],
+            },
+        )
+        .await;
+
+        let message: InternalMsgToSession = receive_message(&mut gui).await;
+        match message {
+            InternalMsgToSession::DesktopSessionState {
+                session_id: actual_session_id,
+                mounted_shares: SessionShares::Shares { shares },
+                desired_shares: None,
+            } => {
+                assert_eq!(actual_session_id, session_id("desktop-1"));
+                assert_eq!(shares.len(), 1);
+                assert_eq!(shares[0].share, updated_share);
+                assert_eq!(shares[0].mount_path, PathBuf::from("/mnt/share-1"));
+            }
+            message => panic!("unexpected GUI update: {message:?}"),
+        }
+        assert!(matches!(
+            test_setup
+                .shared_state
+                .lock()
+                .await
+                .mounted_shares
+                .get(&session_id("desktop-1")),
+            Some(SessionShares::Shares { shares }) if shares.len() == 1
+        ));
+    }
+
+    #[tokio::test]
+    async fn session_state_cleaned_up_on_disconnect() {
+        let test_setup = TestSetup::start().await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut session_helper).await;
+        send_message(
+            &mut session_helper,
+            &InternalMsgToAgent::SessionUpdate { shares: vec![] },
+        )
+        .await;
+        test_setup
+            .wait_for_state(|state| {
+                state.mounted_shares.contains_key(&session_id("desktop-1"))
+                    && state.session_connections.get(&session_id("desktop-1")) == Some(&1)
+            })
+            .await;
+
+        session_helper.close(None).await.unwrap();
+
+        test_setup
+            .wait_for_state(|state| {
+                !state.mounted_shares.contains_key(&session_id("desktop-1"))
+                    && !state
+                        .session_connections
+                        .contains_key(&session_id("desktop-1"))
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn invalid_message_from_gui_are_ignored_and_bookkeeping_stays_alive() {
+        let test_setup = TestSetup::start().await;
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut gui).await;
+
+        send_message(
+            &mut gui,
+            &InternalMsgToAgent::SessionUpdate {
+                shares: vec![SessionShare {
+                    share: share("ignored-share"),
+                    path: PathBuf::from("/mnt/ignored"),
+                }],
+            },
+        )
+        .await;
+        let ping_payload = b"invalid-message-processed";
+        gui.send(WebSocketMessage::Ping(
+            ping_payload.as_slice().to_vec().into(),
+        ))
+        .await
+        .unwrap();
+        wait_for_pong(&mut gui, ping_payload).await;
+        test_setup
+            .shared_state
+            .lock()
+            .await
+            .desired_state_channel
+            .send(StateUpdateToSession::DesiredState {
+                foreground_share_id: Some("desired-share".to_owned()),
+                shares: vec![share("desired-share")],
+            })
+            .unwrap();
+
+        let message: InternalMsgToSession = receive_message(&mut gui).await;
+        match message {
+            InternalMsgToSession::DesiredState {
+                config,
+                share_state:
+                    Some(Shares {
+                        foreground_share_id,
+                        shares,
+                    }),
+            } => {
+                assert_eq!(config.smb_hostname, "smb.example.test");
+                assert_eq!(config.smb_port, 1445);
+                assert_eq!(foreground_share_id.as_deref(), Some("desired-share"));
+                assert_eq!(shares, vec![share("desired-share")]);
+            }
+            message => panic!("unexpected GUI update: {message:?}"),
+        }
+        assert!(
+            test_setup
+                .shared_state
+                .lock()
+                .await
+                .mounted_shares
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn session_helper_disconnect_updates_state_to_discernable_value() {
+        let test_setup = TestSetup::start().await;
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut gui).await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut session_helper).await;
+
+        send_message(
+            &mut session_helper,
+            &InternalMsgToAgent::SessionUpdate { shares: vec![] },
+        )
+        .await;
+        let mounted_message: InternalMsgToSession = receive_message(&mut gui).await;
+        assert!(matches!(
+            mounted_message,
+            InternalMsgToSession::DesktopSessionState {
+                mounted_shares: SessionShares::Shares { ref shares },
+                ..
+            } if shares.is_empty()
+        ));
+
+        session_helper.close(None).await.unwrap();
+
+        let disconnected_message: InternalMsgToSession = receive_message(&mut gui).await;
+        match disconnected_message {
+            InternalMsgToSession::DesktopSessionState {
+                session_id: actual_session_id,
+                mounted_shares: SessionShares::NoSesssionHelper,
+                desired_shares: None,
+            } => assert_eq!(actual_session_id, session_id("desktop-1")),
+            message => panic!("unexpected disconnect update: {message:?}"),
+        }
+    }
 }

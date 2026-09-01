@@ -2,7 +2,25 @@
 
 ## Run tests with coverage
 
-`cargo llvm-cov --html` - then check `target/llvm-cov/html/index.html`
+Run coverage separately for each component:
+
+```sh
+just coverage modama-agent
+just coverage modama-agent-gui
+just coverage smbdrop
+```
+
+The equivalent aliases are `just coverage-modama-agent`,
+`just coverage-modama-agent-gui`, and `just coverage-smbdrop`.
+
+Reports are written to `target/llvm-cov/<component>/`:
+
+- `summary.txt` contains the human-readable summary and missing line numbers.
+- `html/index.html` contains annotated source for browsing.
+- `coverage.json` is the full machine-readable LLVM export, including line and
+  source-region coverage. Source regions are the closest available granularity
+  to expression coverage. The text summary is intended for humans and should
+  not be parsed by tools.
 
 ## Run and update visual tests
 

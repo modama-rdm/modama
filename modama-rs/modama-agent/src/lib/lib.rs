@@ -2,6 +2,7 @@ pub mod config;
 pub mod share;
 
 pub mod agent_state;
+pub mod events_api;
 pub mod http_api;
 pub mod local_http_service;
 pub mod local_net_common;
@@ -14,6 +15,5 @@ pub mod mount_backend;
 pub mod platform;
 pub mod platform_common;
 pub mod runtime;
-pub mod events_api;
 #[cfg(windows)]
 pub mod windows_service;
