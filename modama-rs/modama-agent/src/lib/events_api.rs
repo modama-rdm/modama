@@ -1,9 +1,14 @@
 use std::{ops::DerefMut as _, path::PathBuf, sync::Arc};
 
 use axum::{
-    extract::{State, WebSocketUpgrade, ws::WebSocket},
+    extract::{
+        State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
+    http::header::HeaderMap,
     response::{IntoResponse as _, Response},
 };
+use hyper::StatusCode;
 use log::{error, warn};
 use modama_common::messages::Share;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -13,7 +18,7 @@ use tokio::{
 };
 
 use crate::{
-    agent_state::{AgentState, StateUpdate},
+    agent_state::{AgentState, StateUpdateToSession},
     local_http_service::ApiState,
     share::MountedShare,
 };
@@ -26,6 +31,7 @@ pub struct SessionId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionHelperConfig {
     smb_hostname: String,
+    smb_port: u32,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -39,7 +45,7 @@ impl SessionId {
         #[cfg(target_os = "linux")]
         let environment = std::env::var("XDG_SESSION_ID")?;
         #[cfg(windows)]
-        let environment = env::var("SESSIONNAME")?;
+        let environment = std::env::var("SESSIONNAME")?;
 
         Ok(Self { id: environment })
     }
@@ -113,7 +119,7 @@ pub enum EventAPIError {
     ChannelRecv(#[from] tokio::sync::broadcast::error::RecvError),
 
     #[error("internal communication error")]
-    ChannelSend(#[from] tokio::sync::broadcast::error::SendError<StateUpdate>),
+    ChannelSend(#[from] tokio::sync::broadcast::error::SendError<StateUpdateToSession>),
 
     #[error("state error, message sent out of turn?")]
     StateError,
@@ -128,7 +134,11 @@ where
         .await
         .transpose()?
         .ok_or(EventAPIError::Dropped)?;
-    let msg_text = msg.to_text()?;
+    let msg_text = match &msg {
+        Message::Text(utf8_bytes) => utf8_bytes.as_str(),
+        Message::Close(_close_frame) => return Err(EventAPIError::Dropped),
+        _ => return Err(EventAPIError::InvalidMsg),
+    };
     let msg_obj: T = serde_json::from_str(msg_text)?;
 
     Ok(msg_obj)
@@ -138,19 +148,19 @@ async fn send_obj<T>(socket: &mut WebSocket, obj: &T) -> Result<(), EventAPIErro
 where
     T: Serialize,
 {
-    let msg = axum::extract::ws::Message::Text(serde_json::to_string(obj)?.into());
+    let msg = Message::Text(serde_json::to_string(obj)?.into());
     socket.send(msg).await?;
 
     Ok(())
 }
 
 async fn send_update_to_session_helper(
-    update: StateUpdate,
+    update: StateUpdateToSession,
     config: &SessionHelperConfig,
     socket: &mut WebSocket,
 ) -> Result<(), EventAPIError> {
     match update {
-        StateUpdate::DesiredState {
+        StateUpdateToSession::DesiredState {
             foreground_share_id,
             shares,
         } => {
@@ -166,7 +176,7 @@ async fn send_update_to_session_helper(
             )
             .await?;
         }
-        StateUpdate::MountUpdate {
+        StateUpdateToSession::MountUpdate {
             session_id: _,
             shares: _,
         } => {} // ignore
@@ -177,7 +187,7 @@ async fn send_update_to_session_helper(
 
 async fn record_update_from_session_helper(
     session_update: InternalMsgToAgent,
-    tx: broadcast::Sender<StateUpdate>,
+    tx: broadcast::Sender<StateUpdateToSession>,
     session_id: &SessionId,
     state: &mut AgentState,
 ) -> Result<(), EventAPIError> {
@@ -197,7 +207,7 @@ async fn record_update_from_session_helper(
                 .collect();
             *a = mounted_shares.clone();
             // forward to the GUI
-            tx.send(StateUpdate::MountUpdate {
+            tx.send(StateUpdateToSession::MountUpdate {
                 session_id: session_id.clone(),
                 shares: mounted_shares,
             })?;
@@ -211,7 +221,12 @@ async fn handle_session_helper_websocket(
     mut socket: WebSocket,
     session_id: SessionId,
 ) -> Result<(), EventAPIError> {
-    let (mut rx, tx, remote_info, smb_hostname) = {
+    let _guard = SessionConnection::new(
+        &session_id,
+        state.lock().await.session_channel_sender.clone(),
+    )
+    .await;
+    let (mut rx, tx, remote_info, smb_hostname, smb_port) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
 
@@ -220,10 +235,14 @@ async fn handle_session_helper_websocket(
             agent_state.desired_state_channel.clone(),
             agent_state.remote_info.clone(),
             agent_state.config.smb_hostname.clone(),
+            agent_state.config.smb_port,
         )
     };
 
-    let session_config = SessionHelperConfig { smb_hostname };
+    let session_config = SessionHelperConfig {
+        smb_hostname,
+        smb_port,
+    };
 
     // initial state
     send_obj(
@@ -258,12 +277,12 @@ async fn handle_session_helper_websocket(
 }
 
 async fn send_update_to_gui(
-    update: StateUpdate,
+    update: StateUpdateToSession,
     config: &SessionHelperConfig,
     socket: &mut WebSocket,
 ) -> Result<(), EventAPIError> {
     let msg = match update {
-        StateUpdate::DesiredState {
+        StateUpdateToSession::DesiredState {
             foreground_share_id,
             shares,
         } => InternalMsgToSession::DesiredState {
@@ -273,7 +292,7 @@ async fn send_update_to_gui(
                 shares,
             }),
         },
-        StateUpdate::MountUpdate { session_id, shares } => {
+        StateUpdateToSession::MountUpdate { session_id, shares } => {
             InternalMsgToSession::MountUpdate { session_id, shares }
         }
     };
@@ -286,7 +305,7 @@ async fn handle_gui_websocket(
     mut socket: WebSocket,
     session_id: SessionId,
 ) -> Result<(), EventAPIError> {
-    let (mut rx, _tx, remote_info, smb_hostname, mounted_shares) = {
+    let (mut rx, _tx, remote_info, smb_hostname, smb_port, mounted_shares) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
         let mounted_shares = agent_state.mounted_shares.get(&session_id).cloned();
@@ -296,11 +315,15 @@ async fn handle_gui_websocket(
             agent_state.desired_state_channel.clone(),
             agent_state.remote_info.clone(),
             agent_state.config.smb_hostname.clone(),
+            agent_state.config.smb_port,
             mounted_shares,
         )
     };
 
-    let session_config = SessionHelperConfig { smb_hostname };
+    let session_config = SessionHelperConfig {
+        smb_hostname,
+        smb_port,
+    };
 
     // initial state
     send_obj(
@@ -398,11 +421,6 @@ async fn handle_connection(
             handle_gui_websocket(state, socket, session_id).await?;
         }
         InternalMsgToAgent::HelloSessionHelper { session_id } => {
-            SessionConnection::new(
-                &session_id,
-                state.lock().await.session_channel_sender.clone(),
-            )
-            .await;
             handle_session_helper_websocket(state, socket, session_id).await?;
         }
         InternalMsgToAgent::SessionUpdate { shares: _ } => {
@@ -413,7 +431,18 @@ async fn handle_connection(
     Ok(())
 }
 
-pub async fn events_api(ws: WebSocketUpgrade, State(state): State<ApiState>) -> Response {
+pub async fn events_api(
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+    State(state): State<ApiState>,
+) -> Response {
+    // Disallow browsers from connecting. Our own clients don't send an Origin header.
+    // this assumes that if the browser is too old to send an Origin header (IE10 or older),
+    // it will not be connected to the internet, or at least not to untrusted websites.
+    if headers.get("origin").is_some() {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
     ws.on_upgrade(async move |socket| {
         if let Err(e) = handle_connection(Arc::clone(&state.state), socket).await {
             error!("dropping websocket connection: {e}");

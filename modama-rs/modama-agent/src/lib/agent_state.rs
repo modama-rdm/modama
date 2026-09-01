@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use log::{info, warn};
+use log::{error, info, warn};
 use modama_common::{agent::AgentId, messages::Share};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
@@ -100,7 +100,7 @@ impl Default for RemoteInfo {
 }
 
 #[derive(Debug, Clone)]
-pub enum StateUpdate {
+pub enum StateUpdateToSession {
     DesiredState {
         /// The current foreground share
         foreground_share_id: Option<String>,
@@ -136,7 +136,7 @@ pub struct AgentState {
     pub config: AgentConfig,
 
     /// Broadcast channel to update GUI and session helpers
-    pub desired_state_channel: broadcast::Sender<StateUpdate>,
+    pub desired_state_channel: broadcast::Sender<StateUpdateToSession>,
 }
 
 /// Cleanup task: when connections for a session_id drop to zero, clear the session state
@@ -151,19 +151,31 @@ async fn session_bookkeeper(
                 state
                     .session_connections
                     .entry(session_id.clone())
-                    .and_modify(|c| *c += 1);
+                    .and_modify(|c| *c += 1)
+                    .or_insert(1);
             }
             Some(SessionBeginEnd::End { session_id }) => {
                 let mut state = agent_state.lock().await;
                 state
                     .session_connections
                     .entry(session_id.clone())
-                    .and_modify(|c| *c -= 1);
+                    .and_modify(|c| *c -= 1)
+                    .or_insert(0);
                 if let Some(c) = state.session_connections.get(&session_id)
                     && *c == 0
                 {
                     info!("cleaning up session {session_id:?}");
                     state.mounted_shares.remove(&session_id);
+                    if let Err(_e) =
+                        state
+                            .desired_state_channel
+                            .send(StateUpdateToSession::MountUpdate {
+                                session_id,
+                                shares: vec![],
+                            })
+                    {
+                        warn!("tried to send an update on current mounts but no one cared");
+                    }
                 }
             }
             None => {
@@ -193,7 +205,7 @@ impl AgentState {
         }));
 
         // FIXME: error handling for spawning, baby sitting to keep it alive?
-        let _ = tokio::spawn(session_bookkeeper(Arc::clone(&state), sess_rx)).await;
+        let _join_handle = tokio::spawn(session_bookkeeper(Arc::clone(&state), sess_rx));
 
         state
     }

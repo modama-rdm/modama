@@ -5,7 +5,7 @@ use rand::RngExt;
 use tungstenite::Message;
 
 use crate::{
-    agent_state::{AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdate},
+    agent_state::{AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdateToSession},
     config::AgentConfig,
     mount_backend::MountBackend,
     share::MountedShare,
@@ -114,13 +114,15 @@ async fn handle_message(
                     desired_shares: desired_shares.clone(),
                 });
                 // forward desired state to session helpers
-                state.desired_state_channel.send(StateUpdate::DesiredState {
+                if let Err(_e) = state.desired_state_channel.send(StateUpdateToSession::DesiredState {
                     foreground_share_id: desired_shares
                         .foreground_share
                         .clone()
                         .map(|share| share.share_id),
                     shares: desired_shares.shares.clone(),
-                });
+                }) {
+                    warn!("tried to update session helpers but no one cared");
+                }
                 (state.config.clone(), state.current_shares.clone())
             };
             let new_current_shares = update_share_list(
