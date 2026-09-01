@@ -54,6 +54,7 @@ utoipa-axum = "0.2"
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+mod_module_files = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
