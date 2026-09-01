@@ -378,6 +378,8 @@ pub enum SessionBeginEnd {
     End { session_id: SessionId },
 }
 
+/// Session connection guard; when dropped, we send a message via the MPSC
+/// channel which triggers cleanup in `agent_state::session_bookkeeper`
 #[derive(Debug)]
 struct SessionConnection {
     session_id: SessionId,
@@ -385,6 +387,7 @@ struct SessionConnection {
 }
 
 impl SessionConnection {
+    #[must_use]
     pub async fn new(
         session_id: &SessionId,
         channel: mpsc::UnboundedSender<SessionBeginEnd>,
