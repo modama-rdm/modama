@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use log::{error, info, warn};
+use log::{info, warn};
 use modama_common::{agent::AgentId, messages::Share};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
