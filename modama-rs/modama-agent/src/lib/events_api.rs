@@ -594,6 +594,22 @@ mod tests {
             socket
         }
 
+        async fn seed_remote_info(&self, foreground_share: Share, shares: Vec<Share>) {
+            let mut remote_info = RemoteInfo::new();
+            remote_info
+                .desired_shares
+                .replace_state(shares, Some(foreground_share));
+            self.shared_state.lock().await.remote_info = Some(remote_info);
+        }
+
+        async fn seed_mounted_shares(&self, id: &str, shares: Vec<MountedShare>) {
+            self.shared_state
+                .lock()
+                .await
+                .mounted_shares
+                .insert(session_id(id), SessionShares::Shares { shares });
+        }
+
         async fn wait_for_state(&self, predicate: impl Fn(&AgentState) -> bool) {
             timeout(Duration::from_secs(1), async {
                 loop {
@@ -653,6 +669,25 @@ mod tests {
             .into_text()
             .expect("expected websocket text message");
         serde_json::from_str(&text).unwrap()
+    }
+
+    async fn wait_for_termination(socket: &mut TestWebSocket) {
+        timeout(Duration::from_secs(1), async {
+            loop {
+                match socket.next().await {
+                    None | Some(Err(_)) | Some(Ok(WebSocketMessage::Close(_))) => return,
+                    Some(Ok(WebSocketMessage::Ping(payload))) => {
+                        socket.send(WebSocketMessage::Pong(payload)).await.unwrap();
+                    }
+                    Some(Ok(WebSocketMessage::Pong(_))) => {}
+                    Some(Ok(message)) => {
+                        panic!("received application response before termination: {message:?}")
+                    }
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for websocket termination");
     }
 
     async fn wait_for_pong(socket: &mut TestWebSocket, expected_payload: &[u8]) {
@@ -739,6 +774,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initial_non_empty_state_reaches_gui_and_session_helper() {
+        let test_setup = TestSetup::start().await;
+        let foreground_share = share("foreground");
+        let background_share = share("background");
+        let desired_shares = vec![foreground_share.clone(), background_share.clone()];
+        let mounted_share = MountedShare {
+            share: background_share.clone(),
+            mount_path: PathBuf::from("/mnt/background"),
+        };
+        test_setup
+            .seed_remote_info(foreground_share.clone(), desired_shares.clone())
+            .await;
+        test_setup
+            .seed_mounted_shares("desktop-1", vec![mounted_share.clone()])
+            .await;
+
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+        let gui_message: InternalMsgToSession = receive_message(&mut gui).await;
+        match gui_message {
+            InternalMsgToSession::DesktopSessionState {
+                session_id: actual_session_id,
+                mounted_shares: SessionShares::Shares { shares },
+                desired_shares:
+                    Some(Shares {
+                        foreground_share_id,
+                        shares: actual_desired_shares,
+                    }),
+            } => {
+                assert_eq!(actual_session_id, session_id("desktop-1"));
+                assert_eq!(shares, vec![mounted_share]);
+                assert_eq!(foreground_share_id.as_deref(), Some("foreground"));
+                assert_eq!(actual_desired_shares, desired_shares);
+            }
+            message => panic!("unexpected initial GUI message: {message:?}"),
+        }
+
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let helper_message: InternalMsgToSession = receive_message(&mut session_helper).await;
+        match helper_message {
+            InternalMsgToSession::DesiredState {
+                config,
+                share_state:
+                    Some(Shares {
+                        foreground_share_id,
+                        shares: actual_desired_shares,
+                    }),
+            } => {
+                assert_eq!(config.smb_hostname, "smb.example.test");
+                assert_eq!(config.smb_port, 1445);
+                assert_eq!(foreground_share_id.as_deref(), Some("foreground"));
+                assert_eq!(actual_desired_shares, desired_shares);
+            }
+            message => panic!("unexpected initial session-helper message: {message:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn later_desired_state_reaches_session_helper() {
+        let test_setup = TestSetup::start().await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut session_helper).await;
+        let foreground_share = share("foreground");
+        let background_share = share("background");
+
+        test_setup
+            .shared_state
+            .lock()
+            .await
+            .desired_state_channel
+            .send(StateUpdateToSession::DesiredState {
+                foreground_share_id: Some(foreground_share.share_id.clone()),
+                shares: vec![foreground_share.clone(), background_share.clone()],
+            })
+            .unwrap();
+
+        let message: InternalMsgToSession = receive_message(&mut session_helper).await;
+        match message {
+            InternalMsgToSession::DesiredState {
+                config,
+                share_state:
+                    Some(Shares {
+                        foreground_share_id,
+                        shares,
+                    }),
+            } => {
+                assert_eq!(config.smb_hostname, "smb.example.test");
+                assert_eq!(config.smb_port, 1445);
+                assert_eq!(foreground_share_id.as_deref(), Some("foreground"));
+                assert_eq!(shares, vec![foreground_share, background_share]);
+            }
+            message => panic!("unexpected session-helper update: {message:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn update_from_session_helper_propagates() {
         let test_setup = TestSetup::start().await;
         let mut gui = test_setup.connect_gui("desktop-1").await;
@@ -781,6 +911,119 @@ mod tests {
                 .get(&session_id("desktop-1")),
             Some(SessionShares::Shares { shares }) if shares.len() == 1
         ));
+    }
+
+    #[tokio::test]
+    async fn mount_update_to_gui_includes_current_desired_state() {
+        let test_setup = TestSetup::start().await;
+        let foreground_share = share("foreground");
+        let background_share = share("background");
+        let desired_shares = vec![foreground_share.clone(), background_share];
+        test_setup
+            .seed_remote_info(foreground_share, desired_shares.clone())
+            .await;
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut gui).await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut session_helper).await;
+        let mounted_share = share("mounted");
+
+        send_message(
+            &mut session_helper,
+            &InternalMsgToAgent::SessionUpdate {
+                shares: vec![SessionShare {
+                    share: mounted_share.clone(),
+                    path: PathBuf::from("/mnt/mounted"),
+                }],
+            },
+        )
+        .await;
+
+        let message: InternalMsgToSession = receive_message(&mut gui).await;
+        match message {
+            InternalMsgToSession::DesktopSessionState {
+                session_id: actual_session_id,
+                mounted_shares: SessionShares::Shares { shares },
+                desired_shares:
+                    Some(Shares {
+                        foreground_share_id,
+                        shares: actual_desired_shares,
+                    }),
+            } => {
+                assert_eq!(actual_session_id, session_id("desktop-1"));
+                assert_eq!(
+                    shares,
+                    vec![MountedShare {
+                        share: mounted_share,
+                        mount_path: PathBuf::from("/mnt/mounted"),
+                    }]
+                );
+                assert_eq!(foreground_share_id.as_deref(), Some("foreground"));
+                assert_eq!(actual_desired_shares, desired_shares);
+            }
+            message => panic!("unexpected GUI update: {message:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_initial_messages_terminate_connection_without_response() {
+        let test_setup = TestSetup::start().await;
+        let invalid_messages = [
+            WebSocketMessage::Binary(vec![0, 1, 2].into()),
+            WebSocketMessage::Text("{malformed-json".into()),
+            WebSocketMessage::Text(
+                serde_json::to_string(&InternalMsgToAgent::SessionUpdate { shares: vec![] })
+                    .unwrap()
+                    .into(),
+            ),
+        ];
+
+        for message in invalid_messages {
+            let mut socket = test_setup.connect().await;
+            socket.send(message).await.unwrap();
+            wait_for_termination(&mut socket).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn repeated_session_helper_greeting_terminates_and_cleans_up() {
+        let test_setup = TestSetup::start().await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut session_helper).await;
+        send_message(
+            &mut session_helper,
+            &InternalMsgToAgent::SessionUpdate {
+                shares: vec![SessionShare {
+                    share: share("mounted"),
+                    path: PathBuf::from("/mnt/mounted"),
+                }],
+            },
+        )
+        .await;
+        test_setup
+            .wait_for_state(|state| {
+                state.mounted_shares.contains_key(&session_id("desktop-1"))
+                    && state.session_connections.get(&session_id("desktop-1")) == Some(&1)
+            })
+            .await;
+
+        send_message(
+            &mut session_helper,
+            &InternalMsgToAgent::HelloSessionHelper {
+                session_id: session_id("desktop-1"),
+            },
+        )
+        .await;
+        wait_for_termination(&mut session_helper).await;
+
+        test_setup
+            .wait_for_state(|state| {
+                !state.mounted_shares.contains_key(&session_id("desktop-1"))
+                    && !state
+                        .session_connections
+                        .contains_key(&session_id("desktop-1"))
+            })
+            .await;
     }
 
     #[tokio::test]
