@@ -129,19 +129,22 @@ async fn recv_obj<T>(socket: &mut WebSocket) -> Result<T, EventAPIError>
 where
     T: DeserializeOwned,
 {
-    let msg = socket
-        .recv()
-        .await
-        .transpose()?
-        .ok_or(EventAPIError::Dropped)?;
-    let msg_text = match &msg {
-        Message::Text(utf8_bytes) => utf8_bytes.as_str(),
-        Message::Close(_close_frame) => return Err(EventAPIError::Dropped),
-        _ => return Err(EventAPIError::InvalidMsg),
-    };
-    let msg_obj: T = serde_json::from_str(msg_text)?;
+    loop {
+        let msg = socket
+            .recv()
+            .await
+            .transpose()?
+            .ok_or(EventAPIError::Dropped)?;
+        let msg_text = match &msg {
+            Message::Text(utf8_bytes) => utf8_bytes.as_str(),
+            Message::Ping(_a) | Message::Pong(_a) => continue,
+            Message::Close(_close_frame) => return Err(EventAPIError::Dropped),
+            _ => return Err(EventAPIError::InvalidMsg),
+        };
+        let msg_obj: T = serde_json::from_str(msg_text)?;
 
-    Ok(msg_obj)
+        return Ok(msg_obj);
+    }
 }
 
 async fn send_obj<T>(socket: &mut WebSocket, obj: &T) -> Result<(), EventAPIError>
