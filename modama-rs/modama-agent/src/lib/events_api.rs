@@ -81,6 +81,8 @@ pub struct Shares {
     shares: Vec<Share>,
 }
 
+// TODO: maybe actually separate the *ToSession enum into two structs that carry the full state,
+// which could simplify lagging and similar edge cases, but is it worth it?
 /// Updates sent to the session helper and the GUI
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum InternalMsgToSession {
@@ -89,7 +91,7 @@ pub enum InternalMsgToSession {
         /// (also the port if we are on Linux)
         config: SessionHelperConfig,
 
-        /// None means we haven't reveiced the desired state yet. We need to consider this, because
+        /// None means we haven't received the desired state yet. We need to consider this, because
         /// otherwise, it could lead to a flip-flopping situation when re-connecting. If this is
         /// None, and shares are mounted, no reconciliation should be happening.
         share_state: Option<Shares>,
@@ -204,7 +206,7 @@ async fn record_update_from_session_helper(
             let state_mounted_shares = state
                 .mounted_shares
                 .entry(session_id.clone())
-                .or_insert(SessionShares::NoSesssionHelper);
+                .or_insert(SessionShares::NoSessionHelper);
             let mounted_shares: Vec<MountedShare> = shares
                 .into_iter()
                 .map(|s| MountedShare {
@@ -223,6 +225,25 @@ async fn record_update_from_session_helper(
                 },
             })?;
             Ok(())
+        }
+    }
+}
+
+async fn recv_handle_lagging<T: Clone>(
+    rx: &mut broadcast::Receiver<T>,
+) -> Result<T, EventAPIError> {
+    loop {
+        match rx.recv().await {
+            Ok(t) => return Ok(t),
+            Err(e @ broadcast::error::RecvError::Closed) => {
+                return Err(EventAPIError::ChannelRecv(e));
+            }
+            // recover from lagging state updates
+            // FIXME: proper recovery, don't care for the MVP
+            // (worst case, unlikely to happen, is that the session helper doesn't get a current
+            // desired state message, which is only the case if all following messages are
+            // DesktopSessionState)
+            Err(_e @ broadcast::error::RecvError::Lagged(_n)) => continue,
         }
     }
 }
@@ -274,7 +295,7 @@ async fn handle_session_helper_websocket(
 
     loop {
         select! {
-            state_update = rx.recv() => {
+            state_update = recv_handle_lagging(&mut rx) => {
                 let update = state_update?;
                 send_update_to_session_helper(update, &session_config, &mut socket).await?;
             }
@@ -287,6 +308,7 @@ async fn handle_session_helper_websocket(
 
 async fn send_update_to_gui(
     update: StateUpdateToSession,
+    own_session_id: &SessionId,
     config: &SessionHelperConfig,
     socket: &mut WebSocket,
     remote_info: Option<RemoteInfo>,
@@ -303,6 +325,10 @@ async fn send_update_to_gui(
             }),
         },
         StateUpdateToSession::MountUpdate { session_id, shares } => {
+            // ignore any updates that don't concern our session:
+            if &session_id != own_session_id {
+                return Ok(());
+            }
             InternalMsgToSession::DesktopSessionState {
                 session_id,
                 mounted_shares: shares,
@@ -345,13 +371,13 @@ async fn handle_gui_websocket(
         smb_port,
     };
 
-    let mounted_shares = mounted_shares.unwrap_or(SessionShares::NoSesssionHelper);
+    let mounted_shares = mounted_shares.unwrap_or(SessionShares::NoSessionHelper);
 
     // initial state
     send_obj(
         &mut socket,
         &InternalMsgToSession::DesktopSessionState {
-            session_id,
+            session_id: session_id.clone(),
             mounted_shares,
             desired_shares: remote_info.map(|remote| Shares {
                 foreground_share_id: remote
@@ -367,10 +393,10 @@ async fn handle_gui_websocket(
 
     loop {
         select! {
-            state_update = rx.recv() => {
+            state_update = recv_handle_lagging(&mut rx) => {
                 let update = state_update?;
                 let remote_info = state.lock().await.remote_info.clone();
-                send_update_to_gui(update, &session_config, &mut socket, remote_info).await?;
+                send_update_to_gui(update, &session_id, &session_config, &mut socket, remote_info).await?;
             }
             session_update = recv_obj::<InternalMsgToAgent>(&mut socket) => {
                 // panic! or rather, don't. the GUI isn't supposed to send us anything,
@@ -747,7 +773,7 @@ mod tests {
         match message {
             InternalMsgToSession::DesktopSessionState {
                 session_id: actual_session_id,
-                mounted_shares: SessionShares::NoSesssionHelper,
+                mounted_shares: SessionShares::NoSessionHelper,
                 desired_shares: None,
             } => assert_eq!(actual_session_id, session_id("desktop-1")),
             message => panic!("unexpected initial GUI message: {message:?}"),
@@ -1144,10 +1170,80 @@ mod tests {
         match disconnected_message {
             InternalMsgToSession::DesktopSessionState {
                 session_id: actual_session_id,
-                mounted_shares: SessionShares::NoSesssionHelper,
+                mounted_shares: SessionShares::NoSessionHelper,
                 desired_shares: None,
             } => assert_eq!(actual_session_id, session_id("desktop-1")),
             message => panic!("unexpected disconnect update: {message:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn updates_to_gui_connections_are_session_filtered() {
+        let test_setup = TestSetup::start().await;
+        let mut matching_gui = test_setup.connect_gui("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut matching_gui).await;
+        let mut other_gui = test_setup.connect_gui("desktop-2").await;
+        let _: InternalMsgToSession = receive_message(&mut other_gui).await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: InternalMsgToSession = receive_message(&mut session_helper).await;
+        let updated_share = share("share-1");
+
+        send_message(
+            &mut session_helper,
+            &InternalMsgToAgent::SessionUpdate {
+                shares: vec![SessionShare {
+                    share: updated_share.clone(),
+                    path: PathBuf::from("/mnt/share-1"),
+                }],
+            },
+        )
+        .await;
+
+        let message: InternalMsgToSession = receive_message(&mut matching_gui).await;
+        match message {
+            InternalMsgToSession::DesktopSessionState {
+                session_id: actual_session_id,
+                mounted_shares: SessionShares::Shares { shares },
+                desired_shares: None,
+            } => {
+                assert_eq!(actual_session_id, session_id("desktop-1"));
+                assert_eq!(
+                    shares,
+                    vec![MountedShare {
+                        share: updated_share,
+                        mount_path: PathBuf::from("/mnt/share-1"),
+                    }]
+                );
+            }
+            message => panic!("unexpected GUI update: {message:?}"),
+        }
+
+        let desired_share = share("desired-share");
+        test_setup
+            .shared_state
+            .lock()
+            .await
+            .desired_state_channel
+            .send(StateUpdateToSession::DesiredState {
+                foreground_share_id: Some(desired_share.share_id.clone()),
+                shares: vec![desired_share.clone()],
+            })
+            .unwrap();
+
+        let message: InternalMsgToSession = receive_message(&mut other_gui).await;
+        match message {
+            InternalMsgToSession::DesiredState {
+                share_state:
+                    Some(Shares {
+                        foreground_share_id,
+                        shares,
+                    }),
+                ..
+            } => {
+                assert_eq!(foreground_share_id.as_deref(), Some("desired-share"));
+                assert_eq!(shares, vec![desired_share]);
+            }
+            message => panic!("unexpected update for GUI in another session: {message:?}"),
         }
     }
 }

@@ -33,6 +33,9 @@ pub enum Command {
     /// Run under an operating-system service manager.
     RunService,
 
+    /// Run the session helper (notification tray icon included if possible)
+    SessionHelper,
+
     /// Install and start the Windows service.
     #[cfg(windows)]
     InstallAsService,

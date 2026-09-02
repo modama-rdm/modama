@@ -102,7 +102,7 @@ impl Default for RemoteInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionShares {
-    NoSesssionHelper,
+    NoSessionHelper,
     Shares { shares: Vec<MountedShare> },
 }
 
@@ -166,7 +166,7 @@ async fn session_bookkeeper(
                 state
                     .session_connections
                     .entry(session_id.clone())
-                    .and_modify(|c| *c -= 1)
+                    .and_modify(|c| *c = c.saturating_sub(1))
                     .or_insert(0);
                 if let Some(c) = state.session_connections.get(&session_id)
                     && *c == 0
@@ -179,7 +179,7 @@ async fn session_bookkeeper(
                             .desired_state_channel
                             .send(StateUpdateToSession::MountUpdate {
                                 session_id,
-                                shares: SessionShares::NoSesssionHelper,
+                                shares: SessionShares::NoSessionHelper,
                             })
                     {
                         warn!("tried to send an update on current mounts but no one cared");

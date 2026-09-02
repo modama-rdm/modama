@@ -15,6 +15,8 @@ To understand how `modama-agent` works, let's first define some terms and compon
 
 There can be multiple `modama-agent` instances running per [resource](#resource), which can cooperatively provide data ingest services on all data generating systems belonging to the resource.
 
+Part of `modama-agent` is a session helper, which runs for each login session (this includes desktop sessions and remote/RDP/SSH sessions, as far as possible). The session helper takes care of mounting the ingest share in the user's context, and umounting it at the end of the session.
+
 ### `resource`
 
 A `resource` is a data generating instrument, for example an electron microscope, a FIB, etc. There can be different computers involved with a single resource, for example for different detectors, sensors or cameras, which are often provided by different vendors.
@@ -72,11 +74,15 @@ Note that the directory structure allows to limit bind mounts of key material to
 
 ## Security considerations
 
-In the common case `modama-agent` should run privileged, such that users don't have access to key material. Preventing access might not always be possible, for example if the machine's user interface is running as an administrator user.
+In the common case `modama-agent` should run privileged, such that users don't have access to mTLS key material. Preventing access might not always be possible, for example if the machine's user interface is running as an administrator user.
 
 If a user obtains the key material, they might be able to "participate" in current and future session, and access ingest shares, so care should be taken to protect the files with the correct permissions.
 
 Agents can also participate without having a private key, by talking over the local lab network to reach at least one privileged `modama-agent`. That means `modama` assumes the local lab network is a "security domain", meaning if a user can access it, they can participate in the experiment. Non-TLS encrypted HTTP is used locally, also to enable communication without having to manage DNS names of agents or fixed IP mappings.
+
+The local lab network being the security domain also means anyone on that network can access the current shares / their credentials. This includes multiple sessions on each of the participating machines - talking to the local `modama-agent` API gives a user from a different session nothing they couldn't get by starting their own anonymous per-session `modama-agent` instance.
+
+`modama-agent` has to put some trust into the local users of a participating system - meaning, it has to be able to assume that there is no malicious session helper impersonating another session. This might be fixed in the future, if this is possible without impacting features and complexity (and other security constraints, like background service capabilities).
 
 The CA private key is encrypted with a user-provided password and
 needs to be decrypted when enrolling a new agent or service.

@@ -17,3 +17,4 @@ pub mod platform_common;
 pub mod runtime;
 #[cfg(windows)]
 pub mod windows_service;
+pub mod session_helper;

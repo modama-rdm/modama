@@ -84,6 +84,9 @@ fn main() -> Result<()> {
                 run_foreground(path)
             }
         }
+        Some(Command::SessionHelper) => {
+            todo!();
+        }
         #[cfg(windows)]
         Some(Command::InstallAsService) => {
             let source =
