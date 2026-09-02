@@ -14,3 +14,4 @@ dist/
 AGENTS.md
 frontend_auth_spike.md
 /.claude
+cargo-git

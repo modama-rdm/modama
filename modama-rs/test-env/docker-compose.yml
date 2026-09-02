@@ -44,6 +44,7 @@ services:
     volumes:
       - ./certs:/certs:ro
       - ./cargo-cache:/usr/local/cargo/registry/cache/
+      - ./cargo-git:/usr/local/cargo/git/
       - ./target:/usr/src/modama-rs/target/
       - type: bind
         source: "./testfolder/data/"
@@ -89,6 +90,7 @@ services:
       - ./certs:/certs:ro
       - ./target:/usr/src/modama-rs/target/
       - ./cargo-cache:/usr/local/cargo/registry/cache/
+      - ./cargo-git:/usr/local/cargo/git/
     command:
       - "cargo"
       - "run"
@@ -123,6 +125,7 @@ services:
       - ./certs:/certs:ro
       - ./target:/usr/src/modama-rs/target/
       - ./cargo-cache:/usr/local/cargo/registry/cache/
+      - ./cargo-git:/usr/local/cargo/git/
     command:
       - "cargo"
       - "run"
@@ -155,6 +158,7 @@ services:
       - ./certs:/certs:ro
       - ./target:/usr/src/modama-rs/target/
       - ./cargo-cache:/usr/local/cargo/registry/cache/
+      - ./cargo-git:/usr/local/cargo/git/
     command:
       - "cargo"
       - "run"
