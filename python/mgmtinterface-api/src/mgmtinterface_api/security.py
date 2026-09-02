@@ -151,10 +151,10 @@ def current_session(
     if not token:
         raise APIError(401, "not_authenticated", "Sign in to continue.")
 
-    # The deletion rides on the error rather than on `response`: an exception
-    # handler builds its own response, and anything written to the injected one
-    # is discarded. Same reason `APIError` carries `Retry-After` for the login
-    # throttle.
+    # The cookie deletion travels as a header on the error, not on `response`:
+    # an exception handler builds its own response, so anything written to the
+    # injected one is discarded. `APIError` carries `Retry-After` for the login
+    # throttle for the same reason.
     try:
         data, age_seconds = codec_of(request).read(token)
     except SessionInvalid as exc:

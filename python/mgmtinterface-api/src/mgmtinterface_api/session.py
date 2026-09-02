@@ -13,7 +13,7 @@ _SALT = "modama-session"
 
 class SessionData(TypedDict):
     username: str
-    # Unix time of the *original* login. The serializer carries its own
+    # Unix time (UTC) of the original login. The serializer carries its own
     # timestamp, which moves forward on every refresh; this one never does, so
     # it is what bounds the absolute lifetime.
     issued: int
@@ -27,11 +27,25 @@ class SessionCodec:
     """
     Signs and verifies the session cookie.
 
-    Stateless by decision (#172): the cookie *is* the session, so there is no
-    store to consult and nothing to revoke. Logout deletes the client's copy,
-    but a leaked cookie stays valid until it expires — which is why the idle
-    lifetime is short. Revisit when private projects (Theme D) need real
-    session-kill.
+    Sessions are implemented using signed cookies, so there is no store to
+    consult and nothing to revoke. Logout deletes the client's copy, but a
+    leaked cookie stays valid until it expires, which is why the idle lifetime
+    is short. Revisit when private projects (Theme D) need real session-kill.
+
+    Two separate timestamps bound a session:
+
+    * `itsdangerous` stamps the token itself and that stamp moves forward every
+      time the cookie is re-issued. `read()` checks it against `idle_seconds`,
+      so it measures time since the last refresh: the idle window.
+    * `issued` is carried in the payload and copied unchanged across refreshes.
+      It measures time since the original login and bounds the absolute
+      lifetime (`max_age_seconds`), which a sliding session must not extend.
+
+    Refreshing happens in `security.current_session`, not here; this class only
+    reports how stale a cookie is, as the age returned by `read()`. The caller
+    re-issues at most every `session_refresh_seconds`, which is also where the
+    account is re-checked against the permissions service. Login and logout are
+    in `routes/auth.py`.
     """
 
     def __init__(self, secret: str, max_age_seconds: int, idle_seconds: int):
