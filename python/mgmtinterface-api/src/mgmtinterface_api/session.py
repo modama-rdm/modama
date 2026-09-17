@@ -1,5 +1,5 @@
 import time
-from typing import Any, TypedDict, cast
+from typing import Any, NamedTuple, TypedDict, cast
 
 from fastapi import Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -17,6 +17,13 @@ class SessionData(TypedDict):
     # timestamp, which moves forward on every refresh; this one never does, so
     # it is what bounds the absolute lifetime.
     issued: int
+
+
+class VerifiedSession(NamedTuple):
+    """A session read back from a cookie, and how stale that cookie is."""
+
+    data: SessionData
+    age_seconds: float
 
 
 class SessionInvalid(Exception):
@@ -64,7 +71,7 @@ class SessionCodec:
         }
         return self._serializer.dumps(data)
 
-    def read(self, token: str) -> tuple[SessionData, float]:
+    def read(self, token: str) -> VerifiedSession:
         """
         Verify a cookie value, returning the session and how many seconds have
         passed since it was last issued (the caller uses that to decide whether
@@ -82,7 +89,7 @@ class SessionCodec:
         now = time.time()
         if now - data["issued"] > self._max_age_seconds:
             raise SessionInvalid("session is past its absolute lifetime")
-        return data, now - refreshed_at.timestamp()
+        return VerifiedSession(data, now - refreshed_at.timestamp())
 
 
 def _as_session_data(raw: Any) -> SessionData:

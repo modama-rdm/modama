@@ -55,10 +55,12 @@ Accepted limitations:
 * Re-validation is existence-only. The cookie holds no credentials, so the
   refresh check (`id_user`) confirms the account still resolves, not that it is
   still enabled or that the password is unchanged.
-* The signing secret must be configured for sessions to survive a restart. Set
-  `MODAMA_SESSION_SECRET_FILE` (see `docker-compose.prod.yml`). Changing the
-  secret signs everybody out. There is no hardcoded default, since a predictable
-  key would let anyone mint a cookie.
+* The signing secret has to be configured or the service refuses to start. Set
+  `MODAMA_SESSION_SECRET_FILE` (see `docker-compose.prod.yml` and the Secrets
+  section of the top-level README). Changing the secret signs everybody out.
+  There is no hardcoded default, since a predictable key would let anyone mint a
+  cookie. `MODAMA_DEV_MODE=1` substitutes a random per-boot key for development,
+  at the cost of sessions not surviving a restart.
 
 CSRF: `SameSite=Lax` plus an `Origin` check on state-changing requests, falling
 back to `Referer` when `Origin` is absent, applied app-wide. A request with

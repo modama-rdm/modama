@@ -96,6 +96,18 @@ The externally supplied file `externalstorage_pw` contains the preshared passwor
 SECRET_KEY = 'I am so super secret'
 ```
 
+`/var/local/data-mgmt/modama_session_secret` signs the `mgmtinterface-api`
+session cookies. It is that service's equivalent of `SECRET_KEY`, read from a
+mounted file rather than from config, and the service refuses to start without
+it:
+
+```
+openssl rand -base64 48 > /var/local/data-mgmt/modama_session_secret
+```
+
+`docker-compose.prod.yml` mounts it read-only at `/session_secret` and points
+`MODAMA_SESSION_SECRET_FILE` at it. Changing the file signs everyone out.
+
 ## mTLS CA setup
 
 Certificates and key material is stored in `/var/local/data-mgmt/CA/` for both

@@ -43,24 +43,39 @@ def test_errors_never_challenge_with_basic_auth(client: TestClient):
     assert "www-authenticate" not in {k.lower() for k in response.headers}
 
 
-def test_unconfigured_session_secret_is_generated_not_defaulted():
+def test_unconfigured_session_secret_is_refused():
     """
-    No hardcoded fallback: a predictable signing key would let anyone mint a
-    session cookie. A random per-boot key is fine — it just doesn't outlive the
-    process.
+    A deployment that forgets to mount the secret file fails visibly, instead of
+    coming up on a temporary key that signs everyone out at the next restart.
     """
     unconfigured = Settings(session_secret="", session_secret_file="")
-    generated = unconfigured.resolve_session_secret()
+    with pytest.raises(RuntimeError, match="No session secret configured"):
+        _ = unconfigured.resolve_session_secret()
+
+
+def test_app_refuses_to_start_without_a_session_secret():
+    with pytest.raises(RuntimeError, match="No session secret configured"):
+        _ = create_app(Settings(session_secret="", session_secret_file=""))
+
+
+def test_dev_mode_session_secret_is_generated_not_defaulted():
+    """
+    No hardcoded fallback: a predictable signing key would let anyone mint a
+    session cookie. A random per-boot key is fine; it just doesn't outlive the
+    process.
+    """
+    dev = Settings(session_secret="", session_secret_file="", dev_mode=True)
+    generated = dev.resolve_session_secret()
     assert len(generated) >= 32
     # Stable within the process, or every request would invalidate the last.
-    assert unconfigured.resolve_session_secret() == generated
+    assert dev.resolve_session_secret() == generated
     # ...and not shared with any other boot.
-    other = Settings(session_secret="", session_secret_file="")
+    other = Settings(session_secret="", session_secret_file="", dev_mode=True)
     assert other.resolve_session_secret() != generated
 
 
-def test_app_starts_without_any_session_configuration():
-    app = create_app(Settings(session_secret="", session_secret_file=""))
+def test_app_starts_without_session_configuration_in_dev_mode():
+    app = create_app(Settings(session_secret="", session_secret_file="", dev_mode=True))
     assert api_client(app).get(f"{API_PREFIX}/healthz").status_code == 200
 
 

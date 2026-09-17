@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     session_cookie_name: str = DEFAULT_SESSION_COOKIE_NAME
     session_secret: str = ""
     session_secret_file: str = ""
+    # With this set, an unconfigured session secret becomes a random per-boot
+    # key instead of a startup failure. Development and tests only.
+    dev_mode: bool = False
     # Two lifetimes: `max_age` caps the session no matter how active the user is,
     # `idle` expires it after a quiet stretch. Sliding refresh moves the idle
     # window forward, never the absolute one.
@@ -102,25 +105,31 @@ class Settings(BaseSettings):
 
     def resolve_session_secret(self) -> str:
         """
-        The signing secret: a mounted file, an environment value, or — failing
-        both — a fresh random one for this process.
+        The signing secret: a mounted file, or an environment value.
 
-        There is deliberately no hardcoded fallback: a *predictable* signing key
-        would let anyone mint a session cookie. A random per-boot key has no
-        such problem; its only cost is that sessions do not survive a restart of
-        this container, since the key they were signed with is gone. Configure
-        `session_secret_file` when that matters.
+        There is deliberately no hardcoded fallback, since a predictable signing
+        key would let anyone mint a session cookie. Without one configured the
+        service refuses to start, so a deployment that forgets to mount the file
+        fails visibly instead of coming up on a temporary key that signs
+        everyone out at the next restart. `dev_mode` opts into that temporary
+        key.
         """
         if self.session_secret_file:
             return Path(self.session_secret_file).read_text(encoding="utf8").strip()
         if self.session_secret:
             return self.session_secret
+        if not self.dev_mode:
+            raise RuntimeError(
+                "No session secret configured. Set MODAMA_SESSION_SECRET_FILE "
+                "to a mounted file (or MODAMA_SESSION_SECRET), or set "
+                "MODAMA_DEV_MODE=1 to sign with a random per-boot key."
+            )
         if self._generated_secret is None:
             self._generated_secret = secrets.token_urlsafe(48)
             log.warning(
-                "No session secret configured (MODAMA_SESSION_SECRET_FILE or "
-                "MODAMA_SESSION_SECRET); generated a random one. Sessions will "
-                "not survive a restart of this service."
+                "MODAMA_DEV_MODE and no session secret configured; generated a "
+                "random one. Sessions will not survive a restart of this "
+                "service."
             )
         return self._generated_secret
 

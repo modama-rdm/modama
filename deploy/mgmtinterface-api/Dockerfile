@@ -19,4 +19,9 @@ RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install -e /code/mgmtin
 
 WORKDIR /code/mgmtinterface-api
 
+# Python rather than curl: the slim image has no http client installed.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/venv/bin/python3", "-c", \
+         "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/mgmt-api/healthz', timeout=3)"]
+
 CMD ["/venv/bin/uvicorn", "mgmtinterface_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

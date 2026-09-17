@@ -3,6 +3,8 @@ __pycache__
 *.egg-info
 # setuptools leaves this behind on a non-editable `pip install ./python/<pkg>`
 build/
+# ...and this one on `python -m build`
+dist/
 .pytest_cache/
 .ipynb_checkpoints
 .vscode

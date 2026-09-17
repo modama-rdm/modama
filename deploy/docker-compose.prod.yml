@@ -38,24 +38,21 @@ services:
       - './prodconf/cloudproxy-sampledb.nginx.conf.snippet:/etc/nginx/conf.d/sampledb.conf.snippet'
     ports:
       - "127.0.0.1:1889:80"
-  # mgmtinterface-api signs session cookies with a random key generated at
-  # startup, so it needs no configuration. The cost is that a restart of that
-  # container signs everyone out. To make sessions survive restarts, create the
-  # secret on the host once:
+  # mgmtinterface-api signs session cookies with this key and refuses to start
+  # without it. Create it on the host once:
   #
   #   openssl rand -base64 48 > /var/local/data-mgmt/modama_session_secret
   #
-  # and uncomment the block below. Changing the file later still signs everyone
-  # out, because the sessions are stateless.
-  #
-  # mgmtinterface-api:
-  #   environment:
-  #     - MODAMA_SESSION_SECRET_FILE=/session_secret
-  #   volumes:
-  #     - type: bind
-  #       source: "/var/local/data-mgmt/modama_session_secret"
-  #       target: "/session_secret"
-  #       read_only: true
+  # Changing the file later signs everyone out, because the sessions are
+  # stateless.
+  mgmtinterface-api:
+    environment:
+      - MODAMA_SESSION_SECRET_FILE=/session_secret
+    volumes:
+      - type: bind
+        source: "/var/local/data-mgmt/modama_session_secret"
+        target: "/session_secret"
+        read_only: true
 
   permissions:
     volumes:
