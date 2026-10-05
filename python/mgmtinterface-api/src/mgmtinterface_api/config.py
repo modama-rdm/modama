@@ -56,8 +56,8 @@ class Settings(BaseSettings):
     # Two lifetimes: `max_age` caps the session no matter how active the user is,
     # `idle` expires it after a quiet stretch. Sliding refresh moves the idle
     # window forward, never the absolute one.
-    session_max_age_seconds: int = 8 * 60 * 60
-    session_idle_seconds: int = 30 * 60
+    session_max_age_seconds: int = 12 * 60 * 60
+    session_idle_seconds: int = 2 * 60 * 60
     # How stale a cookie may get before it is re-issued. This also paces the
     # re-validation against the permissions service, so that check costs one
     # request per user per interval rather than one per request.

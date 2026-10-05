@@ -40,12 +40,13 @@ back to the bare `modama_session`.
 The name has to stay distinct from Flask-Login's `mgmtinterface_session` while
 both run on the same origin, until the cutover (#170).
 
-Two lifetimes: 8h absolute and 30min idle. Both values are still under
-discussion. The cookie carries the original login time, so the sliding refresh
-moves the idle window forward without extending the absolute one. Refresh
-happens at most every 5 minutes (`session_refresh_seconds`), which is also when
-the account is re-checked against the permissions service. Pacing it this way
-keeps that service out of the per-request path.
+Two lifetimes: 12h absolute and 2h idle, configurable with
+`MODAMA_SESSION_MAX_AGE_SECONDS` and `MODAMA_SESSION_IDLE_SECONDS`. The cookie
+carries the original login time, so the sliding refresh moves the idle window
+forward without extending the absolute one. Refresh happens at most every 5
+minutes (`session_refresh_seconds`), which is also when the account is
+re-checked against the permissions service. Pacing it this way keeps that
+service out of the per-request path.
 
 Accepted limitations:
 
