@@ -117,9 +117,8 @@ services:
       context: ..
       dockerfile: deploy/mgmtinterface-api/Dockerfile
     image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-api:latest
-    # Sessions are signed with a key generated at startup unless one is mounted;
-    # see the commented-out block in docker-compose.prod.yml for how to make
-    # them survive a restart of this container.
+    # Refuses to start without a session secret: docker-compose.prod.yml mounts
+    # it from the host, and the dev override sets one.
     depends_on:
       - "permissions"
 
