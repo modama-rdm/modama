@@ -2,10 +2,10 @@
 Tests for the generated OpenAPI document.
 
 The document is built lazily, on the first request to `/docs` or
-`/openapi.json` — so without these, a malformed `responses` mapping or a broken
-description template would first surface in a browser, in a deployment, while
-the suite stayed green. These assert the handful of things a client author
-actually depends on, not the whole schema.
+`/openapi.json`. Without these tests, a malformed `responses` mapping or a
+broken description template would only show up in a browser, in a deployment,
+while the test suite stayed green. The tests cover the parts a client author
+depends on, not the whole schema.
 """
 
 from typing import Any
@@ -42,7 +42,7 @@ def version_parameter(
 
 
 def test_document_builds(schema: dict[str, Any]):
-    """The whole point: a broken document must fail here, not in a browser."""
+    """A broken document must fail here, not in a browser."""
     assert schema["openapi"].startswith("3.")
     assert schema["info"]["version"] == str(LATEST_VERSION)
 
@@ -68,12 +68,12 @@ def test_every_documented_route_is_present(schema: dict[str, Any]):
 
 def test_version_header_is_documented_as_required(schema: dict[str, Any]):
     """
-    The reason the header is declared at all: a generated client has to send it.
+    The header is declared so that a generated client sends it.
 
-    It is optional in the Python signature on purpose — a missing header must
-    reach this API's own 400 rather than FastAPI's 422 — so the requirement is
-    restated on the document afterwards. If that correction is ever dropped, a
-    generated client silently stops sending the header and every call 400s.
+    It is optional in the Python signature on purpose, because a missing header
+    must reach this API's own 400 rather than FastAPI's 422, so the requirement
+    is set on the document afterwards. If that correction is dropped, a
+    generated client stops sending the header and every call gets a 400.
     """
     for path, method in ((LOGIN, "post"), (SESSION, "get"), (PROJECTS, "get")):
         parameter = version_parameter(schema, path, method)
@@ -114,7 +114,7 @@ def test_only_the_routes_needing_a_session_are_marked(schema: dict[str, Any]):
 def test_error_statuses_are_documented_with_the_house_body(schema: dict[str, Any]):
     """
     Each layer contributes the errors it can raise, so a route documents the
-    union of its own and its dependencies'. Login is the richest case.
+    union of its own and its dependencies' errors. Login has the most.
     """
     login = schema["paths"][LOGIN]["post"]["responses"]
     assert {"400", "401", "403", "429"} <= set(login)
@@ -143,8 +143,8 @@ def test_error_model_documents_both_fields(schema: dict[str, Any]):
 
 def test_document_is_stable_across_calls(settings: Settings):
     """
-    FastAPI caches the document; the correction pass must be idempotent rather
-    than compounding on a second read of `/openapi.json`.
+    FastAPI caches the document, so the correction pass must be idempotent and
+    not change the document again on a second read of `/openapi.json`.
     """
     app = create_app(settings)
     assert app.openapi() == app.openapi()

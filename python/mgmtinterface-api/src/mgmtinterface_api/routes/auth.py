@@ -17,7 +17,7 @@ from ..session import SessionData, clear_session_cookie, set_session_cookie
 from ..versioning import VERSION_ERROR_RESPONSES
 
 # The CSRF origin check is applied app-wide in `create_app`, so a new router
-# cannot forget it. `responses` documents what that app-wide layer can return,
+# cannot omit it. `responses` documents what the app-wide layers can return,
 # once for the whole router instead of on each route.
 router = APIRouter(prefix="/auth", tags=["auth"], responses={**VERSION_ERROR_RESPONSES})
 
@@ -59,8 +59,9 @@ def login(request: Request, response: Response, body: LoginRequest) -> SessionIn
     settings = settings_of(request)
     _no_store(response)
 
-    # Usernames are case-insensitive to the directory, so fold the throttle key
-    # or alternating case would multiply an attacker's budget.
+    # Usernames are case-insensitive in the directory, so the throttle key is
+    # case-folded. Otherwise varying the case would give an attacker a separate
+    # counter per spelling.
     throttle_key = body.username.strip().casefold()
     throttle = throttle_of(request)
     if throttle.is_blocked(throttle_key):
@@ -74,9 +75,9 @@ def login(request: Request, response: Response, body: LoginRequest) -> SessionIn
     if not authenticate(settings, body.username, body.password):
         throttle.record_failure(throttle_key)
         # One message for both "no such user" and "wrong password", so the
-        # response does not confirm which usernames exist. Deliberately no
-        # WWW-Authenticate header: that is what made the browser show its own
-        # login dialog on top of the SPA's.
+        # response does not reveal which usernames exist. No WWW-Authenticate
+        # header: that is what made the browser show its own login dialog on
+        # top of the SPA's.
         raise APIError(401, "invalid_credentials", "Wrong username or password.")
 
     throttle.reset(throttle_key)
@@ -91,8 +92,8 @@ def login(request: Request, response: Response, body: LoginRequest) -> SessionIn
     responses={**CSRF_ERROR_RESPONSES},
 )
 def logout(request: Request, response: Response) -> None:
-    # No session required: logging out of an already-expired session should
-    # succeed quietly rather than 401.
+    # No session required: logging out of an expired session should succeed
+    # rather than answer 401.
     _no_store(response)
     clear_session_cookie(response, settings_of(request))
 
@@ -106,6 +107,6 @@ def read_session(
     response: Response,
     session: Annotated[SessionData, Depends(current_session)],
 ) -> SessionInfo:
-    """Who the caller is; 401 when there is no usable session."""
+    """The signed-in user, or 401 when there is no valid session."""
     _no_store(response)
     return SessionInfo(username=session["username"])

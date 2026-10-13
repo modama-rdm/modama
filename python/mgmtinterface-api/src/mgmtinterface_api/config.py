@@ -8,23 +8,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = logging.getLogger(__name__)
 
-# Every route of this service lives under this prefix; nginx routes it here and
-# forwards the full path. Deliberately carries no version number: the contract
-# version travels in the `X-Modama-API-Version` header instead (see
-# `versioning.py`), so this path never has to change again. It lives here rather
-# than in the package root because both the app factory and the versioning layer
-# need it, and importing the root from a submodule would be a cycle.
+# All routes of this service are under this prefix. nginx routes it here and
+# forwards the full path. It carries no version number; the contract version is
+# in the `X-Modama-API-Version` header (see `versioning.py`). It is defined
+# here rather than in the package root because both the app factory and the
+# versioning layer need it, and importing the root from a submodule would be a
+# circular import.
 API_PREFIX = "/mgmt-api"
 
-# Default name of the session cookie, module-level because the OpenAPI security
-# scheme in `security.py` has to name a cookie at import time, before any
-# `Settings` instance exists. A deployment can still override the setting; the
-# document then describes the default deployment rather than that one.
+# Default name of the session cookie. Module-level because the OpenAPI security
+# scheme in `security.py` needs the name at import time, before a `Settings`
+# instance exists. A deployment can still override the setting; the OpenAPI
+# document then shows the default name rather than the configured one.
 DEFAULT_SESSION_COOKIE_NAME = "modama_session"
 
-#: The `__Host-` prefixed spelling, i.e. the name as actually sent whenever the
-#: cookie is Secure. See `Settings.effective_cookie_name` for why the prefix is
-#: there and when it is dropped.
+#: The name with the `__Host-` prefix, which is what is sent whenever the cookie
+#: is Secure. See `Settings.effective_cookie_name`.
 HOST_PREFIXED_SESSION_COOKIE_NAME = f"__Host-{DEFAULT_SESSION_COOKIE_NAME}"
 
 
@@ -33,11 +32,11 @@ class Settings(BaseSettings):
     Runtime configuration, read from the environment with the ``MODAMA_``
     prefix.
 
-    The Flask app loads a Python file named by ``MGMTINTERFACE_CONFIG``; this
-    service uses environment variables so the container needs no bind-mounted
-    config. Secrets are the exception — the deployment mounts those as files, so
-    `session_secret_file` names a file to read instead of putting the value in
-    the environment.
+    Unlike the Flask app, which loads a Python file named by
+    ``MGMTINTERFACE_CONFIG``, this service is configured through environment
+    variables, so the container needs no bind-mounted config file. Secrets are
+    the exception: the deployment mounts them as files, and
+    `session_secret_file` names the file to read.
     """
 
     model_config = SettingsConfigDict(env_prefix="MODAMA_")
@@ -45,7 +44,7 @@ class Settings(BaseSettings):
     permissions_api: str = "http://permissions:5050"
 
     # Signed-cookie session. The name must differ from the Flask app's
-    # `mgmtinterface_session` — both are live on the same origin until the
+    # `mgmtinterface_session`, since both run on the same origin until the
     # cutover (#170).
     session_cookie_name: str = DEFAULT_SESSION_COOKIE_NAME
     session_secret: str = ""
@@ -53,14 +52,14 @@ class Settings(BaseSettings):
     # With this set, an unconfigured session secret becomes a random per-boot
     # key instead of a startup failure. Development and tests only.
     dev_mode: bool = False
-    # Two lifetimes: `max_age` caps the session no matter how active the user is,
-    # `idle` expires it after a quiet stretch. Sliding refresh moves the idle
-    # window forward, never the absolute one.
+    # `max_age` limits the session regardless of activity, `idle` ends it after a
+    # period without requests. Refreshing the cookie extends the idle window but
+    # not the absolute one.
     session_max_age_seconds: int = 12 * 60 * 60
     session_idle_seconds: int = 2 * 60 * 60
-    # How stale a cookie may get before it is re-issued. This also paces the
-    # re-validation against the permissions service, so that check costs one
-    # request per user per interval rather than one per request.
+    # How old a cookie may get before it is re-issued. The account is re-checked
+    # against the permissions service at the same time, so that check happens
+    # once per user per interval rather than on every request.
     session_refresh_seconds: int = 5 * 60
     # Off only for local HTTP development; a Secure cookie is dropped over http.
     session_cookie_secure: bool = True
@@ -72,9 +71,9 @@ class Settings(BaseSettings):
     login_failure_window_seconds: int = 5 * 60
 
     # Additional origins the CSRF check accepts, comma-separated. Needed when a
-    # dev server proxies the API under a different origin than the browser sees
-    # — vite on :5180 forwards to the VM on :5001 with `changeOrigin`, so the
-    # Host header no longer matches the Origin. Leave empty in production.
+    # dev server proxies the API under a different origin than the browser sees.
+    # vite on :5180 forwards to the VM on :5001 with `changeOrigin`, so the Host
+    # header does not match the Origin. Leave empty in production.
     csrf_extra_origins: str = ""
 
     _generated_secret: str | None = PrivateAttr(default=None)
@@ -90,14 +89,14 @@ class Settings(BaseSettings):
     @property
     def effective_cookie_name(self) -> str:
         """
-        The cookie name as sent, with the ``__Host-`` prefix when we are able to
-        satisfy it.
+        The cookie name as sent: with the ``__Host-`` prefix when the cookie is
+        Secure.
 
-        The prefix makes the browser reject the cookie unless it is Secure, has
-        ``Path=/`` and carries no ``Domain`` — which is what stops another host
-        under fz-juelich.de from setting a cookie that gets sent here (a
-        "cookie tossing" session-fixation attack). The prefix requires Secure,
-        so plain-http development falls back to the bare name.
+        Browsers reject a ``__Host-`` cookie unless it is Secure, has ``Path=/``
+        and has no ``Domain``. This prevents another host under fz-juelich.de
+        from setting a cookie that is sent here (cookie tossing, a form of
+        session fixation). Since the prefix requires Secure, plain-http
+        development uses the bare name.
         """
         if self.session_cookie_secure:
             return f"__Host-{self.session_cookie_name}"
@@ -105,14 +104,13 @@ class Settings(BaseSettings):
 
     def resolve_session_secret(self) -> str:
         """
-        The signing secret: a mounted file, or an environment value.
+        The signing secret, read from a mounted file or from the environment.
 
-        There is deliberately no hardcoded fallback, since a predictable signing
-        key would let anyone mint a session cookie. Without one configured the
-        service refuses to start, so a deployment that forgets to mount the file
-        fails visibly instead of coming up on a temporary key that signs
-        everyone out at the next restart. `dev_mode` opts into that temporary
-        key.
+        There is no hardcoded fallback, because a known signing key would let
+        anyone forge a session cookie. Without a configured secret the service
+        refuses to start, so a deployment that forgets to mount the file fails
+        at startup instead of running on a temporary key that invalidates all
+        sessions at the next restart. `dev_mode` enables that temporary key.
         """
         if self.session_secret_file:
             return Path(self.session_secret_file).read_text(encoding="utf8").strip()

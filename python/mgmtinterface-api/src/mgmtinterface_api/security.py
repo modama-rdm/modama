@@ -18,16 +18,15 @@ from .throttle import FailureThrottle
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
-#: The session cookie, declared as an OpenAPI security scheme so that endpoints
-#: needing a session are marked as such in the document — a reader sees which
-#: ones require signing in, and a generated client knows there is credentialed
-#: state to carry rather than treating every route as public.
+#: The session cookie as an OpenAPI security scheme, so that endpoints that
+#: need a session are marked in the document and a generated client knows it
+#: has to carry the cookie.
 #:
-#: `auto_error=False` because the 401 this API sends is `APIError`'s shape, not
-#: the one FastAPI's security helpers raise; `current_session` below still owns
-#: the refusal. The name is the `__Host-` prefixed one, i.e. what a real
-#: deployment sends — a plain-http development instance drops the prefix, which
-#: is why the value is read through `settings` rather than from this dependency.
+#: `auto_error=False` because the 401 is raised by `current_session` with this
+#: API's error body, not by FastAPI's security helper. The name is the
+#: `__Host-` prefixed one that a real deployment sends. A plain-http
+#: development instance drops the prefix, which is why `current_session` reads
+#: the cookie through `settings` rather than through this dependency.
 session_cookie_scheme = APIKeyCookie(
     name=HOST_PREFIXED_SESSION_COOKIE_NAME,
     scheme_name="session",
@@ -38,10 +37,9 @@ session_cookie_scheme = APIKeyCookie(
     auto_error=False,
 )
 
-#: What the OpenAPI document says about the errors this layer raises. Split in
-#: two because they apply to different routes: any endpoint behind
-#: `current_session` can 401, while only state-changing ones reach the CSRF
-#: check.
+#: OpenAPI documentation of the errors raised in this module. Two sets, because
+#: they apply to different routes: every endpoint behind `current_session` can
+#: return 401, but only state-changing requests reach the CSRF check.
 AUTH_ERROR_RESPONSES = error_responses(
     {401: "No session, or the session has expired. Sign in again."}
 )
@@ -64,17 +62,16 @@ def throttle_of(request: Request) -> FailureThrottle:
 
 def enforce_same_origin(request: Request) -> None:
     """
-    CSRF guard for state-changing requests.
+    CSRF check for state-changing requests.
 
-    Cookies are attached by the browser automatically, which the previous Basic
-    scheme was immune to (JS had to add the header). `SameSite=Lax` already
-    blocks cross-site POSTs in current browsers; this is the second line, in the
-    order OWASP recommends: Origin first, Referer as fallback.
+    The browser attaches cookies automatically, unlike the Basic auth header of
+    the Flask API, which JS had to add. `SameSite=Lax` already blocks
+    cross-site POSTs in current browsers; this check is the second layer, in
+    the order OWASP recommends: Origin first, Referer as fallback.
 
-    A request with *neither* header is allowed: browsers have sent Origin on
-    cross-site state-changing requests for years, so absence means a non-browser
-    caller (curl, a script, the test suite) rather than the attack this defends
-    against.
+    A request with neither header is allowed. Browsers send Origin on
+    cross-site state-changing requests, so a request without it comes from a
+    non-browser client (curl, a script, the test suite).
     """
     if request.method in _SAFE_METHODS:
         return
@@ -99,17 +96,17 @@ def _origin_of(url: str) -> str | None:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-#: Ports a URL of each scheme is spelled *without*. A browser omits these from
-#: `Origin`, so an authority carrying one has to be normalized before comparing.
+#: Default port per scheme. A browser omits it from `Origin`, so a Host header
+#: that carries it has to be normalized before comparing.
 _DEFAULT_PORTS = {"http": "80", "https": "443"}
 
 
 def _expected_origin(request: Request) -> str:
-    # nginx sets both headers; falling back to the request URL keeps this
-    # working when the service is hit directly (local dev, container probes).
-    # The Host header must carry the port the browser used (nginx: $http_host,
-    # not $host) — the test deployment is on :5001, and an origin missing that
-    # port matches nothing the browser ever sends.
+    # nginx sets both headers; the fallback to the request URL covers direct
+    # access (local dev, container probes). The Host header must include the
+    # port the browser used (nginx: $http_host, not $host). The test deployment
+    # runs on :5001, and an origin without that port never matches what the
+    # browser sends.
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("host", request.url.netloc)
     return f"{scheme}://{_without_default_port(scheme, host)}"
@@ -119,9 +116,9 @@ def _without_default_port(scheme: str, host: str) -> str:
     """
     ``example.org:443`` -> ``example.org`` for https, and likewise :80 for http.
 
-    Only an explicit *default* port is dropped: a caller that spells it out
-    would otherwise never match the port-less `Origin` its own browser sends.
-    Any other port is significant and stays.
+    Only an explicit default port is dropped. A Host header that spells it out
+    would otherwise never match the `Origin`, which the browser sends without
+    the port. Any other port is kept.
     """
     prefix, sep, port = host.rpartition(":")
     if sep and port == _DEFAULT_PORTS.get(scheme):
@@ -135,16 +132,17 @@ def _without_default_port(scheme: str, host: str) -> str:
 def current_session(
     request: Request,
     response: Response,
-    # Documentation-carrying, not load-bearing: the value is read from
-    # `request.cookies` below under the deployment's configured name.
+    # Only for the OpenAPI document. The value is read from `request.cookies`
+    # below, under the configured cookie name.
     _scheme: Annotated[str | None, Security(session_cookie_scheme)] = None,
 ) -> SessionData:
     """
-    The signed-in user, refreshing the cookie when it has gone stale.
+    The signed-in user. Refreshes the cookie once it is older than the refresh
+    interval.
 
-    Refreshing on an interval rather than on every request is what keeps the
-    permissions service out of the hot path — otherwise this would re-create the
-    old Basic behaviour of one upstream call per request.
+    Refreshing on an interval rather than on every request keeps the
+    permissions service out of the per-request path. Otherwise this would be
+    the same as Basic auth in the Flask API, with one upstream call per request.
     """
     settings = settings_of(request)
     token = request.cookies.get(settings.effective_cookie_name)

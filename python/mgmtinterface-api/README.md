@@ -1,159 +1,164 @@
 # mgmtinterface-api
 
-FastAPI service backing the React UI in `mgmtinterface-new/`, tracked as #172.
-Runs as its own container (`mgmtinterface-api`, uvicorn on port 8000);
+FastAPI service behind the React UI in `mgmtinterface-new/` (#172). It runs as
+its own container (`mgmtinterface-api`, uvicorn on port 8000), and
 `mgmtinterface-proxy` routes `/mgmt-api/` to it.
 
 ## Conventions
 
-Errors use HTTP status codes. A single `APIError` is rendered by a single
-handler into:
+Errors are reported through HTTP status codes. Handlers raise `APIError`, and
+one exception handler turns it into
 
 ```json
 {"code": "not_a_member", "message": "You are not a member of this project."}
 ```
 
-`code` is stable and safe to branch on, `message` is safe to display. The
-human-readable field is not called `detail` because FastAPI's own 422 validation
-body uses `detail` for a list of per-field errors. 422 keeps FastAPI's default
-shape and is the one exception to the convention.
+Clients can branch on `code`, which is stable. `message` is meant for display.
+The field is not called `detail` because FastAPI's own 422 validation response
+uses `detail` for a list of per-field errors. 422 responses keep FastAPI's
+default shape; they are the only exception.
 
-Never send `WWW-Authenticate: Basic`. It makes the browser pop its own login
-dialog over the SPA's login screen. In practice: don't use FastAPI's `HTTPBasic`
-helper. There is a test guarding this.
+Do not send `WWW-Authenticate: Basic`. The browser would open its own login
+dialog on top of the SPA's login screen. This rules out FastAPI's `HTTPBasic`
+helper. A test checks that the header is absent.
 
-Configuration comes from the environment with the `MODAMA_` prefix (see
+Configuration is read from the environment with the `MODAMA_` prefix (see
 `config.py`). Secrets are read from mounted files.
 
 ## Sessions
 
-Login exchanges credentials for a signed, stateless cookie:
+On login the service sets a signed, stateless session cookie:
 `__Host-modama_session`, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
 
-`__Host-` is a cookie name prefix defined in RFC 6265bis and enforced by all
-current browsers: the browser rejects such a cookie unless it is `Secure`, has
-`Path=/` and carries no `Domain`. That stops another host under `fz-juelich.de`
-from setting a session cookie for this one (cookie tossing, a route to session
-fixation). Because the prefix requires `Secure`, plain-http development falls
-back to the bare `modama_session`.
+`__Host-` is a cookie name prefix defined in RFC 6265bis. Current browsers
+reject a cookie with this prefix unless it is `Secure`, has `Path=/` and has no
+`Domain`. As a result, another host under `fz-juelich.de` cannot set a session
+cookie for this service (cookie tossing, which would allow session fixation).
+Since the prefix requires `Secure`, plain-http development uses the name
+`modama_session` instead.
 
-The name has to stay distinct from Flask-Login's `mgmtinterface_session` while
-both run on the same origin, until the cutover (#170).
+The name must differ from Flask-Login's `mgmtinterface_session` as long as both
+run on the same origin, i.e. until the cutover (#170).
 
-Two lifetimes: 12h absolute and 2h idle, configurable with
+A session has two lifetimes, 12h absolute and 2h idle, configurable with
 `MODAMA_SESSION_MAX_AGE_SECONDS` and `MODAMA_SESSION_IDLE_SECONDS`. The cookie
-carries the original login time, so the sliding refresh moves the idle window
-forward without extending the absolute one. Refresh happens at most every 5
-minutes (`session_refresh_seconds`), which is also when the account is
-re-checked against the permissions service. Pacing it this way keeps that
-service out of the per-request path.
+stores the original login time, so refreshing it extends the idle window but
+not the absolute one. The cookie is refreshed at most every 5 minutes
+(`session_refresh_seconds`), and the account is re-checked against the
+permissions service at the same time. The permissions service is therefore not
+called on every request.
 
-Accepted limitations:
+Known limitations:
 
-* No revocation. Logout deletes the client's copy; a leaked cookie stays valid
-  until it expires. The idle lifetime bounds this. Revisit at private projects
-  (Theme D), where admin-killable sessions need a session store.
-* Re-validation is existence-only. The cookie holds no credentials, so the
-  refresh check (`id_user`) confirms the account still resolves, not that it is
-  still enabled or that the password is unchanged.
-* The signing secret has to be configured or the service refuses to start. Set
-  `MODAMA_SESSION_SECRET_FILE` (see `docker-compose.prod.yml` and the Secrets
-  section of the top-level README). Changing the secret signs everybody out.
-  There is no hardcoded default, since a predictable key would let anyone mint a
-  cookie. `MODAMA_DEV_MODE=1` substitutes a random per-boot key for development,
-  at the cost of sessions not surviving a restart.
+* There is no revocation. Logout deletes the client's copy of the cookie, but a
+  leaked cookie stays valid until it expires. The idle lifetime limits the
+  damage. This has to be revisited for private projects (Theme D), where an
+  admin must be able to end a session, which needs a session store.
+* Re-validation only checks that the account exists. The cookie holds no
+  credentials, so the refresh check (`id_user`) confirms that the account still
+  resolves, not that it is still enabled or that the password is unchanged.
+* The signing secret must be configured, otherwise the service refuses to
+  start. Set `MODAMA_SESSION_SECRET_FILE` (see `docker-compose.prod.yml` and the
+  Secrets section of the top-level README). Changing the secret invalidates all
+  sessions. There is no hardcoded default, because a known key would let anyone
+  forge a cookie. With `MODAMA_DEV_MODE=1` the service generates a random key at
+  startup for development; sessions then do not survive a restart.
 
-CSRF: `SameSite=Lax` plus an `Origin` check on state-changing requests, falling
-back to `Referer` when `Origin` is absent, applied app-wide. A request with
-neither header is allowed, since browsers always send one on cross-site POSTs.
+CSRF protection consists of `SameSite=Lax` and an `Origin` check on
+state-changing requests, which falls back to `Referer` when `Origin` is absent.
+The check applies to the whole app. A request with neither header is allowed,
+because browsers always send one of them on cross-site POSTs.
 
-`csrf_extra_origins` (comma-separated) widens the accepted set. Local
+`csrf_extra_origins` (comma-separated) adds further accepted origins. Local
 development needs it: the vite dev server on :5180 proxies `/api` to the VM with
-`changeOrigin`, so the `Host` the service sees no longer matches the browser's
-`Origin` and every POST would 403. Production sets none.
+`changeOrigin`, so the `Host` header the service sees does not match the
+browser's `Origin`, and every POST would get a 403. Production does not set it.
 
-Brute force: failed logins are counted per username (case-folded) in process.
-Past `login_max_failures` within `login_failure_window_seconds` the endpoint
-answers 429 with `Retry-After` and stops calling the permissions service. Only
-failures count, and a success clears the counter. Keying on username alone means
-someone can deliberately throttle a known account; the window is short and
-nothing is locked, so it self-heals.
+Failed logins are counted per username (case-folded) in memory. After
+`login_max_failures` failures within `login_failure_window_seconds`, the login
+endpoint answers 429 with `Retry-After` and stops calling the permissions
+service. Only failures are counted, and a successful login clears the counter.
+Because the counter is keyed on the username alone, someone can deliberately
+trigger the throttle for a known account. The window is short and no account
+is locked, so the state clears on its own.
 
-Auth responses and errors carry `Cache-Control: no-store`.
+Auth responses and error responses carry `Cache-Control: no-store`.
 
-If the permissions service is unreachable, login answers 502, not 401. Session
-refresh keeps the session instead, so a restart of that service does not sign
-everyone out.
+If the permissions service is unreachable, login answers 502 rather than 401.
+Session refresh keeps the existing session in that case, so a restart of the
+permissions service does not log everyone out.
 
 ## API versions
 
-The version is a header: `X-Modama-API-Version: 1`. The URL never carries one,
-which is why the prefix is `/mgmt-api/` and not `/api/v2/`.
+The API version is sent in a header, `X-Modama-API-Version: 1`, and never in
+the URL. That is why the prefix is `/mgmt-api/` rather than `/api/v2/`.
 
 Agents are installed on lab machines and updated on the lab's schedule, so the
-server has to answer several contracts at once, and a client has to be able to
-pin one in a single config value rather than rewriting every URL it builds.
+server has to support several contract versions at once, and a client must be
+able to pin one in a single config value instead of changing every URL it
+builds.
 
-The server never guesses. A missing header is a `400 missing_api_version` and an
-unknown version a `400 unsupported_api_version` (400 rather than 404, so a lab
-log says why). There is no fallback to the newest version, which would otherwise
-move an old client onto a new contract on our next deploy. `/mgmt-api/healthz`
-and `/mgmt-api/versions` answer without a version.
+The header is mandatory. A missing header results in `400 missing_api_version`
+and an unknown version in `400 unsupported_api_version`. These are 400 rather
+than 404 so that the reason is visible in the client's log. There is no
+fallback to the newest version, because that would silently move an old client
+onto a new contract at the next deploy. `/mgmt-api/healthz` and
+`/mgmt-api/versions` do not require the header.
 
 Every response carries `X-Modama-API-Versions-Supported`. A versioned response
-also echoes `X-Modama-API-Version` and names it in `Vary`, so a shared cache
-cannot mix up bodies for the same URL. A deprecated version additionally carries
-`Deprecation` (RFC 9745) and `Sunset` (RFC 8594).
+also echoes `X-Modama-API-Version` and lists it in `Vary`, so a shared cache
+cannot serve the body of one version for a request of another. A deprecated
+version additionally carries `Deprecation` (RFC 9745) and `Sunset` (RFC 8594).
 
-To add a version, append to `SUPPORTED_VERSIONS` in `versioning.py` and branch
-in a handler on the `api_version` dependency where the shape differs. Additive
-changes (a new field, endpoint, or optional request field) do not get a new
-version; clients ignore what they do not know, and the Rust structs in
-`modama-common` are not `deny_unknown_fields`. How handlers should dispatch once
-two versions return incompatible response models is still under discussion.
+To add a version, append it to `SUPPORTED_VERSIONS` in `versioning.py` and
+branch on the `api_version` dependency in the handlers whose response shape
+differs. Additive changes (a new field, a new endpoint, a new optional request
+field) do not get a new version. Clients are expected to ignore unknown fields;
+the Rust structs in `modama-common` are not `deny_unknown_fields`. How handlers
+should dispatch once two versions return incompatible response models is still
+open (#212).
 
-To remove one: the service logs one line per `(version, client)` pair per boot,
-and agents identify themselves as `modama-agent/<git-version>`, so "is any lab
-still on version 1" is a log query:
+The service logs one line per `(version, client)` pair per boot, and agents
+identify themselves as `modama-agent/<git-version>`, so the log shows which
+versions are still in use:
 
 ```bash
 docker compose logs mgmtinterface-api | grep "First request this boot"
 ```
 
-A version is removed once that has been empty for a long while and its `Sunset`
-date has passed.
+A version can be removed once this has shown no clients on it for a while and
+its `Sunset` date has passed.
 
-Once a version ships, its tests do not change. A behaviour change that makes an
-old test fail is the breaking change the version exists to isolate, so it
-belongs behind a new number.
+The tests of a released version are not changed. If a behaviour change makes an
+old test fail, that change is breaking and belongs in a new version.
 
 ## Endpoints
 
 | | |
 |---|---|
-| `POST /mgmt-api/auth/login` | credentials in, session cookie out |
-| `POST /mgmt-api/auth/logout` | 204; clears the cookie |
+| `POST /mgmt-api/auth/login` | takes credentials, sets the session cookie |
+| `POST /mgmt-api/auth/logout` | clears the cookie, answers 204 |
 | `GET /mgmt-api/auth/session` | the signed-in user, or 401 |
-| `GET /mgmt-api/projects` | every project, unfiltered |
-| `GET /mgmt-api/versions` | which contract versions this server speaks |
+| `GET /mgmt-api/projects` | all projects, unfiltered |
+| `GET /mgmt-api/versions` | supported API versions |
 | `GET /mgmt-api/healthz` | liveness probe |
-| `GET /mgmt-api/docs` | Swagger UI over the generated OpenAPI document |
-| `GET /mgmt-api/openapi.json` | that document, for generated clients |
+| `GET /mgmt-api/docs` | Swagger UI for the generated OpenAPI document |
+| `GET /mgmt-api/openapi.json` | the OpenAPI document, for generating clients |
 
-The generated document at `/mgmt-api/docs` is the reference. What makes it
-usable is defined alongside the code: request and response models on every
-route, the `X-Modama-API-Version` header declared as a parameter
-(`versioning.py`) so a generated client sends it, the session cookie declared as
-a security scheme (`security.py`), and the `{code, message}` error body attached
-per status via `error_responses` (`errors.py`). `/docs` and `/openapi.json` are
-unversioned and unauthenticated; nginx forwards the full path, so the prefix
-stays intact through the proxy.
+The OpenAPI document is the reference for the API. It is complete because the
+relevant parts are declared in code: every route has request and response
+models, `versioning.py` declares the `X-Modama-API-Version` header as a
+parameter so that generated clients send it, `security.py` declares the session
+cookie as a security scheme, and `errors.py` attaches the `{code, message}`
+error body to each status code via `error_responses`. `/docs` and
+`/openapi.json` need neither a version header nor a session. nginx forwards the
+full path, so the `/mgmt-api/` prefix is preserved behind the proxy.
 
-`GET /projects` returns `{"projects": [...]}` rather than a bare array, so
-pagination fields (Theme A / #90) can be added without breaking callers.
-Grouping into own/member/other stays client-side, and access is enforced by the
-file system rather than by hiding rows. Private projects (Theme D) is what turns
-this into a filtered query.
+`GET /projects` returns `{"projects": [...]}` instead of a bare array, so that
+pagination fields (Theme A / #90) can be added later without breaking callers.
+Grouping into own/member/other happens in the client. Access is enforced by the
+file system, not by hiding rows. This changes with private projects (Theme D),
+which need a filtered query.
 
 ## Layout
 
@@ -172,15 +177,14 @@ this into a filtered query.
         routes/versions.py  supported versions, unauthenticated
     tests/
 
-The app is built by `create_app()`; `main.py` is the only place that calls it at
-import time, so importing the package does not read configuration or require a
-session secret.
+The app is created by `create_app()`. `main.py` is the only module that calls
+it at import time, so importing the package neither reads configuration nor
+requires a session secret.
 
 ## Running the tests
 
-Needs `pytest` and `httpx2` (`fastapi.testclient` deprecates plain `httpx`).
-These run on macOS; the Linux-only constraint is about the full docker stack,
-not pytest:
+The tests need `pytest` and `httpx2` (`fastapi.testclient` deprecates plain
+`httpx`). They run on macOS; only the full docker stack is Linux-only:
 
 ```
 python3 -m venv /tmp/venv
@@ -191,5 +195,5 @@ cd python/mgmtinterface-api && /tmp/venv/bin/pytest tests
 ## Local stack
 
 `docker-compose.override.yml` bind-mounts this directory into the container and
-runs uvicorn with `--reload`, so a code change only needs the file synced into
-the VM checkout. The baked image still needs rebuilding for production.
+runs uvicorn with `--reload`. A code change therefore only has to be synced into
+the VM checkout. For production the image has to be rebuilt.

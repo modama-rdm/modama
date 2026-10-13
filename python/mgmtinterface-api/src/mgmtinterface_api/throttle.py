@@ -7,14 +7,13 @@ class FailureThrottle:
     """
     Counts recent failures per key and reports when a key is over its limit.
 
-    Deliberately in-process and approximate. It exists to blunt password
-    guessing against the login endpoint (ASVS 2.2.1), not to be an accounting
-    system: there is one instance of this service, and a throttle that needs a
-    shared store would drag in the infrastructure the stateless-session decision
-    avoided.
+    In-process and approximate on purpose. It slows down password guessing
+    against the login endpoint (ASVS 2.2.1) and does not need to be exact.
+    There is one instance of this service, and a throttle with a shared store
+    would need the infrastructure that the stateless-session decision avoided.
 
-    Only failures are recorded and a success clears the key, so a user typing
-    their password wrong twice and then correctly is never affected.
+    Only failures are recorded and a success clears the key, so a user who
+    types the password wrong twice and then correctly is not affected.
     """
 
     def __init__(self, max_failures: int, window_seconds: int, max_keys: int = 10_000):
@@ -22,7 +21,7 @@ class FailureThrottle:
         self._window_seconds = window_seconds
         self._max_keys = max_keys
         self._lock = threading.Lock()
-        # Ordered so the least-recently-touched key can be evicted; without a
+        # Ordered so that the least recently used key can be evicted. Without a
         # cap, a flood of distinct usernames would grow this without bound.
         self._failures: OrderedDict[str, deque[float]] = OrderedDict()
 
@@ -37,6 +36,7 @@ class FailureThrottle:
             recent.append(time.monotonic())
             self._failures[key] = recent
             self._failures.move_to_end(key)
+            # Evict the least recently used keys until the cap holds.
             while len(self._failures) > self._max_keys:
                 _ = self._failures.popitem(last=False)
 
@@ -56,6 +56,7 @@ class FailureThrottle:
     def _recent_locked(self, key: str) -> "deque[float]":
         recent = self._failures.get(key, deque())
         cutoff = time.monotonic() - self._window_seconds
+        # Drop the failures that are older than the window.
         while recent and recent[0] < cutoff:
             _ = recent.popleft()
         return recent

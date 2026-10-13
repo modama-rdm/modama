@@ -15,12 +15,12 @@ router = APIRouter(
 
 class Project(BaseModel):
     """
-    One project, mirroring the permissions service's own shape.
+    One project, in the shape the permissions service returns.
 
-    Kept field-for-field identical to what the legacy `/api/project/` returned,
-    so screens migrate one endpoint at a time without also rewriting how they
-    read a project. `usage_bytes` is null in the list — it is expensive enough
-    that the permissions service only computes it for a single project.
+    The fields are identical to those of the legacy `/api/project/` response, so
+    that screens can migrate one endpoint at a time without changing how they
+    read a project. `usage_bytes` is null in the list; it is expensive to
+    compute, so the permissions service only computes it for a single project.
     """
 
     relpath: str
@@ -39,7 +39,7 @@ class ProjectList(BaseModel):
     projects: list[Project]
 
 
-# Sync `def`: the permissions call is blocking, so let FastAPI thread it.
+# Sync `def`: the permissions call is blocking, so FastAPI runs it in a threadpool.
 @router.get(
     "",
     summary="List every project",
@@ -50,11 +50,11 @@ def read_projects(
     session: Annotated[SessionData, Depends(current_session)],
 ) -> ProjectList:
     """
-    Every project, unfiltered — same as the legacy endpoint.
+    All projects, unfiltered, like the legacy endpoint.
 
-    Grouping into own/member/other happens client-side, and *access* is enforced
-    by the file system rather than by hiding rows here. Private projects (Theme
-    D) are what change that, and they need this to become a filtered query.
+    Grouping into own/member/other happens in the client, and access is
+    enforced by the file system rather than by hiding rows here. This changes
+    with private projects (Theme D), which need a filtered query.
     """
     return ProjectList(
         projects=[Project(**project) for project in list_projects(settings_of(request))]

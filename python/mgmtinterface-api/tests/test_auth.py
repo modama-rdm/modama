@@ -18,8 +18,8 @@ GOOD = {"username": "mmustermann", "password": "correct horse"}
 @pytest.fixture
 def upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     """
-    Stands in for the permissions service, and counts the calls so tests can
-    show that refreshing is paced rather than per-request.
+    Replaces the permissions service and counts the calls, so tests can check
+    that re-validation happens on refresh and not on every request.
     """
     calls = {"authenticate": 0, "user_exists": 0}
 
@@ -65,13 +65,13 @@ def test_cookie_name_does_not_collide_with_flask_login(settings: Settings):
 
 def test_secure_deployments_use_the_host_cookie_prefix():
     """
-    `__Host-` makes the browser refuse the cookie unless it is Secure, Path=/
-    and Domain-less, which is what stops another host under fz-juelich.de from
-    planting a session cookie for this one.
+    The browser rejects a `__Host-` cookie unless it is Secure, has Path=/ and
+    no Domain. This prevents another host under fz-juelich.de from setting a
+    session cookie for this service.
     """
     secure = Settings(session_secret="x", session_cookie_secure=True)
     assert secure.effective_cookie_name == "__Host-modama_session"
-    # The prefix requires Secure, so plain-http dev has to go without it.
+    # The prefix requires Secure, so plain-http development cannot use it.
     insecure = Settings(session_secret="x", session_cookie_secure=False)
     assert insecure.effective_cookie_name == "modama_session"
 
@@ -99,7 +99,7 @@ def test_login_rejects_bad_credentials(client: TestClient, settings: Settings):
 
 def test_login_validates_its_body(client: TestClient):
     response = client.post(LOGIN, json={"username": "", "password": ""})
-    # FastAPI's own 422 shape is the documented exception to the house model.
+    # FastAPI's own 422 shape is the documented exception to the error body.
     assert response.status_code == 422
 
 
@@ -149,11 +149,12 @@ def test_a_dead_session_is_cleared_from_the_browser(
     client: TestClient, settings: Settings
 ):
     """
-    The 401 has to carry the deletion, not just report the problem.
+    The 401 has to carry the cookie deletion.
 
-    It is raised, and an exception handler builds its own response — so a
-    `Set-Cookie` written to the handler's injected `Response` would be silently
-    dropped and the browser would keep sending a cookie that can never work.
+    The error is raised and the exception handler builds its own response, so
+    a `Set-Cookie` written to the handler's injected `Response` would be
+    dropped, and the browser would keep sending a cookie that is never
+    accepted.
     """
     other = create_app(Settings(session_secret="other", session_cookie_secure=False))
     client.cookies.set(
@@ -175,7 +176,7 @@ def test_a_dead_session_is_cleared_from_the_browser(
 def test_a_session_whose_account_vanished_is_also_cleared(
     settings: Settings, upstream: dict[str, int], monkeypatch: pytest.MonkeyPatch
 ):
-    """The other 401 path out of `current_session` — same requirement."""
+    """The other 401 path out of `current_session`, with the same requirement."""
     monkeypatch.setattr(
         "mgmtinterface_api.security.user_exists", lambda settings, username: False
     )
@@ -195,9 +196,9 @@ def test_fresh_session_does_not_call_the_permissions_service(
     client: TestClient, upstream: dict[str, int]
 ):
     """
-    The reason for refreshing on an interval: a cookie that was just issued must
-    not cost an upstream call, or we are back to Basic auth's one-call-per-
-    request behaviour.
+    A cookie that was just issued must not cause a call to the permissions
+    service. Otherwise this would be the same as Basic auth, with one upstream
+    call per request.
     """
     _ = client.post(LOGIN, json=GOOD)
     for _i in range(3):
@@ -225,8 +226,8 @@ def test_stale_cookie_is_refreshed_and_revalidated(
     assert response.status_code == 200
     assert upstream["user_exists"] == 1
 
-    # A refreshed cookie comes back on the response, carrying the original
-    # `issued` — so refreshing cannot extend the absolute lifetime.
+    # A refreshed cookie comes back on the response and carries the original
+    # `issued`, so refreshing cannot extend the absolute lifetime.
     jar = SimpleCookie(response.headers["set-cookie"])
     refreshed, _ = app.state.session_codec.read(
         jar[settings.effective_cookie_name].value
@@ -283,8 +284,8 @@ def test_origin_is_compared_against_the_forwarded_scheme(client: TestClient):
 def test_origin_keeps_a_non_default_port(client: TestClient):
     """
     The test deployment answers on :5001, so the browser's Origin carries that
-    port. nginx must forward it ($http_host, not $host) or every POST 403s —
-    which is exactly how a wrong-looking password once turned out to be CSRF.
+    port. nginx must forward it ($http_host, not $host), otherwise every POST
+    gets a 403. This once showed up as a seemingly wrong password.
     """
     response = client.post(
         LOGIN,
@@ -295,8 +296,8 @@ def test_origin_keeps_a_non_default_port(client: TestClient):
 
 
 def test_explicit_default_port_still_matches(client: TestClient):
-    # The mirror image: a Host spelling out :443 must not stop matching the
-    # port-less Origin the browser sends for https.
+    # The opposite case: a Host header with an explicit :443 must still match
+    # the Origin, which the browser sends without the port for https.
     response = client.post(
         LOGIN,
         json=GOOD,
@@ -388,8 +389,8 @@ def test_repeated_failures_are_throttled(settings: Settings, upstream: dict[str,
     # Blocked attempts must not reach the permissions service either.
     assert upstream["authenticate"] == 3
 
-    # Even the correct password waits out the window — otherwise the throttle
-    # would be trivially bypassed by guessing.
+    # Even the correct password has to wait for the window to pass. Otherwise
+    # the throttle could be bypassed by guessing.
     assert client.post(LOGIN, json=GOOD).status_code == 429
 
 
@@ -398,7 +399,7 @@ def test_throttle_counts_only_failures(settings: Settings, upstream: dict[str, i
     client = api_client(app)
     bad = {**GOOD, "password": "wrong"}
 
-    # Two typos then a success must leave the user with a clean slate.
+    # Two typos followed by a success must reset the counter.
     for _i in range(2):
         assert client.post(LOGIN, json=bad).status_code == 401
     assert client.post(LOGIN, json=GOOD).status_code == 200
@@ -420,5 +421,5 @@ def test_throttle_key_ignores_case_and_padding(
         ).status_code
         == 401
     )
-    # Alternating case must not hand an attacker a fresh budget.
+    # Varying the case must not give an attacker a separate counter.
     assert client.post(LOGIN, json={**GOOD, "password": "wrong"}).status_code == 429

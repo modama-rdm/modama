@@ -34,7 +34,7 @@ def test_cookie_from_another_secret_is_rejected(codec: SessionCodec):
 
 def test_idle_timeout(codec: SessionCodec, monkeypatch: pytest.MonkeyPatch):
     # itsdangerous stamps tokens with whole seconds, so backdate the stamp
-    # instead of sleeping the test out.
+    # instead of sleeping in the test.
     real_timestamp = TimestampSigner.get_timestamp
     monkeypatch.setattr(
         TimestampSigner, "get_timestamp", lambda self: real_timestamp(self) - 3600
@@ -48,8 +48,8 @@ def test_idle_timeout(codec: SessionCodec, monkeypatch: pytest.MonkeyPatch):
 
 def test_absolute_lifetime_survives_refresh(codec: SessionCodec):
     """
-    The whole point of carrying `issued` separately: refreshing moves the idle
-    window but must not extend the absolute one.
+    `issued` is carried separately so that refreshing moves the idle window but
+    does not extend the absolute lifetime.
     """
     issued_long_ago = int(time.time()) - 9 * 60 * 60
     refreshed_now = codec.issue("mmustermann", issued=issued_long_ago)

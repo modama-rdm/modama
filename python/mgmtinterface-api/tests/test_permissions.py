@@ -14,8 +14,8 @@ def test_login_reports_an_unreachable_permissions_service(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ):
     """
-    Not a 401: telling users their password is wrong when the account service is
-    merely down sends them off resetting credentials that were fine.
+    Not a 401: telling users that their password is wrong when the account
+    service is down would make them reset credentials that are correct.
     """
     monkeypatch.setattr(PermissionsClient, "authenticate", unreachable)
     with pytest.raises(APIError) as raised:
@@ -28,8 +28,8 @@ def test_refresh_keeps_the_session_when_permissions_is_unreachable(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ):
     """
-    The opposite call: this one runs against an already-signed session, so
-    failing closed would sign everyone out during a restart of that service.
+    The opposite decision: this runs against an existing signed session, so
+    failing closed would log everyone out during a restart of that service.
     """
     monkeypatch.setattr(PermissionsClient, "id_user", unreachable)
     assert user_exists(settings, "mmustermann") is True

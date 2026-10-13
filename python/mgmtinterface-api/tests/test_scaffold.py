@@ -35,9 +35,9 @@ def test_api_error_uses_status_code_and_house_body(client: TestClient):
 
 def test_errors_never_challenge_with_basic_auth(client: TestClient):
     """
-    A `WWW-Authenticate: Basic` header makes the browser pop its own login
-    dialog on top of the SPA's login screen. The Flask API needed an explicit
-    workaround for this; here it just has to never happen.
+    A `WWW-Authenticate: Basic` header makes the browser open its own login
+    dialog on top of the SPA's login screen. The Flask API needed a workaround
+    for this; here the header must never be sent.
     """
     response = client.get(f"{API_PREFIX}/boom")
     assert "www-authenticate" not in {k.lower() for k in response.headers}
@@ -45,8 +45,9 @@ def test_errors_never_challenge_with_basic_auth(client: TestClient):
 
 def test_unconfigured_session_secret_is_refused():
     """
-    A deployment that forgets to mount the secret file fails visibly, instead of
-    coming up on a temporary key that signs everyone out at the next restart.
+    A deployment that forgets to mount the secret file fails at startup,
+    instead of running on a temporary key that invalidates all sessions at the
+    next restart.
     """
     unconfigured = Settings(session_secret="", session_secret_file="")
     with pytest.raises(RuntimeError, match="No session secret configured"):
@@ -60,8 +61,8 @@ def test_app_refuses_to_start_without_a_session_secret():
 
 def test_dev_mode_session_secret_is_generated_not_defaulted():
     """
-    No hardcoded fallback: a predictable signing key would let anyone mint a
-    session cookie. A random per-boot key is fine; it just doesn't outlive the
+    No hardcoded fallback: a known signing key would let anyone forge a session
+    cookie. A random per-boot key is acceptable; it does not outlive the
     process.
     """
     dev = Settings(session_secret="", session_secret_file="", dev_mode=True)

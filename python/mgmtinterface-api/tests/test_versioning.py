@@ -1,7 +1,7 @@
 """
-The version contract itself: what the server does when a client says which
-contract it was built against, and — the point of the whole exercise — what it
-does when a client says nothing.
+Tests for the version contract: what the server does when a client states the
+contract version it was built against, and what it does when a client sends
+no version.
 """
 
 from datetime import datetime, timezone
@@ -37,16 +37,16 @@ def app(settings: Settings):
 
 @pytest.fixture
 def unversioned(app) -> TestClient:
-    """A client that sends no version header — i.e. a caller that got it wrong."""
+    """A client that sends no version header."""
     return TestClient(app)
 
 
 def test_request_without_version_header_is_refused(unversioned: TestClient):
     """
-    The rule the whole design rests on: the server does not guess.
+    The server does not fall back to a default version.
 
-    A locally installed client that omits the header must fail loudly now rather
-    than be silently moved onto a newer contract by some future deploy.
+    A locally installed client that omits the header must fail now rather than
+    be silently moved onto a newer contract by a future deploy.
     """
     response = unversioned.get(PROJECTS)
     assert response.status_code == 400
@@ -55,9 +55,9 @@ def test_request_without_version_header_is_refused(unversioned: TestClient):
 
 def test_missing_version_is_refused_before_authentication(unversioned: TestClient):
     """
-    App-wide dependency order: the version is resolved before anything else has
-    an opinion, so an unauthenticated caller is told the real problem instead of
-    being sent off to sign in first.
+    App-wide dependency order: the version is resolved before authentication,
+    so an unauthenticated caller is told about the missing version instead of
+    being asked to sign in first.
     """
     assert unversioned.get(PROJECTS).status_code == 400
 
@@ -65,9 +65,9 @@ def test_missing_version_is_refused_before_authentication(unversioned: TestClien
 @pytest.mark.parametrize("value", ["99", "0", "v1", "", "latest", "1.0"])
 def test_unknown_version_is_a_400_not_a_404(app, value: str):
     """
-    400, so a lab log says *why*. A 404 would read as a wrong URL and send
-    whoever is debugging it looking in the wrong place. `v1` is rejected on
-    purpose: one accepted spelling means a client cannot half-work.
+    400, so that the reason is visible in the client's log. A 404 would look
+    like a wrong URL. `v1` is rejected on purpose: only one form of the version
+    is accepted.
     """
     client = TestClient(app, headers={API_VERSION_HEADER: value})
     response = client.get(PROJECTS)
@@ -76,7 +76,7 @@ def test_unknown_version_is_a_400_not_a_404(app, value: str):
 
 
 def test_errors_advertise_what_the_server_does_support(unversioned: TestClient):
-    """The client that got it wrong is the one that needs the list."""
+    """A client that sent a wrong version needs the list of supported ones."""
     response = unversioned.get(PROJECTS)
     assert response.headers[SUPPORTED_HEADER] == ", ".join(
         str(v) for v in SUPPORTED_VERSIONS
@@ -99,14 +99,14 @@ def test_surrounding_whitespace_is_tolerated(app):
 
 
 def test_healthz_answers_without_a_version(unversioned: TestClient):
-    """The container probe predates any notion of a contract."""
+    """The container probe does not need a version."""
     assert unversioned.get(f"{API_PREFIX}/healthz").status_code == 200
 
 
 def test_versions_endpoint_answers_without_a_version(unversioned: TestClient):
     """
-    A client calls this precisely because it does not yet know what exists, so
-    requiring a version here would be a chicken-and-egg.
+    A client calls this before it knows which versions exist, so requiring a
+    version here would be circular.
     """
     response = unversioned.get(f"{API_PREFIX}/versions")
     assert response.status_code == 200
@@ -119,9 +119,9 @@ def test_versions_endpoint_answers_without_a_version(unversioned: TestClient):
 
 def test_deprecated_version_advertises_its_sunset(app, monkeypatch: pytest.MonkeyPatch):
     """
-    A client on a doomed version learns it from every response, months before
-    the version is switched off — that warning is what makes a slow local
-    update cycle survivable.
+    A client on a deprecated version is told so on every response, before the
+    version is switched off. The slow update cycle of local installations
+    depends on that warning.
     """
     from mgmtinterface_api import versioning
 
@@ -150,9 +150,9 @@ def test_supported_version_is_not_deprecated_by_default(app):
 
 def test_clients_are_logged_once_per_boot(app, caplog: pytest.LogCaptureFixture):
     """
-    Retiring a version is an observation, not a calendar promise — the logs have
-    to be able to answer "is anything still on version 1". One line per client,
-    not one per request, or the answer drowns.
+    Before a version is removed, the logs have to show whether any client still
+    uses it. One line per client rather than one per request, so the lines are
+    easy to find.
     """
     client = api_client(app, headers={"user-agent": "modama-agent/1.2.3"})
     with caplog.at_level("INFO", logger="mgmtinterface_api.versioning"):
@@ -167,13 +167,12 @@ def test_clients_are_logged_once_per_boot(app, caplog: pytest.LogCaptureFixture)
 @pytest.mark.parametrize("spelling", ["+1", "01", "1_0", "1.0", "v1", "1 1", ""])
 def test_only_one_spelling_of_a_version_is_accepted(app, spelling: str):
     """
-    Anything but a bare integer is an unsupported version, not a value to
-    interpret.
+    Anything but a bare integer is an unsupported version.
 
-    `int()` on its own would read most of these as 1 or 10 — and a client that
-    half-works on a form we happen to tolerate today is exactly what breaks when
-    the parsing is later tightened. Rejecting them now costs nothing: no client
-    can already depend on a spelling the server never accepted.
+    `int()` on its own would read most of these as 1 or 10. A client that works
+    on a form that is tolerated today would break when the parsing is tightened
+    later. Rejecting these now costs nothing, because no client can depend on a
+    form the server never accepted.
     """
     client = TestClient(app, headers={API_VERSION_HEADER: spelling})
     response = client.get(ECHO)
@@ -182,6 +181,6 @@ def test_only_one_spelling_of_a_version_is_accepted(app, spelling: str):
 
 
 def test_the_supported_version_is_still_accepted_plainly(app):
-    """The guard above must not have narrowed the one spelling that counts."""
+    """The check above must not reject the accepted form."""
     client = TestClient(app, headers={API_VERSION_HEADER: str(LATEST_VERSION)})
     assert client.get(ECHO).status_code == 200

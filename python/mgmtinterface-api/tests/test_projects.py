@@ -16,7 +16,7 @@ FIXTURE = {
     "ctime": 1_690_000_000.0,
     "mtime": 1_700_000_000.5,
     "gid": 5001,
-    # Null in the list view — the permissions service only computes usage for a
+    # Null in the list view; the permissions service only computes usage for a
     # single project.
     "usage_bytes": None,
 }

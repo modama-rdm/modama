@@ -11,7 +11,7 @@ router = APIRouter(prefix="/versions", tags=["versions"])
 class DeprecatedVersion(BaseModel):
     version: int
     deprecated_since: datetime
-    #: After this moment the version is gone and requests for it get a 400.
+    #: After this time the version is no longer served and requests get a 400.
     sunset: datetime
 
 
@@ -24,12 +24,13 @@ class VersionsResponse(BaseModel):
 @router.get("")
 def read_versions() -> VersionsResponse:
     """
-    Which contract versions this server speaks.
+    The contract versions this server supports.
 
-    Unauthenticated and itself unversioned, on purpose: a locally installed
-    client calls this at startup, before it knows either. That lets it complain
-    in its own log — where the person running the instrument will see it —
-    rather than failing halfway through an ingest months later.
+    Unauthenticated and unversioned on purpose: a locally installed client
+    calls this at startup, before it has a session or knows which version to
+    use. That way it can report a problem in its own log, where the person
+    running the instrument sees it, instead of failing in the middle of an
+    ingest later.
     """
     return VersionsResponse(
         supported=list(SUPPORTED_VERSIONS),

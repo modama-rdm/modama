@@ -6,8 +6,8 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from .config import Settings
 
-# Namespaces the signature, so a token minted for something else can never be
-# read back as a session even under the same secret.
+# Namespaces the signature, so a token signed for another purpose with the same
+# secret cannot be read back as a session.
 _SALT = "modama-session"
 
 
@@ -37,7 +37,8 @@ class SessionCodec:
     Sessions are implemented using signed cookies, so there is no store to
     consult and nothing to revoke. Logout deletes the client's copy, but a
     leaked cookie stays valid until it expires, which is why the idle lifetime
-    is short. Revisit when private projects (Theme D) need real session-kill.
+    is short. Revisit when private projects (Theme D) need sessions that an
+    admin can end.
 
     Two separate timestamps bound a session:
 
@@ -62,8 +63,8 @@ class SessionCodec:
 
     def issue(self, username: str, issued: int | None = None) -> str:
         """
-        Mint a cookie value. Pass the original `issued` when refreshing, so a
-        sliding session cannot outlive its absolute lifetime.
+        Create a cookie value. Pass the original `issued` when refreshing, so
+        that a refreshed session cannot outlive its absolute lifetime.
         """
         data: SessionData = {
             "username": username,
@@ -93,8 +94,9 @@ class SessionCodec:
 
 
 def _as_session_data(raw: Any) -> SessionData:
-    # The signature proves we minted it, not that the payload still matches this
-    # version of the code — an older deployment's shape must not crash a loader.
+    # The signature proves that this service issued the token, not that the
+    # payload matches the current code. A payload written by an older deployment
+    # must not crash the loader.
     if (
         not isinstance(raw, dict)
         or not isinstance(raw.get("username"), str)
@@ -116,8 +118,9 @@ def set_session_cookie(response: Response, settings: Settings, token: str) -> No
         max_age=settings.session_max_age_seconds,
         httponly=True,
         secure=settings.session_cookie_secure,
-        # Lax, not Strict: Strict would drop the cookie when a user follows a
-        # link into the app from an ELN entry, which is a normal way in here.
+        # Lax rather than Strict: Strict would drop the cookie when a user
+        # follows a link into the app from an ELN entry, which is a common way
+        # to get here.
         samesite="lax",
         path=_COOKIE_PATH,
     )
@@ -137,14 +140,14 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
 
 def clear_session_cookie_header(settings: Settings) -> dict[str, str]:
     """
-    The same deletion, rendered as a header mapping for `APIError`.
+    The same deletion as a header mapping, for `APIError`.
 
-    A dead session is refused by *raising*, and headers written to a handler's
-    injected `Response` are dropped once an exception handler builds its own
-    response — so the deletion has to travel with the error instead. Rendering
-    it through a throwaway `Response` keeps one definition of the cookie's
-    attributes; they must match the ones it was set with or the browser keeps
-    the original cookie alongside the deletion.
+    An expired session is rejected by raising, and headers written to the
+    handler's injected `Response` are dropped once the exception handler builds
+    its own response, so the deletion has to be attached to the error. Using a
+    throwaway `Response` keeps a single definition of the cookie attributes;
+    they must match the ones the cookie was set with, or the browser keeps the
+    original cookie next to the deletion.
     """
     carrier = Response()
     clear_session_cookie(carrier, settings)
