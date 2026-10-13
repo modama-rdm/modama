@@ -4,7 +4,7 @@ contract version it was built against, and what it does when a client sends
 no version.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from conftest import api_client
@@ -125,13 +125,13 @@ def test_deprecated_version_advertises_its_sunset(app, monkeypatch: pytest.Monke
     """
     from mgmtinterface_api import versioning
 
-    since = datetime(2027, 1, 4, tzinfo=timezone.utc)
+    since = datetime(2027, 1, 4, tzinfo=UTC)
     monkeypatch.setattr(
         versioning,
         "DEPRECATIONS",
         {
             LATEST_VERSION: Deprecation(
-                since=since, sunset=datetime(2028, 1, 4, tzinfo=timezone.utc)
+                since=since, sunset=datetime(2028, 1, 4, tzinfo=UTC)
             )
         },
     )
