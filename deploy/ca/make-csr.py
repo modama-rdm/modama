@@ -5,9 +5,8 @@ we have to generate CSRs etc. Needs tomllib for config (py311+).
 """
 
 import subprocess
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 
 def make_keys(privkey_path: Path, size: int):
