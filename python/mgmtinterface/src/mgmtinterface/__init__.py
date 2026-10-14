@@ -1,7 +1,7 @@
 import os
 import shlex
-from datetime import datetime, timezone
-from typing import TypedDict, final
+from datetime import UTC, datetime
+from typing import NotRequired, TypedDict, final
 from urllib.parse import quote, quote_plus, urlencode, urljoin, urlparse
 
 import flask
@@ -26,7 +26,6 @@ from smbdrop_client.schema import (
     ListSharesResponse,
     SerializedShare,
 )
-from typing_extensions import NotRequired
 from webdav3.client import (
     Client as WebDAVClient,
 )
@@ -137,7 +136,7 @@ class ChangeProjectMembersForm(FlaskForm):
 
 
 def default_dataset_name():
-    now = datetime.now(tz=timezone.utc).astimezone()
+    now = datetime.now(tz=UTC).astimezone()
     return now.strftime("%Y-%m-%d-")
 
 
@@ -165,7 +164,7 @@ def format_filesize(value: int):
 
 @app.template_filter()
 def format_unixtime(value: float):
-    d = datetime.fromtimestamp(value, tz=timezone.utc).astimezone()
+    d = datetime.fromtimestamp(value, tz=UTC).astimezone()
     return d.strftime("%Y-%m-%d %H:%M")
 
 
