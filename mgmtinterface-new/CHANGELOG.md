@@ -11,6 +11,19 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.13.0] - 2026-10-15
+
+### Added
+
+- "Keep me logged in" on the sign-in screen. With the box ticked there is no
+  inactivity limit and you stay signed in for up to 7 days, also across browser
+  restarts. It is off by default; leave it off on a shared machine.
+
+### Changed
+
+- Signing in now opens a session that ends after 2 hours without activity, or
+  after 12 hours at the latest. After that the sign-in screen appears again.
+
 ## [0.12.1] - 2026-07-22
 
 ### Changed

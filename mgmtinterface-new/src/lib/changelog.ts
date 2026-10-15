@@ -23,6 +23,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.13.0',
+        date: '2026-10-15',
+        title: 'Keep me logged in',
+        changes: [
+            'Added a “Keep me logged in” box on the sign-in screen. Tick it to stay signed in for up to 7 days, also across browser restarts, with no inactivity limit. It is off by default; leave it off on a shared machine.',
+            'Signing in now opens a session that ends after 2 hours without activity, or after 12 hours at the latest; after that the sign-in screen appears again.',
+        ],
+    },
+    {
         version: '0.12.1',
         date: '2026-07-22',
         title: 'Stay signed in across tabs',
