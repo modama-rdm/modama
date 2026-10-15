@@ -111,6 +111,25 @@ def test_only_the_routes_needing_a_session_are_marked(schema: dict[str, Any]):
     assert not schema["paths"][VERSIONS]["get"].get("security")
 
 
+def test_login_documents_the_persistent_flag(schema: dict[str, Any]):
+    """
+    The flag is how "keep me logged in" and a long-running client ask for a
+    session without an idle timeout, so a generated client has to see it: a
+    boolean, optional, off by default. Both session responses report the kind.
+    """
+    body = schema["paths"][LOGIN]["post"]["requestBody"]["content"]
+    ref = body["application/json"]["schema"]["$ref"]
+    request_model = schema["components"]["schemas"][ref.rsplit("/", 1)[1]]
+    flag = request_model["properties"]["persistent"]
+    assert flag["type"] == "boolean"
+    assert flag["default"] is False
+    assert "persistent" not in request_model.get("required", [])
+
+    session_info = schema["components"]["schemas"]["SessionInfo"]
+    assert session_info["properties"]["persistent"]["type"] == "boolean"
+    assert "persistent" in session_info["required"]
+
+
 def test_error_statuses_are_documented_with_the_house_body(schema: dict[str, Any]):
     """
     Each layer contributes the errors it can raise, so a route documents the

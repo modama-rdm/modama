@@ -48,11 +48,24 @@ not the absolute one. The cookie is refreshed at most every 5 minutes
 permissions service at the same time. The permissions service is therefore not
 called on every request.
 
+A login with `"persistent": true` ("keep me logged in") opens a session with no
+idle timeout and a 7-day absolute limit, configurable with
+`MODAMA_SESSION_PERSISTENT_MAX_AGE_SECONDS`. It is meant for the UI's checkbox
+and for long-running clients such as modama-agent. The flag is stored in the
+signed cookie, so a refresh keeps the kind of session, and the cookie's
+`Max-Age` is the persistent limit, so the browser keeps it across restarts.
+Re-validation against the permissions service still happens every 5 minutes,
+which is what ends a persistent session once the account is gone. The flag is
+off by default, and so is the checkbox. `POST /auth/login` and
+`GET /auth/session` both report the kind of session as `persistent`.
+
 Known limitations:
 
 * There is no revocation. Logout deletes the client's copy of the cookie, but a
   leaked cookie stays valid until it expires. The idle lifetime limits the
-  damage. This has to be revisited for private projects (Theme D), where an
+  damage for a normal session. A persistent cookie has no idle lifetime, so a
+  leaked one, for example from a shared lab machine, stays usable for up to 7
+  days. This has to be revisited for private projects (Theme D), where an
   admin must be able to end a session, which needs a session store.
 * Re-validation only checks that the account exists. The cookie holds no
   credentials, so the refresh check (`id_user`) confirms that the account still
@@ -136,7 +149,7 @@ old test fail, that change is breaking and belongs in a new version.
 
 | | |
 |---|---|
-| `POST /mgmt-api/auth/login` | takes credentials, sets the session cookie |
+| `POST /mgmt-api/auth/login` | takes credentials and an optional `persistent` flag, sets the session cookie |
 | `POST /mgmt-api/auth/logout` | clears the cookie, answers 204 |
 | `GET /mgmt-api/auth/session` | the signed-in user, or 401 |
 | `GET /mgmt-api/projects` | all projects, unfiltered |

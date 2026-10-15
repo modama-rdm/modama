@@ -2,7 +2,7 @@ import time
 from http.cookies import SimpleCookie
 
 import pytest
-from conftest import api_client
+from conftest import api_client, issue_backdated
 from fastapi.testclient import TestClient
 from mgmtinterface_api import API_PREFIX, create_app
 from mgmtinterface_api.config import Settings
@@ -44,7 +44,7 @@ def client(settings: Settings, upstream: dict[str, int]) -> TestClient:
 def test_login_sets_a_session_cookie(client: TestClient, settings: Settings):
     response = client.post(LOGIN, json=GOOD)
     assert response.status_code == 200
-    assert response.json() == {"username": "mmustermann"}
+    assert response.json() == {"username": "mmustermann", "persistent": False}
 
     cookie = response.cookies.get(settings.effective_cookie_name)
     assert cookie is not None
@@ -52,6 +52,29 @@ def test_login_sets_a_session_cookie(client: TestClient, settings: Settings):
     assert "httponly" in set_cookie
     assert "samesite=lax" in set_cookie
     assert "path=/" in set_cookie
+    assert f"max-age={settings.session_max_age_seconds}" in set_cookie
+
+
+def test_login_persistent_sets_a_long_lived_cookie(
+    client: TestClient, settings: Settings
+):
+    """
+    "Keep me logged in": the cookie's Max-Age is the persistent limit, so the
+    browser keeps it across restarts instead of dropping it with the normal one.
+    """
+    response = client.post(LOGIN, json={**GOOD, "persistent": True})
+    assert response.status_code == 200
+    assert response.json() == {"username": "mmustermann", "persistent": True}
+    assert (
+        f"Max-Age={settings.session_persistent_max_age_seconds}"
+        in response.headers["set-cookie"]
+    )
+
+
+def test_login_validates_persistent_type(client: TestClient):
+    # The field is strict: a string is a 422, not a truthy flag.
+    response = client.post(LOGIN, json={**GOOD, "persistent": "yes"})
+    assert response.status_code == 422
 
 
 def test_login_response_is_not_cacheable(client: TestClient):
@@ -113,7 +136,12 @@ def test_session_returns_the_signed_in_user(client: TestClient):
     _ = client.post(LOGIN, json=GOOD)
     response = client.get(SESSION)
     assert response.status_code == 200
-    assert response.json() == {"username": "mmustermann"}
+    assert response.json() == {"username": "mmustermann", "persistent": False}
+
+
+def test_session_reports_persistent(client: TestClient):
+    _ = client.post(LOGIN, json={**GOOD, "persistent": True})
+    assert client.get(SESSION).json() == {"username": "mmustermann", "persistent": True}
 
 
 def test_logout_clears_the_cookie(client: TestClient):
@@ -233,6 +261,61 @@ def test_stale_cookie_is_refreshed_and_revalidated(
         jar[settings.effective_cookie_name].value
     )
     assert refreshed["issued"] == issued
+
+
+def test_persistent_flag_survives_refresh(settings: Settings, upstream: dict[str, int]):
+    app = create_app(always_refreshing(settings))
+    client = api_client(app)
+    client.cookies.set(
+        settings.effective_cookie_name,
+        app.state.session_codec.issue("mmustermann", persistent=True),
+    )
+
+    response = client.get(SESSION)
+    assert response.status_code == 200
+    # Re-validation against the permissions service applies to both kinds.
+    assert upstream["user_exists"] == 1
+
+    set_cookie = response.headers["set-cookie"]
+    jar = SimpleCookie(set_cookie)
+    refreshed, _ = app.state.session_codec.read(
+        jar[settings.effective_cookie_name].value
+    )
+    assert refreshed["persistent"] is True
+    assert f"Max-Age={settings.session_persistent_max_age_seconds}" in set_cookie
+
+
+def test_persistent_session_outlives_the_idle_timeout(
+    settings: Settings, upstream: dict[str, int], monkeypatch: pytest.MonkeyPatch
+):
+    """The flag end to end: a cookie idle for longer than the idle limit."""
+    app = create_app(settings)
+    idle_for = settings.session_idle_seconds + 60
+
+    client = api_client(app)
+    client.cookies.set(
+        settings.effective_cookie_name,
+        issue_backdated(
+            app.state.session_codec,
+            monkeypatch,
+            idle_for,
+            username="mmustermann",
+            persistent=True,
+        ),
+    )
+    assert client.get(SESSION).status_code == 200
+
+    # The same idle period ends a normal session.
+    client = api_client(app)
+    client.cookies.set(
+        settings.effective_cookie_name,
+        issue_backdated(
+            app.state.session_codec, monkeypatch, idle_for, username="mmustermann"
+        ),
+    )
+    response = client.get(SESSION)
+    assert response.status_code == 401
+    assert response.json()["code"] == "session_expired"
 
 
 def test_session_ends_when_the_account_disappears(

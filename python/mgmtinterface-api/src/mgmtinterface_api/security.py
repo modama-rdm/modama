@@ -171,10 +171,16 @@ def current_session(
                 "Your session has expired.",
                 headers=clear_session_cookie_header(settings),
             )
+        # The re-issued cookie keeps the original `issued` and the kind of
+        # session, so a persistent session stays persistent and neither kind
+        # can outlive its absolute lifetime.
         set_session_cookie(
             response,
             settings,
-            codec_of(request).issue(data["username"], issued=data["issued"]),
+            codec_of(request).issue(
+                data["username"], issued=data["issued"], persistent=data["persistent"]
+            ),
+            persistent=data["persistent"],
         )
 
     return data

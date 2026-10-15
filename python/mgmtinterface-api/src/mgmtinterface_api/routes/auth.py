@@ -25,10 +25,25 @@ router = APIRouter(prefix="/auth", tags=["auth"], responses={**VERSION_ERROR_RES
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
+    # Strict, so only a JSON boolean is accepted. Pydantic would otherwise also
+    # read strings such as "yes" or "off" as the flag, and a client sending the
+    # wrong type should get a 422 rather than a session of the wrong kind.
+    persistent: bool = Field(
+        default=False,
+        strict=True,
+        description=(
+            "Keep the session without an idle timeout, up to the configured "
+            'persistent lifetime. For the UI\'s "keep me logged in" and for '
+            "long-running clients such as modama-agent."
+        ),
+    )
 
 
 class SessionInfo(BaseModel):
     username: str
+    persistent: bool = Field(
+        description="Whether the session was opened with `persistent: true`."
+    )
 
 
 def _no_store(response: Response) -> None:
@@ -56,6 +71,11 @@ def _no_store(response: Response) -> None:
     },
 )
 def login(request: Request, response: Response, body: LoginRequest) -> SessionInfo:
+    """
+    Sign in. A normal session ends after a period of inactivity and after an
+    absolute limit. With `persistent: true` there is no idle timeout and the
+    absolute limit is the longer, persistent one.
+    """
     settings = settings_of(request)
     _no_store(response)
 
@@ -81,8 +101,9 @@ def login(request: Request, response: Response, body: LoginRequest) -> SessionIn
         raise APIError(401, "invalid_credentials", "Wrong username or password.")
 
     throttle.reset(throttle_key)
-    set_session_cookie(response, settings, codec_of(request).issue(body.username))
-    return SessionInfo(username=body.username)
+    token = codec_of(request).issue(body.username, persistent=body.persistent)
+    set_session_cookie(response, settings, token, persistent=body.persistent)
+    return SessionInfo(username=body.username, persistent=body.persistent)
 
 
 @router.post(
@@ -109,4 +130,4 @@ def read_session(
 ) -> SessionInfo:
     """The signed-in user, or 401 when there is no valid session."""
     _no_store(response)
-    return SessionInfo(username=session["username"])
+    return SessionInfo(username=session["username"], persistent=session["persistent"])
