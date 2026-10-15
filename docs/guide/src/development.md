@@ -233,4 +233,6 @@ In short:
 
 Releases are created with "New Release" in the Deploy->Releases view of the Gitlab repository. Create a version tag, set title (can just be the tag) and write short release notes.
 
-Finally, click on the "release" button!
+The version tag should be in form `vX.Y.Z`.
+
+Finally, click on the "release" button! This will trigger a `tag` run of the CI pipeline, which will in addition to the normal CI run, re-tag the container images at the end to both `latest` and the `vX.Y.Z` tag.
