@@ -23,6 +23,7 @@ export function Login() {
 
     const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
+    const [persistent, setPersistent] = useState(false)
     const [error, setError] = useState('')
     const [submitting, setSubmitting] = useState(false)
 
@@ -39,7 +40,7 @@ export function Login() {
         }
         setError('')
         setSubmitting(true)
-        const result = await login(username, password)
+        const result = await login(username, password, persistent)
         setSubmitting(false)
         if (result.ok) {
             navigate(next, {replace: true})
@@ -91,6 +92,18 @@ export function Login() {
                             placeholder="Unix password"
                             autoComplete="current-password"
                         />
+                        {/* Off by default: the server then issues a session without an
+                            idle timeout, which is the wrong default on a shared lab PC. */}
+                        <label className="flex cursor-pointer items-center gap-2.5 text-sm text-fg-muted">
+                            <input
+                                type="checkbox"
+                                checked={persistent}
+                                onChange={(e) => setPersistent(e.target.checked)}
+                                disabled={submitting}
+                                className="h-4 w-4 rounded border-default accent-primary"
+                            />
+                            Keep me logged in
+                        </label>
                         <Button type="submit" fullWidth disabled={submitting} className="mt-2">
                             {submitting ? 'Signing in…' : 'Sign in →'}
                         </Button>

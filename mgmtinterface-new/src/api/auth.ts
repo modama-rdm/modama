@@ -77,6 +77,10 @@ export type LoginResult = { ok: true } | { ok: false; message: string }
  * Sign in: establishes the session cookie and, for as long as legacy screens
  * need it, the Basic token.
  *
+ * `persistent` is the "keep me logged in" choice: the server then issues a
+ * session without an idle timeout and a longer absolute lifetime. The kind of
+ * session lives in the httpOnly cookie, so nothing about it is stored here.
+ *
  * Does not throw on bad credentials — returns a discriminated result the login
  * screen renders. The messages come from the API itself, so a throttled sign-in
  * (429) explains itself without this file knowing about throttling.
@@ -84,11 +88,12 @@ export type LoginResult = { ok: true } | { ok: false; message: string }
 export async function login(
     username: string,
     password: string,
+    persistent = false,
 ): Promise<LoginResult> {
     try {
-        await apiFetchV2<{username: string}>('/auth/login', {
+        await apiFetchV2<{username: string; persistent: boolean}>('/auth/login', {
             method: 'POST',
-            body: JSON.stringify({username, password}),
+            body: JSON.stringify({username, password, persistent}),
         })
     } catch (err) {
         if (err instanceof ApiError) {

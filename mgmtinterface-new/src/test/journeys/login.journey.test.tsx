@@ -1,6 +1,6 @@
 import {screen} from '@testing-library/react'
 import {beforeEach, describe, expect, it} from 'vitest'
-import {installApiMock} from '../api-mock'
+import {installApiMock, type ApiRecorder} from '../api-mock'
 import {renderApp} from '../render'
 import {baseWorld} from '../world'
 
@@ -14,16 +14,22 @@ import {baseWorld} from '../world'
  * which is the point — the app cannot read it either.
  */
 describe('journey: login', () => {
+    let recorder: ApiRecorder
+
     beforeEach(() => {
-        installApiMock([
+        recorder = installApiMock([
             ...baseWorld(),
             {
                 method: 'POST',
                 path: '/mgmt-api/auth/login',
                 respond: ({body}) => {
-                    const {username, password} = body as {username: string; password: string}
+                    const {username, password, persistent} = body as {
+                        username: string
+                        password: string
+                        persistent?: boolean
+                    }
                     if (username === 'user1' && password === 'correct-horse') {
-                        return {body: {username}}
+                        return {body: {username, persistent: persistent === true}}
                     }
                     return {
                         status: 401,
@@ -42,9 +48,26 @@ describe('journey: login', () => {
 
         await user.type(screen.getByLabelText('Username'), 'user1')
         await user.type(screen.getByLabelText('Password'), 'correct-horse')
+        // "Keep me logged in" is off unless the user ticks it.
+        expect(screen.getByLabelText('Keep me logged in')).not.toBeChecked()
         await user.click(screen.getByRole('button', {name: /sign in/i}))
 
         expect(await screen.findByRole('heading', {name: 'Projects'})).toBeInTheDocument()
+        const [call] = recorder.matching('POST', '/mgmt-api/auth/login')
+        expect(call.body).toEqual({username: 'user1', password: 'correct-horse', persistent: false})
+    })
+
+    it('sends the "keep me logged in" choice with the credentials', async () => {
+        const {user} = renderApp({route: '/login'})
+
+        await user.type(screen.getByLabelText('Username'), 'user1')
+        await user.type(screen.getByLabelText('Password'), 'correct-horse')
+        await user.click(screen.getByLabelText('Keep me logged in'))
+        await user.click(screen.getByRole('button', {name: /sign in/i}))
+
+        expect(await screen.findByRole('heading', {name: 'Projects'})).toBeInTheDocument()
+        const [call] = recorder.matching('POST', '/mgmt-api/auth/login')
+        expect(call.body).toEqual({username: 'user1', password: 'correct-horse', persistent: true})
     })
 
     it('shows an error and stays on the login form for bad credentials', async () => {

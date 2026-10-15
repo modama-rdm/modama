@@ -19,6 +19,12 @@ function mockFetchOnce(body: unknown, init: { ok?: boolean; status?: number } = 
     return fn
 }
 
+/** The JSON body of the first request made through a stubbed `fetch`. */
+function sentBody(fetchFn: ReturnType<typeof vi.fn>): unknown {
+    const init = fetchFn.mock.calls[0][1] as RequestInit
+    return JSON.parse(init.body as string)
+}
+
 beforeEach(() => {
     localStorage.clear()
 })
@@ -29,7 +35,7 @@ afterEach(() => {
 
 describe('login', () => {
     it('signs in against the v2 endpoint and keeps the Basic token for legacy screens', async () => {
-        const fetchFn = mockFetchOnce({username: 'barthel'})
+        const fetchFn = mockFetchOnce({username: 'barthel', persistent: false})
 
         const result = await login('barthel', 's3cret')
 
@@ -38,12 +44,33 @@ describe('login', () => {
             '/mgmt-api/auth/login',
             expect.objectContaining({method: 'POST', credentials: 'same-origin'}),
         )
+        // A plain sign-in asks for a normal session.
+        expect(sentBody(fetchFn)).toEqual({
+            username: 'barthel',
+            password: 's3cret',
+            persistent: false,
+        })
         // The session cookie is httpOnly, so nothing is asserted about it here —
         // the browser holds it. The token below exists only because the other
         // screens still call the legacy Flask API.
         expect(getToken()).toBe(btoa('barthel:s3cret'))
         expect(getCurrentUser()).toBe('barthel')
         expect(isAuthenticated()).toBe(true)
+    })
+
+    it('sends persistent: true for "keep me logged in"', async () => {
+        const fetchFn = mockFetchOnce({username: 'barthel', persistent: true})
+
+        await expect(login('barthel', 's3cret', true)).resolves.toEqual({ok: true})
+
+        expect(sentBody(fetchFn)).toEqual({
+            username: 'barthel',
+            password: 's3cret',
+            persistent: true,
+        })
+        // The kind of session lives in the httpOnly cookie; the stored
+        // credential is the same either way.
+        expect(localStorage.getItem('erc.auth')).not.toContain('persistent')
     })
 
     it('does not store anything when credentials are rejected', async () => {
