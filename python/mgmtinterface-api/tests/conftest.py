@@ -3,7 +3,9 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from itsdangerous.timed import TimestampSigner
 from mgmtinterface_api.config import Settings
+from mgmtinterface_api.session import SessionCodec
 from mgmtinterface_api.versioning import API_VERSION_HEADER, LATEST_VERSION
 
 
@@ -19,6 +21,26 @@ def api_client(app: FastAPI, **kwargs: Any) -> TestClient:
     return TestClient(app, headers=headers, **kwargs)
 
 
+def issue_backdated(
+    codec: SessionCodec, monkeypatch: pytest.MonkeyPatch, seconds: int, **kwargs: Any
+) -> str:
+    """
+    A cookie whose itsdangerous stamp lies `seconds` in the past, i.e. one that
+    was last refreshed that long ago.
+
+    The stamp has whole-second resolution, so backdating it is what makes idle
+    timeouts testable without sleeping.
+    """
+    real_timestamp = TimestampSigner.get_timestamp
+    monkeypatch.setattr(
+        TimestampSigner, "get_timestamp", lambda self: real_timestamp(self) - seconds
+    )
+    try:
+        return codec.issue(**kwargs)
+    finally:
+        monkeypatch.undo()
+
+
 @pytest.fixture
 def settings() -> Settings:
     """
@@ -32,5 +54,6 @@ def settings() -> Settings:
         session_cookie_secure=False,
         session_max_age_seconds=8 * 60 * 60,
         session_idle_seconds=30 * 60,
+        session_persistent_max_age_seconds=7 * 24 * 60 * 60,
         session_refresh_seconds=5 * 60,
     )

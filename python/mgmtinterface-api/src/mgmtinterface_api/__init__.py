@@ -61,8 +61,11 @@ a malformed request body.
 ### Authentication
 
 `POST /auth/login` sets an `HttpOnly` session cookie, which the browser sends
-back automatically. State-changing requests are also checked against the
-request `Origin`. Endpoints that need a session are marked with a lock below.
+back automatically. A session ends after a period of inactivity and after an
+absolute limit; `"persistent": true` on login drops the idle timeout in exchange
+for a longer absolute limit ("keep me logged in"). State-changing requests are
+also checked against the request `Origin`. Endpoints that need a session are
+marked with a lock below.
 """.strip()
 
 TAGS_METADATA = [
@@ -113,6 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.resolve_session_secret(),
         max_age_seconds=settings.session_max_age_seconds,
         idle_seconds=settings.session_idle_seconds,
+        persistent_max_age_seconds=settings.session_persistent_max_age_seconds,
     )
     # (version, client) pairs seen since boot, used to tell whether an old
     # version is still in use; see `versioning.py`.

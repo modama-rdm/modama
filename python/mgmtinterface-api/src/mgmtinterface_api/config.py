@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # not the absolute one.
     session_max_age_seconds: int = 12 * 60 * 60
     session_idle_seconds: int = 2 * 60 * 60
+    # Absolute limit for a session opened with `persistent: true` ("keep me
+    # logged in"). Such a session has no idle timeout, so this is its only
+    # bound.
+    session_persistent_max_age_seconds: int = 7 * 24 * 60 * 60
     # How old a cookie may get before it is re-issued. The account is re-checked
     # against the permissions service at the same time, so that check happens
     # once per user per interval rather than on every request.

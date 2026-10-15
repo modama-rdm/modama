@@ -1,5 +1,5 @@
 import time
-from typing import Any, NamedTuple, TypedDict, cast
+from typing import Any, NamedTuple, TypedDict
 
 from fastapi import Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -17,6 +17,10 @@ class SessionData(TypedDict):
     # timestamp, which moves forward on every refresh; this one never does, so
     # it is what bounds the absolute lifetime.
     issued: int
+    # Opened with `persistent: true` ("keep me logged in"): no idle timeout and
+    # a longer absolute lifetime. Cookies issued before the flag existed lack
+    # the key; `_as_session_data` reads them as not persistent.
+    persistent: bool
 
 
 class VerifiedSession(NamedTuple):
@@ -49,6 +53,11 @@ class SessionCodec:
       It measures time since the original login and bounds the absolute
       lifetime (`max_age_seconds`), which a sliding session must not extend.
 
+    A persistent session ("keep me logged in") skips the idle check and is
+    bounded by `persistent_max_age_seconds` instead of `max_age_seconds`. The
+    flag travels in the signed payload, so each cookie carries the lifetimes
+    that apply to it and nothing has to be stored server-side.
+
     Refreshing happens in `security.current_session`, not here; this class only
     reports how stale a cookie is, as the age returned by `read()`. The caller
     re-issues at most every `session_refresh_seconds`, which is also where the
@@ -56,19 +65,30 @@ class SessionCodec:
     in `routes/auth.py`.
     """
 
-    def __init__(self, secret: str, max_age_seconds: int, idle_seconds: int):
+    def __init__(
+        self,
+        secret: str,
+        max_age_seconds: int,
+        idle_seconds: int,
+        persistent_max_age_seconds: int,
+    ):
         self._serializer = URLSafeTimedSerializer(secret, salt=_SALT)
         self._max_age_seconds = max_age_seconds
         self._idle_seconds = idle_seconds
+        self._persistent_max_age_seconds = persistent_max_age_seconds
 
-    def issue(self, username: str, issued: int | None = None) -> str:
+    def issue(
+        self, username: str, issued: int | None = None, persistent: bool = False
+    ) -> str:
         """
-        Create a cookie value. Pass the original `issued` when refreshing, so
-        that a refreshed session cannot outlive its absolute lifetime.
+        Create a cookie value. Pass the original `issued` and `persistent` when
+        refreshing, so that a refreshed session keeps its kind and cannot
+        outlive its absolute lifetime.
         """
         data: SessionData = {
             "username": username,
             "issued": int(time.time()) if issued is None else issued,
+            "persistent": persistent,
         }
         return self._serializer.dumps(data)
 
@@ -79,18 +99,25 @@ class SessionCodec:
         to refresh).
         """
         try:
-            raw, refreshed_at = self._serializer.loads(
-                token, max_age=self._idle_seconds, return_timestamp=True
-            )
+            raw, refreshed_at = self._serializer.loads(token, return_timestamp=True)
         except BadSignature as exc:
-            # Also covers SignatureExpired, i.e. the idle timeout.
-            raise SessionInvalid("bad or idle-expired session cookie") from exc
+            raise SessionInvalid("bad session cookie") from exc
 
         data = _as_session_data(raw)
         now = time.time()
-        if now - data["issued"] > self._max_age_seconds:
+        age = now - refreshed_at.timestamp()
+        # The idle check is done here rather than with `loads(max_age=...)`:
+        # whether it applies depends on the flag inside the payload, which is
+        # only known once `loads` has returned.
+        if data["persistent"]:
+            limit = self._persistent_max_age_seconds
+        else:
+            if age > self._idle_seconds:
+                raise SessionInvalid("session is past its idle lifetime")
+            limit = self._max_age_seconds
+        if now - data["issued"] > limit:
             raise SessionInvalid("session is past its absolute lifetime")
-        return VerifiedSession(data, now - refreshed_at.timestamp())
+        return VerifiedSession(data, age)
 
 
 def _as_session_data(raw: Any) -> SessionData:
@@ -101,9 +128,16 @@ def _as_session_data(raw: Any) -> SessionData:
         not isinstance(raw, dict)
         or not isinstance(raw.get("username"), str)
         or not isinstance(raw.get("issued"), int)
+        # Absent in cookies issued before the flag existed; a present one must
+        # be a real boolean.
+        or not isinstance(raw.get("persistent", False), bool)
     ):
         raise SessionInvalid("session cookie payload has an unexpected shape")
-    return cast(SessionData, raw)
+    return {
+        "username": raw["username"],
+        "issued": raw["issued"],
+        "persistent": raw.get("persistent", False),
+    }
 
 
 # `__Host-` requires exactly this path and no Domain attribute. It is also the
@@ -111,11 +145,20 @@ def _as_session_data(raw: Any) -> SessionData:
 _COOKIE_PATH = "/"
 
 
-def set_session_cookie(response: Response, settings: Settings, token: str) -> None:
+def set_session_cookie(
+    response: Response, settings: Settings, token: str, persistent: bool = False
+) -> None:
+    # `Max-Age` follows the kind of session: a persistent cookie has to survive
+    # browser restarts for its whole lifetime.
+    max_age = (
+        settings.session_persistent_max_age_seconds
+        if persistent
+        else settings.session_max_age_seconds
+    )
     response.set_cookie(
         settings.effective_cookie_name,
         token,
-        max_age=settings.session_max_age_seconds,
+        max_age=max_age,
         httponly=True,
         secure=settings.session_cookie_secure,
         # Lax rather than Strict: Strict would drop the cookie when a user
