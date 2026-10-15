@@ -19,7 +19,7 @@ class Project(BaseModel):
 
     The fields are identical to those of the legacy `/api/project/` response, so
     that screens can migrate one endpoint at a time without changing how they
-    read a project. `usage_bytes` is null in the list; it is expensive to
+    read a project. `usage_bytes` is null in `ProjectList`; it is expensive to
     compute, so the permissions service only computes it for a single project.
     """
 
