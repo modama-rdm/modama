@@ -121,6 +121,7 @@ services:
     # it from the host, and the dev override sets one.
     depends_on:
       - "permissions"
+      - "smbdrop"
 
   mgmtinterface-proxy:  # another nginx, in prod this terminates TLS
     # see prod/override files for config volumes and ports

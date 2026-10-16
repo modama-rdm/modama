@@ -13,6 +13,9 @@ RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install uvicorn
 COPY ./python/permissions-client /code/permissions-client
 RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install /code/permissions-client/
 
+COPY ./python/smbdrop-client /code/smbdrop-client
+RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install /code/smbdrop-client/
+
 # This one last to speed up iteration on the API
 COPY ./python/mgmtinterface-api /code/mgmtinterface-api
 RUN --mount=type=cache,target=/root/.cache /venv/bin/pip install -e /code/mgmtinterface-api/
