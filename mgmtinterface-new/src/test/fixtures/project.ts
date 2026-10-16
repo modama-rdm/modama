@@ -1,4 +1,4 @@
-import type {ProjectDetailsResponse} from '../../api/types'
+import type {SerializedDataset, SerializedProject} from '../../api/types'
 
 /**
  * The real "datamanagement" project (Dieter's dogfooding project — 11 members,
@@ -6,8 +6,12 @@ import type {ProjectDetailsResponse} from '../../api/types'
  * verbatim: they're demo/test data ("create by hand", "testsession", …), not
  * identities, and are exactly the kind of value #202's quote_path parity exists
  * to round-trip correctly (spaces, digits, hyphens).
+ *
+ * Captured from the legacy details endpoint, which computed `usage_bytes`
+ * inline. The new API answers the details with `usage_bytes: null` and the
+ * size from `GET .../usage`; `world.ts` splits the fixture accordingly.
  */
-export const FIXTURE_PROJECT: ProjectDetailsResponse['project'] = {
+export const FIXTURE_PROJECT: SerializedProject = {
     "ctime": 1783695300.3267505,
     "gid": 1020,
     "members": [
@@ -30,7 +34,7 @@ export const FIXTURE_PROJECT: ProjectDetailsResponse['project'] = {
     "usage_bytes": 2226346428528
 }
 
-export const FIXTURE_DATASETS: ProjectDetailsResponse['datasets'] = [
+export const FIXTURE_DATASETS: SerializedDataset[] = [
     {
         "ctime": 1783695300.3417509,
         "immutable": false,

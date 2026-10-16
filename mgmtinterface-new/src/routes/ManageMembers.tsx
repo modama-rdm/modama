@@ -8,13 +8,9 @@ import {
     useLoaderData,
     useNavigate,
 } from 'react-router-dom'
-import {Unauthorized, apiFetch} from '../api/client'
-import type {
-    ChangeMembersRequest,
-    ChangeMembersResponse,
-    GenericErrorResponse,
-    ProjectDetailsResponse,
-} from '../api/types'
+import {Unauthorized} from '../api/client'
+import {apiFetchV2} from '../api/clientV2'
+import type {ProjectDetailsV2, SerializedProject, SetMembersRequestV2} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {MemberPicker} from '../components/MemberPicker'
 import {Avatar} from '../components/ui/Avatar'
@@ -25,30 +21,10 @@ import {useToast} from '../components/ui/toast-context'
 import {memberChanges} from '../lib/projectsUtil'
 import type {ManageMembersLoaderData} from './manageMembers.loader'
 
-/**
- * Apply one add/remove batch via `PATCH …/members/`. Throws on a non-success
- * response so the caller can surface the backend message; `Unauthorized`
- * propagates untouched for the login redirect.
- */
-async function changeMembers(
-    name: string,
-    body: ChangeMembersRequest,
-): Promise<void> {
-    const res = await apiFetch<ChangeMembersResponse | GenericErrorResponse>(
-        `/api/project/${encodeURIComponent(name)}/members/`,
-        {method: 'PATCH', body: JSON.stringify(body)},
-    )
-    // `errno` can't discriminate (it's `number` on the error shape), so key off
-    // the presence of the `project` payload (matches the New Project pattern).
-    if (!('project' in res)) {
-        throw new Error(res.message || 'Could not update members.')
-    }
-}
-
-/** Renders once the slow `details` promise resolves; owns the edit form. */
+/** Renders once the `details` promise resolves; owns the edit form. */
 function MembersForm() {
     const {name, currentUser, users} = useLoaderData() as ManageMembersLoaderData
-    const {project} = useAsyncValue() as ProjectDetailsResponse
+    const project = useAsyncValue() as ProjectDetailsV2
     const navigate = useNavigate()
     const {notify} = useToast()
 
@@ -87,21 +63,18 @@ function MembersForm() {
         }
         setError('')
         setSubmitting(true)
-        // The API applies one op per call, so add + remove can't be atomic. Track
-        // whether the add already committed: if a later call fails we've changed
-        // server state, and the form's baseline (`project.members`, loaded once)
-        // is now stale — resubmitting would re-add the already-added members.
-        let partiallyApplied = false
         try {
-            // Two ops mirror the legacy route: add the new members, then remove
-            // the dropped ones. `user` must equal the authenticated user.
-            if (added.length > 0) {
-                await changeMembers(name, {op: 'add', members: added, user: currentUser})
-                partiallyApplied = removed.length > 0
-            }
-            if (removed.length > 0) {
-                await changeMembers(name, {op: 'remove', members: removed, user: currentUser})
-            }
+            // One request with the list as it should be (#172). The API works
+            // out who to add and who to remove against the current members, so
+            // the form never has to track what already landed: if the call
+            // fails, even after part of the change was applied (the API says
+            // so in its message), saving again applies only what is still
+            // missing. The owner is a member regardless of the list.
+            const body: SetMembersRequestV2 = {members: selected}
+            await apiFetchV2<SerializedProject>(
+                `/projects/${encodeURIComponent(name)}/members`,
+                {method: 'PUT', body: JSON.stringify(body)},
+            )
             notify(`Members of "${project.name}" updated.`)
             navigate(backTo)
         } catch (err) {
@@ -109,18 +82,8 @@ function MembersForm() {
                 navigate(`/login?next=/projects/${project.name}/members`)
                 return
             }
-            const message = err instanceof Error ? err.message : 'Could not update members.'
-            if (partiallyApplied) {
-                // Some changes already landed. Bounce to the project (which reloads
-                // the real member list) instead of leaving a stale form the user
-                // could resubmit against an out-of-date baseline.
-                notify(`Some changes were saved before an error occurred: ${message} Please re-check the members.`, 'error')
-                navigate(backTo)
-            } else {
-                // Nothing was applied — the baseline still matches the server, so
-                // it is safe to surface the error in place and let the user retry.
-                setError(message)
-            }
+            // The API's errors are written to be shown.
+            setError(err instanceof Error ? err.message : 'Could not update members.')
         } finally {
             setSubmitting(false)
         }

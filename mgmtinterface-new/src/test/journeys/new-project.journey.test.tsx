@@ -31,8 +31,13 @@ describe('journey: new project', () => {
             // captured fixtures, so answer for it ahead of the base world.
             {
                 method: 'GET',
-                path: `/api/project/${created.name}/`,
-                respond: () => ({body: {errno: 0, project: created, datasets: []}}),
+                path: `/mgmt-api/projects/${created.name}`,
+                respond: () => ({body: {...created, usage_bytes: null, sessions: []}}),
+            },
+            {
+                method: 'GET',
+                path: `/mgmt-api/projects/${created.name}/usage`,
+                respond: () => ({body: {usage_bytes: 0}}),
             },
             ...baseWorld(),
             {

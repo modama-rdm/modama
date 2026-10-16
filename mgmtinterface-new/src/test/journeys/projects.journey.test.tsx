@@ -4,6 +4,7 @@ import {installApiMock} from '../api-mock'
 import {renderApp, signIn} from '../render'
 import {baseWorld} from '../world'
 import {FIXTURE_PROJECT} from '../fixtures/project'
+import {makeFixtureShare} from '../fixtures/share'
 
 /**
  * #169 journey 2/6 — projects list: grouping, search, sort, and navigating
@@ -54,15 +55,28 @@ describe('journey: projects list', () => {
         expect(screen.getByText(`Project owned by ${FIXTURE_PROJECT.owner}`)).toBeInTheDocument()
     })
 
-    it('reads the list from the new API while shares stay on the legacy one', async () => {
-        // Pins the half-migrated state (#172) that this screen is in, so the
-        // day shares move over, this fails and gets updated deliberately.
+    it('reads the list and the shares from the new API and nothing from the legacy one', async () => {
+        // Pins that this screen is fully off Flask (#172).
         const api = installApiMock(baseWorld())
         renderApp({route: '/projects'})
         await screen.findByText('My Projects')
 
         expect(api.matching('GET', '/mgmt-api/projects')).toHaveLength(1)
-        expect(api.matching('GET', '/api/project/')).toHaveLength(0)
-        expect(api.matching('GET', '/api/share/')).toHaveLength(1)
+        expect(api.matching('GET', '/mgmt-api/ingest-shares')).toHaveLength(1)
+        expect(api.calls.filter(c => c.path.startsWith('/api/'))).toHaveLength(0)
+    })
+
+    it('shows an active upload for each open share, by project and session', async () => {
+        // The share names its project and session; nothing is parsed off a path.
+        const share = makeFixtureShare({project: FIXTURE_PROJECT.name, session: 'create by hand'})
+        installApiMock(baseWorld({shares: [share]}))
+        const {user} = renderApp({route: '/projects'})
+
+        const banner = (await screen.findByText('Active upload in progress')).closest('div')!.parentElement!
+        expect(within(banner).getByText(FIXTURE_PROJECT.name)).toBeInTheDocument()
+        expect(within(banner).getByText('create by hand')).toBeInTheDocument()
+
+        await user.click(within(banner).getByRole('button', {name: /manage ingest/i}))
+        expect(await screen.findByText('Ingest share is live')).toBeInTheDocument()
     })
 })

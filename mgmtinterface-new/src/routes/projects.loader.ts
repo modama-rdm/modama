@@ -1,21 +1,19 @@
 import {redirect} from 'react-router-dom'
 import {getCurrentUser} from '../api/auth'
-import {Unauthorized, apiFetch} from '../api/client'
+import {Unauthorized} from '../api/client'
 import {apiFetchV2} from '../api/clientV2'
-import type {ListSharesResponse, ProjectListV2} from '../api/types'
+import type {IngestShareListV2, IngestShareV2, ProjectListV2} from '../api/types'
 
 export interface ProjectsLoaderData {
     currentUser: string
     projects: ProjectListV2['projects']
-    shares: ListSharesResponse
+    /** The current user's open ingest shares, for the active-upload banner. */
+    shares: IngestShareV2[]
 }
 
 /**
- * Loads the project list (+ the current user's active ingested shares).
- *
- * The list now comes from the new API (#172), authenticated by the session
- * cookie; shares are still on the legacy Flask endpoint with its Basic token.
- * The two coexist screen by screen until every endpoint has moved over.
+ * Loads the project list and the current user's open ingest shares, both from
+ * the new API (#172), authenticated by the session cookie.
  */
 export async function projectsLoader(): Promise<ProjectsLoaderData> {
     const currentUser = getCurrentUser() ?? ''
@@ -29,11 +27,11 @@ export async function projectsLoader(): Promise<ProjectsLoaderData> {
     }
 
     // Active ingest is secondary — never fail the whole page if shares are down.
-    let shares: ListSharesResponse
+    let shares: IngestShareV2[]
     try {
-        shares = await apiFetch<ListSharesResponse>('/api/share/')
+        shares = (await apiFetchV2<IngestShareListV2>('/ingest-shares')).shares
     } catch {
-        shares = {}
+        shares = []
     }
 
     return {currentUser, projects, shares}

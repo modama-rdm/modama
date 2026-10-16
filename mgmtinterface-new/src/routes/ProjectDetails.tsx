@@ -9,7 +9,12 @@ import {
     useNavigate,
 } from 'react-router-dom'
 import {Unauthorized} from '../api/client'
-import type {ProjectDetailsResponse, SerializedDataset} from '../api/types'
+import type {
+    ProjectDetailsV2,
+    ProjectUsageV2,
+    SerializedDataset,
+    SerializedProject,
+} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {CopyButton} from '../components/CopyField'
 import {Avatar} from '../components/ui/Avatar'
@@ -64,7 +69,7 @@ function SessionsTable({
                            sharedNames,
                            canMutate,
                        }: {
-    project: ProjectDetailsResponse['project']
+    project: SerializedProject
     datasets: SerializedDataset[]
     sharedNames: Set<string>
     canMutate: boolean
@@ -187,16 +192,37 @@ function DetailRow({label, children}: { label: string; children: ReactNode }) {
     )
 }
 
-/** Renders once the slow `details` promise resolves. */
+/**
+ * The Size row's value: streams in from the separate usage call (#172), which
+ * runs `du` on the server and can take a minute on a large project. Until it
+ * resolves there is a placeholder; if it fails, a dash — the rest of the page
+ * is not affected either way.
+ */
+function Size() {
+    const {usage_bytes} = useAsyncValue() as ProjectUsageV2
+    return <span title={`${usage_bytes} bytes`}>{formatBytes(usage_bytes)}</span>
+}
+
+function SizePending() {
+    return (
+        <span
+            aria-busy="true"
+            aria-label="Computing size"
+            className="inline-block h-4 w-20 animate-pulse rounded bg-surface-muted align-middle"
+        />
+    )
+}
+
+/** Renders once the `details` promise resolves. */
 function ProjectBody() {
-    const {currentUser, shares} = useLoaderData() as ProjectDetailsLoaderData
-    const {project, datasets} = useAsyncValue() as ProjectDetailsResponse
+    const {currentUser, shares, usage} = useLoaderData() as ProjectDetailsLoaderData
+    const project = useAsyncValue() as ProjectDetailsV2
     const navigate = useNavigate()
 
     const isOwner = currentUser === project.owner
     const canMutate = isOwner || project.members.includes(currentUser)
-    const sharedNames = sharedDatasetNames(shares, project.relpath)
-    const sorted = sortDatasets(datasets)
+    const sharedNames = sharedDatasetNames(shares, project.name)
+    const sorted = sortDatasets(project.sessions)
     const projectPath = canonicalProjectPath(project.relpath)
 
     return (
@@ -231,13 +257,21 @@ function ProjectBody() {
                     <DetailRow label="Created">{formatDateTime(project.ctime)}</DetailRow>
                     <DetailRow label="Modified">{formatDateTime(project.mtime)}</DetailRow>
                     <DetailRow label="Size">
-                        {project.usage_bytes == null ? (
-                            <span className="text-fg-faint">—</span>
-                        ) : (
-                            <span title={`${project.usage_bytes} bytes`}>
-                                {formatBytes(project.usage_bytes)}
-                            </span>
-                        )}
+                        <Suspense fallback={<SizePending/>}>
+                            <Await
+                                resolve={usage}
+                                errorElement={
+                                    <span
+                                        className="text-fg-faint"
+                                        title="The size could not be computed"
+                                    >
+                                        —
+                                    </span>
+                                }
+                            >
+                                <Size/>
+                            </Await>
+                        </Suspense>
                     </DetailRow>
                     <DetailRow label="Members">
                         {project.members.length === 0 ? (

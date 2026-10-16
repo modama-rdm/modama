@@ -1,7 +1,8 @@
 import {redirect} from 'react-router-dom'
 import {getCurrentUser} from '../api/auth'
-import {Unauthorized, apiFetch} from '../api/client'
-import type {GetUserListResponse} from '../api/types'
+import {Unauthorized} from '../api/client'
+import {apiFetchV2} from '../api/clientV2'
+import type {UserListV2} from '../api/types'
 
 export interface NewProjectLoaderData {
     currentUser: string
@@ -13,7 +14,7 @@ export interface NewProjectLoaderData {
 export async function newProjectLoader(): Promise<NewProjectLoaderData> {
     const currentUser = getCurrentUser() ?? ''
     try {
-        const res = await apiFetch<GetUserListResponse>('/api/users/list/')
+        const res = await apiFetchV2<UserListV2>('/users')
         return {currentUser, users: res.users}
     } catch (err) {
         if (err instanceof Unauthorized) throw redirect('/login?next=/projects/new')

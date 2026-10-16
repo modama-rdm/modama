@@ -6,11 +6,10 @@ import {baseWorld} from '../world'
 import {FIXTURE_PROJECT} from '../fixtures/project'
 
 /**
- * #169 journey 3/6 — create a session, then seal one. Creating moved to the
- * new API (#172): real status codes, 201 for a new session and 200 for one
- * that already existed. Sealing still uses the legacy "errno-can't-
- * discriminate" pattern (`SealSession.tsx`), which this journey keeps
- * exercising through the real UI.
+ * #169 journey 3/6 — create a session, then seal one. Both are on the new API
+ * (#172): real status codes, 201 for a new session and 200 for one that
+ * already existed; sealing is a bodiless `POST` on the session that answers
+ * the sealed session or says why it could not.
  */
 describe('journey: create and seal a session', () => {
     const name = FIXTURE_PROJECT.name
@@ -20,6 +19,11 @@ describe('journey: create and seal a session', () => {
     })
 
     const createSession = `/mgmt-api/projects/${name}/sessions`
+    const dataset = 'create by hand' // FIXTURE_DATASETS entry with immutable: false
+    // The session name is a path segment, URL-encoded; the mock matches on the
+    // encoded pathname, as the server would see it.
+    const seal = `${createSession}/${encodeURIComponent(dataset)}/seal`
+    const sealRoute = `/projects/${name}/sessions/${encodeURIComponent(dataset)}/seal`
 
     it('creates a session and returns to the project', async () => {
         const recorder = installApiMock([
@@ -110,22 +114,47 @@ describe('journey: create and seal a session', () => {
     })
 
     it('seals an open session and returns to the project', async () => {
-        const dataset = 'create by hand' // FIXTURE_DATASETS entry with immutable: false
         const recorder = installApiMock([
             ...baseWorld(),
             {
                 method: 'POST',
-                path: `/api/project/${name}/dataset/seal/`,
-                respond: () => ({body: {errno: 0}}),
+                path: seal,
+                respond: () => ({
+                    body: {name: dataset, immutable: true, ctime: 1, mtime: 1784720092},
+                }),
             },
         ])
-        const {user} = renderApp({route: `/projects/${name}/sessions/${encodeURIComponent(dataset)}/seal`})
+        const {user} = renderApp({route: sealRoute})
 
         await screen.findByText('Seal this session?')
         await user.click(screen.getByRole('button', {name: /seal session permanently/i}))
 
         expect(await screen.findByRole('heading', {name})).toBeInTheDocument()
-        const [call] = recorder.matching('POST', `/api/project/${name}/dataset/seal/`)
-        expect(call.body).toEqual({name: dataset, user: FIXTURE_PROJECT.owner})
+        expect(screen.getByText(`Session "${dataset}" sealed.`)).toBeInTheDocument()
+        const calls = recorder.matching('POST', seal)
+        expect(calls).toHaveLength(1)
+        // Everything the server needs is in the path and the cookie.
+        expect(calls[0].body).toBeUndefined()
+    })
+
+    it("shows the API's reason and stays when sealing is refused", async () => {
+        installApiMock([
+            ...baseWorld(),
+            {
+                method: 'POST',
+                path: seal,
+                respond: () => ({
+                    status: 400,
+                    body: {code: 'seal_rejected', message: 'Raw folder does not exist.'},
+                }),
+            },
+        ])
+        const {user} = renderApp({route: sealRoute})
+
+        await screen.findByText('Seal this session?')
+        await user.click(screen.getByRole('button', {name: /seal session permanently/i}))
+
+        expect(await screen.findByText('Raw folder does not exist.')).toBeInTheDocument()
+        expect(screen.getByRole('button', {name: /seal session permanently/i})).toBeInTheDocument()
     })
 })

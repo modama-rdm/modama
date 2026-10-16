@@ -1,10 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import type {
-    ListSharesResponse,
-    SerializedDataset,
-    SerializedProject,
-    SerializedShare,
-} from '../api/types'
+import type {IngestShareV2, SerializedDataset, SerializedProject} from '../api/types'
 import {
     availableMembers,
     canonicalProjectPath,
@@ -12,7 +7,6 @@ import {
     findDatasetShare,
     groupProjects,
     memberChanges,
-    parseSharePath,
     sharedDatasetNames,
     sortDatasets,
     sortProjects,
@@ -102,22 +96,6 @@ describe('sortProjects', () => {
     })
 })
 
-describe('parseSharePath', () => {
-    it('extracts project and dataset from the last two path segments', () => {
-        expect(parseSharePath('/data/adhoc/ghost_imaging/2025-06-18')).toEqual({
-            project: 'ghost_imaging',
-            dataset: '2025-06-18',
-        })
-    })
-
-    it('ignores trailing slashes', () => {
-        expect(parseSharePath('/data/adhoc/proj/sess/')).toEqual({
-            project: 'proj',
-            dataset: 'sess',
-        })
-    })
-})
-
 describe('canonicalProjectPath', () => {
     it('builds the project path from relpath', () => {
         expect(canonicalProjectPath('data/ghost_imaging')).toBe('/data/ghost_imaging')
@@ -131,53 +109,55 @@ describe('canonicalProjectPath', () => {
 })
 
 describe('sharedDatasetNames', () => {
-    const share = (destPath: string): SerializedShare => ({
+    // Shares name their project and session (#172); `dest_path` is along for
+    // the ride and must not be what the match is made on.
+    const share = (id: string, project: string, session: string): IngestShareV2 => ({
         resource: null,
-        share_id: destPath,
-        share_name: 'tmp',
-        dest_path: destPath,
+        share_id: id,
+        share_name: `share-${id}`,
+        dest_path: '/data/adhoc/decoy/decoy',
         created_timestamp: 1700000000,
         username: 'ingest',
         password: 'secret',
         uid: 5001,
         gid: 5001,
+        project,
+        session,
+        smb_host: 'ingest.example.test',
+        workgroup: 'LAB',
     })
-    const shares: ListSharesResponse = {
-        a: share('/srv/smb/data/ghost_imaging/2025-06-18'),
-        b: share('/srv/smb/data/ghost_imaging/2025-06-19/'),
-        c: share('/srv/smb/data/other_project/2025-06-18'),
-    }
+    const shares: IngestShareV2[] = [
+        share('a', 'ghost_imaging', '2025-06-18'),
+        share('b', 'ghost_imaging', '2025-06-19'),
+        share('c', 'other_project', '2025-06-18'),
+    ]
 
-    it('matches only datasets under the given project relpath', () => {
-        const names = sharedDatasetNames(shares, 'data/ghost_imaging')
+    it('matches only sessions of the given project', () => {
+        const names = sharedDatasetNames(shares, 'ghost_imaging')
         expect(names).toEqual(new Set(['2025-06-18', '2025-06-19']))
     })
 
-    it('does not match a same-named dataset in another project', () => {
-        const names = sharedDatasetNames(shares, 'data/other_project')
+    it('does not match a same-named session in another project', () => {
+        const names = sharedDatasetNames(shares, 'other_project')
         expect(names).toEqual(new Set(['2025-06-18']))
     })
 
     it('returns an empty set when nothing matches', () => {
-        expect(sharedDatasetNames(shares, 'data/empty')).toEqual(new Set())
+        expect(sharedDatasetNames(shares, 'empty')).toEqual(new Set())
+        expect(sharedDatasetNames([], 'ghost_imaging')).toEqual(new Set())
     })
 
-    it('finds the share for a specific dataset', () => {
-        const found = findDatasetShare(shares, 'data/ghost_imaging', '2025-06-19')
-        expect(found?.dest_path).toBe('/srv/smb/data/ghost_imaging/2025-06-19/')
+    it('finds the share for a specific session', () => {
+        expect(findDatasetShare(shares, 'ghost_imaging', '2025-06-19')?.share_id).toBe('b')
     })
 
-    it('does not match a same-named dataset in another project', () => {
-        expect(
-            findDatasetShare(shares, 'data/ghost_imaging', '2025-06-18')?.dest_path,
-        ).toBe('/srv/smb/data/ghost_imaging/2025-06-18')
-        expect(
-            findDatasetShare(shares, 'data/other_project', '2025-06-19'),
-        ).toBeNull()
+    it('does not match a same-named session in another project', () => {
+        expect(findDatasetShare(shares, 'ghost_imaging', '2025-06-18')?.share_id).toBe('a')
+        expect(findDatasetShare(shares, 'other_project', '2025-06-19')).toBeNull()
     })
 
-    it('returns null when the dataset has no share', () => {
-        expect(findDatasetShare(shares, 'data/ghost_imaging', '2025-01-01')).toBeNull()
+    it('returns null when the session has no share', () => {
+        expect(findDatasetShare(shares, 'ghost_imaging', '2025-01-01')).toBeNull()
     })
 })
 

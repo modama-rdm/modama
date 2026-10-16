@@ -9,7 +9,6 @@ import {formatDate} from '../lib/format'
 import {
     filterProjects,
     groupProjects,
-    parseSharePath,
     sortProjects,
     type SortBy,
 } from '../lib/projectsUtil.ts'
@@ -118,11 +117,6 @@ export function Projects() {
         }
     }, [query, sortBy, currentUser, projects])
 
-    const ingests = useMemo(
-        () => Object.values(shares).map((s) => parseSharePath(s.dest_path)),
-        [shares],
-    )
-
     const visibleCount =
         grouped.own.length + grouped.member.length + grouped.other.length
     const openProject = (name: string) => navigate(`/projects/${name}`)
@@ -163,25 +157,26 @@ export function Projects() {
                 </select>
             </div>
 
-            {ingests.length > 0 && (
+            {shares.length > 0 && (
                 <div
                     className="mb-7 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 px-5 py-4 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-orange-500/10">
                     <div
                         className="mb-2.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
                         <UploadIcon className="h-3.5 w-3.5"/>
-                        Active upload{ingests.length === 1 ? '' : 's'} in progress
+                        Active upload{shares.length === 1 ? '' : 's'} in progress
                     </div>
                     <div className="flex flex-col gap-3">
-                        {ingests.map((s, i) => (
+                        {/* Each share names its project and session (#172); nothing to parse. */}
+                        {shares.map((s) => (
                             <div
-                                key={`${s.project}/${s.dataset}/${i}`}
+                                key={s.share_id}
                                 className="flex flex-wrap items-center justify-between gap-3"
                             >
                                 <div>
                                     <div className="text-sm font-semibold text-fg">
                                         <span className="font-mono">{s.project}</span>
                                         <span className="mx-1.5 font-normal text-fg-faint">/</span>
-                                        <span className="font-mono">{s.dataset}</span>
+                                        <span className="font-mono">{s.session}</span>
                                     </div>
                                     <div className="mt-0.5 text-xs text-amber-800 dark:text-amber-200">
                                         Ingest share is open — data is being uploaded to this session
@@ -197,7 +192,7 @@ export function Projects() {
                                     <button
                                         onClick={() =>
                                             navigate(
-                                                `/projects/${s.project}/sessions/${s.dataset}/ingest`,
+                                                `/projects/${s.project}/sessions/${s.session}/ingest`,
                                             )
                                         }
                                         className="rounded-lg bg-amber-600 px-4 py-1.5 text-[13px] font-semibold text-white transition-colors hover:bg-amber-700"

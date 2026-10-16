@@ -24,7 +24,7 @@ export interface ApiRequest {
 }
 
 export interface ApiReply {
-    /** Defaults to 200 — the API reports logical errors in the `errno` body. */
+    /** Defaults to 200. Use 204 for a bodiless success (the body is then ignored). */
     status?: number
     body: unknown
 }
@@ -94,6 +94,8 @@ export function installApiMock(handlers: ApiHandler[]): ApiRecorder {
             if (!h.re.test(url.pathname)) continue
             const reply = await h.respond(req)
             const status = reply.status ?? 200
+            // A 204 may not carry a body; `Response` throws if given one.
+            if (status === 204) return new Response(null, {status})
             return new Response(JSON.stringify(reply.body), {
                 status,
                 headers: {'Content-Type': 'application/json'},

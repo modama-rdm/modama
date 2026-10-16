@@ -1,9 +1,4 @@
-import type {
-    ListSharesResponse,
-    SerializedDataset,
-    SerializedProject,
-    SerializedShare,
-} from '../api/types'
+import type {IngestShareV2, SerializedDataset, SerializedProject} from '../api/types'
 
 export type SortBy = 'recent' | 'name'
 
@@ -61,22 +56,6 @@ export function sortProjects(
 }
 
 /**
- * Derive { project, dataset } from a share's `dest_path` — replicates the
- * backend's `split_smbpath`: the dataset is the last path segment, the project
- * the one before it.
- */
-export function parseSharePath(destPath: string): {
-    project: string
-    dataset: string
-} {
-    const parts = destPath.split('/').filter(Boolean)
-    return {
-        dataset: parts[parts.length - 1] ?? '',
-        project: parts[parts.length - 2] ?? '',
-    }
-}
-
-/**
  * Canonical filesystem path of a project (or a dataset within it) — mirrors the
  * backend `canonical_path` filter: "/" + relpath [ + "/" + dataset ]. Used for
  * the Browse links and copy-to-clipboard fields.
@@ -87,32 +66,15 @@ export function canonicalProjectPath(relpath: string, dataset?: string): string 
 }
 
 /**
- * If a share targets a dataset inside the given project `relpath`, return that
- * dataset's name, else `null` — the shared matcher behind `sharedDatasetNames`
- * and `findDatasetShare`. A share belongs to the project when its `dest_path` is
- * `.../<relpath>/<dataset>` (the API already scopes `/api/share/` to the current
- * user, so no uid check is needed here). Mirrors the backend `add_share_info`.
- */
-function shareDatasetName(destPath: string, relpath: string): string | null {
-    const norm = destPath.replace(/\/+$/, '')
-    const slash = norm.lastIndexOf('/')
-    if (slash < 0) return null
-    const dataset = norm.slice(slash + 1)
-    const parent = norm.slice(0, slash + 1)
-    return parent.endsWith(`/${relpath}/`) ? dataset : null
-}
-
-/**
  * Names of this project's datasets that currently have an active ingest share.
+ * Each share names its project and session (#172), and the list is already
+ * scoped to the signed-in user, so this is a plain field match; nothing parses
+ * `dest_path` any more.
  */
-export function sharedDatasetNames(
-    shares: ListSharesResponse,
-    relpath: string,
-): Set<string> {
+export function sharedDatasetNames(shares: IngestShareV2[], project: string): Set<string> {
     const names = new Set<string>()
-    for (const share of Object.values(shares)) {
-        const dataset = shareDatasetName(share.dest_path, relpath)
-        if (dataset) names.add(dataset)
+    for (const share of shares) {
+        if (share.project === project) names.add(share.session)
     }
     return names
 }
@@ -122,14 +84,11 @@ export function sharedDatasetNames(
  * lookup the Ingest screen needs (`sharedDatasetNames` only yields names).
  */
 export function findDatasetShare(
-    shares: ListSharesResponse,
-    relpath: string,
+    shares: IngestShareV2[],
+    project: string,
     dataset: string,
-): SerializedShare | null {
-    for (const share of Object.values(shares)) {
-        if (shareDatasetName(share.dest_path, relpath) === dataset) return share
-    }
-    return null
+): IngestShareV2 | null {
+    return shares.find((s) => s.project === project && s.session === dataset) ?? null
 }
 
 /** Return a copy of the datasets sorted newest-modified first (legacy order). */

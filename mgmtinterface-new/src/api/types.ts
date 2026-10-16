@@ -1,8 +1,14 @@
 /**
- * TypeScript mirrors of the mgmtinterface `/api/*` JSON shapes.
- * */
+ * TypeScript mirrors of the JSON shapes the app reads.
+ *
+ * Every screen but the data browser reads the new `/mgmt-api` service (GitLab
+ * #172), which reports failure with the status code and a `{code, message}`
+ * body (see `clientV2.ts`); its shapes carry a `V2` suffix. The browse types at
+ * the end mirror the legacy Flask `/api/browse/` stopgap, the one endpoint
+ * still answering HTTP 200 with an `errno` envelope; step 5 of #172 replaces it.
+ */
 
-/** Most endpoints return an `errno` discriminator (0 = success). */
+/** The legacy envelope: `errno` 0 is success. Only the browse stopgap uses it. */
 export interface OkEnvelope {
     errno: 0
 }
@@ -12,21 +18,11 @@ export interface GenericErrorResponse {
     message: string
 }
 
-export interface IdInner {
-    uid: number
-}
-
-export interface AuthenticateSuccess extends OkEnvelope {
-    id: IdInner
-}
-
-/** `POST /api/users/auth/` — public; returns 200 even for bad credentials. */
-export type AuthenticateResponse = AuthenticateSuccess | GenericErrorResponse
-
-export interface GetUserListResponse extends OkEnvelope {
-    users: string[]
-}
-
+/**
+ * One project, as the permissions service serializes it. `usage_bytes` is null
+ * in every answer but {@link ProjectUsageV2}: computing it means a `du` over
+ * the whole project, which nothing else should wait for.
+ */
 export interface SerializedProject {
     relpath: string
     name: string
@@ -38,6 +34,7 @@ export interface SerializedProject {
     usage_bytes: number | null
 }
 
+/** One session (a "dataset" to the permissions service): a folder with `raw/`. */
 export interface SerializedDataset {
     name: string
     immutable: boolean
@@ -45,25 +42,71 @@ export interface SerializedDataset {
     mtime: number
 }
 
-export interface ListProjectsResponse extends OkEnvelope {
-    projects: SerializedProject[]
-}
-
 /**
- * `GET /mgmt-api/projects` — the same project shape without the `errno` envelope,
- * since that API reports failure with the status code (GitLab #172). An object
- * rather than a bare array so pagination fields can arrive without breaking
- * callers.
+ * `GET /mgmt-api/projects`. An object rather than a bare array so pagination
+ * fields can arrive without breaking callers.
  */
 export interface ProjectListV2 {
     projects: SerializedProject[]
 }
 
-export interface ProjectDetailsResponse extends OkEnvelope {
-    project: SerializedProject
-    datasets: SerializedDataset[]
+/**
+ * `GET /mgmt-api/projects/<name>`: the project's own fields plus its sessions,
+ * flat, not the legacy `{project, datasets}` envelope. Readable by anyone
+ * signed in. Fast: the size is a separate call ({@link ProjectUsageV2}).
+ */
+export interface ProjectDetailsV2 extends SerializedProject {
+    sessions: SerializedDataset[]
 }
 
+/**
+ * `GET /mgmt-api/projects/<name>/usage`: the one slow call (`du` on the
+ * server, up to a minute on a large project). Loaders stream it separately so
+ * the rest of a screen never waits for it.
+ */
+export interface ProjectUsageV2 {
+    usage_bytes: number
+}
+
+/** `GET /mgmt-api/users`: everyone a project can have as a member, sorted. */
+export interface UserListV2 {
+    users: string[]
+}
+
+/**
+ * `POST /mgmt-api/projects`. No `owner`: the signed-in session is the owner.
+ * Answers 201 with the new project, or 200 with the existing one when the
+ * signed-in user already owns a project of that name (the create endpoints
+ * are idempotent); 409 when someone else does.
+ */
+export interface CreateProjectRequestV2 {
+    name: string
+    members: string[]
+}
+
+/**
+ * `PUT /mgmt-api/projects/<name>/members`: the complete member list wanted.
+ * The server works out who to add and who to remove, so sending the same list
+ * again (after a lost or partial answer) is safe. The owner is a member
+ * regardless and may be left out. Answers the {@link SerializedProject}.
+ */
+export interface SetMembersRequestV2 {
+    members: string[]
+}
+
+/** `POST /mgmt-api/projects/<name>/sessions` — the session, by its UI name. */
+export interface CreateSessionRequestV2 {
+    name: string
+}
+
+/**
+ * A session as the new API answers it: on create (200 when it already existed,
+ * 201 when just created) and on `POST .../sessions/<session>/seal`, which
+ * takes no body and answers the sealed session.
+ */
+export type SessionV2 = SerializedDataset
+
+/** An smbdrop share, the fields the share service itself reports. */
 export interface SerializedShare {
     resource: string | null
     share_id: string
@@ -78,90 +121,6 @@ export interface SerializedShare {
     gid: number
 }
 
-/** `GET /api/share/` — keyed by share_id. */
-export type ListSharesResponse = Record<string, SerializedShare>
-
-
-export interface CreateProjectRequest {
-    name: string
-    owner: string
-    members: string[]
-}
-
-/**
- * `POST /mgmt-api/projects` (#172). No `owner`: the signed-in session is the
- * owner. Answers 201 with the new project, or 200 with the existing one when
- * the signed-in user already owns a project of that name (the create endpoints
- * are idempotent); 409 when someone else does.
- */
-export interface CreateProjectRequestV2 {
-    name: string
-    members: string[]
-}
-
-/** `POST /mgmt-api/projects/<name>/sessions` — the session, by its UI name. */
-export interface CreateSessionRequestV2 {
-    name: string
-}
-
-/**
- * `POST /mgmt-api/projects/<name>/sessions` success: the session as the
- * project details list it (same fields as {@link SerializedDataset}). 200 when
- * it already existed, 201 when it was just created.
- */
-export type SessionV2 = SerializedDataset
-
-/** `POST /api/project/` success — the freshly created project. */
-export interface CreateProjectResponse extends OkEnvelope {
-    project: SerializedProject
-}
-
-export interface CreateDatasetRequest {
-    name: string
-    owner: string
-}
-
-/** `POST /api/project/<name>/dataset/` — success carries no payload. */
-export type CreateDatasetResponse = OkEnvelope
-
-export interface SealDatasetRequest {
-    name: string
-    user: string
-}
-
-/** `POST /api/project/<name>/dataset/seal/` — success carries no payload. */
-export type SealDatasetResponse = OkEnvelope
-
-export interface ChangeMembersRequest {
-    op: 'add' | 'remove'
-    members: string[]
-    user: string
-}
-
-/** `PATCH /api/project/<name>/members/` success - the updated project. */
-export interface ChangeMembersResponse extends OkEnvelope {
-    project: SerializedProject
-}
-
-export interface CreateShareRequest {
-    project: string
-    dataset: string
-    resource?: string
-}
-
-/**
- * `POST /api/share/` success — the freshly created share. The endpoint unwraps
- * the smbdrop `{share}` envelope and returns the bare {@link SerializedShare}.
- * The `smb_host`/`workgroup` needed to render connection details are not part of
- * this payload; the client supplies them (see `lib/shares.ts`).
- */
-export type CreateShareResponse = SerializedShare
-
-/** `DELETE /api/share/<share_id>/` success. */
-export interface DeleteShareResponse {
-    status: 'ok'
-}
-
 /** `POST /mgmt-api/ingest-shares` — the session to open a share for. */
 export interface CreateIngestShareRequestV2 {
     project: string
@@ -169,18 +128,28 @@ export interface CreateIngestShareRequestV2 {
 }
 
 /**
- * `POST /mgmt-api/ingest-shares` success: the share as smbdrop reports it,
- * plus what the legacy response left to the client — which project and
- * session it is for, and the host and workgroup to connect with. 200 when the
- * user already had a share open for that session, 201 when a new one was
- * opened. A superset of {@link SerializedShare}, so it slots into the
- * share-matching helpers while the list endpoint is still the legacy one.
+ * An ingest share as the new API answers it, on create and in the list: the
+ * smbdrop fields plus what the legacy API left to the client — which project
+ * and session it is for, and the host and workgroup to connect with. On create,
+ * 200 means the user already had a share open for that session, 201 that a new
+ * one was opened.
  */
 export interface IngestShareV2 extends SerializedShare {
     project: string
     session: string
     smb_host: string
     workgroup: string
+}
+
+/**
+ * `GET /mgmt-api/ingest-shares`: the signed-in user's open shares, oldest
+ * first. A list rather than the legacy map keyed by share id; each share names
+ * its project and session, so nothing parses `dest_path` any more.
+ * `DELETE /mgmt-api/ingest-shares/<share_id>` answers 204, or 404 once the
+ * share is gone.
+ */
+export interface IngestShareListV2 {
+    shares: IngestShareV2[]
 }
 
 /**

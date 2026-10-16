@@ -8,14 +8,9 @@ import {
     useLoaderData,
     useNavigate,
 } from 'react-router-dom'
-import {ApiError, Unauthorized, apiFetch} from '../api/client'
-import {apiRequestV2} from '../api/clientV2'
-import type {
-    CreateIngestShareRequestV2,
-    DeleteShareResponse,
-    IngestShareV2,
-    ProjectDetailsResponse,
-} from '../api/types'
+import {ApiError, Unauthorized} from '../api/client'
+import {apiFetchV2, apiRequestV2} from '../api/clientV2'
+import type {CreateIngestShareRequestV2, IngestShareV2, ProjectDetailsV2} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {CopyField} from '../components/CopyField'
 import {Button} from '../components/ui/Button'
@@ -29,7 +24,7 @@ import {
 } from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import {findDatasetShare} from '../lib/projectsUtil'
-import {shareAccess, type ConnectableShare} from '../lib/shares'
+import {shareAccess} from '../lib/shares'
 import type {IngestShareLoaderData} from './ingestShare.loader'
 
 function ErrorBanner({message}: { message: string }) {
@@ -48,7 +43,7 @@ function ActiveShare({
                          onClose,
                          closing,
                      }: {
-    share: ConnectableShare
+    share: IngestShareV2
     dataset: string
     onClose: () => void
     closing: boolean
@@ -214,19 +209,19 @@ function CreateShare({
     )
 }
 
-/** Renders once the slow `details` promise resolves; owns the share state. */
+/** Renders once the `details` promise resolves; owns the share state. */
 function IngestPanel() {
     const {name, dataset, currentUser, shares} =
         useLoaderData() as IngestShareLoaderData
-    const {project, datasets} = useAsyncValue() as ProjectDetailsResponse
+    const project = useAsyncValue() as ProjectDetailsV2
     const navigate = useNavigate()
     const {notify} = useToast()
 
-    const ds = datasets.find((d) => d.name === dataset)
-    // Either a share from the legacy list (no host in it) or one the new API
-    // just opened (host included); `shareAccess` handles both.
-    const [share, setShare] = useState<ConnectableShare | null>(() =>
-        findDatasetShare(shares, project.relpath, dataset),
+    const ds = project.sessions.find((d) => d.name === dataset)
+    // The share this user has open for the session, if any. Shares name their
+    // project and session, so this is a field match, not a path comparison.
+    const [share, setShare] = useState<IngestShareV2 | null>(() =>
+        findDatasetShare(shares, project.name, dataset),
     )
     const [error, setError] = useState('')
     /** True when the last create answered with a share that was already open. */
@@ -280,8 +275,6 @@ function IngestPanel() {
         setAlreadyOpen(false)
         setBusy(true)
         try {
-            // Opening a share moved to the new API (#172). Listing and closing
-            // are still on the legacy endpoints until those move too.
             const body: CreateIngestShareRequestV2 = {project: name, session: dataset}
             const {status, body: created} = await apiRequestV2<IngestShareV2>(
                 '/ingest-shares',
@@ -318,8 +311,8 @@ function IngestPanel() {
         setAlreadyOpen(false)
         setBusy(true)
         try {
-            await apiFetch<DeleteShareResponse>(
-                `/api/share/${encodeURIComponent(share.share_id)}/`,
+            await apiFetchV2<void>(
+                `/ingest-shares/${encodeURIComponent(share.share_id)}`,
                 {method: 'DELETE'},
             )
             setShare(null)
@@ -329,7 +322,18 @@ function IngestPanel() {
                 navigate(`/login?next=${next}`)
                 return
             }
-            setError('Could not close the ingest share. Please try again.')
+            if (err instanceof ApiError && err.status === 404) {
+                // Gone already, closed from another tab or by its owner on
+                // another machine. That is the state the user wanted.
+                setShare(null)
+                notify(`Ingest share for "${dataset}" was already closed.`)
+                return
+            }
+            setError(
+                err instanceof ApiError
+                    ? err.message
+                    : 'Could not close the ingest share. Please try again.',
+            )
         } finally {
             setBusy(false)
         }

@@ -1,12 +1,8 @@
 import {useState} from 'react'
 import {useNavigate, useParams} from 'react-router-dom'
-import {getCurrentUser} from '../api/auth'
-import {Unauthorized, apiFetch} from '../api/client'
-import type {
-    GenericErrorResponse,
-    SealDatasetRequest,
-    SealDatasetResponse,
-} from '../api/types'
+import {Unauthorized} from '../api/client'
+import {apiFetchV2} from '../api/clientV2'
+import type {SessionV2} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
@@ -27,28 +23,21 @@ export function SealSession() {
         setError('')
         setSubmitting(true)
         try {
-            const body: SealDatasetRequest = {
-                name: dataset,
-                user: getCurrentUser() ?? '',
-            }
-            const res = await apiFetch<SealDatasetResponse | GenericErrorResponse>(
-                `/api/project/${encodeURIComponent(name)}/dataset/seal/`,
-                {method: 'POST', body: JSON.stringify(body)},
+            // No body: the session is in the path and the signed-in user in the
+            // cookie (#172). The API answers with the sealed session; sealing
+            // one that is sealed already is not an error.
+            const sealed = await apiFetchV2<SessionV2>(
+                `/projects/${encodeURIComponent(name)}/sessions/${encodeURIComponent(dataset)}/seal`,
+                {method: 'POST'},
             )
-            if (res.errno !== 0) {
-                setError(
-                    (res as GenericErrorResponse).message ||
-                    'Could not seal the session.',
-                )
-                return
-            }
-            notify(`Session "${dataset}" sealed.`)
+            notify(`Session "${sealed.name}" sealed.`)
             backToProject()
         } catch (err) {
             if (err instanceof Unauthorized) {
                 navigate(`/login?next=/projects/${name}/sessions/${dataset}/seal`)
                 return
             }
+            // The API's errors are written to be shown.
             setError(err instanceof Error ? err.message : 'Could not seal the session.')
         } finally {
             setSubmitting(false)

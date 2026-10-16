@@ -1,7 +1,8 @@
 import {redirect, type LoaderFunctionArgs} from 'react-router-dom'
 import {getCurrentUser} from '../api/auth'
-import {Unauthorized, apiFetch} from '../api/client'
-import type {GetUserListResponse, ProjectDetailsResponse} from '../api/types'
+import {Unauthorized} from '../api/client'
+import {apiFetchV2} from '../api/clientV2'
+import type {ProjectDetailsV2, UserListV2} from '../api/types'
 
 export interface ManageMembersLoaderData {
     name: string
@@ -9,14 +10,14 @@ export interface ManageMembersLoaderData {
     /** Every known user, for the member picker. */
     users: string[]
     /**
-     * Project + datasets. Deferred (not awaited) because the backend computes
-     * `usage_bytes` eagerly and that is slow - the form streams in behind a
-     * skeleton via `<Await>` once the current membership is known.
+     * Project + sessions. Not awaited, so the breadcrumbs paint at once and the
+     * form streams in behind a skeleton via `<Await>` once the current
+     * membership is known.
      */
-    details: Promise<ProjectDetailsResponse>
+    details: Promise<ProjectDetailsV2>
 }
 
-/** Loads the user directory (fast) and streams the project details for editing. */
+/** Loads the user directory and streams the project details for editing. */
 export async function manageMembersLoader({
                                               params,
                                           }: LoaderFunctionArgs): Promise<ManageMembersLoaderData> {
@@ -24,10 +25,8 @@ export async function manageMembersLoader({
     const currentUser = getCurrentUser() ?? ''
     const next = `/projects/${encodeURIComponent(name)}/members`
     try {
-        const res = await apiFetch<GetUserListResponse>('/api/users/list/')
-        const details = apiFetch<ProjectDetailsResponse>(
-            `/api/project/${encodeURIComponent(name)}/`,
-        )
+        const res = await apiFetchV2<UserListV2>('/users')
+        const details = apiFetchV2<ProjectDetailsV2>(`/projects/${encodeURIComponent(name)}`)
         return {name, currentUser, users: res.users, details}
     } catch (err) {
         if (err instanceof Unauthorized) throw redirect(`/login?next=${next}`)
