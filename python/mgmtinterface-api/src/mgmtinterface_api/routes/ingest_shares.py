@@ -1,10 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Path, Request, Response, status
 from pydantic import BaseModel, Field
+from smbdrop_client.schema import SerializedShare
 
+from ..config import Settings
 from ..errors import APIError, error_responses
-from ..permissions import find_session, require_member, require_project, user_uid
+from ..permissions import require_member, require_project, require_session, user_uid
 from ..security import (
     AUTH_ERROR_RESPONSES,
     CSRF_ERROR_RESPONSES,
@@ -12,7 +14,15 @@ from ..security import (
     settings_of,
 )
 from ..session import SessionData
-from ..shares import create_share, find_share, share_path
+from ..shares import (
+    create_share,
+    delete_share,
+    find_share,
+    list_shares,
+    share_path,
+    split_share_path,
+    user_shares,
+)
 from ..versioning import VERSION_ERROR_RESPONSES
 
 # "Ingest share" is the UI's word for an smbdrop share: a temporary Samba share
@@ -49,9 +59,111 @@ class IngestShare(BaseModel):
     workgroup: str = Field(description="Workgroup for the username on Windows.")
 
 
+class IngestShareList(BaseModel):
+    # An object rather than a bare array, like `ProjectList`, and a list rather
+    # than the legacy map keyed by share id: each share names its project and
+    # session, so a client no longer has to parse `dest_path` to find the one
+    # it wants.
+    shares: list[IngestShare] = Field(
+        description="The signed-in user's open shares, oldest first."
+    )
+
+
 class CreateIngestShareRequest(BaseModel):
     project: str = Field(min_length=1, examples=["ghost_imaging_2026"])
     session: str = Field(min_length=1, examples=["2026-10-16-alignment_run"])
+
+
+ShareId = Annotated[str, Path(description="The `share_id` of an open share.")]
+
+
+def _ingest_share(
+    settings: Settings, share: SerializedShare, project: str, session: str
+) -> IngestShare:
+    """An smbdrop share plus what this API adds to it."""
+    return IngestShare(
+        **share,
+        project=project,
+        session=session,
+        smb_host=settings.ingest_smb_host,
+        workgroup=settings.ingest_workgroup,
+    )
+
+
+@router.get(
+    "",
+    summary="List your open ingest shares",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        **error_responses(
+            {502: "The share service or the account service is unavailable."}
+        ),
+    },
+)
+def read_ingest_shares(
+    request: Request,
+    session: Annotated[SessionData, Depends(current_session)],
+) -> IngestShareList:
+    """
+    The shares the signed-in user has open, across all projects. Shares write
+    as the user who opened them, so another user's shares are not listed, as
+    in the legacy endpoint.
+    """
+    settings = settings_of(request)
+    uid = user_uid(settings, session["username"])
+    return IngestShareList(
+        shares=[
+            _ingest_share(settings, share, *split_share_path(share["dest_path"]))
+            for share in user_shares(settings, uid)
+        ]
+    )
+
+
+@router.delete(
+    "/{share_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Close an ingest share",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        **CSRF_ERROR_RESPONSES,
+        **error_responses(
+            {
+                403: "The share was opened by someone else.",
+                404: (
+                    "There is no open share with that id. A share that was "
+                    "closed already answers this too."
+                ),
+                502: "The share service or the account service is unavailable.",
+            }
+        ),
+    },
+)
+def close_ingest_share(
+    request: Request,
+    share_id: ShareId,
+    session: Annotated[SessionData, Depends(current_session)],
+) -> None:
+    """
+    Close a share: its one-time credentials stop working and the Samba export
+    goes away. The data written through it stays in the session.
+
+    Only the user who opened a share can close it. A share that is gone
+    already is a 404; a client that lost the answer to its first attempt can
+    treat that as closed.
+    """
+    settings = settings_of(request)
+    share = list_shares(settings).get(share_id)
+    if share is None:
+        raise APIError(
+            404,
+            "share_not_found",
+            f"There is no open ingest share {share_id!r}. It may have been closed.",
+        )
+    if share["uid"] != user_uid(settings, session["username"]):
+        raise APIError(
+            403, "not_your_share", "This ingest share was opened by someone else."
+        )
+    delete_share(settings, share_id)
 
 
 @router.post(
@@ -94,12 +206,7 @@ def add_ingest_share(
 
     details = require_project(settings, body.project)
     require_member(details, username)
-    if find_session(details, body.session) is None:
-        raise APIError(
-            404,
-            "session_not_found",
-            f"There is no session named {body.session!r} in project {body.project!r}.",
-        )
+    require_session(details, body.session)
 
     project = details["project"]
     uid = user_uid(settings, username)
@@ -112,10 +219,4 @@ def add_ingest_share(
     else:
         share = create_share(settings, dest_path, uid=uid, gid=project["gid"])
 
-    return IngestShare(
-        **share,
-        project=project["name"],
-        session=body.session,
-        smb_host=settings.ingest_smb_host,
-        workgroup=settings.ingest_workgroup,
-    )
+    return _ingest_share(settings, share, project["name"], body.session)

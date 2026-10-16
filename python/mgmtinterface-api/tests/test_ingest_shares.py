@@ -48,10 +48,10 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     The permissions service (one project, one session, two resolvable users)
     and smbdrop (whatever `shares` holds; a create appends a share).
     """
-    state: dict = {"shares": {}, "create_calls": []}
+    state: dict = {"shares": {}, "create_calls": [], "delete_calls": []}
 
     def projectdetails(self: PermissionsClient, projectname: str, fast: bool = False):
-        assert fast, "the create endpoints must never ask for the slow variant"
+        assert fast, "the share endpoints must never ask for the slow variant"
         if projectname != PROJECT["name"]:
             return {"errno": 1, "message": f'"{projectname}" is not an ad-hoc project.'}
         return {"errno": 0, "project": PROJECT, "datasets": [dict(SESSION)]}
@@ -68,10 +68,16 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
         state["shares"][share["share_id"]] = share
         return {"share": share}
 
+    def delete(self: ShareClient, share_id: str):
+        state["delete_calls"].append(share_id)
+        del state["shares"][share_id]
+        return {"status": "ok"}
+
     monkeypatch.setattr(PermissionsClient, "projectdetails", projectdetails)
     monkeypatch.setattr(PermissionsClient, "id_user", id_user)
     monkeypatch.setattr(ShareClient, "list", list_shares)
     monkeypatch.setattr(ShareClient, "create", create)
+    monkeypatch.setattr(ShareClient, "delete", delete)
     return state
 
 
@@ -200,5 +206,161 @@ def test_reports_a_failed_create(
 
     monkeypatch.setattr(ShareClient, "create", failed)
     response = member.post(INGEST_SHARES, json=REQUEST)
+    assert response.status_code == 502
+    assert response.json()["code"] == "share_service_unavailable"
+
+
+# --- GET /ingest-shares -------------------------------------------------------
+
+
+def test_lists_only_the_signed_in_users_shares(member: TestClient, backend: dict):
+    mine = make_share("mine", UIDS["user2"])
+    theirs = make_share("theirs", UIDS["user1"])
+    backend["shares"] = {s["share_id"]: s for s in (mine, theirs)}
+
+    response = member.get(INGEST_SHARES)
+    assert response.status_code == 200
+    # A list, not the legacy map keyed by share id, and each share says which
+    # project and session it is for and where to connect, like a create does.
+    assert response.json() == {
+        "shares": [
+            {
+                **mine,
+                "project": PROJECT["name"],
+                "session": SESSION["name"],
+                "smb_host": "moellenstedt.iff.kfa-juelich.de",
+                "workgroup": "ER-C-INGEST",
+            }
+        ]
+    }
+
+
+def test_an_opened_share_appears_in_the_list_as_it_was_answered(
+    member: TestClient, backend: dict
+):
+    opened = member.post(INGEST_SHARES, json=REQUEST).json()
+    assert member.get(INGEST_SHARES).json() == {"shares": [opened]}
+
+
+def test_shares_are_listed_oldest_first(member: TestClient, backend: dict):
+    newer = {**make_share("newer", UIDS["user2"]), "created_timestamp": 2_000}
+    older = {**make_share("older", UIDS["user2"]), "created_timestamp": 1_000}
+    backend["shares"] = {"newer": newer, "older": older}
+    ids = [s["share_id"] for s in member.get(INGEST_SHARES).json()["shares"]]
+    assert ids == ["older", "newer"]
+
+
+def test_project_and_session_are_read_off_the_path(member: TestClient, backend: dict):
+    # The last two segments of the normalized path, as the legacy
+    # `split_smbpath` reads them; smbdrop keeps a trailing slash if given one.
+    backend["shares"] = {
+        "a": make_share("a", UIDS["user2"], dest_path=f"{DEST_PATH}/"),
+        "b": make_share("b", UIDS["user2"], dest_path="/data/adhoc/other/2026 run"),
+    }
+    shares = member.get(INGEST_SHARES).json()["shares"]
+    assert [(s["project"], s["session"]) for s in shares] == [
+        (PROJECT["name"], SESSION["name"]),
+        ("other", "2026 run"),
+    ]
+
+
+def test_no_shares_is_an_empty_list(member: TestClient, backend: dict):
+    assert member.get(INGEST_SHARES).json() == {"shares": []}
+
+
+def test_list_requires_a_session_cookie(settings: Settings, backend: dict):
+    assert api_client(create_app(settings)).get(INGEST_SHARES).status_code == 401
+
+
+def test_list_reports_an_unreachable_share_service(
+    member: TestClient, backend: dict, monkeypatch: pytest.MonkeyPatch
+):
+    def unreachable(self: ShareClient):
+        raise requests.ConnectionError("smbdrop is down")
+
+    monkeypatch.setattr(ShareClient, "list", unreachable)
+    response = member.get(INGEST_SHARES)
+    assert response.status_code == 502
+    assert response.json()["code"] == "share_service_unavailable"
+
+
+def test_list_reports_an_unreachable_permissions_service(
+    member: TestClient, backend: dict, monkeypatch: pytest.MonkeyPatch
+):
+    # The user's uid is what the list is filtered on; without it there is no
+    # safe answer.
+    def unreachable(self: PermissionsClient, name: str):
+        raise requests.ConnectionError("permissions service is down")
+
+    monkeypatch.setattr(PermissionsClient, "id_user", unreachable)
+    response = member.get(INGEST_SHARES)
+    assert response.status_code == 502
+    assert response.json()["code"] == "permissions_unavailable"
+
+
+# --- DELETE /ingest-shares/{share_id} -----------------------------------------
+
+
+def test_closes_the_users_own_share(member: TestClient, backend: dict):
+    mine = make_share("mine", UIDS["user2"])
+    backend["shares"] = {"mine": mine}
+    response = member.delete(f"{INGEST_SHARES}/mine")
+    assert response.status_code == 204
+    assert response.content == b""
+    assert backend["delete_calls"] == ["mine"]
+    assert member.get(INGEST_SHARES).json() == {"shares": []}
+
+
+def test_someone_elses_share_cannot_be_closed(member: TestClient, backend: dict):
+    theirs = make_share("theirs", UIDS["user1"])
+    backend["shares"] = {"theirs": theirs}
+    response = member.delete(f"{INGEST_SHARES}/theirs")
+    assert response.status_code == 403
+    assert response.json()["code"] == "not_your_share"
+    assert backend["delete_calls"] == []
+
+
+def test_an_unknown_share_is_a_404(member: TestClient, backend: dict):
+    response = member.delete(f"{INGEST_SHARES}/nope")
+    assert response.status_code == 404
+    assert response.json()["code"] == "share_not_found"
+    assert backend["delete_calls"] == []
+
+
+def test_closing_twice_answers_404_the_second_time(member: TestClient, backend: dict):
+    # Not idempotent like the creates: once the share is gone there is nothing
+    # to say whose it was. The 404 is documented as "treat as closed".
+    backend["shares"] = {"mine": make_share("mine", UIDS["user2"])}
+    assert member.delete(f"{INGEST_SHARES}/mine").status_code == 204
+    assert member.delete(f"{INGEST_SHARES}/mine").status_code == 404
+
+
+def test_close_requires_a_session_cookie(settings: Settings, backend: dict):
+    backend["shares"] = {"mine": make_share("mine", UIDS["user2"])}
+    response = api_client(create_app(settings)).delete(f"{INGEST_SHARES}/mine")
+    assert response.status_code == 401
+    assert backend["delete_calls"] == []
+
+
+def test_close_is_covered_by_the_origin_check(member: TestClient, backend: dict):
+    backend["shares"] = {"mine": make_share("mine", UIDS["user2"])}
+    response = member.delete(
+        f"{INGEST_SHARES}/mine", headers={"Origin": "https://evil.example"}
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "bad_origin"
+    assert backend["delete_calls"] == []
+
+
+def test_close_reports_a_failed_delete(
+    member: TestClient, backend: dict, monkeypatch: pytest.MonkeyPatch
+):
+    backend["shares"] = {"mine": make_share("mine", UIDS["user2"])}
+
+    def failed(self: ShareClient, share_id: str):
+        raise RuntimeError("something went wrong when deleting the share")
+
+    monkeypatch.setattr(ShareClient, "delete", failed)
+    response = member.delete(f"{INGEST_SHARES}/mine")
     assert response.status_code == 502
     assert response.json()["code"] == "share_service_unavailable"

@@ -22,10 +22,33 @@ from mgmtinterface_api.versioning import (
 LOGIN = f"{API_PREFIX}/auth/login"
 SESSION = f"{API_PREFIX}/auth/session"
 PROJECTS = f"{API_PREFIX}/projects"
-SESSIONS = f"{API_PREFIX}/projects/{{project}}/sessions"
+PROJECT = f"{PROJECTS}/{{project}}"
+PROJECT_USAGE = f"{PROJECT}/usage"
+PROJECT_MEMBERS = f"{PROJECT}/members"
+SESSIONS = f"{PROJECT}/sessions"
+SEAL = f"{SESSIONS}/{{session}}/seal"
+USERS = f"{API_PREFIX}/users"
 INGEST_SHARES = f"{API_PREFIX}/ingest-shares"
+INGEST_SHARE = f"{INGEST_SHARES}/{{share_id}}"
 VERSIONS = f"{API_PREFIX}/versions"
 HEALTHZ = f"{API_PREFIX}/healthz"
+
+#: Every operation that needs a session, as (path, method). Used by the tests
+#: that check what each such operation has to document.
+SESSION_OPERATIONS = [
+    (SESSION, "get"),
+    (PROJECTS, "get"),
+    (PROJECTS, "post"),
+    (PROJECT, "get"),
+    (PROJECT_USAGE, "get"),
+    (PROJECT_MEMBERS, "put"),
+    (SESSIONS, "post"),
+    (SEAL, "post"),
+    (USERS, "get"),
+    (INGEST_SHARES, "get"),
+    (INGEST_SHARES, "post"),
+    (INGEST_SHARE, "delete"),
+]
 
 
 @pytest.fixture
@@ -63,8 +86,14 @@ def test_every_documented_route_is_present(schema: dict[str, Any]):
         f"{API_PREFIX}/auth/logout",
         SESSION,
         PROJECTS,
+        PROJECT,
+        PROJECT_USAGE,
+        PROJECT_MEMBERS,
         SESSIONS,
+        SEAL,
+        USERS,
         INGEST_SHARES,
+        INGEST_SHARE,
         VERSIONS,
         HEALTHZ,
     }
@@ -79,14 +108,7 @@ def test_version_header_is_documented_as_required(schema: dict[str, Any]):
     is set on the document afterwards. If that correction is dropped, a
     generated client stops sending the header and every call gets a 400.
     """
-    for path, method in (
-        (LOGIN, "post"),
-        (SESSION, "get"),
-        (PROJECTS, "get"),
-        (PROJECTS, "post"),
-        (SESSIONS, "post"),
-        (INGEST_SHARES, "post"),
-    ):
+    for path, method in ((LOGIN, "post"), *SESSION_OPERATIONS):
         parameter = version_parameter(schema, path, method)
         assert parameter is not None, f"{method.upper()} {path} does not document it"
         assert parameter["required"] is True, f"{method.upper()} {path} says optional"
@@ -113,11 +135,10 @@ def test_session_cookie_is_declared_as_a_security_scheme(schema: dict[str, Any])
 
 
 def test_only_the_routes_needing_a_session_are_marked(schema: dict[str, Any]):
-    assert schema["paths"][SESSION]["get"].get("security")
-    assert schema["paths"][PROJECTS]["get"].get("security")
-    assert schema["paths"][PROJECTS]["post"].get("security")
-    assert schema["paths"][SESSIONS]["post"].get("security")
-    assert schema["paths"][INGEST_SHARES]["post"].get("security")
+    for path, method in SESSION_OPERATIONS:
+        operation = schema["paths"][path][method]
+        assert operation.get("security"), f"{method.upper()} {path} is not marked"
+        assert "401" in operation["responses"], f"{method.upper()} {path} lacks 401"
     # Signing in cannot require being signed in, and logging out of an expired
     # session answers 204 rather than 401.
     assert not schema["paths"][LOGIN]["post"].get("security")
@@ -142,6 +163,74 @@ def test_login_documents_the_persistent_flag(schema: dict[str, Any]):
     session_info = schema["components"]["schemas"]["SessionInfo"]
     assert session_info["properties"]["persistent"]["type"] == "boolean"
     assert "persistent" in session_info["required"]
+
+
+def test_only_state_changing_operations_document_the_csrf_403(schema: dict[str, Any]):
+    """
+    The origin check applies app-wide but only to non-safe methods, so a GET
+    must not advertise a 403 it can never answer with (unless it has a 403 of
+    its own, which none of the reads do).
+    """
+    for path, method in SESSION_OPERATIONS:
+        responses = schema["paths"][path][method]["responses"]
+        if method == "get":
+            assert "403" not in responses, f"GET {path} documents a 403"
+        else:
+            assert "403" in responses, f"{method.upper()} {path} lacks the 403"
+
+
+def test_project_details_embed_the_sessions(schema: dict[str, Any]):
+    # Flat: the project's own fields plus `sessions`, named after the UI's
+    # term, not the legacy `{project, datasets}` envelope.
+    details = schema["components"]["schemas"]["ProjectDetails"]
+    assert "sessions" in details["properties"]
+    assert "name" in details["properties"]
+    assert details["properties"]["sessions"]["items"]["$ref"].endswith("/Session")
+    assert "usage_bytes" in details["properties"]
+    assert set(schema["components"]["schemas"]["ProjectUsage"]["properties"]) == {
+        "usage_bytes"
+    }
+
+
+def test_members_are_set_as_a_whole_list(schema: dict[str, Any]):
+    operation = schema["paths"][PROJECT_MEMBERS]["put"]
+    ref = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert ref.endswith("/SetMembersRequest")
+    request = schema["components"]["schemas"]["SetMembersRequest"]
+    assert request["required"] == ["members"]
+    assert "400" in operation["responses"]
+    assert "404" in operation["responses"]
+    # The answer is the project, not a dedicated response type.
+    ok = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert ok["$ref"].endswith("/Project")
+
+
+def test_seal_and_close_document_their_outcomes(schema: dict[str, Any]):
+    seal = schema["paths"][SEAL]["post"]
+    # Everything it needs is in the path; a body would be an extra thing for a
+    # client to get wrong.
+    assert "requestBody" not in seal
+    assert seal["responses"]["200"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/Session")
+    assert {"400", "403", "404"} <= set(seal["responses"])
+
+    close = schema["paths"][INGEST_SHARE]["delete"]
+    assert "204" in close["responses"]
+    assert "content" not in close["responses"]["204"]
+    assert {"403", "404", "502"} <= set(close["responses"])
+
+
+def test_share_list_is_a_list_of_the_create_response_type(schema: dict[str, Any]):
+    listed = schema["paths"][INGEST_SHARES]["get"]["responses"]["200"]
+    ref = listed["content"]["application/json"]["schema"]["$ref"]
+    assert ref.endswith("/IngestShareList")
+    items = schema["components"]["schemas"]["IngestShareList"]["properties"]["shares"]
+    assert items["items"]["$ref"].endswith("/IngestShare")
+    created = schema["paths"][INGEST_SHARES]["post"]["responses"]["201"]
+    assert created["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/IngestShare"
+    )
 
 
 @pytest.mark.parametrize("path", [PROJECTS, SESSIONS, INGEST_SHARES])

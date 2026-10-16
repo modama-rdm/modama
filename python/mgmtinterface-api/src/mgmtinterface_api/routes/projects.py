@@ -4,7 +4,18 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 
 from ..errors import APIError, error_responses
-from ..permissions import Rejected, create_project, list_projects, project_details
+from ..permissions import (
+    Rejected,
+    add_members,
+    create_project,
+    list_projects,
+    project_details,
+    project_not_found,
+    project_usage,
+    remove_members,
+    require_owner,
+    require_project,
+)
 from ..security import (
     AUTH_ERROR_RESPONSES,
     CSRF_ERROR_RESPONSES,
@@ -13,6 +24,7 @@ from ..security import (
 )
 from ..session import SessionData
 from ..versioning import VERSION_ERROR_RESPONSES
+from .sessions import ProjectName, Session
 
 router = APIRouter(
     prefix="/projects", tags=["projects"], responses={**VERSION_ERROR_RESPONSES}
@@ -25,8 +37,9 @@ class Project(BaseModel):
 
     The fields are identical to those of the legacy `/api/project/` response, so
     that screens can migrate one endpoint at a time without changing how they
-    read a project. `usage_bytes` is null in `ProjectList`; it is expensive to
-    compute, so the permissions service only computes it for a single project.
+    read a project. `usage_bytes` is null everywhere but in the answer of
+    `GET /projects/{project}/usage`: computing it means a `du` over the whole
+    project, which nothing else should wait for.
     """
 
     relpath: str
@@ -43,6 +56,29 @@ class ProjectList(BaseModel):
     # An object rather than a bare array, so pagination fields can be added
     # later without breaking every caller (Theme A / #90).
     projects: list[Project]
+
+
+class ProjectDetails(Project):
+    """A project with its sessions. `usage_bytes` is null; see `GET .../usage`."""
+
+    sessions: list[Session]
+
+
+class ProjectUsage(BaseModel):
+    usage_bytes: int = Field(
+        description="Disk usage of the project folder in bytes, as `du` reports it."
+    )
+
+
+class SetMembersRequest(BaseModel):
+    members: list[Annotated[str, Field(min_length=1)]] = Field(
+        description=(
+            "The complete list of members wanted. Members not in it are removed, "
+            "names not yet members are added. The owner is a member regardless "
+            "and may be left out."
+        ),
+        examples=[["clausen", "weber"]],
+    )
 
 
 class CreateProjectRequest(BaseModel):
@@ -161,5 +197,137 @@ def add_project(
     # The service fills `usage_bytes` on a create (a `du` of an empty folder)
     # but not on the lookup above, and both outcomes of this endpoint should
     # answer with the same body. Null, as in the list, is the one that costs
-    # nothing; the project details endpoint is where the size belongs.
+    # nothing; `GET /projects/{project}/usage` is where the size belongs.
     return Project(**{**created, "usage_bytes": None})
+
+
+@router.get(
+    "/{project}",
+    summary="A project with its sessions",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        **error_responses({404: "There is no project of that name."}),
+    },
+)
+def read_project(
+    request: Request,
+    project: ProjectName,
+    session: Annotated[SessionData, Depends(current_session)],
+) -> ProjectDetails:
+    """
+    One project and the sessions in it, readable by anyone signed in, like the
+    list. Access to the data is enforced by the file system, not by hiding the
+    project here.
+
+    `usage_bytes` is null: the size needs a `du` over the project, which can
+    take a minute on a large one, so it has its own endpoint.
+    """
+    details = require_project(settings_of(request), project)
+    return ProjectDetails(
+        **details["project"],
+        sessions=[Session(**dataset) for dataset in details["datasets"]],
+    )
+
+
+@router.get(
+    "/{project}/usage",
+    summary="The disk usage of a project",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        **error_responses({404: "There is no project of that name."}),
+    },
+)
+def read_project_usage(
+    request: Request,
+    project: ProjectName,
+    session: Annotated[SessionData, Depends(current_session)],
+) -> ProjectUsage:
+    """
+    The size of the project folder. Slow: the permissions service runs `du`
+    over the whole project, so call this after the details, not instead.
+    """
+    usage = project_usage(settings_of(request), project)
+    if usage is None:
+        raise project_not_found(project)
+    return ProjectUsage(usage_bytes=usage)
+
+
+@router.put(
+    "/{project}/members",
+    summary="Set the members of a project",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        **CSRF_ERROR_RESPONSES,
+        **error_responses(
+            {
+                400: (
+                    "The permissions service refused the change; `message` says "
+                    "why. `members_rejected` means nothing was changed. "
+                    "`members_partially_changed` means the new members were "
+                    "added but the dropped ones could not be removed; the "
+                    "message names both. Sending the request again applies "
+                    "what is still missing."
+                ),
+                403: "Only the owner of a project can change its members.",
+                404: "There is no project of that name.",
+            }
+        ),
+    },
+)
+def set_members(
+    request: Request,
+    project: ProjectName,
+    session: Annotated[SessionData, Depends(current_session)],
+    body: SetMembersRequest,
+) -> Project:
+    """
+    Replace the members of a project with the given list.
+
+    The API works out who to add and who to remove against the current
+    members, so the client sends the list it wants rather than operations.
+    Sending the same list again changes nothing and answers with the project
+    as it is, which also makes a retry after a lost or partial answer safe:
+    the difference is computed afresh each time. The owner is a member
+    whatever the list says and is never added or removed.
+    """
+    settings = settings_of(request)
+    username = session["username"]
+
+    details = require_project(settings, project)
+    require_owner(details, username)
+    current = details["project"]
+    owner = current["owner"]
+
+    wanted = {member for member in body.members if member != owner}
+    have = {member for member in current["members"] if member != owner}
+    to_add = sorted(wanted - have)
+    to_remove = sorted(have - wanted)
+    if not to_add and not to_remove:
+        return Project(**current)
+
+    # The service applies one operation per call, so add and remove cannot be
+    # atomic. Add first: a failure then leaves the project as it was, and the
+    # error can say so. The service answers each call with the project after
+    # that call, which saves reading it back.
+    updated = current
+    if to_add:
+        try:
+            updated = add_members(settings, project, to_add, username)
+        except Rejected as rejected:
+            raise APIError(400, "members_rejected", rejected.message) from rejected
+    if to_remove:
+        try:
+            updated = remove_members(settings, project, to_remove, username)
+        except Rejected as rejected:
+            if to_add:
+                raise APIError(
+                    400,
+                    "members_partially_changed",
+                    f"Added {', '.join(to_add)}, but could not remove "
+                    f"{', '.join(to_remove)}: {rejected.message}",
+                ) from rejected
+            raise APIError(400, "members_rejected", rejected.message) from rejected
+
+    # The service serializes the project with a `du` after a change; the size
+    # is not this endpoint's to report. Null, as everywhere but `GET .../usage`.
+    return Project(**{**updated, "usage_bytes": None})

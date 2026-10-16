@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI
 
 from .config import API_PREFIX, Settings, get_settings
 from .errors import APIError, api_error_handler
-from .routes import auth, ingest_shares, projects, sessions, versions
+from .routes import auth, ingest_shares, projects, sessions, users, versions
 from .security import enforce_same_origin
 from .session import SessionCodec
 from .throttle import FailureThrottle
@@ -75,11 +75,29 @@ of the same request answers `200` with the existing one instead of an error. A
 client that lost a response to a flaky network can therefore simply send the
 request again. The only conflict (`409`) is a project of the same name that
 belongs to someone else.
+
+### Changing things
+
+`PUT /projects/{{{{project}}}}/members` takes the complete member list wanted,
+not operations; the API works out what to add and remove, so a retry is safe.
+Sealing a session that is sealed already answers `200` with the session as it
+is. `DELETE /ingest-shares/{{{{share_id}}}}` answers `204`, and `404` once the
+share is gone.
+
+### Slow calls
+
+`GET /projects/{{{{project}}}}/usage` runs `du` over the project and can take a
+minute on a large one. Nothing else waits for it: the project details answer
+with `usage_bytes` null.
 """.strip()
 
 TAGS_METADATA = [
     {"name": "auth", "description": "Login, logout, and the current session."},
-    {"name": "projects", "description": "Project listings and creation."},
+    {
+        "name": "projects",
+        "description": "Projects: list, details, disk usage, members, creation.",
+    },
+    {"name": "users", "description": "The accounts a project can have as members."},
     {
         "name": "sessions",
         "description": (
@@ -152,6 +170,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(auth.router, prefix=API_PREFIX)
     app.include_router(projects.router, prefix=API_PREFIX)
+    app.include_router(users.router, prefix=API_PREFIX)
     app.include_router(sessions.router, prefix=API_PREFIX)
     app.include_router(ingest_shares.router, prefix=API_PREFIX)
     app.include_router(versions.router, prefix=API_PREFIX)

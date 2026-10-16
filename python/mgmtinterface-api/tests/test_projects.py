@@ -94,6 +94,12 @@ def test_response_is_not_wrapped_in_an_errno_envelope(signed_in: TestClient):
 
 NEW_NAME = "ghost_imaging_2026"
 
+# The sessions of `FIXTURE`, as the service lists them (it calls them datasets).
+SESSIONS = [
+    {"name": "create by hand", "immutable": False, "ctime": 1.0, "mtime": 2.0},
+    {"name": "demo session", "immutable": True, "ctime": 3.0, "mtime": 4.0},
+]
+
 
 @pytest.fixture
 def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
@@ -117,10 +123,10 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
         return {"errno": 0, "project": project}
 
     def projectdetails(self: PermissionsClient, projectname: str, fast: bool = False):
-        assert fast, "the create endpoints must never ask for the slow variant"
+        assert fast, "only the usage endpoint may ask for the slow variant"
         if projectname != FIXTURE["name"]:
             return {"errno": 1, "message": f'"{projectname}" is not an ad-hoc project.'}
-        return {"errno": 0, "project": FIXTURE, "datasets": []}
+        return {"errno": 0, "project": FIXTURE, "datasets": [dict(s) for s in SESSIONS]}
 
     monkeypatch.setattr(PermissionsClient, "create_project", create_project)
     monkeypatch.setattr(PermissionsClient, "projectdetails", projectdetails)
@@ -257,3 +263,131 @@ def test_create_reports_an_unreachable_permissions_service(
     response = client.post(PROJECTS, json={"name": NEW_NAME})
     assert response.status_code == 502
     assert response.json()["code"] == "permissions_unavailable"
+
+
+# --- GET /projects/{project} --------------------------------------------------
+
+DETAILS = f"{PROJECTS}/{FIXTURE['name']}"
+
+
+def test_reads_a_project_with_its_sessions(settings: Settings, backend: dict):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.get(DETAILS)
+    assert response.status_code == 200
+    # The project's own fields, flat, plus the sessions under the UI's name
+    # for them. No `errno` envelope and no nesting under `project`.
+    assert response.json() == {**FIXTURE, "sessions": SESSIONS}
+
+
+def test_details_are_readable_by_anyone_signed_in(settings: Settings, backend: dict):
+    # Like the list and the legacy endpoint: access to the data is enforced by
+    # the file system, not by hiding the project. user3 is not a member.
+    outsider = signed_in_client(create_app(settings), settings, "user3")
+    assert outsider.get(DETAILS).status_code == 200
+
+
+def test_details_do_not_compute_the_size(settings: Settings, backend: dict):
+    # The fixture asserts that only the fast variant is asked for; the size is
+    # the usage endpoint's job.
+    client = signed_in_client(create_app(settings), settings, "user1")
+    assert client.get(DETAILS).json()["usage_bytes"] is None
+
+
+def test_unknown_project_is_a_404(settings: Settings, backend: dict):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.get(f"{PROJECTS}/nope")
+    assert response.status_code == 404
+    assert response.json()["code"] == "project_not_found"
+
+
+def test_details_require_a_session(settings: Settings, backend: dict):
+    assert api_client(create_app(settings)).get(DETAILS).status_code == 401
+
+
+def test_details_report_an_unreachable_permissions_service(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+):
+    def unreachable(self: PermissionsClient, *args, **kwargs):
+        raise requests.ConnectionError("permissions service is down")
+
+    monkeypatch.setattr(PermissionsClient, "projectdetails", unreachable)
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.get(DETAILS)
+    assert response.status_code == 502
+    assert response.json()["code"] == "permissions_unavailable"
+
+
+# --- GET /projects/{project}/usage --------------------------------------------
+
+USAGE = f"{DETAILS}/usage"
+SIZE = 2_226_346_428_528
+
+
+@pytest.fixture
+def usage_backend(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """A permissions service that records which variant was asked for."""
+    asked: list[bool] = []
+
+    def projectdetails(self: PermissionsClient, projectname: str, fast: bool = False):
+        asked.append(fast)
+        if projectname != FIXTURE["name"]:
+            return {"errno": 1, "message": f'"{projectname}" is not an ad-hoc project.'}
+        project = {**FIXTURE, "usage_bytes": None if fast else SIZE}
+        return {"errno": 0, "project": project, "datasets": []}
+
+    monkeypatch.setattr(PermissionsClient, "projectdetails", projectdetails)
+    return asked
+
+
+def test_usage_asks_for_the_slow_variant(settings: Settings, usage_backend: list[bool]):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.get(USAGE)
+    assert response.status_code == 200
+    assert response.json() == {"usage_bytes": SIZE}
+    # This is the one call that may run `du`.
+    assert usage_backend == [False]
+
+
+def test_usage_of_an_unknown_project_is_a_404(
+    settings: Settings, usage_backend: list[bool]
+):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.get(f"{PROJECTS}/nope/usage")
+    assert response.status_code == 404
+    assert response.json()["code"] == "project_not_found"
+
+
+def test_usage_requires_a_session(settings: Settings, usage_backend: list[bool]):
+    assert api_client(create_app(settings)).get(USAGE).status_code == 401
+    assert usage_backend == []
+
+
+def test_a_null_size_from_the_slow_variant_is_a_service_failure(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+):
+    # The slow variant always fills the size; null means the service did not
+    # do what was asked, and the client must not be told the project is empty.
+    monkeypatch.setattr(
+        PermissionsClient,
+        "projectdetails",
+        lambda self, projectname, fast=False: {
+            "errno": 0,
+            "project": FIXTURE,
+            "datasets": [],
+        },
+    )
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.get(USAGE)
+    assert response.status_code == 502
+    assert response.json()["code"] == "permissions_unavailable"
+
+
+def test_usage_reports_an_unreachable_permissions_service(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+):
+    def unreachable(self: PermissionsClient, *args, **kwargs):
+        raise requests.ConnectionError("permissions service is down")
+
+    monkeypatch.setattr(PermissionsClient, "projectdetails", unreachable)
+    client = signed_in_client(create_app(settings), settings, "user1")
+    assert client.get(USAGE).status_code == 502

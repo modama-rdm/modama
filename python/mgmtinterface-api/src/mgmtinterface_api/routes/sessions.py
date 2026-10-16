@@ -10,6 +10,8 @@ from ..permissions import (
     find_session,
     require_member,
     require_project,
+    require_session,
+    seal_session,
 )
 from ..security import (
     AUTH_ERROR_RESPONSES,
@@ -30,13 +32,24 @@ router = APIRouter(
 )
 
 ProjectName = Annotated[str, Path(description="Name of the project.")]
+SessionName = Annotated[
+    str,
+    Path(
+        description=(
+            "Name of the session, URL-encoded where needed; spaces and dots "
+            "are allowed in session names."
+        )
+    ),
+]
 
 
 class Session(BaseModel):
     """One session, in the shape the project details of the legacy API use."""
 
     name: str
-    immutable: bool = Field(description="True once the session has been sealed.")
+    immutable: bool = Field(
+        description="True once the session has been sealed: its `raw/` folder is read-only."
+    )
     ctime: float
     mtime: float
 
@@ -136,3 +149,62 @@ def add_session(
             "The session was created but could not be read back. Please reload.",
         )
     return Session(**created)
+
+
+@router.post(
+    "/{session}/seal",
+    summary="Seal a session: make its raw data read-only for good",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        **CSRF_ERROR_RESPONSES,
+        **error_responses(
+            {
+                400: (
+                    "The permissions service refused to seal the session. "
+                    "`message` says why, for example a missing `raw/` folder."
+                ),
+                403: "The signed-in user is neither owner nor member of the project.",
+                404: "There is no such project, or no such session in it.",
+            }
+        ),
+    },
+)
+def seal(
+    request: Request,
+    project: ProjectName,
+    session: SessionName,
+    # Named for what it is here, because `session` is the path parameter.
+    signed_in: Annotated[SessionData, Depends(current_session)],
+) -> Session:
+    """
+    Make the `raw/` folder of a session and everything in it immutable. This
+    cannot be undone through the API.
+
+    Idempotent: a session that is already sealed is answered with 200 and its
+    current state, without asking the permissions service again. The rest of
+    the session folder stays writable; only `raw/` is sealed.
+    """
+    settings = settings_of(request)
+    username = signed_in["username"]
+
+    details = require_project(settings, project)
+    require_member(details, username)
+    existing = require_session(details, session)
+    if existing["immutable"]:
+        return Session(**existing)
+
+    try:
+        seal_session(settings, project, session, username)
+    except Rejected as rejected:
+        raise APIError(400, "seal_rejected", rejected.message) from rejected
+
+    # The service answers with nothing but `errno`; the sealed state and the
+    # new mtime come from reading the project back.
+    sealed = find_session(require_project(settings, project), session)
+    if sealed is None:
+        raise APIError(
+            502,
+            "permissions_unavailable",
+            "The session was sealed but could not be read back. Please reload.",
+        )
+    return Session(**sealed)

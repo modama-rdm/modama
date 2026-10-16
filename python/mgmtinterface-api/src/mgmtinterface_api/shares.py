@@ -32,11 +32,34 @@ def share_path(settings: Settings, relpath: str, session: str) -> str:
     return os.path.normpath(os.path.join(settings.smb_base, relpath, session))
 
 
+def split_share_path(dest_path: str) -> tuple[str, str]:
+    """
+    The project and session a share is for, read off its path: the last two
+    segments of `smb_base/<project relpath>/<session>`, as the legacy
+    `split_smbpath` reads them. Normalized first, because smbdrop stores the
+    path as it was given, trailing slash included.
+    """
+    head, session = os.path.split(os.path.normpath(dest_path))
+    return os.path.basename(head), session
+
+
 def list_shares(settings: Settings) -> dict[str, SerializedShare]:
     try:
         return make_client(settings).list()
     except (requests.RequestException, RuntimeError) as exc:
         raise _unavailable() from exc
+
+
+def user_shares(settings: Settings, uid: int) -> list[SerializedShare]:
+    """
+    The shares that write as `uid`, oldest first.
+
+    smbdrop lists every open share of every user; a share belongs to the user
+    whose uid it impersonates, as in the legacy list endpoint.
+    """
+    shares = [s for s in list_shares(settings).values() if s["uid"] == uid]
+    shares.sort(key=lambda share: (share["created_timestamp"], share["share_id"]))
+    return shares
 
 
 def find_share(settings: Settings, dest_path: str, uid: int) -> SerializedShare | None:
@@ -61,6 +84,13 @@ def create_share(
     except (requests.RequestException, RuntimeError) as exc:
         raise _unavailable() from exc
     return result["share"]
+
+
+def delete_share(settings: Settings, share_id: str) -> None:
+    try:
+        make_client(settings).delete(share_id)
+    except (requests.RequestException, RuntimeError) as exc:
+        raise _unavailable() from exc
 
 
 def _unavailable() -> APIError:

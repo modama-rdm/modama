@@ -154,8 +154,15 @@ old test fail, that change is breaking and belongs in a new version.
 | `GET /mgmt-api/auth/session` | the signed-in user, or 401 |
 | `GET /mgmt-api/projects` | all projects, unfiltered |
 | `POST /mgmt-api/projects` | create a project owned by the signed-in user |
+| `GET /mgmt-api/projects/{project}` | one project with its sessions |
+| `GET /mgmt-api/projects/{project}/usage` | its disk usage (slow) |
+| `PUT /mgmt-api/projects/{project}/members` | set its members |
 | `POST /mgmt-api/projects/{project}/sessions` | create a session in a project |
+| `POST /mgmt-api/projects/{project}/sessions/{session}/seal` | seal a session |
+| `GET /mgmt-api/users` | every account, for picking members |
+| `GET /mgmt-api/ingest-shares` | the signed-in user's open ingest shares |
 | `POST /mgmt-api/ingest-shares` | open an ingest share for a session |
+| `DELETE /mgmt-api/ingest-shares/{share_id}` | close an ingest share |
 | `GET /mgmt-api/versions` | supported API versions |
 | `GET /mgmt-api/healthz` | liveness probe |
 | `GET /mgmt-api/docs` | Swagger UI for the generated OpenAPI document |
@@ -230,6 +237,49 @@ The owner of a new project is the signed-in user. The legacy request carried an
 `owner` field that had to equal the authenticated user; here the session is the
 only source.
 
+## Reading and changing things
+
+`GET /projects/{project}` answers the project's own fields plus `sessions`, flat,
+rather than the legacy `{project, datasets}` envelope. Anyone signed in may read
+it; access to the data is enforced by the file system. `usage_bytes` is null
+here and in the list, and `GET /projects/{project}/usage` is the one call that
+fills it: the permissions service computes it with `du` over the whole project,
+which takes a minute on a large one, and three screens read the details while
+only one shows the size. The legacy UI made the same split
+(`/project/<name>/fragments/disk_usage/`).
+
+`PUT /projects/{project}/members` takes the complete member list wanted. The
+API computes the difference against the current members and asks the
+permissions service to add and then to remove, since that service applies one
+operation per call. The same list twice finds no difference and answers with
+the project as it is, so a retry after a lost or partial answer is safe. The
+owner is a member regardless and is ignored on both sides of the difference.
+When the add succeeds and the remove fails, the answer is `400
+members_partially_changed` and the message names both; a plain refusal that
+changed nothing is `400 members_rejected`. Only the owner may change members
+(`403 not_the_owner`).
+
+`POST /projects/{project}/sessions/{session}/seal` makes the session's `raw/`
+folder immutable and answers with the session. The name is a path segment;
+`check_valid_dataset` forbids slashes, so that is safe, and spaces and dots
+travel URL-encoded. A session that is sealed already answers 200 as it is,
+without a call to the service. Owner or member only (`403 not_a_member`), like
+the service's `check_can_seal`.
+
+`GET /ingest-shares` answers `{"shares": [...]}`, the signed-in user's open
+shares (matched on uid, like the legacy endpoint), oldest first, each in the
+same `IngestShare` shape the create answers with: `project` and `session` are
+read off `dest_path` the way the legacy `split_smbpath` does, and `smb_host`
+and `workgroup` come from the settings. A client therefore never parses
+`dest_path`. The legacy endpoint returned a map keyed by share id.
+
+`DELETE /ingest-shares/{share_id}` answers 204. A share that does not exist is
+`404 share_not_found`, also on a repeat of a close that succeeded; a client can
+treat that as closed. Another user's share is `403 not_your_share`.
+
+`GET /users` is the ad-hoc group's members, sorted: the accounts a project can
+have as members.
+
 ## Layout
 
     src/mgmtinterface_api/
@@ -244,9 +294,10 @@ only source.
         permissions.py  calls into the permissions service
         shares.py       calls into smbdrop, the share service
         routes/auth.py      login / logout / session
-        routes/projects.py  project list, create project
-        routes/sessions.py  create session
-        routes/ingest_shares.py  open ingest share
+        routes/projects.py  project list, create, details, usage, members
+        routes/sessions.py  create session, seal session
+        routes/users.py     user list
+        routes/ingest_shares.py  open, list, close ingest shares
         routes/versions.py  supported versions, unauthenticated
     tests/
 

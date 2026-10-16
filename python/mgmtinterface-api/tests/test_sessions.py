@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import pytest
 import requests
 from conftest import api_client, signed_in_client
@@ -23,18 +25,36 @@ EXISTING = {
     "ctime": 1_760_000_000.0,
     "mtime": 1_760_003_600.0,
 }
+# An open session, with a space in its name, as people type them.
+OPEN = {
+    "name": "2026-10-16 run 1",
+    "immutable": False,
+    "ctime": 1_760_100_000.0,
+    "mtime": 1_760_100_000.0,
+}
 
 SESSIONS = f"{API_PREFIX}/projects/{PROJECT['name']}/sessions"
+
+
+def seal_url(session: str, project: str = PROJECT["name"]) -> str:
+    return f"{API_PREFIX}/projects/{project}/sessions/{quote(session, safe='')}/seal"
 
 
 @pytest.fixture
 def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     """
-    A permissions service with one project that has one session. Creating a
-    session appends it, unless `reject` is set, in which case the service
-    answers the way it does when `mkdir` fails.
+    A permissions service with one project that has a sealed and an open
+    session. Creating a session appends it, unless `reject` is set, in which
+    case the service answers the way it does when `mkdir` fails. Sealing
+    flips `immutable`, unless `seal_reject` is set.
     """
-    state: dict = {"datasets": [dict(EXISTING)], "create_calls": [], "reject": None}
+    state: dict = {
+        "datasets": [dict(EXISTING), dict(OPEN)],
+        "create_calls": [],
+        "reject": None,
+        "seal_calls": [],
+        "seal_reject": None,
+    }
 
     def projectdetails(self: PermissionsClient, projectname: str, fast: bool = False):
         assert fast, "the create endpoints must never ask for the slow variant"
@@ -55,8 +75,19 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
         )
         return {"errno": 0}
 
+    def seal_dataset(self: PermissionsClient, projectname: str, name: str, user: str):
+        state["seal_calls"].append((projectname, name, user))
+        if state["seal_reject"] is not None:
+            return {"errno": 1, "message": state["seal_reject"]}
+        for dataset in state["datasets"]:
+            if dataset["name"] == name:
+                dataset["immutable"] = True
+                dataset["mtime"] += 60.0
+        return {"errno": 0}
+
     monkeypatch.setattr(PermissionsClient, "projectdetails", projectdetails)
     monkeypatch.setattr(PermissionsClient, "create_dataset", create_dataset)
+    monkeypatch.setattr(PermissionsClient, "seal_dataset", seal_dataset)
     return state
 
 
@@ -189,5 +220,96 @@ def test_create_reports_an_unreachable_permissions_service(
     monkeypatch.setattr(PermissionsClient, "projectdetails", unreachable)
     member = signed_in_client(create_app(settings), settings, "user2")
     response = member.post(SESSIONS, json={"name": "run"})
+    assert response.status_code == 502
+    assert response.json()["code"] == "permissions_unavailable"
+
+
+# --- POST /projects/{project}/sessions/{session}/seal -------------------------
+
+
+def test_seals_an_open_session_as_the_signed_in_user(member: TestClient, backend: dict):
+    response = member.post(seal_url(OPEN["name"]))
+    assert response.status_code == 200
+    # The service answers with nothing but errno; the sealed state and the
+    # new mtime come from reading the project back.
+    assert response.json() == {**OPEN, "immutable": True, "mtime": OPEN["mtime"] + 60.0}
+    # The session name travels URL-encoded in the path and arrives as typed.
+    assert backend["seal_calls"] == [(PROJECT["name"], OPEN["name"], "user2")]
+
+
+def test_the_owner_can_seal_too(settings: Settings, backend: dict):
+    owner = signed_in_client(create_app(settings), settings, PROJECT["owner"])
+    assert owner.post(seal_url(OPEN["name"])).status_code == 200
+
+
+def test_sealing_a_sealed_session_is_not_an_error(member: TestClient, backend: dict):
+    """
+    Idempotent: a retry after a lost answer finds the session sealed and gets
+    it back as it is, without the service being asked to seal it again.
+    """
+    response = member.post(seal_url(EXISTING["name"]))
+    assert response.status_code == 200
+    assert response.json() == EXISTING
+    assert backend["seal_calls"] == []
+
+
+def test_non_members_get_a_403_before_anything_is_sealed(
+    settings: Settings, backend: dict
+):
+    outsider = signed_in_client(create_app(settings), settings, "user3")
+    response = outsider.post(seal_url(OPEN["name"]))
+    assert response.status_code == 403
+    assert response.json()["code"] == "not_a_member"
+    assert backend["seal_calls"] == []
+
+
+def test_seal_of_an_unknown_project_is_a_404(member: TestClient, backend: dict):
+    response = member.post(seal_url(OPEN["name"], project="nope"))
+    assert response.status_code == 404
+    assert response.json()["code"] == "project_not_found"
+
+
+def test_seal_of_an_unknown_session_is_a_404(member: TestClient, backend: dict):
+    response = member.post(seal_url("nope"))
+    assert response.status_code == 404
+    assert response.json()["code"] == "session_not_found"
+    assert backend["seal_calls"] == []
+
+
+def test_a_seal_refusal_is_reported_with_the_services_message(
+    member: TestClient, backend: dict
+):
+    backend["seal_reject"] = "Raw folder does not exist."
+    response = member.post(seal_url(OPEN["name"]))
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "seal_rejected",
+        "message": "Raw folder does not exist.",
+    }
+
+
+def test_seal_requires_a_session_cookie(settings: Settings, backend: dict):
+    response = api_client(create_app(settings)).post(seal_url(OPEN["name"]))
+    assert response.status_code == 401
+    assert backend["seal_calls"] == []
+
+
+def test_seal_is_covered_by_the_origin_check(member: TestClient, backend: dict):
+    response = member.post(
+        seal_url(OPEN["name"]), headers={"Origin": "https://evil.example"}
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "bad_origin"
+    assert backend["seal_calls"] == []
+
+
+def test_seal_reports_an_unreachable_permissions_service(
+    member: TestClient, backend: dict, monkeypatch: pytest.MonkeyPatch
+):
+    def unreachable(self: PermissionsClient, *args, **kwargs):
+        raise requests.ConnectionError("permissions service is down")
+
+    monkeypatch.setattr(PermissionsClient, "seal_dataset", unreachable)
+    response = member.post(seal_url(OPEN["name"]))
     assert response.status_code == 502
     assert response.json()["code"] == "permissions_unavailable"

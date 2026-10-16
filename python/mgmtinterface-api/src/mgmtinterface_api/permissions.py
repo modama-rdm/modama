@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from typing import Literal
 
 import requests
 from permissions_client import PermissionsClient
@@ -63,13 +64,24 @@ def list_projects(settings: Settings) -> list[SerializedProject]:
     return result["projects"]
 
 
+def list_users(settings: Settings) -> list[str]:
+    """Everyone who may use the system: the members of the ad-hoc group."""
+    try:
+        result = make_client(settings).list_users()
+    except requests.RequestException as exc:
+        raise _unavailable() from exc
+    if result.get("errno") != 0:
+        raise _unavailable()
+    return sorted(result["users"])
+
+
 def project_details(settings: Settings, name: str) -> ProjectDetailsResponse | None:
     """
     A project with its sessions, or None when there is no ad-hoc project of
     that name.
 
     Always the fast variant: the full one runs `du` over the whole project to
-    fill `usage_bytes`, which none of the callers here need.
+    fill `usage_bytes`, which only `project_usage` asks for.
     """
     try:
         result = make_client(settings).projectdetails(name, fast=True)
@@ -81,11 +93,38 @@ def project_details(settings: Settings, name: str) -> ProjectDetailsResponse | N
     return result
 
 
+def project_usage(settings: Settings, name: str) -> int | None:
+    """
+    The disk usage of a project in bytes, or None when there is no ad-hoc
+    project of that name.
+
+    This is the one call that asks for the slow variant, which runs `du` over
+    the project folder. It has its own endpoint so that nothing else waits on
+    it.
+    """
+    try:
+        result = make_client(settings).projectdetails(name, fast=False)
+    except requests.RequestException as exc:
+        raise _unavailable() from exc
+    if result.get("errno") != 0:
+        return None
+    usage = result["project"]["usage_bytes"]
+    if usage is None:
+        # The slow variant always fills it; a null here means the service did
+        # not do what was asked.
+        raise _unavailable()
+    return int(usage)
+
+
+def project_not_found(name: str) -> APIError:
+    return APIError(404, "project_not_found", f"There is no project named {name!r}.")
+
+
 def require_project(settings: Settings, name: str) -> ProjectDetailsResponse:
     """`project_details`, with a 404 instead of None."""
     details = project_details(settings, name)
     if details is None:
-        raise APIError(404, "project_not_found", f"There is no project named {name!r}.")
+        raise project_not_found(name)
     return details
 
 
@@ -105,6 +144,22 @@ def require_member(details: ProjectDetailsResponse, username: str) -> None:
         )
 
 
+def require_owner(details: ProjectDetailsResponse, username: str) -> None:
+    """
+    Only the owner may change who the members are. The permissions service
+    checks this too (`check_can_modify`); the check here turns its refusal
+    into a 403 that says why.
+    """
+    project = details["project"]
+    if username != project["owner"]:
+        raise APIError(
+            403,
+            "not_the_owner",
+            f"Only the owner of project {project['name']!r}, {project['owner']}, "
+            "can change its members.",
+        )
+
+
 def find_session(
     details: ProjectDetailsResponse, name: str
 ) -> SerializedDataset | None:
@@ -112,6 +167,19 @@ def find_session(
         if dataset["name"] == name:
             return dataset
     return None
+
+
+def require_session(details: ProjectDetailsResponse, name: str) -> SerializedDataset:
+    """`find_session`, with a 404 instead of None."""
+    session = find_session(details, name)
+    if session is None:
+        raise APIError(
+            404,
+            "session_not_found",
+            f"There is no session named {name!r} in project "
+            f"{details['project']['name']!r}.",
+        )
+    return session
 
 
 def create_project(
@@ -138,6 +206,56 @@ def create_session(settings: Settings, project: str, name: str, user: str) -> No
         raise _unavailable() from exc
     if result.get("errno") != 0:
         raise Rejected(str(result.get("message", "The session was not created.")))
+
+
+def seal_session(settings: Settings, project: str, name: str, user: str) -> None:
+    """
+    Make the `raw/` folder of a session and everything in it immutable, as
+    `user`. The service checks that `user` is the owner or a member, that the
+    folder exists and that it is not a symlink; any refusal comes back as a
+    message.
+    """
+    try:
+        result = make_client(settings).seal_dataset(project, name, user)
+    except requests.RequestException as exc:
+        raise _unavailable() from exc
+    if result.get("errno") != 0:
+        raise Rejected(str(result.get("message", "The session was not sealed.")))
+
+
+def add_members(
+    settings: Settings, project: str, members: Iterable[str], user: str
+) -> SerializedProject:
+    """
+    Grant `members` access to a project, as `user`. Returns the project as the
+    service serializes it afterwards.
+    """
+    return _change_members(settings, project, "add", members, user)
+
+
+def remove_members(
+    settings: Settings, project: str, members: Iterable[str], user: str
+) -> SerializedProject:
+    """Revoke the access of `members`, as `user`. See `add_members`."""
+    return _change_members(settings, project, "remove", members, user)
+
+
+def _change_members(
+    settings: Settings,
+    project: str,
+    op: Literal["add", "remove"],
+    members: Iterable[str],
+    user: str,
+) -> SerializedProject:
+    try:
+        result = make_client(settings).change_project_members(
+            project, op, list(members), user
+        )
+    except requests.RequestException as exc:
+        raise _unavailable() from exc
+    if result.get("errno") != 0:
+        raise Rejected(str(result.get("message", "The members were not changed.")))
+    return result["project"]
 
 
 def user_uid(settings: Settings, username: str) -> int:
