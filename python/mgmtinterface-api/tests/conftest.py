@@ -57,3 +57,12 @@ def settings() -> Settings:
         session_persistent_max_age_seconds=7 * 24 * 60 * 60,
         session_refresh_seconds=5 * 60,
     )
+
+
+def signed_in_client(app: FastAPI, settings: Settings, username: str) -> TestClient:
+    """A client carrying a valid session cookie for `username`."""
+    client = api_client(app)
+    client.cookies.set(
+        settings.effective_cookie_name, app.state.session_codec.issue(username)
+    )
+    return client

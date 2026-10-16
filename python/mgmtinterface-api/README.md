@@ -153,6 +153,9 @@ old test fail, that change is breaking and belongs in a new version.
 | `POST /mgmt-api/auth/logout` | clears the cookie, answers 204 |
 | `GET /mgmt-api/auth/session` | the signed-in user, or 401 |
 | `GET /mgmt-api/projects` | all projects, unfiltered |
+| `POST /mgmt-api/projects` | create a project owned by the signed-in user |
+| `POST /mgmt-api/projects/{project}/sessions` | create a session in a project |
+| `POST /mgmt-api/ingest-shares` | open an ingest share for a session |
 | `GET /mgmt-api/versions` | supported API versions |
 | `GET /mgmt-api/healthz` | liveness probe |
 | `GET /mgmt-api/docs` | Swagger UI for the generated OpenAPI document |
@@ -173,6 +176,60 @@ Grouping into own/member/other happens in the client. Access is enforced by the
 file system, not by hiding rows. This changes with private projects (Theme D),
 which need a filtered query.
 
+## Creating things
+
+The three `POST` endpoints are named after the UI's terms, session and ingest
+share, rather than the legacy API's dataset and share. They are idempotent:
+the agent retries on flaky networks and may never have seen the answer to its
+first attempt, so a repeat of the same request must not fail.
+
+| | first request | repeat |
+|---|---|---|
+| `POST /projects` | 201, the new project | 200, the existing project, unchanged |
+| `POST /projects/{project}/sessions` | 201, the new session | 200, the existing session |
+| `POST /ingest-shares` | 201, a new share | 200, the share the user already has for that session |
+
+Both answers carry the resource; a client treats any 2xx as "I have it". The
+one conflict is `409 project_exists`: a project of that name that belongs to
+someone else. A repeat with a different member list does not change the
+members of an existing project; that is a separate operation.
+
+How each one tells "already there" from "refused":
+
+* Project: the permissions service refuses an existing name with the same
+  `errno` it uses for an invalid one, so the create is attempted first and the
+  name looked up only on refusal. Looking first would leave a window in which
+  two concurrent requests both see nothing and one of them fails with the very
+  error the endpoint absorbs. A refusal for a name that does not exist is a
+  `400 project_rejected` with the service's message.
+* Session: the project is read first (membership is checked on the same read,
+  giving a `403 not_a_member` instead of a `mkdir` error); an existing session
+  is returned, otherwise the folder is created and the project read again for
+  the session's timestamps. A refusal is re-checked against the project once,
+  for the case where a concurrent request created the session in between.
+* Ingest share: smbdrop opens a second share for the same path without
+  complaint, so the user's open shares are listed and matched on the
+  normalized path and uid, like the legacy `add_share_info`. Another user's
+  share for the same session does not count; each user ingests under their
+  own identity.
+
+The project and session name rules of the permissions service
+(`check_valid_group`, `check_valid_dataset`) are repeated as request-model
+constraints, so that they are in the OpenAPI document and a bad name fails
+with a 422 before a round trip. The service stays the authority for everything
+it checks beyond the spelling (Unix groups, existing folders, who may create).
+
+The ingest share response adds what the legacy response left to the client:
+`project`, `session`, and the `smb_host` and `workgroup` to connect with
+(`MODAMA_INGEST_SMB_HOST`, `MODAMA_INGEST_WORKGROUP`). Not in this version:
+the `X-Agent-Token` path of the legacy endpoint, which binds a share to the
+instrument an agent runs on (`resource`). That comes with the agent's move to
+this API, together with the question of how the agent authenticates.
+
+The owner of a new project is the signed-in user. The legacy request carried an
+`owner` field that had to equal the authenticated user; here the session is the
+only source.
+
 ## Layout
 
     src/mgmtinterface_api/
@@ -185,8 +242,11 @@ which need a filtered query.
         versioning.py the X-Modama-API-Version contract
         throttle.py   in-process failed-login counter
         permissions.py  calls into the permissions service
+        shares.py       calls into smbdrop, the share service
         routes/auth.py      login / logout / session
-        routes/projects.py  project list
+        routes/projects.py  project list, create project
+        routes/sessions.py  create session
+        routes/ingest_shares.py  open ingest share
         routes/versions.py  supported versions, unauthenticated
     tests/
 
@@ -201,7 +261,7 @@ The tests need `pytest` and `httpx2` (`fastapi.testclient` deprecates plain
 
 ```
 python3 -m venv /tmp/venv
-/tmp/venv/bin/pip install pytest httpx2 -e ./python/mgmtinterface-api
+/tmp/venv/bin/pip install pytest httpx2 ./python/permissions-client ./python/smbdrop-client -e ./python/mgmtinterface-api
 cd python/mgmtinterface-api && /tmp/venv/bin/pytest tests
 ```
 

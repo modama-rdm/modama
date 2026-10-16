@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MODAMA_")
 
     permissions_api: str = "http://permissions:5050"
+    # smbdrop, which creates the Samba shares for ingest. Shares are addressed
+    # by the path of the session as smbdrop sees it, which is
+    # `smb_base/<project relpath>/<session>`; both containers mount the data
+    # tree at the same place.
+    share_api: str = "http://smbdrop:5051"
+    smb_base: str = "/data"
+    # Host and workgroup an instrument PC connects to for an ingest share. The
+    # share service does not report them, so the API supplies them with the
+    # share, instead of every client pinning the lab's infrastructure.
+    ingest_smb_host: str = "moellenstedt.iff.kfa-juelich.de"
+    ingest_workgroup: str = "ER-C-INGEST"
 
     # Signed-cookie session. The name must differ from the Flask app's
     # `mgmtinterface_session`, since both run on the same origin until the

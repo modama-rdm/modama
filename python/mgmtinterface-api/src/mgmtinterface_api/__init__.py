@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI
 
 from .config import API_PREFIX, Settings, get_settings
 from .errors import APIError, api_error_handler
-from .routes import auth, projects, versions
+from .routes import auth, ingest_shares, projects, sessions, versions
 from .security import enforce_same_origin
 from .session import SessionCodec
 from .throttle import FailureThrottle
@@ -66,11 +66,35 @@ absolute limit; `"persistent": true` on login drops the idle timeout in exchange
 for a longer absolute limit ("keep me logged in"). State-changing requests are
 also checked against the request `Origin`. Endpoints that need a session are
 marked with a lock below.
+
+### Creating things
+
+The `POST` endpoints that create a project, a session or an ingest share are
+idempotent: the first request answers `201` with the new resource, and a repeat
+of the same request answers `200` with the existing one instead of an error. A
+client that lost a response to a flaky network can therefore simply send the
+request again. The only conflict (`409`) is a project of the same name that
+belongs to someone else.
 """.strip()
 
 TAGS_METADATA = [
     {"name": "auth", "description": "Login, logout, and the current session."},
-    {"name": "projects", "description": "Project listings."},
+    {"name": "projects", "description": "Project listings and creation."},
+    {
+        "name": "sessions",
+        "description": (
+            "Sessions, one folder per measurement run inside a project. The "
+            "legacy API calls them datasets."
+        ),
+    },
+    {
+        "name": "ingest shares",
+        "description": (
+            "Temporary Samba shares with one-time credentials for writing data "
+            "into a session from an instrument PC. The legacy API calls them "
+            "shares."
+        ),
+    },
     {
         "name": "versions",
         "description": (
@@ -128,6 +152,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(auth.router, prefix=API_PREFIX)
     app.include_router(projects.router, prefix=API_PREFIX)
+    app.include_router(sessions.router, prefix=API_PREFIX)
+    app.include_router(ingest_shares.router, prefix=API_PREFIX)
     app.include_router(versions.router, prefix=API_PREFIX)
 
     @app.get(

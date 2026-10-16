@@ -22,6 +22,8 @@ from mgmtinterface_api.versioning import (
 LOGIN = f"{API_PREFIX}/auth/login"
 SESSION = f"{API_PREFIX}/auth/session"
 PROJECTS = f"{API_PREFIX}/projects"
+SESSIONS = f"{API_PREFIX}/projects/{{project}}/sessions"
+INGEST_SHARES = f"{API_PREFIX}/ingest-shares"
 VERSIONS = f"{API_PREFIX}/versions"
 HEALTHZ = f"{API_PREFIX}/healthz"
 
@@ -61,6 +63,8 @@ def test_every_documented_route_is_present(schema: dict[str, Any]):
         f"{API_PREFIX}/auth/logout",
         SESSION,
         PROJECTS,
+        SESSIONS,
+        INGEST_SHARES,
         VERSIONS,
         HEALTHZ,
     }
@@ -75,7 +79,14 @@ def test_version_header_is_documented_as_required(schema: dict[str, Any]):
     is set on the document afterwards. If that correction is dropped, a
     generated client stops sending the header and every call gets a 400.
     """
-    for path, method in ((LOGIN, "post"), (SESSION, "get"), (PROJECTS, "get")):
+    for path, method in (
+        (LOGIN, "post"),
+        (SESSION, "get"),
+        (PROJECTS, "get"),
+        (PROJECTS, "post"),
+        (SESSIONS, "post"),
+        (INGEST_SHARES, "post"),
+    ):
         parameter = version_parameter(schema, path, method)
         assert parameter is not None, f"{method.upper()} {path} does not document it"
         assert parameter["required"] is True, f"{method.upper()} {path} says optional"
@@ -104,6 +115,9 @@ def test_session_cookie_is_declared_as_a_security_scheme(schema: dict[str, Any])
 def test_only_the_routes_needing_a_session_are_marked(schema: dict[str, Any]):
     assert schema["paths"][SESSION]["get"].get("security")
     assert schema["paths"][PROJECTS]["get"].get("security")
+    assert schema["paths"][PROJECTS]["post"].get("security")
+    assert schema["paths"][SESSIONS]["post"].get("security")
+    assert schema["paths"][INGEST_SHARES]["post"].get("security")
     # Signing in cannot require being signed in, and logging out of an expired
     # session answers 204 rather than 401.
     assert not schema["paths"][LOGIN]["post"].get("security")
@@ -128,6 +142,29 @@ def test_login_documents_the_persistent_flag(schema: dict[str, Any]):
     session_info = schema["components"]["schemas"]["SessionInfo"]
     assert session_info["properties"]["persistent"]["type"] == "boolean"
     assert "persistent" in session_info["required"]
+
+
+@pytest.mark.parametrize("path", [PROJECTS, SESSIONS, INGEST_SHARES])
+def test_create_endpoints_document_both_outcomes(schema: dict[str, Any], path: str):
+    """
+    An idempotent create has two success answers, 201 and 200, and a client
+    author has to see both to handle a retry correctly. Both carry the
+    resource, not the error body.
+    """
+    responses = schema["paths"][path]["post"]["responses"]
+    assert {"200", "201"} <= set(responses)
+    for status in ("200", "201"):
+        ref = responses[status]["content"]["application/json"]["schema"]["$ref"]
+        assert not ref.endswith("/ErrorResponse"), f"{status} documents the error body"
+    assert responses["200"]["content"] == responses["201"]["content"]
+    # State-changing, so the CSRF 403 applies, and a session is required.
+    assert {"401", "403"} <= set(responses)
+
+
+def test_project_conflict_is_documented(schema: dict[str, Any]):
+    responses = schema["paths"][PROJECTS]["post"]["responses"]
+    assert "409" in responses
+    assert "409" not in schema["paths"][SESSIONS]["post"]["responses"]
 
 
 def test_error_statuses_are_documented_with_the_house_body(schema: dict[str, Any]):
