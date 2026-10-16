@@ -11,6 +11,27 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.15.0] - 2026-10-16
+
+### Changed
+
+- Project details, the user list, changing members, sealing a session, and
+  listing and closing ingest shares now go through the new API. The data
+  browser is the only screen still on the legacy API. (#172)
+- A project page, Manage Members, Seal Session and the ingest share no longer
+  wait for the project's size to be computed before they appear; the project
+  page shows the size as soon as it is known.
+- Saving members is a single request: the server works out who to add and who
+  to remove, so saving again after an error applies only what is still
+  missing.
+- Closing an ingest share that was already closed (for example from another
+  tab) shows the create state instead of an error.
+
+### Fixed
+
+- When sealing a session, changing members or closing an ingest share fails,
+  the error says why instead of showing a generic message.
+
 ## [0.14.0] - 2026-10-16
 
 ### Changed

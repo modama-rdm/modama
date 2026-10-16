@@ -23,6 +23,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.15.0',
+        date: '2026-10-16',
+        title: 'Project pages open at once',
+        changes: [
+            'A project page, Manage Members, Seal Session and the ingest share no longer wait for the project’s size to be computed before they appear. The project page shows the size as soon as it is known.',
+            'Saving members is one step: the server works out who to add and who to remove, so if something goes wrong you can simply save again.',
+            'Closing an ingest share that was already closed, for example from another tab, no longer shows an error.',
+            'When sealing a session, changing members or closing an ingest share fails, the error now says why.',
+        ],
+    },
+    {
         version: '0.14.0',
         date: '2026-10-16',
         title: 'Creating things is forgiving',
