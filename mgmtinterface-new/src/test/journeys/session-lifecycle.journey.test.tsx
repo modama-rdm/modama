@@ -6,9 +6,11 @@ import {baseWorld} from '../world'
 import {FIXTURE_PROJECT} from '../fixtures/project'
 
 /**
- * #169 journey 3/6 — create a session, then seal one. Both mutations use the
- * "errno-can't-discriminate" pattern (`NewSession.tsx` / `SealSession.tsx`) —
- * this is the journey that exercises that response shape through the real UI.
+ * #169 journey 3/6 — create a session, then seal one. Creating moved to the
+ * new API (#172): real status codes, 201 for a new session and 200 for one
+ * that already existed. Sealing still uses the legacy "errno-can't-
+ * discriminate" pattern (`SealSession.tsx`), which this journey keeps
+ * exercising through the real UI.
  */
 describe('journey: create and seal a session', () => {
     const name = FIXTURE_PROJECT.name
@@ -17,13 +19,23 @@ describe('journey: create and seal a session', () => {
         signIn(FIXTURE_PROJECT.owner, 'correct-horse')
     })
 
+    const createSession = `/mgmt-api/projects/${name}/sessions`
+
     it('creates a session and returns to the project', async () => {
         const recorder = installApiMock([
             ...baseWorld(),
             {
                 method: 'POST',
-                path: `/api/project/${name}/dataset/`,
-                respond: () => ({body: {errno: 0}}),
+                path: createSession,
+                respond: ({body}) => ({
+                    status: 201,
+                    body: {
+                        name: (body as {name: string}).name,
+                        immutable: false,
+                        ctime: 1784720092,
+                        mtime: 1784720092,
+                    },
+                }),
             },
         ])
         const {user} = renderApp({route: `/projects/${name}/sessions/new`})
@@ -34,8 +46,41 @@ describe('journey: create and seal a session', () => {
         await user.click(screen.getByRole('button', {name: /create session/i}))
 
         expect(await screen.findByRole('heading', {name})).toBeInTheDocument()
-        const [call] = recorder.matching('POST', `/api/project/${name}/dataset/`)
-        expect(call.body).toEqual({name: '2026-07-22-alignment_run', owner: FIXTURE_PROJECT.owner})
+        expect(screen.getByText('Session "2026-07-22-alignment_run" created.')).toBeInTheDocument()
+        const [call] = recorder.matching('POST', createSession)
+        // No `owner`: the session cookie says who is creating it.
+        expect(call.body).toEqual({name: '2026-07-22-alignment_run'})
+    })
+
+    it('says so on the form when the session already exists', async () => {
+        // The API is idempotent: a repeat answers 200 with the existing session.
+        // The form stays, with a way back to the project, instead of a "Done!".
+        installApiMock([
+            ...baseWorld(),
+            {
+                method: 'POST',
+                path: createSession,
+                respond: () => ({
+                    status: 200,
+                    body: {name: 'create by hand', immutable: false, ctime: 1, mtime: 2},
+                }),
+            },
+        ])
+        const {user} = renderApp({route: `/projects/${name}/sessions/new`})
+
+        const input = await screen.findByLabelText('Session name')
+        await user.clear(input)
+        await user.type(input, 'create by hand')
+        await user.click(screen.getByRole('button', {name: /create session/i}))
+
+        const notice = await screen.findByRole('status')
+        expect(notice).toHaveTextContent(/already exists in this project/i)
+        expect(notice).toHaveTextContent('create by hand')
+        expect(screen.queryByText('Done!')).not.toBeInTheDocument()
+        expect(screen.getByLabelText('Session name')).toBeInTheDocument()
+
+        await user.click(screen.getByRole('link', {name: /go back to the project/i}))
+        expect(await screen.findByRole('heading', {name})).toBeInTheDocument()
     })
 
     it('shows the backend error and stays on the form when creation fails', async () => {
@@ -43,8 +88,14 @@ describe('journey: create and seal a session', () => {
             ...baseWorld(),
             {
                 method: 'POST',
-                path: `/api/project/${name}/dataset/`,
-                respond: () => ({body: {errno: 1, message: 'A session with that name already exists.'}}),
+                path: createSession,
+                respond: () => ({
+                    status: 400,
+                    body: {
+                        code: 'session_rejected',
+                        message: 'mkdir: cannot create directory: Permission denied',
+                    },
+                }),
             },
         ])
         const {user} = renderApp({route: `/projects/${name}/sessions/new`})
@@ -52,7 +103,10 @@ describe('journey: create and seal a session', () => {
         await screen.findByLabelText('Session name')
         await user.click(screen.getByRole('button', {name: /create session/i}))
 
-        expect(await screen.findByText('A session with that name already exists.')).toBeInTheDocument()
+        expect(
+            await screen.findByText('mkdir: cannot create directory: Permission denied'),
+        ).toBeInTheDocument()
+        expect(screen.getByLabelText('Session name')).toBeInTheDocument()
     })
 
     it('seals an open session and returns to the project', async () => {

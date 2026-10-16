@@ -1,11 +1,8 @@
 import {useState, type FormEvent} from 'react'
-import {useLoaderData, useNavigate} from 'react-router-dom'
-import {Unauthorized, apiFetch} from '../api/client'
-import type {
-    CreateProjectRequest,
-    CreateProjectResponse,
-    GenericErrorResponse,
-} from '../api/types'
+import {Link, useLoaderData, useNavigate} from 'react-router-dom'
+import {Unauthorized} from '../api/client'
+import {apiRequestV2} from '../api/clientV2'
+import type {CreateProjectRequestV2, SerializedProject} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {MemberPicker} from '../components/MemberPicker'
 import {Button} from '../components/ui/Button'
@@ -15,6 +12,22 @@ import {AlertTriangleIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import type {NewProjectLoaderData} from './newProject.loader'
 
+/**
+ * The rule the API enforces on project names (and the permissions service
+ * behind it): a Unix group name, since a project may become one. Checked here
+ * too, so the form can say it in words rather than show the API's pattern.
+ */
+const PROJECT_NAME = /^[a-z][a-z0-9_-]*$/
+
+function projectNameProblem(name: string): string | null {
+    if (name.length < 3) return 'Project name must be at least 3 characters long.'
+    if (name.length > 32) return 'Project name can be at most 32 characters long.'
+    if (!PROJECT_NAME.test(name)) {
+        return 'Project name can only use lowercase letters, digits, "_" and "-", and must start with a letter.'
+    }
+    return null
+}
+
 export function NewProject() {
     const {currentUser, users} = useLoaderData() as NewProjectLoaderData
     const navigate = useNavigate()
@@ -23,6 +36,8 @@ export function NewProject() {
     const [name, setName] = useState('')
     const [members, setMembers] = useState<string[]>([])
     const [error, setError] = useState('')
+    /** Name of a project the user already owns, after trying to create it again. */
+    const [existing, setExisting] = useState<string | null>(null)
     const [submitting, setSubmitting] = useState(false)
 
     async function onSubmit(e: FormEvent) {
@@ -32,30 +47,31 @@ export function NewProject() {
             setError('Please enter a project name.')
             return
         }
-        if (trimmed.includes('/')) {
-            setError('Project name cannot contain a "/".')
+        const problem = projectNameProblem(trimmed)
+        if (problem) {
+            setError(problem)
             return
         }
         setError('')
+        setExisting(null)
         setSubmitting(true)
         try {
-            const body: CreateProjectRequest = {
-                name: trimmed,
-                owner: currentUser,
-                members,
-            }
-            const res = await apiFetch<CreateProjectResponse | GenericErrorResponse>(
-                '/api/project/',
+            // The signed-in session is the owner; the new API takes no `owner`.
+            const body: CreateProjectRequestV2 = {name: trimmed, members}
+            const {status, body: project} = await apiRequestV2<SerializedProject>(
+                '/projects',
                 {method: 'POST', body: JSON.stringify(body)},
             )
-            // `errno` can't discriminate (it's `number` on the error shape), so
-            // key off the presence of the `project` payload.
-            if (!('project' in res)) {
-                setError(res.message || 'Could not create the project.')
+            // Creating is idempotent: 200 means a project of that name already
+            // belongs to this user. Not a success and not an error: the user
+            // may have meant a new name, so say so here and let them choose,
+            // rather than announce "Done!" and jump to the old project.
+            if (status === 200) {
+                setExisting(project.name)
                 return
             }
-            notify(`Project "${res.project.name}" created.`)
-            navigate(`/projects/${res.project.name}`)
+            notify(`Project "${project.name}" created.`)
+            navigate(`/projects/${project.name}`)
         } catch (err) {
             if (err instanceof Unauthorized) {
                 navigate('/login?next=/projects/new')
@@ -91,6 +107,26 @@ export function NewProject() {
                     </div>
                 )}
 
+                {existing && (
+                    <div
+                        role="status"
+                        className="mb-5 flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/5 px-3.5 py-3">
+                        <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-warning"/>
+                        <div className="text-[13px] leading-relaxed text-fg-muted">
+                            You already own a project named{' '}
+                            <span className="font-mono text-fg">{existing}</span>. Choose
+                            another name, or{' '}
+                            <Link
+                                to={`/projects/${existing}`}
+                                className="font-medium text-primary hover:underline"
+                            >
+                                open the existing project
+                            </Link>
+                            .
+                        </div>
+                    </div>
+                )}
+
                 <form onSubmit={onSubmit} className="flex flex-col gap-6">
                     <Input
                         label={
@@ -102,7 +138,7 @@ export function NewProject() {
                         onChange={(e) => setName(e.target.value)}
                         placeholder="e.g. ghost_imaging_2025"
                         className="font-mono"
-                        help="Lowercase letters, numbers, and underscores only. Will become a folder name."
+                        help="Lowercase letters, digits, underscores and dashes, 3 to 32 characters. Will become a folder name."
                         autoFocus
                     />
                     <MemberPicker

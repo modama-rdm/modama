@@ -1,12 +1,8 @@
 import {useState, type FormEvent} from 'react'
-import {useNavigate, useParams} from 'react-router-dom'
-import {getCurrentUser} from '../api/auth'
-import {Unauthorized, apiFetch} from '../api/client'
-import type {
-    CreateDatasetRequest,
-    CreateDatasetResponse,
-    GenericErrorResponse,
-} from '../api/types'
+import {Link, useNavigate, useParams} from 'react-router-dom'
+import {Unauthorized} from '../api/client'
+import {apiRequestV2} from '../api/clientV2'
+import type {CreateSessionRequestV2, SessionV2} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
@@ -22,6 +18,8 @@ export function NewSession() {
 
     const [session, setSession] = useState(sessionNamePrefix)
     const [error, setError] = useState('')
+    /** Name of a session that already exists, after trying to create it again. */
+    const [existing, setExisting] = useState<string | null>(null)
     const [submitting, setSubmitting] = useState(false)
 
     const backToProject = () => navigate(`/projects/${name}`)
@@ -38,24 +36,23 @@ export function NewSession() {
             return
         }
         setError('')
+        setExisting(null)
         setSubmitting(true)
         try {
-            const body: CreateDatasetRequest = {
-                name: trimmed,
-                owner: getCurrentUser() ?? '',
-            }
-            const res = await apiFetch<CreateDatasetResponse | GenericErrorResponse>(
-                `/api/project/${encodeURIComponent(name)}/dataset/`,
+            // The signed-in session is the owner; the new API takes no `owner`.
+            const body: CreateSessionRequestV2 = {name: trimmed}
+            const {status, body: created} = await apiRequestV2<SessionV2>(
+                `/projects/${encodeURIComponent(name)}/sessions`,
                 {method: 'POST', body: JSON.stringify(body)},
             )
-            if (res.errno !== 0) {
-                setError(
-                    (res as GenericErrorResponse).message ||
-                    'Could not create the session.',
-                )
+            // Creating is idempotent: 200 means the session was already there.
+            // Not a success and not an error: say so on the form and let the
+            // user pick another name, rather than announce "Done!".
+            if (status === 200) {
+                setExisting(created.name)
                 return
             }
-            notify(`Session "${trimmed}" created.`)
+            notify(`Session "${created.name}" created.`)
             backToProject()
         } catch (err) {
             if (err instanceof Unauthorized) {
@@ -99,6 +96,26 @@ export function NewSession() {
                         className="mb-5 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger/5 px-3.5 py-3">
                         <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger"/>
                         <div className="text-[13px] text-danger">{error}</div>
+                    </div>
+                )}
+
+                {existing && (
+                    <div
+                        role="status"
+                        className="mb-5 flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/5 px-3.5 py-3">
+                        <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-warning"/>
+                        <div className="text-[13px] leading-relaxed text-fg-muted">
+                            A session named{' '}
+                            <span className="font-mono text-fg">{existing}</span> already
+                            exists in this project. Choose another name, or{' '}
+                            <Link
+                                to={`/projects/${name}`}
+                                className="font-medium text-primary hover:underline"
+                            >
+                                go back to the project
+                            </Link>
+                            .
+                        </div>
                     </div>
                 )}
 

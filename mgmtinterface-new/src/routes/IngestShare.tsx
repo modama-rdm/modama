@@ -8,13 +8,13 @@ import {
     useLoaderData,
     useNavigate,
 } from 'react-router-dom'
-import {Unauthorized, apiFetch} from '../api/client'
+import {ApiError, Unauthorized, apiFetch} from '../api/client'
+import {apiRequestV2} from '../api/clientV2'
 import type {
-    CreateShareRequest,
-    CreateShareResponse,
+    CreateIngestShareRequestV2,
     DeleteShareResponse,
+    IngestShareV2,
     ProjectDetailsResponse,
-    SerializedShare,
 } from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {CopyField} from '../components/CopyField'
@@ -29,7 +29,7 @@ import {
 } from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import {findDatasetShare} from '../lib/projectsUtil'
-import {shareAccess} from '../lib/shares'
+import {shareAccess, type ConnectableShare} from '../lib/shares'
 import type {IngestShareLoaderData} from './ingestShare.loader'
 
 function ErrorBanner({message}: { message: string }) {
@@ -48,7 +48,7 @@ function ActiveShare({
                          onClose,
                          closing,
                      }: {
-    share: SerializedShare
+    share: ConnectableShare
     dataset: string
     onClose: () => void
     closing: boolean
@@ -223,10 +223,14 @@ function IngestPanel() {
     const {notify} = useToast()
 
     const ds = datasets.find((d) => d.name === dataset)
-    const [share, setShare] = useState<SerializedShare | null>(() =>
+    // Either a share from the legacy list (no host in it) or one the new API
+    // just opened (host included); `shareAccess` handles both.
+    const [share, setShare] = useState<ConnectableShare | null>(() =>
         findDatasetShare(shares, project.relpath, dataset),
     )
     const [error, setError] = useState('')
+    /** True when the last create answered with a share that was already open. */
+    const [alreadyOpen, setAlreadyOpen] = useState(false)
     const [busy, setBusy] = useState(false)
 
     const backTo = `/projects/${project.name}`
@@ -273,21 +277,36 @@ function IngestPanel() {
 
     async function onCreate() {
         setError('')
+        setAlreadyOpen(false)
         setBusy(true)
         try {
-            const body: CreateShareRequest = {project: name, dataset}
-            const created = await apiFetch<CreateShareResponse>('/api/share/', {
-                method: 'POST',
-                body: JSON.stringify(body),
-            })
+            // Opening a share moved to the new API (#172). Listing and closing
+            // are still on the legacy endpoints until those move too.
+            const body: CreateIngestShareRequestV2 = {project: name, session: dataset}
+            const {status, body: created} = await apiRequestV2<IngestShareV2>(
+                '/ingest-shares',
+                {method: 'POST', body: JSON.stringify(body)},
+            )
             setShare(created)
+            // Idempotent: 200 means this user already had a share open for the
+            // session, which the list we loaded had not shown yet. The details
+            // are the right thing to show either way; a "Done!" toast is not.
+            if (status === 200) {
+                setAlreadyOpen(true)
+                return
+            }
             notify(`Ingest share for "${dataset}" created.`)
         } catch (err) {
             if (err instanceof Unauthorized) {
                 navigate(`/login?next=${next}`)
                 return
             }
-            setError('Could not create the ingest share. Please try again.')
+            // The new API's errors are written to be shown.
+            setError(
+                err instanceof ApiError
+                    ? err.message
+                    : 'Could not create the ingest share. Please try again.',
+            )
         } finally {
             setBusy(false)
         }
@@ -296,6 +315,7 @@ function IngestPanel() {
     async function onClose() {
         if (!share) return
         setError('')
+        setAlreadyOpen(false)
         setBusy(true)
         try {
             await apiFetch<DeleteShareResponse>(
@@ -318,6 +338,17 @@ function IngestPanel() {
     return (
         <>
             {error && <ErrorBanner message={error}/>}
+            {alreadyOpen && (
+                <div
+                    role="status"
+                    className="mb-5 flex items-start gap-2.5 rounded-lg border border-primary/25 bg-primary/5 px-3.5 py-3">
+                    <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary"/>
+                    <div className="text-[13px] leading-relaxed text-fg-muted">
+                        You already had an ingest share open for this session. These are
+                        its details; no second share was created.
+                    </div>
+                </div>
+            )}
             {share ? (
                 <ActiveShare
                     share={share}
