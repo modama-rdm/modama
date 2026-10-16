@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest'
 import {ApiError, Unauthorized} from './client'
-import {API_VERSION, apiFetchV2, parseError} from './clientV2'
+import {API_VERSION, apiFetchV2, apiRequestV2, parseError} from './clientV2'
 
 function mockFetchOnce(
     body: unknown,
@@ -89,6 +89,20 @@ describe('apiFetchV2', () => {
         await apiFetchV2('/auth/session')
         const withoutBody = bare.mock.calls[0][1] as RequestInit
         expect((withoutBody.headers as Headers).get('Content-Type')).toBeNull()
+    })
+
+    it('reports the status alongside the body through apiRequestV2', async () => {
+        // The create endpoints are idempotent and answer 201 for a new thing
+        // and 200 for one that already existed; screens word their toast on it.
+        mockFetchOnce({name: 'ghost_imaging_2026'}, {status: 201})
+        await expect(
+            apiRequestV2('/projects', {method: 'POST', body: '{}'}),
+        ).resolves.toEqual({status: 201, body: {name: 'ghost_imaging_2026'}})
+
+        mockFetchOnce({name: 'ghost_imaging_2026'}, {status: 200})
+        await expect(
+            apiRequestV2('/projects', {method: 'POST', body: '{}'}),
+        ).resolves.toEqual({status: 200, body: {name: 'ghost_imaging_2026'}})
     })
 
     it('returns undefined for 204 rather than parsing an empty body', async () => {

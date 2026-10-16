@@ -41,6 +41,14 @@ describe('shareAccess', () => {
         expect(a.password).toBe('s3cr3t')
     })
 
+    it('prefers the host and workgroup a share from the new API names', () => {
+        // The legacy list omits them, so the constants stay as the fallback.
+        const c = shareAccess({...share, smb_host: 'ingest.example.test', workgroup: 'LAB'})
+        expect(c.winAddress).toBe('\\\\ingest.example.test\\drop_abc123')
+        expect(c.winUsername).toBe('LAB\\ingest7')
+        expect(c.unixAddress).toBe('smb://ingest7@ingest.example.test/drop_abc123')
+    })
+
     it('accepts injected host and workgroup overrides', () => {
         const b = shareAccess(share, 'example.test', 'WG')
         expect(b.winAddress).toBe('\\\\example.test\\drop_abc123')

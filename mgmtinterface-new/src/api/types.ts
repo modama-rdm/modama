@@ -88,6 +88,29 @@ export interface CreateProjectRequest {
     members: string[]
 }
 
+/**
+ * `POST /mgmt-api/projects` (#172). No `owner`: the signed-in session is the
+ * owner. Answers 201 with the new project, or 200 with the existing one when
+ * the signed-in user already owns a project of that name (the create endpoints
+ * are idempotent); 409 when someone else does.
+ */
+export interface CreateProjectRequestV2 {
+    name: string
+    members: string[]
+}
+
+/** `POST /mgmt-api/projects/<name>/sessions` — the session, by its UI name. */
+export interface CreateSessionRequestV2 {
+    name: string
+}
+
+/**
+ * `POST /mgmt-api/projects/<name>/sessions` success: the session as the
+ * project details list it (same fields as {@link SerializedDataset}). 200 when
+ * it already existed, 201 when it was just created.
+ */
+export type SessionV2 = SerializedDataset
+
 /** `POST /api/project/` success — the freshly created project. */
 export interface CreateProjectResponse extends OkEnvelope {
     project: SerializedProject
@@ -137,6 +160,27 @@ export type CreateShareResponse = SerializedShare
 /** `DELETE /api/share/<share_id>/` success. */
 export interface DeleteShareResponse {
     status: 'ok'
+}
+
+/** `POST /mgmt-api/ingest-shares` — the session to open a share for. */
+export interface CreateIngestShareRequestV2 {
+    project: string
+    session: string
+}
+
+/**
+ * `POST /mgmt-api/ingest-shares` success: the share as smbdrop reports it,
+ * plus what the legacy response left to the client — which project and
+ * session it is for, and the host and workgroup to connect with. 200 when the
+ * user already had a share open for that session, 201 when a new one was
+ * opened. A superset of {@link SerializedShare}, so it slots into the
+ * share-matching helpers while the list endpoint is still the legacy one.
+ */
+export interface IngestShareV2 extends SerializedShare {
+    project: string
+    session: string
+    smb_host: string
+    workgroup: string
 }
 
 /**

@@ -72,14 +72,28 @@ export function parseError(status: number, body: unknown): ErrorBody {
     }
 }
 
+/** A successful answer: the parsed body and the status it came with. */
+export interface ApiResult<T> {
+    status: number
+    body: T
+}
+
 /**
- * Request to a `/mgmt-api` path, returning the parsed JSON body.
+ * Request to a `/mgmt-api` path, returning the parsed JSON body together with
+ * the status code.
+ *
+ * The status matters for the create endpoints, which are idempotent: 201 means
+ * the thing was just made, 200 that it already existed and was returned as is.
+ * Most callers do not care and use `apiFetchV2`.
  *
  * Throws `Unauthorized` on 401 so existing loaders keep redirecting to /login
  * unchanged, and `ApiError` carrying the API's own message on any other non-2xx
  * — that message is written to be shown to the user.
  */
-export async function apiFetchV2<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function apiRequestV2<T>(
+    path: string,
+    init: RequestInit = {},
+): Promise<ApiResult<T>> {
     const headers = new Headers(init.headers)
     if (init.body && !headers.has('Content-Type')) {
         headers.set('Content-Type', 'application/json')
@@ -95,8 +109,8 @@ export async function apiFetchV2<T>(path: string, init: RequestInit = {}): Promi
     })
 
     if (res.ok) {
-        if (res.status === 204) return undefined as T
-        return (await res.json()) as T
+        if (res.status === 204) return {status: res.status, body: undefined as T}
+        return {status: res.status, body: (await res.json()) as T}
     }
 
     const body: unknown = await res.json().catch(() => null)
@@ -106,4 +120,9 @@ export async function apiFetchV2<T>(path: string, init: RequestInit = {}): Promi
         throw new Unauthorized(error.message)
     }
     throw new ApiError(res.status, error.message)
+}
+
+/** `apiRequestV2` for callers that only need the body. */
+export async function apiFetchV2<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return (await apiRequestV2<T>(path, init)).body
 }
