@@ -23,6 +23,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.14.0',
+        date: '2026-10-16',
+        title: 'Creating things is forgiving',
+        changes: [
+            'Creating a project that you already own, or a session that already exists, is no longer an error: the form tells you it is already there and offers to take you to it. Opening an ingest share you already have open shows that share instead of a second one.',
+            'The project name form now tells you what is wrong with a name (lowercase letters, digits, underscores and dashes, 3 to 32 characters, starting with a letter) before anything is sent.',
+            'When an ingest share cannot be opened, the error now says why.',
+        ],
+    },
+    {
         version: '0.13.0',
         date: '2026-10-15',
         title: 'Keep me logged in',

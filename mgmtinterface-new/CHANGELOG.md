@@ -11,6 +11,26 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.14.0] - 2026-10-16
+
+### Changed
+
+- Creating a project, a session or an ingest share now goes through the new
+  API. Creating something that already exists is no longer an error: the form
+  tells you that the project (one you own) or the session is already there and
+  offers to take you to it, and an ingest share you already have open for a
+  session is shown instead of a second one being opened. (#172)
+- The project name rule (lowercase letters, digits, `_` and `-`, 3 to 32
+  characters, starting with a letter) is now checked in the form, with a message
+  that says what is wrong, instead of failing on the server.
+- The host and workgroup shown for a new ingest share come from the server
+  instead of being fixed in the app.
+
+### Fixed
+
+- When an ingest share cannot be opened, the error now says why instead of
+  showing a generic message.
+
 ## [0.13.0] - 2026-10-15
 
 ### Added
