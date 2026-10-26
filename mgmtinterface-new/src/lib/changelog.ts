@@ -23,6 +23,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.16.0',
+        date: '2026-10-26',
+        title: 'The data browser pages through big folders',
+        changes: [
+            'Folders are listed 200 entries at a time, with a “Load more” button for the rest. Every entry is reachable; the old listing stopped at 1024 and could leave out subfolders of a big folder.',
+            'Entries are ordered folders first, then by name regardless of case.',
+            'A path that does not exist, or a folder you may not read, shows the breadcrumb of the path, so any folder above it is one click away.',
+            'The data browser reads the new API, like every other screen.',
+        ],
+    },
+    {
         version: '0.15.0',
         date: '2026-10-16',
         title: 'Project pages open at once',

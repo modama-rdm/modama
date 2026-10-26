@@ -11,6 +11,27 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.16.0] - 2026-10-26
+
+### Changed
+
+- The data browser now reads the new API, so no screen uses the legacy API
+  any more. (#172)
+- Folders are listed 200 entries at a time, with a "Load more" button for the
+  rest. Every entry of a folder is reachable, where the legacy listing stopped
+  at 1024 and could leave out subfolders of a big folder. Folders come first,
+  then names in alphabetical order regardless of case. (#90)
+- A path that does not exist, or a folder you may not read, shows the
+  breadcrumb of the path as the way back up, instead of a single link to the
+  nearest existing folder.
+- The address bar always carries the normalized path: a trailing slash or a
+  `..` is replaced before the listing is shown, so copied URLs agree with it.
+
+### Fixed
+
+- Opening a folder you may not read shows what happened instead of a server
+  error.
+
 ## [0.15.0] - 2026-10-16
 
 ### Changed
