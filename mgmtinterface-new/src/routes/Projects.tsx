@@ -5,13 +5,17 @@ import {Avatar} from '../components/ui/Avatar'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {PlusIcon, SearchIcon, UploadIcon} from '../components/ui/icons'
+import {SortHeader} from '../components/ui/SortHeader'
+import {useStoredSort} from '../hooks/useStoredSort'
 import {formatDate} from '../lib/format'
 import {
     filterProjects,
     groupProjects,
+    PROJECT_SORT,
     sortProjects,
-    type SortBy,
+    type ProjectSortKey,
 } from '../lib/projectsUtil.ts'
+import type {Sort} from '../lib/sort'
 import type {ProjectsLoaderData} from './projects.loader'
 
 function MemberAvatars({owner, members}: { owner: string; members: string[] }) {
@@ -45,11 +49,15 @@ function ProjectsSection({
                              title,
                              projects,
                              showOwner,
+                             sort,
+                             onSort,
                              onOpen,
                          }: {
     title: string
     projects: SerializedProject[]
     showOwner?: boolean
+    sort: Sort<ProjectSortKey>
+    onSort: (key: ProjectSortKey) => void
     onOpen: (name: string) => void
 }) {
     if (projects.length === 0) return null
@@ -62,10 +70,12 @@ function ProjectsSection({
                 <table className="w-full border-collapse">
                     <thead>
                     <tr className="border-b border-default">
-                        <th className={thClass}>Project</th>
-                        {showOwner && <th className={thClass}>Owner</th>}
+                        <SortHeader label="Project" column="name" sort={sort} onSort={onSort} className={thClass}/>
+                        {showOwner && (
+                            <SortHeader label="Owner" column="owner" sort={sort} onSort={onSort} className={thClass}/>
+                        )}
                         <th className={thClass}>Members</th>
-                        <th className={thClass}>Last modified</th>
+                        <SortHeader label="Last modified" column="mtime" sort={sort} onSort={onSort} className={thClass}/>
                     </tr>
                     </thead>
                     <tbody>
@@ -106,16 +116,16 @@ export function Projects() {
     const {currentUser, projects, shares} = useLoaderData() as ProjectsLoaderData
     const navigate = useNavigate()
     const [query, setQuery] = useState('')
-    const [sortBy, setSortBy] = useState<SortBy>('recent')
+    const [sort, sortBy] = useStoredSort('erc-projects-sort', PROJECT_SORT)
 
     const grouped = useMemo(() => {
         const g = groupProjects(filterProjects(projects, query), currentUser)
         return {
-            own: sortProjects(g.own, sortBy),
-            member: sortProjects(g.member, sortBy),
-            other: sortProjects(g.other, sortBy),
+            own: sortProjects(g.own, sort),
+            member: sortProjects(g.member, sort),
+            other: sortProjects(g.other, sort),
         }
-    }, [query, sortBy, currentUser, projects])
+    }, [query, sort, currentUser, projects])
 
     const visibleCount =
         grouped.own.length + grouped.member.length + grouped.other.length
@@ -136,25 +146,15 @@ export function Projects() {
                 </Button>
             </div>
 
-            <div className="mb-7 flex items-center gap-3">
-                <div className="relative flex-1">
-                    <SearchIcon
-                        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-faint"/>
-                    <input
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search projects…"
-                        className="w-full rounded-lg border border-default bg-surface py-2.5 pl-9 pr-3 text-sm text-fg placeholder:text-fg-faint focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]"
-                    />
-                </div>
-                <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as SortBy)}
-                    className="rounded-lg border border-default bg-surface px-3 py-2.5 text-sm text-fg-muted focus:border-primary focus:outline-none"
-                >
-                    <option value="recent">Most recent</option>
-                    <option value="name">Name A–Z</option>
-                </select>
+            <div className="relative mb-7">
+                <SearchIcon
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-faint"/>
+                <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search projects…"
+                    className="w-full rounded-lg border border-default bg-surface py-2.5 pl-9 pr-3 text-sm text-fg placeholder:text-fg-faint focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]"
+                />
             </div>
 
             {shares.length > 0 && (
@@ -206,17 +206,28 @@ export function Projects() {
                 </div>
             )}
 
-            <ProjectsSection title="My Projects" projects={grouped.own} onOpen={openProject}/>
+            {/* One sort for all three tables, whichever one's header was clicked. */}
+            <ProjectsSection
+                title="My Projects"
+                projects={grouped.own}
+                sort={sort}
+                onSort={sortBy}
+                onOpen={openProject}
+            />
             <ProjectsSection
                 title="Shared with me"
                 projects={grouped.member}
                 showOwner
+                sort={sort}
+                onSort={sortBy}
                 onOpen={openProject}
             />
             <ProjectsSection
                 title="All projects"
                 projects={grouped.other}
                 showOwner
+                sort={sort}
+                onSort={sortBy}
                 onOpen={openProject}
             />
 

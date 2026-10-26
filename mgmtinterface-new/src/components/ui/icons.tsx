@@ -111,6 +111,33 @@ export function XIcon(props: SVGProps<SVGSVGElement>) {
     )
 }
 
+export function ArrowUpIcon(props: SVGProps<SVGSVGElement>) {
+    return (
+        <svg {...base} {...props}>
+            <path d="m5 12 7-7 7 7"/>
+            <path d="M12 19V5"/>
+        </svg>
+    )
+}
+
+export function ArrowDownIcon(props: SVGProps<SVGSVGElement>) {
+    return (
+        <svg {...base} {...props}>
+            <path d="M12 5v14"/>
+            <path d="m19 12-7 7-7-7"/>
+        </svg>
+    )
+}
+
+export function ChevronsUpDownIcon(props: SVGProps<SVGSVGElement>) {
+    return (
+        <svg {...base} {...props}>
+            <path d="m7 15 5 5 5-5"/>
+            <path d="m7 9 5-5 5 5"/>
+        </svg>
+    )
+}
+
 export function ArrowLeftIcon(props: SVGProps<SVGSVGElement>) {
     return (
         <svg {...base} {...props}>

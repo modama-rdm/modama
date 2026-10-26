@@ -1,6 +1,25 @@
 import type {IngestShareV2, SerializedDataset, SerializedProject} from '../api/types'
+import {compareNames, type Sort, type SortSpec} from './sort'
 
-export type SortBy = 'recent' | 'name'
+/** The project tables' sortable columns (#75). */
+export type ProjectSortKey = 'name' | 'owner' | 'mtime'
+
+export const PROJECT_SORT: SortSpec<ProjectSortKey> = {
+    firstDir: {name: 'asc', owner: 'asc', mtime: 'desc'},
+    // Newest first, the order the list had before its headers were clickable.
+    initial: {key: 'mtime', dir: 'desc'},
+}
+
+/** A project's sessions table's sortable columns (#75). */
+export type SessionSortKey = 'name' | 'mtime' | 'status'
+
+export const SESSION_SORT: SortSpec<SessionSortKey> = {
+    firstDir: {name: 'asc', mtime: 'desc', status: 'asc'},
+    // Newest-modified first, the order the table had before its headers were
+    // clickable. No "Created": a session's `ctime` is the folders' inode change
+    // time, which a bulk permission change resets for every session at once.
+    initial: {key: 'mtime', dir: 'desc'},
+}
 
 export interface GroupedProjects {
     /** Projects the current user owns. */
@@ -41,18 +60,45 @@ export function filterProjects(
     return projects.filter((p) => p.name.toLowerCase().includes(q))
 }
 
-/** Return a sorted copy: "recent" = newest mtime first, "name" = A - Z. */
+/**
+ * Return a copy sorted by one column. Ties (same owner, same timestamp) fall
+ * back to the name, A - Z whichever way the column runs.
+ */
 export function sortProjects(
     projects: SerializedProject[],
-    sortBy: SortBy,
+    {key, dir}: Sort<ProjectSortKey>,
 ): SerializedProject[] {
-    const sorted = [...projects]
-    if (sortBy === 'name') {
-        sorted.sort((a, b) => a.name.localeCompare(b.name))
-    } else {
-        sorted.sort((a, b) => b.mtime - a.mtime)
-    }
-    return sorted
+    const sign = dir === 'asc' ? 1 : -1
+    return [...projects].sort((a, b) => {
+        const primary = key === 'mtime' ? a.mtime - b.mtime : compareNames(a[key], b[key])
+        return sign * primary || compareNames(a.name, b.name)
+    })
+}
+
+/** Status order, most active first: ingest share open, then open, then sealed. */
+function statusRank(session: SerializedDataset, sharedNames: Set<string>): number {
+    if (sharedNames.has(session.name)) return 0
+    return session.immutable ? 2 : 1
+}
+
+/**
+ * Return a copy of a project's sessions sorted by one column, `sharedNames`
+ * (from `sharedDatasetNames`) ranking the ones with an ingest share for Status.
+ * Ties (same status, same timestamp) fall back to the name, A - Z.
+ */
+export function sortSessions(
+    sessions: SerializedDataset[],
+    {key, dir}: Sort<SessionSortKey>,
+    sharedNames: Set<string>,
+): SerializedDataset[] {
+    const sign = dir === 'asc' ? 1 : -1
+    return [...sessions].sort((a, b) => {
+        const primary =
+            key === 'name' ? compareNames(a.name, b.name)
+                : key === 'status' ? statusRank(a, sharedNames) - statusRank(b, sharedNames)
+                    : a.mtime - b.mtime
+        return sign * primary || compareNames(a.name, b.name)
+    })
 }
 
 /**
@@ -89,11 +135,6 @@ export function findDatasetShare(
     dataset: string,
 ): IngestShareV2 | null {
     return shares.find((s) => s.project === project && s.session === dataset) ?? null
-}
-
-/** Return a copy of the datasets sorted newest-modified first (legacy order). */
-export function sortDatasets(datasets: SerializedDataset[]): SerializedDataset[] {
-    return [...datasets].sort((a, b) => b.mtime - a.mtime)
 }
 
 /**

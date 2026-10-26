@@ -7,10 +7,13 @@ import {
     findDatasetShare,
     groupProjects,
     memberChanges,
+    PROJECT_SORT,
+    SESSION_SORT,
     sharedDatasetNames,
-    sortDatasets,
     sortProjects,
+    sortSessions,
 } from './projectsUtil.ts'
+import {nextSort} from './sort'
 
 const p = (
     name: string,
@@ -75,24 +78,54 @@ describe('filterProjects', () => {
 })
 
 describe('sortProjects', () => {
-    it('"recent" orders by newest mtime first', () => {
-        const sorted = sortProjects(projects, 'recent')
-        for (let i = 1; i < sorted.length; i++) {
-            expect(sorted[i - 1].mtime).toBeGreaterThanOrEqual(sorted[i].mtime)
-        }
+    const names = (ps: SerializedProject[]) => ps.map((p) => p.name)
+
+    it('starts with the newest mtime first', () => {
+        expect(names(sortProjects(projects, PROJECT_SORT.initial))).toEqual([
+            'datamanagement', 'shanker_project', 'ghost_imaging', 'unrelated',
+        ])
     })
 
-    it('"name" orders alphabetically', () => {
-        const sorted = sortProjects(projects, 'name')
-        for (let i = 1; i < sorted.length; i++) {
-            expect(sorted[i - 1].name.localeCompare(sorted[i].name)).toBeLessThanOrEqual(0)
-        }
+    it('mtime ascending puts the oldest first', () => {
+        expect(names(sortProjects(projects, {key: 'mtime', dir: 'asc'}))).toEqual([
+            'unrelated', 'ghost_imaging', 'shanker_project', 'datamanagement',
+        ])
+    })
+
+    it('name runs A - Z and back', () => {
+        const az = ['datamanagement', 'ghost_imaging', 'shanker_project', 'unrelated']
+        expect(names(sortProjects(projects, {key: 'name', dir: 'asc'}))).toEqual(az)
+        expect(names(sortProjects(projects, {key: 'name', dir: 'desc'}))).toEqual([...az].reverse())
+    })
+
+    it('compares names regardless of case and digit runs as numbers', () => {
+        const runs = [p('run10', 'a', [], 1), p('Run9', 'a', [], 1), p('run2', 'a', [], 1)]
+        expect(names(sortProjects(runs, {key: 'name', dir: 'asc'}))).toEqual(['run2', 'Run9', 'run10'])
+    })
+
+    it('owner sorts numerically too, so user6 comes before user15 and a bare UID first', () => {
+        const owned = [p('a', 'user15', [], 1), p('b', 'user6', [], 1), p('c', '90000001', [], 1)]
+        expect(names(sortProjects(owned, {key: 'owner', dir: 'asc'}))).toEqual(['c', 'b', 'a'])
+    })
+
+    it('breaks ties by name A - Z, in either direction', () => {
+        const tied = [p('zeta', 'bob', [], 5), p('alpha', 'bob', [], 5), p('mid', 'amy', [], 9)]
+        expect(names(sortProjects(tied, {key: 'owner', dir: 'desc'}))).toEqual(['alpha', 'zeta', 'mid'])
+        expect(names(sortProjects(tied, {key: 'mtime', dir: 'asc'}))).toEqual(['alpha', 'zeta', 'mid'])
     })
 
     it('does not mutate the input array', () => {
-        const before = projects.map((p) => p.name)
-        sortProjects(projects, 'name')
-        expect(projects.map((p) => p.name)).toEqual(before)
+        const before = names(projects)
+        sortProjects(projects, {key: 'name', dir: 'asc'})
+        expect(names(projects)).toEqual(before)
+    })
+})
+
+describe('PROJECT_SORT', () => {
+    it('starts names and owners A - Z and dates newest first', () => {
+        expect(nextSort(PROJECT_SORT, PROJECT_SORT.initial, 'name')).toEqual({key: 'name', dir: 'asc'})
+        expect(nextSort(PROJECT_SORT, PROJECT_SORT.initial, 'owner')).toEqual({key: 'owner', dir: 'asc'})
+        expect(nextSort(PROJECT_SORT, {key: 'name', dir: 'desc'}, 'mtime')).toEqual({key: 'mtime', dir: 'desc'})
     })
 })
 
@@ -161,19 +194,58 @@ describe('sharedDatasetNames', () => {
     })
 })
 
-describe('sortDatasets', () => {
-    const d = (name: string, mtime: number): SerializedDataset => ({
+describe('sortSessions', () => {
+    const d = (name: string, ctime: number, mtime: number, immutable = false): SerializedDataset => ({
         name,
+        ctime,
         mtime,
-        ctime: mtime,
-        immutable: false,
+        immutable,
+    })
+    const names = (ds: SerializedDataset[]) => ds.map((x) => x.name)
+    const none = new Set<string>()
+
+    // ctime and mtime disagree on purpose, as they do on prod; only mtime may count.
+    const sessions = [d('run10', 100, 200), d('Run9', 300, 100), d('run2', 200, 300, true)]
+
+    it('starts newest-modified first without mutating the input', () => {
+        expect(names(sortSessions(sessions, SESSION_SORT.initial, none))).toEqual(['run2', 'run10', 'Run9'])
+        expect(names(sessions)).toEqual(['run10', 'Run9', 'run2'])
     })
 
-    it('orders newest-modified first without mutating the input', () => {
-        const input = [d('a', 100), d('b', 300), d('c', 200)]
-        const sorted = sortDatasets(input)
-        expect(sorted.map((x) => x.name)).toEqual(['b', 'c', 'a'])
-        expect(input.map((x) => x.name)).toEqual(['a', 'b', 'c'])
+    it('Last modified runs both ways on mtime, never ctime', () => {
+        expect(names(sortSessions(sessions, {key: 'mtime', dir: 'asc'}, none))).toEqual(['Run9', 'run10', 'run2'])
+    })
+
+    it('compares names regardless of case and digit runs as numbers', () => {
+        expect(names(sortSessions(sessions, {key: 'name', dir: 'asc'}, none))).toEqual(['run2', 'Run9', 'run10'])
+        expect(names(sortSessions(sessions, {key: 'name', dir: 'desc'}, none))).toEqual(['run10', 'Run9', 'run2'])
+    })
+
+    it('Status puts a session with an ingest share first, then open, then sealed', () => {
+        const mixed = [d('sealed', 1, 1, true), d('open', 1, 1), d('sharing', 1, 1)]
+        const shared = new Set(['sharing'])
+        expect(names(sortSessions(mixed, {key: 'status', dir: 'asc'}, shared))).toEqual(['sharing', 'open', 'sealed'])
+        expect(names(sortSessions(mixed, {key: 'status', dir: 'desc'}, shared))).toEqual(['sealed', 'open', 'sharing'])
+    })
+
+    it('a sealed session with an ingest share still counts as sharing', () => {
+        const mixed = [d('open', 1, 1), d('sealed-shared', 1, 1, true)]
+        expect(names(sortSessions(mixed, {key: 'status', dir: 'asc'}, new Set(['sealed-shared']))))
+            .toEqual(['sealed-shared', 'open'])
+    })
+
+    it('breaks ties by name A - Z, in either direction', () => {
+        const tied = [d('zeta', 1, 5), d('alpha', 2, 5), d('mid', 3, 5, true)]
+        expect(names(sortSessions(tied, {key: 'mtime', dir: 'desc'}, none))).toEqual(['alpha', 'mid', 'zeta'])
+        expect(names(sortSessions(tied, {key: 'status', dir: 'asc'}, none))).toEqual(['alpha', 'zeta', 'mid'])
+    })
+})
+
+describe('SESSION_SORT', () => {
+    it('starts names A - Z, dates newest first and Status most active first', () => {
+        expect(nextSort(SESSION_SORT, SESSION_SORT.initial, 'name')).toEqual({key: 'name', dir: 'asc'})
+        expect(nextSort(SESSION_SORT, SESSION_SORT.initial, 'status')).toEqual({key: 'status', dir: 'asc'})
+        expect(nextSort(SESSION_SORT, {key: 'name', dir: 'asc'}, 'mtime')).toEqual({key: 'mtime', dir: 'desc'})
     })
 })
 

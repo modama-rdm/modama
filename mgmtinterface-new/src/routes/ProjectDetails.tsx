@@ -26,11 +26,14 @@ import {
     PlusIcon,
     UsersIcon,
 } from '../components/ui/icons'
+import {SortHeader} from '../components/ui/SortHeader'
+import {useStoredSort} from '../hooks/useStoredSort'
 import {formatBytes, formatDateTime} from '../lib/format'
 import {
     canonicalProjectPath,
+    SESSION_SORT,
     sharedDatasetNames,
-    sortDatasets,
+    sortSessions,
 } from '../lib/projectsUtil'
 import {browsePath, browseUrl} from '../lib/quotePath'
 import type {ProjectDetailsLoaderData} from './projectDetails.loader'
@@ -75,6 +78,8 @@ function SessionsTable({
     canMutate: boolean
 }) {
     const navigate = useNavigate()
+    // One remembered sort for every project's sessions table (#75).
+    const [sort, sortBy] = useStoredSort('erc-sessions-sort', SESSION_SORT)
     if (datasets.length === 0) {
         return (
             <Card className="p-12 text-center">
@@ -101,14 +106,14 @@ function SessionsTable({
             <table className="w-full border-collapse">
                 <thead>
                 <tr className="border-b border-default">
-                    <th className={thClass}>Session</th>
-                    <th className={thClass}>Created</th>
-                    <th className={thClass}>Status</th>
+                    <SortHeader label="Session" column="name" sort={sort} onSort={sortBy} className={thClass}/>
+                    <SortHeader label="Last modified" column="mtime" sort={sort} onSort={sortBy} className={thClass}/>
+                    <SortHeader label="Status" column="status" sort={sort} onSort={sortBy} className={thClass}/>
                     <th className={thClass}/>
                 </tr>
                 </thead>
                 <tbody>
-                {datasets.map((d) => {
+                {sortSessions(datasets, sort, sharedNames).map((d) => {
                     const shared = sharedNames.has(d.name)
                     return (
                         <tr
@@ -121,7 +126,7 @@ function SessionsTable({
                                 </div>
                             </td>
                             <td className="px-5 py-3.5 text-sm text-fg-muted">
-                                {formatDateTime(d.ctime)}
+                                {formatDateTime(d.mtime)}
                             </td>
                             <td className="px-5 py-3.5">
                                 <StatusBadges dataset={d} shared={shared}/>
@@ -222,7 +227,6 @@ function ProjectBody() {
     const isOwner = currentUser === project.owner
     const canMutate = isOwner || project.members.includes(currentUser)
     const sharedNames = sharedDatasetNames(shares, project.name)
-    const sorted = sortDatasets(project.sessions)
     const projectPath = canonicalProjectPath(project.relpath)
 
     return (
@@ -322,7 +326,7 @@ function ProjectBody() {
             </div>
             <SessionsTable
                 project={project}
-                datasets={sorted}
+                datasets={project.sessions}
                 sharedNames={sharedNames}
                 canMutate={canMutate}
             />
