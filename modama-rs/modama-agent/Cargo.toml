@@ -58,7 +58,7 @@ network-interface = "2.0.3"
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"]}
 directories = "6.0.0"
 rand = { workspace = true }
-percent-encoding = { workspace = true }
+percent-encoding.workspace = true
 tower-http = { workspace = true, features = ["csrf"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -78,6 +78,10 @@ widestring = { version = "1.1.0" }
 async-dns = "0.1.0"
 procfs = { workspace = true }
 nix = { workspace = true, features = ["mount"] }
+# disabled default features so we don't depend on library symbols that
+# are only available in latest glib:
+gio = { version = "0.22", default-features = false }
+glib = { version = "0.22", default-features = false }
 
 [lints]
 workspace = true

@@ -9,7 +9,7 @@ use modama_common::{
     cert_helpers::{
         CertHelperError, cert_chain_from_reader, get_root_cert_store, private_key_from_reader,
     },
-    config::{AgentConfigFile, AgentConfigFileClientCert, AgentConfigFileLinux},
+    config::{AgentConfigFile, AgentConfigFileClientCert},
     tokens::{TokenError, TokenFetcher, TokenProvider},
 };
 use thiserror::Error;
@@ -55,39 +55,6 @@ pub enum Command {
     /// Print the installed Windows service status.
     #[cfg(windows)]
     ServiceStatus,
-}
-
-#[derive(Debug, Clone)]
-pub struct AgentLinuxConfig {
-    pub mount_point_prefix: PathBuf,
-
-    // we assume that this system is using some shared unix user,
-    // which should have access to the ingest share(s):
-    pub uid: u32,
-    pub gid: u32,
-}
-
-impl Default for AgentLinuxConfig {
-    fn default() -> Self {
-        Self {
-            mount_point_prefix: PathBuf::from("/run/modama/ingest/"),
-            uid: 1000,
-            gid: 1000,
-        }
-    }
-}
-
-impl From<AgentConfigFileLinux> for AgentLinuxConfig {
-    fn from(value: AgentConfigFileLinux) -> Self {
-        let defaults = Self::default();
-        Self {
-            mount_point_prefix: value
-                .mount_point_prefix
-                .unwrap_or(defaults.mount_point_prefix),
-            uid: value.uid.unwrap_or(defaults.uid),
-            gid: value.gid.unwrap_or(defaults.gid),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -144,9 +111,6 @@ pub struct AgentConfig {
 
     /// Samba domain to use for mounting
     pub smb_domain: String,
-
-    // FIXME: find a better way?
-    pub linux_config: Option<AgentLinuxConfig>,
 
     /// CA certificate
     pub ca_root_store: RootCertStore,
@@ -225,11 +189,6 @@ impl AgentConfig {
             .map(String::as_str)
     }
 
-    pub fn get_linux_config(&self) -> AgentLinuxConfig {
-        let c = &self.linux_config;
-        c.clone().unwrap_or_default()
-    }
-
     pub async fn from_file(path: &impl AsRef<Path>) -> Result<Self, ConfigError> {
         let mut cfg_str: String = String::new();
         tokio::fs::File::open(path)
@@ -286,7 +245,6 @@ impl AgentConfig {
             smb_ip: OnceCell::new(),
             smb_port: config_file.services.smb_port,
             smb_domain: config_file.services.smb_domain.clone(),
-            linux_config: Some(config_file.linux.map(Into::into).unwrap_or_default()),
             ca_root_store,
             listen_local_api: config_file.listen_local_api.clone(),
             token_service_url,

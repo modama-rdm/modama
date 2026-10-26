@@ -1,98 +1,23 @@
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result as AnyResult};
-use rand::RngExt;
 use tungstenite::Message;
 
-use crate::{
-    agent_state::{AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdateToSession},
-    config::AgentConfig,
-    mount_backend::MountBackend,
-    share::MountedShare,
+use crate::agent_state::{
+    AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdateToSession,
 };
-use futures_util::{SinkExt, StreamExt, future::join_all};
-use log::{debug, error, info, warn};
+use futures_util::{SinkExt, StreamExt};
+use log::{error, info, warn};
 use modama_common::{
     messages::{EventChannelInitialMessages, EventChannelMessage, Share},
     tokens::TokenProvider,
     version::modama_git_version,
 };
-use tokio::{sync::Mutex, time::Instant};
+use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MountPolicy {
-    Enabled,
-    Disabled,
-}
-
-async fn update_share_list(
-    backend: &impl MountBackend,
-    config: &AgentConfig,
-    current_shares: &ShareState<MountedShare>,
-    desired_shares: ShareState<Share>,
-    mount_policy: MountPolicy,
-) -> AnyResult<ShareState<MountedShare>> {
-    if mount_policy == MountPolicy::Disabled {
-        return Ok(ShareState::default());
-    }
-    let mut next_shares = current_shares.clone();
-    let new_fg_share: Option<Share> = desired_shares.foreground_share;
-    let old_fg_share: Option<&Share> = current_shares.foreground_share.as_ref().map(|ms| &ms.share);
-    let fg_share_to_set = if old_fg_share != new_fg_share.as_ref() {
-        if let Some(share) = new_fg_share {
-            match backend.ensure_mounted(&share, config).await {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    error!("Mount failed: {e}");
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        current_shares.foreground_share.clone()
-    };
-    let shares_to_set = join_all(desired_shares.shares.clone().into_iter().map(|s| async {
-        let s2 = s;
-        backend.ensure_mounted(&s2, config).await
-    }))
-    .await
-    .into_iter()
-    .flat_map(|res| {
-        if let Err(err) = &res {
-            warn!("Mounting failed: {err}");
-        }
-        res
-    })
-    .collect();
-    next_shares.replace_state(shares_to_set, fg_share_to_set);
-
-    debug!(
-        "desired mounts: {:?}",
-        next_shares
-            .shares
-            .iter()
-            .map(|s| s.mount_path.to_string_lossy().clone())
-            .collect::<Vec<_>>()
-    );
-
-    backend.umount_old_shares(config, &next_shares.shares).await;
-    backend
-        .cleanup_mount_points(config, &desired_shares.shares)
-        .await;
-
-    Ok(next_shares)
-}
-
-async fn handle_message(
-    backend: &impl MountBackend,
-    state: &Arc<Mutex<AgentState>>,
-    msg: &str,
-    mount_policy: MountPolicy,
-) -> AnyResult<()> {
+async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<()> {
     let event_msg: EventChannelMessage = serde_json::from_str(msg)
         .with_context(|| format!("Invalid message encountered: {}", msg))?;
     info!("Received EventChannelMessage: {event_msg:?}");
@@ -129,18 +54,6 @@ async fn handle_message(
                 }
                 (state.config.clone(), state.current_shares.clone())
             };
-            let new_current_shares = update_share_list(
-                backend,
-                &config,
-                &current_shares,
-                desired_shares,
-                mount_policy,
-            )
-            .await?;
-            {
-                let mut state = state.lock().await;
-                state.current_shares = new_current_shares;
-            }
             Ok(())
         }
     }
@@ -148,19 +61,17 @@ async fn handle_message(
 
 async fn receive_inner(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
-    backend: &impl MountBackend,
     state: &Arc<Mutex<AgentState>>,
-    mount_policy: MountPolicy,
 ) -> ControlFlow<(), ()> {
     match message {
-        Some(Ok(msg)) => {
-            if let Ok(msg) = msg.into_text() {
-                if let Err(e) = handle_message(backend, state, &msg, mount_policy).await {
-                    error!("Error while handing message: {e}");
-                }
-            } else {
-                warn!("Message is not text, ignoring...");
+        Some(Ok(Message::Text(utf8_bytes))) => {
+            if let Err(e) = handle_message(state, &utf8_bytes.as_str()).await {
+                error!("Error while handing message: {e}");
             }
+            ControlFlow::Continue(())
+        }
+        Some(Ok(_)) => {
+            warn!("Message is not text, ignoring...");
             ControlFlow::Continue(())
         }
         Some(Err(e)) => {
@@ -176,47 +87,10 @@ async fn receive_inner(
     }
 }
 
-async fn reconcile(
-    backend: &impl MountBackend,
-    state: &Arc<Mutex<AgentState>>,
-    mount_policy: MountPolicy,
-) {
-    let (current, remote_info, config) = {
-        let state = state.lock().await;
-        (
-            state.current_shares.clone(),
-            state.remote_info.clone(),
-            state.config.clone(),
-        )
-    };
-    if let Some(remote_info) = remote_info {
-        match update_share_list(
-            backend,
-            &config,
-            &current,
-            remote_info.desired_shares,
-            mount_policy,
-        )
-        .await
-        {
-            Ok(new_current_shares) => {
-                state.lock().await.current_shares = new_current_shares;
-            }
-            Err(e) => {
-                error!("error during reconciliation: {e}");
-            }
-        }
-    } else {
-        debug!("will not reconcile as we don't have share info yet");
-    }
-}
-
 pub async fn message_loop(
-    backend: &impl MountBackend,
     state: Arc<Mutex<AgentState>>,
     tls_config: Arc<ClientConfig>,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
-    mount_policy: MountPolicy,
 ) {
     let config = state.lock().await.config.clone();
 
@@ -277,26 +151,12 @@ pub async fn message_loop(
             continue;
         }
 
-        let reconcile_interval =
-            Duration::from_millis(1000u64 + rand::rng().random_range(0..500u64));
-        let timer = tokio::time::sleep(reconcile_interval);
-        tokio::pin!(timer);
-
         state.lock().await.connection = ConnectionState::Connected;
         loop {
-            tokio::select! {
-                _ = &mut timer => {
-                    reconcile(backend, &state, mount_policy).await;
-                    timer.as_mut().reset(
-                        Instant::now() + reconcile_interval
-                    )
-                }
-                msg = ws_read.next() => {
-                    match receive_inner(msg, backend, &state, mount_policy).await {
-                        ControlFlow::Continue(_) => continue,  // success or ignored message
-                        ControlFlow::Break(_) => break,  // error or disconnected => reconnect
-                    }
-                }
+            let msg = ws_read.next().await;
+            match receive_inner(msg, &state).await {
+                ControlFlow::Continue(_) => continue, // success or ignored message
+                ControlFlow::Break(_) => break,       // error or disconnected => reconnect
             }
         }
     }
@@ -305,7 +165,8 @@ pub async fn message_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::AgentConfig, platform_common::EnsureMountedError, share::MountedShare};
+    use crate::session_helper::mount_backend::MountBackend;
+    use crate::{config::AgentConfig, session_helper::platform_common::EnsureMountedError, share::MountedShare};
     use modama_common::ca::Ca;
     use modama_common::logging::init_logging;
     use modama_common::messages;
@@ -412,7 +273,6 @@ mod tests {
                 agent_name: "test-agent".to_owned(),
                 resource_name: "test-resource".to_owned(),
             },
-            linux_config: None,
             listen_local_api: "localhost:3001".to_owned(),
             token_service_url: Url::parse("http://localhost").unwrap(),
             ca_root_store: root.clone(),
@@ -454,10 +314,7 @@ mod tests {
             base: std::env::temp_dir(),
         });
         let task_state = Arc::clone(&state);
-        let task_backend = Arc::clone(&backend);
-        let task = tokio::spawn(async move {
-            handle_message(&*task_backend, &task_state, &message, MountPolicy::Enabled).await
-        });
+        let task = tokio::spawn(async move { handle_message(&task_state, &message).await });
 
         tokio::time::timeout(Duration::from_secs(1), entered_rx.recv())
             .await
@@ -512,11 +369,9 @@ mod tests {
             foreground_share: Some(share.clone()),
             shares: vec![share],
         };
-        let (ensure_tx, mut ensure_rx) = mpsc::channel(1);
-        let (umount_tx, mut umount_rx) = mpsc::channel(1);
-        let backend = MockMountBackend::new(ensure_tx, umount_tx, std::env::temp_dir());
 
-        let result = update_share_list(
+        todo!("update testcase");
+        /*let result = update_share_list(
             &backend,
             &test_agent_config(),
             &ShareState::default(),
@@ -529,7 +384,7 @@ mod tests {
         assert!(result.shares.is_empty());
         assert!(result.foreground_share.is_none());
         assert!(ensure_rx.try_recv().is_err());
-        assert!(umount_rx.try_recv().is_err());
+        assert!(umount_rx.try_recv().is_err());*/
     }
 
     struct MessageLoopTestSetup {
@@ -538,8 +393,6 @@ mod tests {
         pub initial_state: SmbDropState,
         pub event_queue: Sender<SmbDropState>,
         pub state: Arc<Mutex<AgentState>>,
-        pub rx_mount: mpsc::Receiver<Share>,
-        pub rx_umount: mpsc::Receiver<Vec<MountedShare>>,
     }
 
     impl MessageLoopTestSetup {
@@ -595,7 +448,6 @@ mod tests {
                     agent_name: "test-agent".to_string(),
                     resource_name: "test_resource".to_string(),
                 },
-                linux_config: None,
                 listen_local_api: "localhost:3001".to_owned(),
                 token_service_url: Url::parse("http://localhost").unwrap(),
                 ca_root_store: root.clone(),
@@ -622,15 +474,6 @@ mod tests {
                 .unwrap();
             let client_config = Arc::new(client_conf);
 
-            // create an mpsc channel to receive mount calls from the mock backend
-            let (tx_mount, rx_mount) = mpsc::channel::<messages::Share>(8);
-            let (tx_umount, rx_umount) = mpsc::channel::<Vec<MountedShare>>(8);
-            let mock = Arc::new(MockMountBackend::new(
-                tx_mount,
-                tx_umount,
-                std::env::temp_dir(),
-            ));
-
             let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
             let token_provider: Arc<dyn TokenProvider + 'static + Sync + Send> =
                 Arc::new(MockTokenProvider {
@@ -650,11 +493,9 @@ mod tests {
                 // message_loop runs forever; it will return only if the connection loop ends
                 // we run it and let it process the single message from our server
                 message_loop(
-                    &*mock,
                     message_loop_state,
                     client_config,
                     Arc::clone(&token_provider),
-                    MountPolicy::Enabled,
                 )
                 .await;
             });
@@ -665,8 +506,6 @@ mod tests {
                 initial_state,
                 event_queue,
                 state,
-                rx_mount,
-                rx_umount,
             }
         }
 
@@ -699,11 +538,12 @@ mod tests {
         test_setup.event_queue.send(new_state).unwrap();
 
         // verify the mock backend was asked to mount the share (with timeout)
-        let recv = tokio::time::timeout(Duration::from_secs(2), test_setup.rx_mount.recv())
-            .await
-            .expect("timeout waiting for mount call");
-        let recorded_share = recv.expect("mock sender dropped");
-        assert_eq!(recorded_share.share_id, "test-id-1");
+        todo!("update testcase");
+        //let recv = tokio::time::timeout(Duration::from_secs(2), test_setup.rx_mount.recv())
+        //    .await
+        //    .expect("timeout waiting for mount call");
+        //let recorded_share = recv.expect("mock sender dropped");
+        //assert_eq!(recorded_share.share_id, "test-id-1");
 
         // assert state updated
         let st = test_setup.state.lock().await;

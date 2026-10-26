@@ -15,20 +15,16 @@ use std::sync::Arc;
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use versioned::{VersionedRouterBuilder, semver::Version, versioned_route, versions};
 
-use crate::share::MountedShare;
 use crate::{
-    events_api::events_api,
     local_http_service::{ApiState, LocalAPIError, get_auth},
 };
 
 use modama_common::{
-    local_api_messages::{
+    internal_api_types::MountedShare, local_api_messages::{
         APIAgentIdentity, APICreateSessionRequest, APICreateSessionResponse,
         APICreateShareResponse, APICurrentForegroundShare, APIHealthCheckResponse,
         APIListProjectsResponse, APIListSessionsResponse, APILoginResponse, APIProjectSummary,
-    },
-    messages::Share,
-    mgmt_client::MgmtClient,
+    }, messages::Share, mgmt_client::MgmtClient
 };
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -57,6 +53,7 @@ pub(crate) fn project_and_session(
     Ok((project.to_owned(), session.to_owned()))
 }
 
+// FIXME: simplify response? either a path if current state matches, or no fg share -> what code?
 fn foreground_response(
     desired: Option<Share>,
     current: Option<MountedShare>,
@@ -478,17 +475,11 @@ pub fn add_api_routes(router: Router<ApiState>, state: ApiState) -> Result<Route
     ))
 }
 
-pub fn add_internal_api(router: Router<ApiState>) -> Result<Router<ApiState>, LocalAPIError> {
-    Ok(router.route("/internal/events/", get(events_api)))
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use modama_common::{local_api_messages::APICurrentForegroundShare, messages::Share};
-
-    use crate::share::MountedShare;
+    use modama_common::{internal_api_types::MountedShare, local_api_messages::APICurrentForegroundShare, messages::Share};
 
     use super::{
         ShareDestinationError, foreground_response, openapi_document, project_and_session,
@@ -555,8 +546,8 @@ mod tests {
         );
 
         let mounted = MountedShare {
-            share: desired.clone(),
-            mount_path: PathBuf::from("/mnt/session"),
+            share_name: desired.share_name.clone(),
+            mount_path: Some(PathBuf::from("/mnt/session")),
         };
         assert_eq!(
             foreground_response(None, Some(mounted.clone())),
@@ -584,8 +575,8 @@ mod tests {
     fn desired_foreground_wins_over_a_different_mounted_share() {
         let desired = share("new");
         let mounted = MountedShare {
-            share: share("old"),
-            mount_path: PathBuf::from("/mnt/old"),
+            share_name: share("old").share_name,
+            mount_path: Some(PathBuf::from("/mnt/old")),
         };
         assert!(matches!(
             foreground_response(Some(desired), Some(mounted)),

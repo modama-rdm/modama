@@ -1,5 +1,25 @@
-// - mount backend here similar to the one we already have in modama-agent for the main process
-// - mount backend might need to actually run in the background _on its own thread_, for GIO to work
-// - ... so we keep an instance of the mount backend around, initialize it once, then interact with
-//   that instance (under the hood, it might then spawn a thread, send messages, clean up that
-//   thread on shutdown)
+use std::future::Future;
+
+use modama_common::{
+    internal_api_types::{MountedShare, SessionHelperConfig},
+    messages::Share,
+};
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum MountBackendError {
+    #[error("mount failed: {message}")]
+    GenericFailure { share_id: String, message: String },
+}
+
+pub trait MountBackend {
+    /// Try to reconcile mounts. Takes the desired shares, and returns
+    /// the state after reconciliation (which might be missing shares,
+    /// or still have additional shares - the mount status should
+    /// eventually be consistent, but it might take some calls of
+    /// this function!)
+    fn reconcile(
+        &self,
+        desired_shares: &[Share],
+        config: &SessionHelperConfig,
+    ) -> impl Future<Output = Vec<Result<MountedShare, MountBackendError>>>;
+}

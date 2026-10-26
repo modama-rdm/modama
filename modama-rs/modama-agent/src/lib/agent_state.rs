@@ -1,14 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
 use log::{info, warn};
-use modama_common::{agent::AgentId, messages::Share};
-use serde::{Deserialize, Serialize};
+use modama_common::{agent::AgentId, internal_api_types::{MountedShare, SessionId}, messages::Share};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::{
     config::AgentConfig,
-    events_api::{SessionBeginEnd, SessionId},
-    share::MountedShare,
+    events_api::{SessionBeginEnd, },
 };
 
 #[derive(Debug, Default)]
@@ -100,12 +98,6 @@ impl Default for RemoteInfo {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SessionShares {
-    NoSessionHelper,
-    Shares { shares: Vec<MountedShare> },
-}
-
 #[derive(Debug, Clone)]
 pub enum StateUpdateToSession {
     DesiredState {
@@ -117,7 +109,9 @@ pub enum StateUpdateToSession {
     },
     MountUpdate {
         session_id: SessionId,
-        shares: SessionShares,
+        /// In case the session helper disconnects, this is not an empty Vec
+        /// but None! Meaning the GUI can distinguish these two cases if needed.
+        shares: Option<Vec<MountedShare>>,
     },
 }
 
@@ -126,9 +120,12 @@ pub struct AgentState {
     pub connection: ConnectionState,
 
     /// The currently mounted shares, according to the last update
+    /// FIXME: does MountedShare have enough info for `current_share` use? esp. foreground share?
+    /// should this just be `Shares`?
     pub current_shares: ShareState<MountedShare>,
 
-    pub mounted_shares: HashMap<SessionId, SessionShares>,
+    /// Per-session list of currently mounted shares
+    pub mounted_shares: HashMap<SessionId, Vec<MountedShare>>,
 
     /// Counter for active session helper connections
     /// (to prevent cleanup while there's still an active connection)
@@ -179,7 +176,7 @@ async fn session_bookkeeper(
                             .desired_state_channel
                             .send(StateUpdateToSession::MountUpdate {
                                 session_id,
-                                shares: SessionShares::NoSessionHelper,
+                                shares: None,
                             })
                     {
                         warn!("tried to send an update on current mounts but no one cared");

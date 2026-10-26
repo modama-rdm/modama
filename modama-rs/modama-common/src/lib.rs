@@ -10,6 +10,7 @@ pub mod requests;
 pub mod test_helpers;
 pub mod tokens;
 pub mod version;
+pub mod internal_api_types;
 
 /// Install the workspace's selected rustls provider before constructing clients that defer
 /// provider selection to the application.

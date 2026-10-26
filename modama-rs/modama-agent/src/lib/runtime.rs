@@ -1,7 +1,7 @@
 use std::{future::Future, path::Path, sync::Arc};
 
 use anyhow::Result;
-use log::{info, warn};
+use log::info;
 use tokio::{select, spawn, sync::Mutex};
 
 use crate::{
@@ -9,14 +9,11 @@ use crate::{
     config::AgentConfig,
     local_http_service::serve_local_web_api_on,
     local_net_token_proxy::token_publisher_loop,
-    message_loop::{MountPolicy, message_loop},
-    mount_backend::MountBackend,
-    platform::CurrentPlatformMountBackend,
+    message_loop::{message_loop},
 };
 
 pub async fn run_agent<S, R>(
     config_path: &Path,
-    mount_policy: MountPolicy,
     shutdown: S,
     ready: R,
 ) -> Result<()>
@@ -45,16 +42,6 @@ where
         serve_local_web_api_on(listener, state_for_api, cloned_token_provider).await
     });
 
-    let mount_backend = CurrentPlatformMountBackend {};
-    match mount_policy {
-        MountPolicy::Enabled => mount_backend.initialize(&config).await,
-        MountPolicy::Disabled => {
-            warn!(
-                "desktop mounting is disabled in Windows service mode until the session helper is available"
-            );
-        }
-    }
-
     ready()?;
     tokio::pin!(shutdown);
     select! {
@@ -63,11 +50,9 @@ where
             Ok(())
         }
         _ = message_loop(
-            &mount_backend,
             Arc::clone(&state),
             Arc::clone(&config.client_config),
             Arc::clone(&token_provider),
-            mount_policy,
         ) => Ok(()),
         res = local_api_handle => Ok(res??),
     }
