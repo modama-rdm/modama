@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI
 
 from .config import API_PREFIX, Settings, get_settings
 from .errors import APIError, api_error_handler
-from .routes import auth, ingest_shares, projects, sessions, users, versions
+from .routes import auth, browse, ingest_shares, projects, sessions, users, versions
 from .security import enforce_same_origin
 from .session import SessionCodec
 from .throttle import FailureThrottle
@@ -89,6 +89,15 @@ share is gone.
 `GET /projects/{{{{project}}}}/usage` runs `du` over the project and can take a
 minute on a large one. Nothing else waits for it: the project details answer
 with `usage_bytes` null.
+
+### Browsing
+
+`GET /browse?path=…` lists a folder of the data tree one page at a time:
+`entries` holds up to `limit` of them (200 by default, 1000 at most), folders
+first and then by name, and `next_cursor` fetches the page after it, until it
+is null. The cursor marks the last entry seen rather than an offset, so an
+entry added or removed while paging neither repeats nor hides another. The
+listing is made as the signed-in user and shows what that user may see.
 """.strip()
 
 TAGS_METADATA = [
@@ -111,6 +120,13 @@ TAGS_METADATA = [
             "Temporary Samba shares with one-time credentials for writing data "
             "into a session from an instrument PC. The legacy API calls them "
             "shares."
+        ),
+    },
+    {
+        "name": "browse",
+        "description": (
+            "The data tree, as the signed-in user sees it: a folder's entries "
+            "one page at a time, with the links to open a path elsewhere."
         ),
     },
     {
@@ -173,6 +189,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(users.router, prefix=API_PREFIX)
     app.include_router(sessions.router, prefix=API_PREFIX)
     app.include_router(ingest_shares.router, prefix=API_PREFIX)
+    app.include_router(browse.router, prefix=API_PREFIX)
     app.include_router(versions.router, prefix=API_PREFIX)
 
     @app.get(

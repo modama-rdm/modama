@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from mgmtinterface_api import API_PREFIX, create_app
 from mgmtinterface_api.config import Settings
+from mgmtinterface_api.security import CSRF_ERROR_RESPONSES
 from mgmtinterface_api.versioning import (
     API_VERSION_HEADER,
     LATEST_VERSION,
@@ -30,6 +31,7 @@ SEAL = f"{SESSIONS}/{{session}}/seal"
 USERS = f"{API_PREFIX}/users"
 INGEST_SHARES = f"{API_PREFIX}/ingest-shares"
 INGEST_SHARE = f"{INGEST_SHARES}/{{share_id}}"
+BROWSE = f"{API_PREFIX}/browse"
 VERSIONS = f"{API_PREFIX}/versions"
 HEALTHZ = f"{API_PREFIX}/healthz"
 
@@ -48,6 +50,7 @@ SESSION_OPERATIONS = [
     (INGEST_SHARES, "get"),
     (INGEST_SHARES, "post"),
     (INGEST_SHARE, "delete"),
+    (BROWSE, "get"),
 ]
 
 
@@ -94,6 +97,7 @@ def test_every_documented_route_is_present(schema: dict[str, Any]):
         USERS,
         INGEST_SHARES,
         INGEST_SHARE,
+        BROWSE,
         VERSIONS,
         HEALTHZ,
     }
@@ -168,13 +172,16 @@ def test_login_documents_the_persistent_flag(schema: dict[str, Any]):
 def test_only_state_changing_operations_document_the_csrf_403(schema: dict[str, Any]):
     """
     The origin check applies app-wide but only to non-safe methods, so a GET
-    must not advertise a 403 it can never answer with (unless it has a 403 of
-    its own, which none of the reads do).
+    must not advertise a 403 it can never answer with. A read may have a 403 of
+    its own (browse: a folder the user may not read), but never the origin
+    check's.
     """
+    csrf = CSRF_ERROR_RESPONSES[403]["description"]
     for path, method in SESSION_OPERATIONS:
         responses = schema["paths"][path][method]["responses"]
         if method == "get":
-            assert "403" not in responses, f"GET {path} documents a 403"
+            description = responses.get("403", {}).get("description")
+            assert description != csrf, f"GET {path} documents the CSRF 403"
         else:
             assert "403" in responses, f"{method.upper()} {path} lacks the 403"
 

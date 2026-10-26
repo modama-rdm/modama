@@ -54,6 +54,42 @@ class Settings(BaseSettings):
     ingest_smb_host: str = "moellenstedt.iff.kfa-juelich.de"
     ingest_workgroup: str = "ER-C-INGEST"
 
+    # The WebDAV server in front of the data tree, which the browse endpoint
+    # lists folders through. That server authenticates by username alone
+    # (wsgidav's `useronly` controller) and serves each request as that Unix
+    # user, so the file system decides what a user sees. A `PROPFIND` of a
+    # folder with tens of thousands of entries takes well under a second; the
+    # timeout is for a hung server, not a slow folder.
+    webdav_api: str = "http://webdav:8080"
+    webdav_timeout_seconds: int = 30
+
+    # Where a browsed path opens elsewhere: the bases the browse endpoint builds
+    # its links from. The defaults are the production values, as in the Flask
+    # app's `default_config.py`; the test stack overrides the Nextcloud one.
+    nextcloud_base: str = (
+        "https://er-c-data.fz-juelich.de/nextcloud/apps/files/?dir=/ER-C-Data"
+    )
+    jupyter_base: str = (
+        "https://moellenstedt.iff.kfa-juelich.de/user-redirect/lab/tree/er-c-data"
+    )
+    libertem_base: str = (
+        "https://moellenstedt.iff.kfa-juelich.de/user-redirect/libertem/"
+        "#action=open&path=/storage/er-c-data"
+    )
+    image_viewer_base: str = (
+        "https://moellenstedt.iff.kfa-juelich.de/user-redirect/image-viewer/"
+        "?path=/storage/er-c-data"
+    )
+    sampledb_base: str = "https://erc-samples.fz-juelich.de/"
+    sampledb_erc3_base: str = "https://erc-3-samples.fz-juelich.de/"
+    elabftw_erc3_base: str = "https://erc3elab.app.fz-juelich.de/"
+    # Transfer targets: the ssh host with the data tree's path on it for rsync
+    # and sftp, and the Samba share as a UNC path for Windows and as an smb://
+    # URL for everything else.
+    moellenstedt_base: str = "moellenstedt.iff.kfa-juelich.de:/storage/er-c-data"
+    main_smb_base: str = "\\\\er-c-data-smb.fz-juelich.de\\er-c-data"
+    smb_url_base: str = "smb://er-c-data-smb.fz-juelich.de/er-c-data"
+
     # Signed-cookie session. The name must differ from the Flask app's
     # `mgmtinterface_session`, since both run on the same origin until the
     # cutover (#170).

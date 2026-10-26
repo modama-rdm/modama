@@ -163,6 +163,7 @@ old test fail, that change is breaking and belongs in a new version.
 | `GET /mgmt-api/ingest-shares` | the signed-in user's open ingest shares |
 | `POST /mgmt-api/ingest-shares` | open an ingest share for a session |
 | `DELETE /mgmt-api/ingest-shares/{share_id}` | close an ingest share |
+| `GET /mgmt-api/browse` | a folder of the data tree, one page at a time, or a file |
 | `GET /mgmt-api/versions` | supported API versions |
 | `GET /mgmt-api/healthz` | liveness probe |
 | `GET /mgmt-api/docs` | Swagger UI for the generated OpenAPI document |
@@ -280,6 +281,47 @@ treat that as closed. Another user's share is `403 not_your_share`.
 `GET /users` is the ad-hoc group's members, sorted: the accounts a project can
 have as members.
 
+## Browsing
+
+`GET /browse?path=/adhoc/proj/sess` answers the path's own fields (`name`,
+`isdir`, `project`, `mtime`, `size`), the links and transfer commands for it
+(`access`), and for a folder one page of `entries` with `total` and
+`next_cursor`. The path is normalized first and answered as `path`; a client
+that asked with a trailing slash or a `..` should switch to that spelling.
+
+Pages are keyed, not offset. `limit` (200 by default, 1000 at most) caps one
+answer, and `next_cursor` encodes the sort key of the last entry returned, so
+the next page starts after it whatever was added or removed in between; an
+entry that exists throughout is shown exactly once. The cursor is opaque to
+clients and independent of `limit`; one this endpoint did not issue is
+`400 bad_cursor`. The order is fixed: folders first, then by name ignoring
+case, with the exact name as the tiebreaker. Every entry is reachable. The
+legacy page cut a folder at 1024 entries, before sorting, so entries past the
+cut could not be seen at all.
+
+The listing comes straight from the WebDAV server in front of the data tree
+(`MODAMA_WEBDAV_API`), one `PROPFIND` with `Depth: 1` per request, made as the
+signed-in user: that server authenticates by username alone and serves the
+request under that Unix identity, so the file system decides what the user
+sees. Anyone who can reach that server can list as anyone, which is why it is
+reachable only inside the compose network, and this API never forwards a
+caller-chosen username to it. WebDAV cannot page, so every page lists the
+whole folder on the server. Measured on the test VM, a folder of 20,000
+entries costs 0.4 s per page, most of it the `PROPFIND`; the legacy page took
+2.5 s for the same folder and showed 1024 of its entries.
+
+A missing path is `404 path_not_found`, a folder the user may not read is
+`403 no_access` (project folders are world-readable, so this takes a folder
+someone made private by hand), and a file server that does not answer is
+`502 files_unavailable`.
+
+The `access` links encode the path in three different ways (`quote_plus`,
+`quote`, and the `quote_path` of the SampleDB and ElabFTW searches, which has
+to match what those systems stored "as entered"), so they are built here
+rather than in every client. `links.py` is a port of the Flask app's helpers
+with the same tests; the bases are the `MODAMA_*_BASE` settings, and their
+defaults are the production values.
+
 ## Layout
 
     src/mgmtinterface_api/
@@ -293,11 +335,14 @@ have as members.
         throttle.py   in-process failed-login counter
         permissions.py  calls into the permissions service
         shares.py       calls into smbdrop, the share service
+        webdav.py       lists the data tree through the WebDAV server
+        links.py        where a browsed path opens elsewhere
         routes/auth.py      login / logout / session
         routes/projects.py  project list, create, details, usage, members
         routes/sessions.py  create session, seal session
         routes/users.py     user list
         routes/ingest_shares.py  open, list, close ingest shares
+        routes/browse.py    the data tree, one page at a time
         routes/versions.py  supported versions, unauthenticated
     tests/
 
