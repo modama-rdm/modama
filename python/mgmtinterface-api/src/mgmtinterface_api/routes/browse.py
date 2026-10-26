@@ -213,13 +213,18 @@ def _decode_cursor(cursor: str) -> tuple[bool, str, str]:
     """The sort key the page after `cursor` starts behind."""
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
-        isdir, name = json.loads(base64.urlsafe_b64decode(padded).decode("utf8"))
-        if not isinstance(isdir, bool) or not isinstance(name, str):
-            raise ValueError("not a cursor")
+        decoded = json.loads(base64.urlsafe_b64decode(padded).decode("utf8"))
     except ValueError as exc:
-        # `binascii.Error`, `JSONDecodeError`, `UnicodeDecodeError` and an
-        # unpacking of the wrong length are all `ValueError`s.
-        raise APIError(
-            400, "bad_cursor", "The cursor is not one this endpoint issued."
-        ) from exc
+        # `binascii.Error`, `JSONDecodeError` and `UnicodeDecodeError` are
+        # all `ValueError`s.
+        raise _bad_cursor() from exc
+    if not isinstance(decoded, list) or len(decoded) != 2:
+        raise _bad_cursor()
+    isdir, name = decoded
+    if not isinstance(isdir, bool) or not isinstance(name, str):
+        raise _bad_cursor()
     return (not isdir, name.casefold(), name)
+
+
+def _bad_cursor() -> APIError:
+    return APIError(400, "bad_cursor", "The cursor is not one this endpoint issued.")
