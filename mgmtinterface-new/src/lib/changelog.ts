@@ -23,6 +23,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.17.0',
+        date: '2026-10-26',
+        title: 'Sort tables by clicking a column',
+        changes: [
+            'Click Project, Owner or Last modified at the top of a project table to sort by that column, and click it again to reverse the order. All three tables follow the same sort. This replaces the “Most recent / Name A–Z” menu next to the search box.',
+            'A project’s sessions sort the same way, by Session, Last modified or Status. Status puts a session with an open ingest share first and sealed sessions last.',
+            'The sessions table shows when each session was last modified, the date it has always been ordered by, instead of “Created”. That date was not when the session was made but the last change to its folder’s settings, such as permissions, and many sessions showed the same day.',
+            'Your choices are remembered in this browser, one for the project lists and one for the sessions tables, so they open the way you left them.',
+            'Names with numbers in them sort the way you read them: “run2” comes before “run10”, and capital letters make no difference.',
+        ],
+    },
+    {
         version: '0.16.1',
         date: '2026-10-26',
         title: 'Your password stays out of the browser',

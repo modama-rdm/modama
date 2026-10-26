@@ -11,6 +11,27 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.17.0] - 2026-10-26
+
+### Changed
+
+- The project tables sort by clicking a column header: Project, Owner or Last
+  modified, and a second click reverses the order. All three tables (My
+  Projects, Shared with me, All projects) follow the same sort. This replaces
+  the "Most recent / Name A–Z" menu next to the search box. (#75)
+- A project's sessions table sorts the same way, by Session, Last modified or
+  Status. Status puts a session with an open ingest share first, then open
+  sessions, then sealed ones. (#75)
+- The sessions table shows "Last modified", the date it has always been ordered
+  by, instead of "Created". That was the folders' inode change time (`ctime`),
+  not when the session was made: any permission change resets it, and on the
+  server many sessions showed the same day. The project page's "Created" row is
+  unchanged for now.
+- The chosen sort is remembered in this browser, one for the project tables and
+  one for the sessions tables, so they open the way you left them.
+- Names and owners sort the way you read them: digits compare as numbers
+  ("run2" before "run10") and capital letters make no difference.
+
 ## [0.16.1] - 2026-10-26
 
 ### Security
