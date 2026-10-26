@@ -27,3 +27,9 @@ If the FastAPI rewrite (#172) changes response shapes, these are what need
 updating — the journeys themselves describe user-visible behavior and shouldn't
 need to change. See `../../scripts/fixture-capture/README.md` for the full
 capture -> scrub -> write workflow.
+
+`browse.ts` was re-shaped by script from the 2026-07-22 capture when the data
+browser moved to `GET /mgmt-api/browse` (#90): same entries, new field names,
+sorted as the new API sorts. The capture scripts still read the legacy
+`/api/browse/`; a fresh capture of the new endpoint needs the cookie login
+rather than the Basic token and is left for when the next capture is due.

@@ -1,6 +1,6 @@
 import type {ButtonHTMLAttributes} from 'react'
 
-type Variant = 'primary' | 'secondary' | 'danger' | 'dangerOutline'
+type Variant = 'primary' | 'secondary' | 'outline' | 'danger' | 'dangerOutline'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: Variant
@@ -16,6 +16,10 @@ const variants: Record<Variant, string> = {
     primary: 'bg-primary text-primary-fg hover:bg-primary-hover',
     secondary:
         'border border-default bg-surface text-fg-muted hover:bg-surface-muted',
+    // An action that should be seen without the weight of a solid fill, e.g.
+    // "Load more" under a listing: the primary colour as a border and text.
+    outline:
+        'border-2 border-primary/40 bg-surface text-primary hover:border-primary hover:bg-primary/5',
     danger: 'bg-danger text-white hover:bg-danger-hover',
     dangerOutline:
         'border border-danger/30 bg-surface text-danger hover:bg-danger/5',

@@ -1,22 +1,10 @@
 /**
  * TypeScript mirrors of the JSON shapes the app reads.
  *
- * Every screen but the data browser reads the new `/mgmt-api` service (GitLab
- * #172), which reports failure with the status code and a `{code, message}`
- * body (see `clientV2.ts`); its shapes carry a `V2` suffix. The browse types at
- * the end mirror the legacy Flask `/api/browse/` stopgap, the one endpoint
- * still answering HTTP 200 with an `errno` envelope; step 5 of #172 replaces it.
+ * Every screen reads the new `/mgmt-api` service (GitLab #172), which reports
+ * failure with the status code and a `{code, message}` body (see
+ * `clientV2.ts`); its shapes carry a `V2` suffix.
  */
-
-/** The legacy envelope: `errno` 0 is success. Only the browse stopgap uses it. */
-export interface OkEnvelope {
-    errno: 0
-}
-
-export interface GenericErrorResponse {
-    errno: number
-    message: string
-}
 
 /**
  * One project, as the permissions service serializes it. `usage_bytes` is null
@@ -153,68 +141,62 @@ export interface IngestShareListV2 {
 }
 
 /**
- * Server-computed access links / transfer commands for a browse resource. Keys
- * are optional because which ones apply depends on the resource: the current
- * item carries the app links + rsync/sftp/SMB; listing rows carry only the
- * columns `browse.html.j2` shows (Nextcloud/JupyterHub for dirs, image viewer
- * for files, LiberTEM + SampleDB for both). The `..` row carries none.
+ * Server-built links and transfer commands for a browsed path. Which keys
+ * apply depends on the resource, and the server answers `null` (or leaves out)
+ * the ones that don't: the browsed path itself carries the app links plus
+ * rsync/sftp/SMB; a listing row carries only the "Open in" columns (Nextcloud
+ * and JupyterHub for a folder, the image viewer for a file, LiberTEM and the
+ * SampleDB/ElabFTW searches for both). Built on the server because the
+ * searches must encode the path exactly as the legacy UI did (#202).
  */
 export interface BrowseAccess {
-    nextcloud?: string
-    jupyter?: string
-    libertem?: string
-    imageviewer?: string
-    sampledb?: string
-    sampledb_erc3?: string
-    elabftw_erc3?: string
-    rsync?: string
-    sftp?: string
-    smb_windows?: string
-    smb_unix?: string
+    nextcloud?: string | null
+    jupyter?: string | null
+    libertem?: string | null
+    imageviewer?: string | null
+    sampledb?: string | null
+    sampledb_erc3?: string | null
+    elabftw_erc3?: string | null
+    rsync?: string | null
+    sftp?: string | null
+    smb_windows?: string | null
+    smb_unix?: string | null
 }
 
-export interface BrowseInfo {
-    name: string
-    isdir: boolean
-    /** Owning project name, or null outside a project tree. */
-    project: string | null
-    /** WebDAV timestamps, passed through as-is (may be null). */
-    created: string | null
-    modified: string | null
-    /** WebDAV reports size as a string; null for directories. */
-    size: string | number | null
-    member_count: number
-    /** True when the listing was capped at 1024 entries. */
-    truncated: boolean
-}
-
+/** One entry of a folder listing. */
 export interface BrowseEntry {
     name: string
-    /** Normalized path; null only would be unexpected. `..` points at the parent. */
+    /** Normalized absolute path: what to browse to next. */
     path: string
     isdir: boolean
-    created: string | null
-    modified: string | null
-    size: string | number | null
+    /** Modification time, epoch seconds; null if the file server reported none. */
+    mtime: number | null
+    /** Bytes; null for a folder. */
+    size: number | null
     access: BrowseAccess
 }
 
-/** `GET /api/browse/?path=` success. */
-export interface BrowseSuccess extends OkEnvelope {
-    /** Canonical (normalized) path — the client syncs its URL to this. */
+/**
+ * `GET /mgmt-api/browse?path=&limit=&cursor=`: the browsed path itself and,
+ * for a folder, one page of its `entries` (folders first, then by name
+ * ignoring case). Pages are keyed, not offset: `next_cursor` is passed back as
+ * `cursor` for the page after, until it is null, so an entry added or removed
+ * while paging neither repeats nor hides another. `path` is normalized; the
+ * loader redirects to it when the URL spelled it differently. A missing path
+ * is a 404, a folder the user may not read a 403 (see `browse.loader.ts`).
+ */
+export interface BrowseV2 {
     path: string
-    info: BrowseInfo
+    /** The last segment of `path`; empty for the root. */
+    name: string
+    isdir: boolean
+    /** The project the path is in (its second segment), or null above that. */
+    project: string | null
+    mtime: number | null
+    size: number | null
     access: BrowseAccess
-    /** Breadcrumb: `[fullPath, tail]` from the root down to the current path. */
-    path_pyramid: [string, string][]
-    members: BrowseEntry[]
+    entries: BrowseEntry[]
+    /** How many entries the folder has in all, across every page. */
+    total: number
+    next_cursor: string | null
 }
-
-/** `GET /api/browse/?path=` logical error (e.g. path not found), errno != 0. */
-export interface BrowseErrorResponse extends GenericErrorResponse {
-    path: string
-    /** Nearest existing ancestor to offer as a way back. */
-    backto: string | null
-}
-
-export type BrowseResponse = BrowseSuccess | BrowseErrorResponse

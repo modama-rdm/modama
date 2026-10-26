@@ -1,24 +1,26 @@
-import {Fragment} from 'react'
-import {Link, useLoaderData} from 'react-router-dom'
-import type {BrowseAccess, BrowseEntry, BrowseInfo} from '../api/types'
+import {Fragment, useState} from 'react'
+import {Link, useLoaderData, useNavigate} from 'react-router-dom'
+import {Unauthorized} from '../api/client'
+import {apiFetchV2} from '../api/clientV2'
+import type {BrowseAccess, BrowseEntry, BrowseV2} from '../api/types'
 import {CopyButton, CopyField} from '../components/CopyField'
 import {useCopy} from '../hooks/useCopy'
+import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
-import {
-    ArrowLeftIcon,
-    CheckCircleIcon,
-    FileIcon,
-    FolderIcon,
-} from '../components/ui/icons'
-import {formatBytes} from '../lib/format'
+import {CheckCircleIcon, FileIcon, FolderIcon} from '../components/ui/icons'
+import {formatBytes, formatDateTime} from '../lib/format'
+import {parentOf, pathPyramid} from '../lib/paths'
 import {browsePath, browseUrl} from '../lib/quotePath'
-import type {BrowseLoaderData} from './browse.loader'
+import {browseRequest, type BrowseLoaderData} from './browse.loader'
 
-/** WebDAV reports size as a numeric string; render it human-readably, else "—". */
-function formatSize(size: string | number | null): string {
-    if (size == null || size === '') return '—'
-    const n = typeof size === 'number' ? size : Number(size)
-    return Number.isFinite(n) ? formatBytes(n) : String(size)
+/** Bytes as the API reports them, human-readably; "—" for a folder. */
+function formatSize(size: number | null): string {
+    return size == null ? '—' : formatBytes(size)
+}
+
+/** Epoch seconds as the API reports them; "—" if the file server gave none. */
+function formatModified(mtime: number | null): string {
+    return mtime == null ? '—' : formatDateTime(mtime)
 }
 
 /**
@@ -114,6 +116,23 @@ function AccessBadge({
     )
 }
 
+/** The badges for every link the server answered for this resource. */
+function AccessBadges({access}: { access: BrowseAccess }) {
+    return (
+        <>
+            {APP_LINKS.filter(({key}) => access[key]).map(({key, label, badge}) => (
+                <AccessBadge
+                    key={key}
+                    href={access[key]!}
+                    label={label}
+                    badge={badge}
+                    size="sm"
+                />
+            ))}
+        </>
+    )
+}
+
 /** Text button that copies the shareable URL for `path`, briefly flipping to
  *  a check — for referencing this location in ELN entries (#202). */
 function CopyUrlButton({path}: { path: string }) {
@@ -139,22 +158,11 @@ function CopyUrlButton({path}: { path: string }) {
 /** Compact header bar for the current resource: icon + name + a meta line on the
  *  left, the full path + copy button on the right. Replaces the old detail card,
  *  matching the design's browse header. */
-function ResourceBar({
-                         info,
-                         access,
-                         path,
-                     }: {
-    info: BrowseInfo
-    access: BrowseAccess
-    path: string
-}) {
+function ResourceBar({info}: { info: BrowseV2 }) {
     const meta = info.isdir
-        ? `${info.member_count} item${info.member_count === 1 ? '' : 's'}${
-            info.truncated ? ' · showing first 1024' : ''
-        }`
+        ? `${info.total.toLocaleString()} item${info.total === 1 ? '' : 's'}`
         : formatSize(info.size)
-
-    const links = APP_LINKS.filter(({key}) => access[key])
+    const hasLinks = APP_LINKS.some(({key}) => info.access[key])
     return (
         <Card className="mb-3.5 px-5 py-3.5">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
@@ -187,25 +195,17 @@ function ResourceBar({
                 </div>
                 <div className="flex min-w-0 items-center gap-2">
                     <code
-                        title={path}
+                        title={info.path}
                         className="min-w-0 truncate font-mono text-[11px] text-fg-subtle"
                     >
-                        {path}
+                        {info.path}
                     </code>
-                    <CopyUrlButton path={path}/>
+                    <CopyUrlButton path={info.path}/>
                 </div>
             </div>
-            {links.length > 0 && (
+            {hasLinks && (
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-default/60 pt-3">
-                    {links.map(({key, label, badge}) => (
-                        <AccessBadge
-                            key={key}
-                            href={access[key]!}
-                            label={label}
-                            badge={badge}
-                            size="sm"
-                        />
-                    ))}
+                    <AccessBadges access={info.access}/>
                 </div>
             )}
         </Card>
@@ -242,10 +242,11 @@ function AccessCommands({access}: { access: BrowseAccess }) {
     )
 }
 
-/** File/folder breadcrumb from the path pyramid, prefixed with a "Projects"
- *  crumb back to the app. The trailing crumb is the current
- *  location — shown as mono text, not a link. */
-function Breadcrumb({pyramid}: { pyramid: [string, string][] }) {
+/** File/folder breadcrumb for a path, prefixed with a "Projects" crumb back to
+ *  the app. The trailing crumb is the current location — shown as mono text,
+ *  not a link. Also the way back up from a path that could not be opened. */
+function Breadcrumb({path}: { path: string }) {
+    const pyramid = pathPyramid(path)
     return (
         <nav className="mb-3.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]">
             <Link to="/projects" className="rounded px-0.5 text-primary hover:underline">
@@ -275,27 +276,105 @@ function Breadcrumb({pyramid}: { pyramid: [string, string][] }) {
     )
 }
 
-/** Compact per-row external links for the listing table, as colored badges. */
-function RowLinks({access}: { access: BrowseAccess }) {
-    return (
-        <div className="flex flex-wrap items-center gap-1.5">
-            {APP_LINKS.filter(({key}) => access[key]).map(({key, label, badge}) => (
-                <AccessBadge
-                    key={key}
-                    href={access[key]!}
-                    label={label}
-                    badge={badge}
-                    size="sm"
-                />
-            ))}
-        </div>
-    )
-}
-
 const thClass =
     'px-5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-fg-faint'
 
-function Listing({entries}: { entries: BrowseEntry[] }) {
+const rowClass =
+    'border-b border-default/60 transition-colors last:border-0 hover:bg-surface-muted/60'
+
+function EntryRow({entry}: { entry: BrowseEntry }) {
+    return (
+        <tr className={rowClass}>
+            <td className="px-5 py-3">
+                <div className="flex items-center gap-2">
+                    {entry.isdir ? (
+                        <FolderIcon className="h-4 w-4 shrink-0 text-fg-faint"/>
+                    ) : (
+                        <FileIcon className="h-4 w-4 shrink-0 text-fg-faint"/>
+                    )}
+                    <Link
+                        to={browsePath(entry.path)}
+                        className="truncate font-mono text-sm text-fg hover:text-primary"
+                    >
+                        {entry.name}
+                    </Link>
+                    <CopyButton value={browseUrl(entry.path)} label="browse URL"/>
+                </div>
+            </td>
+            <td className="px-5 py-3 text-right font-mono text-xs text-fg-subtle">
+                {formatSize(entry.size)}
+            </td>
+            <td className="whitespace-nowrap px-5 py-3 text-[13px] text-fg-muted">
+                {formatModified(entry.mtime)}
+            </td>
+            <td className="px-5 py-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                    <AccessBadges access={entry.access}/>
+                </div>
+            </td>
+        </tr>
+    )
+}
+
+/** The `..` row: the API leaves it to the client, since it follows from the path. */
+function ParentRow({parent}: { parent: string }) {
+    return (
+        <tr className={rowClass}>
+            <td className="px-5 py-3">
+                <div className="flex items-center gap-2">
+                    <FolderIcon className="h-4 w-4 shrink-0 text-fg-faint"/>
+                    <Link
+                        to={browsePath(parent)}
+                        className="truncate font-mono text-sm text-fg hover:text-primary"
+                    >
+                        ..
+                    </Link>
+                </div>
+            </td>
+            <td className="px-5 py-3 text-right font-mono text-xs text-fg-subtle">—</td>
+            <td className="px-5 py-3 text-[13px] text-fg-muted">—</td>
+            <td className="px-5 py-3"/>
+        </tr>
+    )
+}
+
+/**
+ * A folder's entries: the first page from the loader, and the pages after it
+ * fetched here on "Load more". Keyed by path from the parent, so opening
+ * another folder starts at page one again. The rows already shown stay put
+ * while the next page loads, and stay if it fails: the error shows inline and
+ * the button becomes "Try again". A button rather than infinite scroll, so
+ * keyboard users can reach it and nothing depends on scroll position.
+ */
+function FolderListing({first, parent}: { first: BrowseV2; parent: string | null }) {
+    const navigate = useNavigate()
+    const [more, setMore] = useState<BrowseEntry[]>([])
+    const [cursor, setCursor] = useState(first.next_cursor)
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+
+    const entries = [...first.entries, ...more]
+    const paged = first.total > first.entries.length
+
+    async function loadMore() {
+        if (!cursor || loading) return
+        setLoading(true)
+        setError(null)
+        try {
+            const page = await apiFetchV2<BrowseV2>(browseRequest(first.path, cursor))
+            setMore((shown) => [...shown, ...page.entries])
+            setCursor(page.next_cursor)
+        } catch (err) {
+            if (err instanceof Unauthorized) {
+                void navigate(`/login?next=${encodeURIComponent(browsePath(first.path))}`)
+                return
+            }
+            setError(err instanceof Error ? err.message : 'Could not load more entries.')
+        } finally {
+            setLoading(false)
+        }
+    }
+
     return (
         <Card className="mb-3.5 overflow-hidden">
             <table className="w-full border-collapse">
@@ -308,111 +387,90 @@ function Listing({entries}: { entries: BrowseEntry[] }) {
                 </tr>
                 </thead>
                 <tbody>
-                {entries.map((e) => {
-                    const isUp = e.name === '..'
-                    return (
-                        <tr
-                            key={e.path + e.name}
-                            className="border-b border-default/60 transition-colors last:border-0 hover:bg-surface-muted/60"
-                        >
-                            <td className="px-5 py-3">
-                                <div className="flex items-center gap-2">
-                                    {e.isdir ? (
-                                        <FolderIcon className="h-4 w-4 shrink-0 text-fg-faint"/>
-                                    ) : (
-                                        <FileIcon className="h-4 w-4 shrink-0 text-fg-faint"/>
-                                    )}
-                                    <Link
-                                        to={browsePath(e.path)}
-                                        className="truncate font-mono text-sm text-fg hover:text-primary"
-                                    >
-                                        {e.name}
-                                    </Link>
-                                    {!isUp && (
-                                        <CopyButton value={browseUrl(e.path)} label="browse URL"/>
-                                    )}
-                                </div>
-                            </td>
-                            <td className="px-5 py-3 text-right font-mono text-xs text-fg-subtle">
-                                {e.isdir ? '—' : formatSize(e.size)}
-                            </td>
-                            <td className="px-5 py-3 text-[13px] text-fg-muted">
-                                {e.modified ?? '—'}
-                            </td>
-                            <td className="px-5 py-3">
-                                <RowLinks access={e.access}/>
-                            </td>
-                        </tr>
-                    )
-                })}
+                {parent !== null && <ParentRow parent={parent}/>}
+                {entries.map((e) => (
+                    <EntryRow key={e.path} entry={e}/>
+                ))}
                 </tbody>
             </table>
-        </Card>
-    )
-}
-
-/** errno != 0 — path not found or WebDAV error. */
-function BrowseError({
-                         message,
-                         backto,
-                     }: {
-    message: string
-    backto: string | null
-}) {
-    return (
-        <Card className="border-danger/40 bg-danger/5 p-8 text-center">
-            <div className="text-base font-semibold text-fg">
-                Could not open this path
-            </div>
-            <div className="mt-1.5 text-sm text-fg-muted">{message}</div>
-            {backto && (
-                <Link
-                    to={browsePath(backto)}
-                    className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
-                >
-                    Go to {backto}
-                </Link>
+            {paged && (
+                // Its own band under the rows, centred, with the button wide and
+                // on its own line: right-aligned next to the count it read as
+                // part of the status line and was easy to miss. Outlined rather
+                // than solid: a filled block looked heavy against the rows, and
+                // the plain secondary border was too faint to notice.
+                <div className="flex flex-col items-center gap-2.5 border-t border-default bg-surface-muted/50 px-5 py-4 text-center">
+                    <span className="text-xs font-medium text-fg-muted">
+                        {entries.length.toLocaleString()} of {first.total.toLocaleString()}
+                    </span>
+                    {cursor && (
+                        <>
+                            <Button
+                                variant="outline"
+                                onClick={loadMore}
+                                disabled={loading}
+                                aria-busy={loading}
+                                className="min-w-[14rem]"
+                            >
+                                {loading && (
+                                    <span
+                                        aria-hidden="true"
+                                        className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+                                    />
+                                )}
+                                {loading ? 'Loading…' : error ? 'Try again' : 'Load more'}
+                            </Button>
+                            {error && (
+                                <span role="alert" className="text-xs text-danger">
+                                    {error}
+                                </span>
+                            )}
+                        </>
+                    )}
+                </div>
             )}
         </Card>
     )
 }
 
-function BackToProjects() {
+/** A path that could not be opened: no such path (404), or a folder this user
+ *  may not read (403). The breadcrumb above it is the way back up. */
+function BrowseError({status, message}: { status: number; message: string }) {
     return (
-        <Link
-            to="/projects"
-            className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
-        >
-            <ArrowLeftIcon className="h-4 w-4"/>
-            Projects
-        </Link>
+        <Card className="border-danger/40 bg-danger/5 p-8 text-center">
+            <div className="text-base font-semibold text-fg">
+                {status === 403 ? 'You do not have access to this folder' : 'Could not open this path'}
+            </div>
+            <div className="mt-1.5 text-sm text-fg-muted">{message}</div>
+        </Card>
     )
 }
 
 export function Browse() {
-    const {result} = useLoaderData() as BrowseLoaderData
+    const data = useLoaderData() as BrowseLoaderData
 
-    // `errno` can't discriminate the union (the error's errno is a plain number),
-    // so key the success case off the `info` field — as elsewhere in the app.
-    if (!('info' in result)) {
+    if (data.error) {
         return (
             <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-                <BackToProjects/>
-                <BrowseError message={result.message} backto={result.backto}/>
+                <Breadcrumb path={data.path}/>
+                <BrowseError status={data.error.status} message={data.error.message}/>
             </div>
         )
     }
 
-    const {info, access, path_pyramid, members} = result
+    const {result} = data
+    const parent = parentOf(result.path)
 
     return (
         <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <Breadcrumb pyramid={path_pyramid}/>
-            <ResourceBar info={info} access={access} path={result.path}/>
+            <Breadcrumb path={result.path}/>
+            <ResourceBar info={result}/>
 
-            {info.isdir && members.length > 0 && <Listing entries={members}/>}
+            {result.isdir && (result.entries.length > 0 || parent !== null) && (
+                <FolderListing key={result.path} first={result} parent={parent}/>
+            )}
 
-            <AccessCommands access={access}/>
+            <AccessCommands access={result.access}/>
         </div>
     )
 }
