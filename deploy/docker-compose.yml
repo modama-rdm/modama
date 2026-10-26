@@ -122,6 +122,7 @@ services:
     depends_on:
       - "permissions"
       - "smbdrop"
+      - "webdav"
 
   mgmtinterface-proxy:  # another nginx, in prod this terminates TLS
     # see prod/override files for config volumes and ports

@@ -104,6 +104,10 @@ services:
       # the Host no longer matches the browser's Origin and the CSRF check would
       # reject every POST. Production sets no extra origins.
       - MODAMA_CSRF_EXTRA_ORIGINS=http://localhost:5180
+      # The browse links open the test stack's Nextcloud, as config-override.py
+      # does for the Flask app; the other link bases keep their production
+      # defaults.
+      - MODAMA_NEXTCLOUD_BASE=http://localhost:1890/nextcloud/apps/files/?dir=/ER-C-Data/
     command: >
       /venv/bin/uvicorn mgmtinterface_api.main:app --reload
       --host 0.0.0.0 --port 8000
