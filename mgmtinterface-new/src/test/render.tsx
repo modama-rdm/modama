@@ -33,8 +33,8 @@ export function renderApp({route = '/'}: AppOptions = {}) {
  * Put an authenticated session in place, mirroring what `login()` persists, so a
  * journey that isn't testing login can start behind the auth gate. The shape is
  * `api/auth.ts`'s `Session` — if that changes, this fails loudly and correctly.
+ * The session cookie needs no stand-in: the API mock answers every request.
  */
-export function signIn(username = 'user1', password = 'correct-horse'): void {
-    const token = btoa(`${username}:${password}`)
-    localStorage.setItem('erc.auth', JSON.stringify({username, token}))
+export function signIn(username = 'user1'): void {
+    localStorage.setItem('erc.auth', JSON.stringify({username}))
 }

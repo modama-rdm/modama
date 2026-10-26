@@ -8,7 +8,7 @@ import {
     useLoaderData,
     useNavigate,
 } from 'react-router-dom'
-import {Unauthorized} from '../api/client'
+import {Unauthorized} from '../api/errors'
 import {apiFetchV2} from '../api/clientV2'
 import type {ProjectDetailsV2, SerializedProject, SetMembersRequestV2} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'

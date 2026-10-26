@@ -1,6 +1,6 @@
 import {redirect} from 'react-router-dom'
 import {getCurrentUser} from '../api/auth'
-import {Unauthorized} from '../api/client'
+import {Unauthorized} from '../api/errors'
 import {apiFetchV2} from '../api/clientV2'
 import type {UserListV2} from '../api/types'
 

@@ -1,7 +1,7 @@
-import {screen} from '@testing-library/react'
+import {screen, waitFor} from '@testing-library/react'
 import {beforeEach, describe, expect, it} from 'vitest'
 import {installApiMock, type ApiRecorder} from '../api-mock'
-import {renderApp} from '../render'
+import {renderApp, signIn} from '../render'
 import {baseWorld} from '../world'
 
 /**
@@ -89,5 +89,29 @@ describe('journey: login', () => {
         await user.click(screen.getByRole('button', {name: /sign in/i}))
 
         expect(await screen.findByRole('heading', {name: /create a new project/i})).toBeInTheDocument()
+    })
+
+    it('sends an expired session to the login form and keeps it there', async () => {
+        signIn('user1')
+        const expired = installApiMock([
+            {
+                method: 'GET',
+                path: '/mgmt-api/projects',
+                respond: () => ({
+                    status: 401,
+                    body: {code: 'session_expired', message: 'Your session has expired.'},
+                }),
+            },
+            ...baseWorld(),
+        ])
+        const {router} = renderApp({route: '/projects'})
+
+        expect(await screen.findByLabelText('Username')).toBeInTheDocument()
+        // The 401 drops the remembered sign-in. Without that the form would see
+        // it, send the user back to /projects, and the next 401 would start over.
+        await waitFor(() => expect(router.state.navigation.state).toBe('idle'))
+        expect(router.state.location.pathname).toBe('/login')
+        expect(expired.matching('GET', '/mgmt-api/projects')).toHaveLength(1)
+        expect(localStorage.getItem('erc.auth')).toBeNull()
     })
 })

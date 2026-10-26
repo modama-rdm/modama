@@ -17,8 +17,8 @@ again once #172 (FastAPI rewrite) changes response shapes.
   disposable regardless.
 - **Never pass credentials as a command-line argument or paste them in chat.**
   Both scripts read `TOKEN_FILE`, a `chmod 600` file holding
-  `base64(username:password)` (the same value the app stores in
-  `sessionStorage` under `erc.auth` — see `api/auth.ts`). Create it with
+  `base64(username:password)`, the value of an `Authorization: Basic` header
+  for the legacy API these scripts read. Create it with
   `printf`, not `echo`, so it never lands in shell history as a literal:
   ```bash
   printf '%s' 'dXNlcjpwYXNz' > ~/.erc-capture-token && chmod 600 ~/.erc-capture-token

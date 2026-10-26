@@ -1,6 +1,6 @@
 import {useState, type FormEvent} from 'react'
 import {Link, useLoaderData, useNavigate} from 'react-router-dom'
-import {Unauthorized} from '../api/client'
+import {Unauthorized} from '../api/errors'
 import {apiRequestV2} from '../api/clientV2'
 import type {CreateProjectRequestV2, SerializedProject} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'

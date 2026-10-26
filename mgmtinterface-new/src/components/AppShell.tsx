@@ -20,7 +20,7 @@ export function AppShell() {
 
     async function onLogout() {
         // Awaited so the server drops the session cookie before we navigate;
-        // `logout` clears the local credential either way.
+        // `logout` clears the remembered sign-in either way.
         await logout()
         notify('You were logged out.')
         navigate('/login')

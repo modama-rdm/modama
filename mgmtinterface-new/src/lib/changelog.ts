@@ -23,6 +23,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.16.1',
+        date: '2026-10-26',
+        title: 'Your password stays out of the browser',
+        changes: [
+            'The portal no longer keeps your password in the browser. It is sent once when you sign in, and the session cookie does the rest. A copy an earlier version stored is removed the next time you open the portal, without signing you out.',
+            'When your session has expired, the portal shows the sign-in form instead of bouncing between it and the page you were on.',
+        ],
+    },
+    {
         version: '0.16.0',
         date: '2026-10-26',
         title: 'The data browser pages through big folders',

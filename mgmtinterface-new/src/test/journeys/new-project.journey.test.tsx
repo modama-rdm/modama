@@ -22,7 +22,7 @@ describe('journey: new project', () => {
     }
 
     beforeEach(() => {
-        signIn(owner, 'correct-horse')
+        signIn(owner)
     })
 
     it('creates a project and opens it', async () => {

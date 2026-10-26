@@ -1,11 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
-import {
-    getCurrentUser,
-    getToken,
-    isAuthenticated,
-    login,
-    logout,
-} from './auth'
+import {getCurrentUser, isAuthenticated, login, logout} from './auth'
 
 function mockFetchOnce(body: unknown, init: { ok?: boolean; status?: number } = {}) {
     const status = init.status ?? 200
@@ -34,7 +28,7 @@ afterEach(() => {
 })
 
 describe('login', () => {
-    it('signs in against the v2 endpoint and keeps the Basic token for legacy screens', async () => {
+    it('signs in against the v2 endpoint and remembers only who signed in', async () => {
         const fetchFn = mockFetchOnce({username: 'barthel', persistent: false})
 
         const result = await login('barthel', 's3cret')
@@ -51,9 +45,8 @@ describe('login', () => {
             persistent: false,
         })
         // The session cookie is httpOnly, so nothing is asserted about it here —
-        // the browser holds it. The token below exists only because the other
-        // screens still call the legacy Flask API.
-        expect(getToken()).toBe(btoa('barthel:s3cret'))
+        // the browser holds it. The password is sent once and kept nowhere.
+        expect(JSON.parse(localStorage.getItem('erc.auth')!)).toEqual({username: 'barthel'})
         expect(getCurrentUser()).toBe('barthel')
         expect(isAuthenticated()).toBe(true)
     })
@@ -69,7 +62,7 @@ describe('login', () => {
             persistent: true,
         })
         // The kind of session lives in the httpOnly cookie; the stored
-        // credential is the same either way.
+        // record is the same either way.
         expect(localStorage.getItem('erc.auth')).not.toContain('persistent')
     })
 
@@ -82,7 +75,7 @@ describe('login', () => {
         const result = await login('barthel', 'wrong')
 
         expect(result).toEqual({ok: false, message: 'Wrong username or password.'})
-        expect(getToken()).toBeNull()
+        expect(localStorage.getItem('erc.auth')).toBeNull()
         expect(isAuthenticated()).toBe(false)
     })
 
@@ -132,17 +125,29 @@ describe('login', () => {
         })
         expect(isAuthenticated()).toBe(false)
     })
+})
 
-    it('encodes non-ASCII passwords as UTF-8 (btoa would otherwise throw)', async () => {
-        mockFetchOnce({username: 'müller'})
+describe('the remembered sign-in', () => {
+    it('drops the password from a record stored before #172', () => {
+        localStorage.setItem(
+            'erc.auth',
+            JSON.stringify({username: 'barthel', token: btoa('barthel:s3cret')}),
+        )
 
-        await expect(login('müller', 'pä$$wörd')).resolves.toEqual({ok: true})
-        expect(getToken()).toBeTypeOf('string')
+        expect(getCurrentUser()).toBe('barthel')
+        // The user stays signed in; the reversible password is gone from storage.
+        expect(JSON.parse(localStorage.getItem('erc.auth')!)).toEqual({username: 'barthel'})
+    })
+
+    it('treats a record without a username as signed out', () => {
+        localStorage.setItem('erc.auth', JSON.stringify({token: 'dXNlcjpwYXNz'}))
+
+        expect(isAuthenticated()).toBe(false)
     })
 })
 
 describe('logout', () => {
-    it('ends the server session and clears the stored credential', async () => {
+    it('ends the server session and clears the remembered sign-in', async () => {
         mockFetchOnce({username: 'barthel'})
         await login('barthel', 's3cret')
         expect(isAuthenticated()).toBe(true)
@@ -156,18 +161,17 @@ describe('logout', () => {
         )
         expect(isAuthenticated()).toBe(false)
         expect(getCurrentUser()).toBeNull()
-        expect(getToken()).toBeNull()
     })
 
-    it('still clears the credential when the server cannot be reached', async () => {
+    it('still clears the remembered sign-in when the server cannot be reached', async () => {
         mockFetchOnce({username: 'barthel'})
         await login('barthel', 's3cret')
 
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')))
         await logout()
 
-        // Leaving a usable credential behind because the network blipped would
-        // be the wrong way to fail a sign-out.
+        // Showing the user as signed in because the network blipped would be
+        // the wrong way to fail a sign-out.
         expect(isAuthenticated()).toBe(false)
     })
 })

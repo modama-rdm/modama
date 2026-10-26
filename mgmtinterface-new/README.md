@@ -79,10 +79,10 @@ ssh -N -L 5001:127.0.0.1:5001 debian@192.168.64.2
 **Step 3 — confirm the Mac can reach the VM (a second Mac terminal).**
 
 ```bash
-curl -i http://localhost:5001/api/project/      # expect: HTTP/1.1 401 UNAUTHORIZED
+curl -i http://localhost:5001/mgmt-api/healthz      # expect: HTTP/1.1 200 OK
 ```
 
-That `401` is the **success** signal — you reached the backend and it's demanding a login.
+That `200` means you reached the backend's API through the tunnel.
 
 **Step 4 — run the app (Mac terminal).**
 
@@ -133,8 +133,8 @@ How the pieces fit together:
   reach `branding/`) — see the `context`/`dockerfile` in `docker-compose.yml` and
   the CI entry. Built and released by `.gitlab-ci.yml` like the other images.
 - **`mgmtinterface-proxy`** (the mgmt-domain nginx) routes `^~ /new/` to the
-  `mgmtinterface-new` container and everything else to the legacy Flask app. The
-  SPA's `/api/*` calls therefore still land on Flask at the domain root, unchanged.
+  `mgmtinterface-new` container, `^~ /mgmt-api/` to the `mgmtinterface-api`
+  container the SPA talks to, and everything else to the legacy Flask app.
 
 To verify the production build locally against the VM backend, bring the stack up
 (`deploy/`) and open `http://localhost:5001/new/` — the test

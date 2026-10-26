@@ -1,5 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest'
-import {ApiError, Unauthorized} from './client'
+import {isAuthenticated} from './auth'
+import {ApiError, Unauthorized} from './errors'
 import {API_VERSION, apiFetchV2, apiRequestV2, parseError} from './clientV2'
 
 function mockFetchOnce(
@@ -19,6 +20,7 @@ function mockFetchOnce(
 
 afterEach(() => {
     vi.unstubAllGlobals()
+    localStorage.clear()
 })
 
 describe('parseError', () => {
@@ -115,6 +117,29 @@ describe('apiFetchV2', () => {
             status: 401,
         })
         await expect(apiFetchV2('/auth/session')).rejects.toBeInstanceOf(Unauthorized)
+    })
+
+    it('forgets the remembered sign-in on 401', async () => {
+        localStorage.setItem('erc.auth', JSON.stringify({username: 'barthel'}))
+        mockFetchOnce({code: 'session_expired', message: 'Your session has expired.'}, {
+            status: 401,
+        })
+
+        await expect(apiFetchV2('/projects')).rejects.toBeInstanceOf(Unauthorized)
+        // Otherwise /login takes the stale record as current and sends the user
+        // straight back to the page that just failed.
+        expect(isAuthenticated()).toBe(false)
+    })
+
+    it('keeps the sign-in on other failures', async () => {
+        localStorage.setItem('erc.auth', JSON.stringify({username: 'barthel'}))
+        mockFetchOnce({code: 'permissions_unavailable', message: 'Unavailable.'}, {
+            status: 502,
+        })
+
+        await expect(apiFetchV2('/projects')).rejects.toBeInstanceOf(ApiError)
+        // A server error must not sign the user out.
+        expect(isAuthenticated()).toBe(true)
     })
 
     it("carries the API's own message on other failures", async () => {

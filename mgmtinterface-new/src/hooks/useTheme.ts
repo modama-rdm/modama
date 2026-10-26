@@ -8,7 +8,7 @@ const STORAGE_KEY = 'erc-theme'
  * Storage can be unavailable (private mode, disabled, sandboxed) and then both
  * reading and writing throw. The theme is a preference, not state we can't live
  * without, so degrade to the OS setting rather than take `AppShell` — and with it
- * every authenticated screen — down on render. Mirrors `tokenStore` in api/auth.ts.
+ * every authenticated screen — down on render. Mirrors `sessionStore` in api/auth.ts.
  */
 function getInitialTheme(): Theme {
     try {

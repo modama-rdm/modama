@@ -15,7 +15,7 @@ describe('journey: create and seal a session', () => {
     const name = FIXTURE_PROJECT.name
 
     beforeEach(() => {
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
     })
 
     const createSession = `/mgmt-api/projects/${name}/sessions`

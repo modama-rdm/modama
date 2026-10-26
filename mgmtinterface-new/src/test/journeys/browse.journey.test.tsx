@@ -37,7 +37,7 @@ describe('journey: browse', () => {
     }
 
     it('renders the listing, breadcrumb, and access badges for a real directory', async () => {
-        signIn('user1', 'correct-horse')
+        signIn('user1')
         const api = installApiMock(baseWorld())
         renderApp({route})
 
@@ -69,7 +69,7 @@ describe('journey: browse', () => {
     })
 
     it('redirects to the normalized path the API answers with', async () => {
-        signIn('user1', 'correct-horse')
+        signIn('user1')
         installApiMock(baseWorld())
         const {router} = renderApp({route: `${route}%2F`})
 
@@ -79,7 +79,7 @@ describe('journey: browse', () => {
     })
 
     it('loads the next page on "Load more", keeping the rows already shown', async () => {
-        signIn('user1', 'correct-horse')
+        signIn('user1')
         const api = installApiMock(pagedWorld(4))
         const {user} = renderApp({route})
 
@@ -105,7 +105,7 @@ describe('journey: browse', () => {
     })
 
     it('shows a failed "Load more" inline and retries without dropping the rows', async () => {
-        signIn('user1', 'correct-horse')
+        signIn('user1')
         let fail = false
         installApiMock(pagedWorld(4, () => fail))
         const {user} = renderApp({route})
@@ -125,7 +125,7 @@ describe('journey: browse', () => {
     })
 
     it('shows the not-found state with the breadcrumb as the way back for a bad path', async () => {
-        signIn('user1', 'correct-horse')
+        signIn('user1')
         installApiMock(baseWorld())
         renderApp({route: '/browse?path=%2Fhdtms%2Fnope'})
 
@@ -139,7 +139,7 @@ describe('journey: browse', () => {
     })
 
     it('shows the no-access state for a folder the user may not read', async () => {
-        signIn('user1', 'correct-horse')
+        signIn('user1')
         // Listed before `...baseWorld()`: the mock's first-match-wins.
         installApiMock([
             {

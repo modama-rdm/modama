@@ -1,48 +1,48 @@
 /**
- * Client-side authentication, mid-migration between two APIs (GitLab #172).
+ * Client-side authentication against the new API (GitLab #172).
  *
- * Signing in now happens against `POST /mgmt-api/auth/login`, which authenticates
+ * Signing in happens against `POST /mgmt-api/auth/login`, which authenticates
  * and sets an **httpOnly session cookie** the browser attaches to every `/mgmt-api`
- * request on its own. JS never sees that cookie.
+ * request on its own. JS never sees that cookie, and the password is sent once
+ * and not kept.
  *
- * The Basic token below has *not* gone away yet, because most screens still call
- * the legacy Flask `/api/*` endpoints, and those accept nothing but
- * `Authorization: Basic`. So one sign-in establishes both credentials, and the
- * token is retired when the last screen moves to `/mgmt-api` — at which point
- * `tokenStore`, `getToken`, and the backend's `xBasic` handler all go together.
- *
- * SECURITY (known, accepted, and shrinking — GitLab #156, #172): the Basic token
- * is base64(username:password), i.e. reversible encoding of the user's reusable
- * IFF/ER-C Unix password, held in `localStorage` where any XSS can read it. The
- * cookie has no such exposure. Every endpoint migrated to `/mgmt-api` is one less
- * reason for the token to exist.
+ * What this file does keep is who signed in, so the header can show the name and
+ * the route guard can send a signed-out visitor to /login without a round trip.
+ * That record is a hint, not a credential: the cookie decides. When the two
+ * disagree (the cookie expired, or another tab signed out), the next request
+ * answers 401, `apiRequestV2` calls `clearSession`, and the loaders redirect to
+ * /login, which then shows its form.
  */
 
 // `Unauthorized` extends `ApiError`, so catching the latter covers a 401 too.
-import {ApiError} from './client'
+import {ApiError} from './errors'
 import {apiFetchV2} from './clientV2'
 
 const SESSION_KEY = 'erc.auth'
 
 interface Session {
     username: string
-    /** base64(username:password) for the Authorization: Basic header. */
-    token: string
 }
 
 /**
- * The single, swappable persistence layer for the credential. Uses
+ * The single, swappable persistence layer for the session record. Uses
  * `localStorage` so a signed-in session is shared across every tab and window of
  * the same origin (GitLab #204 — opening a file in a new tab must not force a
- * re-login). This trades the per-tab isolation of sessionStorage for that shared
- * session; the XSS exposure is unchanged (either store is readable by page JS).
- * Swap this object's body to change the storage strategy app-wide.
+ * re-login), just as the cookie is. Swap this object's body to change the storage
+ * strategy app-wide.
  */
-const tokenStore = {
+const sessionStore = {
     read(): Session | null {
         try {
             const raw = localStorage.getItem(SESSION_KEY)
-            return raw ? (JSON.parse(raw) as Session) : null
+            if (!raw) return null
+            const stored = JSON.parse(raw) as Partial<Session> & {token?: unknown}
+            if (typeof stored.username !== 'string') return null
+            // Until #172 this record also held base64(username:password) for the
+            // legacy Flask API. Rewrite such a record without it, so the password
+            // doesn't stay in the browser of everyone who never signs out.
+            if ('token' in stored) sessionStore.write({username: stored.username})
+            return {username: stored.username}
         } catch {
             return null
         }
@@ -51,7 +51,7 @@ const tokenStore = {
         try {
             localStorage.setItem(SESSION_KEY, JSON.stringify(session))
         } catch {
-            /* storage unavailable (private mode / disabled) — auth degrades to in-tab only */
+            /* storage unavailable (private mode / disabled) */
         }
     },
     clear(): void {
@@ -63,19 +63,11 @@ const tokenStore = {
     },
 }
 
-/** UTF-8 safe base64 — plain btoa throws on non-Latin1 characters. */
-function basicToken(username: string, password: string): string {
-    const bytes = new TextEncoder().encode(`${username}:${password}`)
-    let binary = ''
-    for (const b of bytes) binary += String.fromCharCode(b)
-    return btoa(binary)
-}
-
 export type LoginResult = { ok: true } | { ok: false; message: string }
 
 /**
- * Sign in: establishes the session cookie and, for as long as legacy screens
- * need it, the Basic token.
+ * Sign in: the API sets the session cookie, and the name it signed in is
+ * remembered for the header and the route guard.
  *
  * `persistent` is the "keep me logged in" choice: the server then issues a
  * session without an idle timeout and a longer absolute lifetime. The kind of
@@ -90,8 +82,9 @@ export async function login(
     password: string,
     persistent = false,
 ): Promise<LoginResult> {
+    let session: {username: string; persistent: boolean}
     try {
-        await apiFetchV2<{username: string; persistent: boolean}>('/auth/login', {
+        session = await apiFetchV2<{username: string; persistent: boolean}>('/auth/login', {
             method: 'POST',
             body: JSON.stringify({username, password, persistent}),
         })
@@ -102,40 +95,36 @@ export async function login(
         return {ok: false, message: 'Could not reach the server. Please try again.'}
     }
 
-    tokenStore.write({username, token: basicToken(username, password)})
+    sessionStore.write({username: session.username})
     return {ok: true}
 }
 
 /**
- * Sign out of both credentials.
+ * Sign out.
  *
- * The local token is cleared even when the server call fails: the user asked to
- * be signed out, and leaving a usable credential behind because the network
- * blipped is the wrong failure mode. The cookie then expires on its own.
+ * The local record is cleared even when the server call fails: the user asked to
+ * be signed out, and showing them as signed in because the network blipped is the
+ * wrong failure mode. The cookie then expires on its own.
  */
 export async function logout(): Promise<void> {
     try {
         await apiFetchV2<void>('/auth/logout', {method: 'POST'})
     } catch {
-        /* clearing the local credential matters more than the round trip */
+        /* clearing the local record matters more than the round trip */
     } finally {
-        tokenStore.clear()
+        sessionStore.clear()
     }
 }
 
-export function getToken(): string | null {
-    return tokenStore.read()?.token ?? null
-}
-
 export function getCurrentUser(): string | null {
-    return tokenStore.read()?.username ?? null
+    return sessionStore.read()?.username ?? null
 }
 
 export function isAuthenticated(): boolean {
-    return tokenStore.read() !== null
+    return sessionStore.read() !== null
 }
 
-/** Used by the API client to drop the session on a 401. */
+/** Used by the API client to drop the session record on a 401. */
 export function clearSession(): void {
-    tokenStore.clear()
+    sessionStore.clear()
 }

@@ -1,5 +1,5 @@
 import {redirect, type LoaderFunctionArgs} from 'react-router-dom'
-import {ApiError, Unauthorized} from '../api/client'
+import {ApiError, Unauthorized} from '../api/errors'
 import {apiFetchV2} from '../api/clientV2'
 import type {BrowseV2} from '../api/types'
 import {browsePath} from '../lib/quotePath'

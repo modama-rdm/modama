@@ -13,7 +13,7 @@ import {makeFixtureShare} from '../fixtures/share'
  */
 describe('journey: projects list', () => {
     beforeEach(() => {
-        signIn('user1', 'correct-horse')
+        signIn('user1')
         installApiMock(baseWorld())
     })
 

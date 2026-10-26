@@ -21,7 +21,7 @@ describe('journey: ingest share', () => {
     const openShare = () => makeFixtureShare({project: name, session: dataset})
 
     it('creates a share and shows connection credentials', async () => {
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         const fixtureShare = openShare()
         const recorder = installApiMock([
             ...baseWorld(),
@@ -53,7 +53,7 @@ describe('journey: ingest share', () => {
     it('shows an already-open share with a note instead of a success toast', async () => {
         // 200 means this user already had a share for the session (the list
         // loaded before was stale). The details are right; "Done!" would not be.
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         installApiMock([
             ...baseWorld(),
             {
@@ -72,7 +72,7 @@ describe('journey: ingest share', () => {
     })
 
     it("shows the API's reason when a share cannot be opened", async () => {
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         installApiMock([
             ...baseWorld(),
             {
@@ -102,7 +102,7 @@ describe('journey: ingest share', () => {
     it('shows an open share from the list with the host it names', async () => {
         // The list is the user's shares with project and session on each; the
         // one for this session is shown as live, with its own host.
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         const mine = openShare()
         const other = makeFixtureShare({share_id: 'other', session: 'demo session', smb_host: 'elsewhere.test'})
         installApiMock(baseWorld({shares: [other, mine]}))
@@ -113,7 +113,7 @@ describe('journey: ingest share', () => {
     })
 
     it('closes an active share and returns to the create state', async () => {
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         const fixtureShare = openShare()
         const close = `/mgmt-api/ingest-shares/${fixtureShare.share_id}`
         const recorder = installApiMock([
@@ -133,7 +133,7 @@ describe('journey: ingest share', () => {
     it('treats a share that is gone already as closed', async () => {
         // Closed from another tab, or by the owner elsewhere: the API answers
         // 404, and the state the user wanted is the one to show.
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         const fixtureShare = openShare()
         installApiMock([
             ...baseWorld({shares: [fixtureShare]}),
@@ -155,7 +155,7 @@ describe('journey: ingest share', () => {
     })
 
     it("shows the API's reason when a share cannot be closed", async () => {
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         const fixtureShare = openShare()
         installApiMock([
             ...baseWorld({shares: [fixtureShare]}),
@@ -183,7 +183,7 @@ describe('journey: ingest share', () => {
     })
 
     it('blocks a non-member from managing the ingest share', async () => {
-        signIn('user50', 'correct-horse') // not owner, not a member of FIXTURE_PROJECT
+        signIn('user50') // not owner, not a member of FIXTURE_PROJECT
         installApiMock(baseWorld())
         renderApp({route})
 

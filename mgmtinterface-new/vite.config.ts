@@ -19,13 +19,12 @@ export default defineConfig(({mode}) => {
     // mapped port). Never point this at production.
     const apiTarget = env.VITE_API_PROXY || 'http://localhost:5001'
 
-    // Only the JSON APIs are proxied to the backend: /mgmt-api is the FastAPI
-    // service, /api the legacy Flask one that screens still fall back to. The
-    // SPA owns its own /login, /logout, etc. as client routes — proxying those
-    // would send the browser to the legacy Flask login page instead of this app.
+    // Only the JSON API is proxied to the backend: /mgmt-api, the FastAPI
+    // service. The SPA owns its own /login, /logout, etc. as client routes —
+    // proxying those would send the browser to the legacy Flask login page
+    // instead of this app.
     const proxy = {
         '/mgmt-api': {target: apiTarget, changeOrigin: true},
-        '/api': {target: apiTarget, changeOrigin: true},
     }
 
     // Public base path the app is served from. In production the new UI lives at

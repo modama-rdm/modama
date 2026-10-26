@@ -8,7 +8,7 @@ import {
     useLoaderData,
     useNavigate,
 } from 'react-router-dom'
-import {Unauthorized} from '../api/client'
+import {Unauthorized} from '../api/errors'
 import type {
     ProjectDetailsV2,
     ProjectUsageV2,

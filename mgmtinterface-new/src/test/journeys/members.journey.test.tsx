@@ -33,7 +33,7 @@ describe('journey: manage members', () => {
     }
 
     it('adds one member and removes another in a single save', async () => {
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         const recorder = installApiMock([
             ...baseWorld(),
             {
@@ -61,7 +61,7 @@ describe('journey: manage members', () => {
     })
 
     it("shows the API's reason and keeps the form when the change is refused", async () => {
-        signIn(FIXTURE_PROJECT.owner, 'correct-horse')
+        signIn(FIXTURE_PROJECT.owner)
         installApiMock([
             ...baseWorld(),
             {
@@ -91,7 +91,7 @@ describe('journey: manage members', () => {
 
     it('blocks a non-owner from managing members', async () => {
         // user2 is a member but not the owner.
-        signIn('user2', 'correct-horse')
+        signIn('user2')
         installApiMock(baseWorld())
         renderApp({route: `/projects/${name}/members`})
 

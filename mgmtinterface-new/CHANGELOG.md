@@ -11,6 +11,21 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.16.1] - 2026-10-26
+
+### Security
+
+- The portal no longer keeps your password in the browser. It used to store it,
+  reversibly encoded, for the legacy API; every screen now uses the new API's
+  session cookie, so the password is sent once at sign-in and kept nowhere. A
+  copy an earlier version stored is removed the next time you open the portal,
+  without signing you out. (#172)
+
+### Fixed
+
+- When your session has expired, the portal shows the sign-in form instead of
+  bouncing between it and the page you were on.
+
 ## [0.16.0] - 2026-10-26
 
 ### Changed

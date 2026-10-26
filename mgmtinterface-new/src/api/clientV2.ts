@@ -1,17 +1,13 @@
 /**
- * Fetch wrapper for the new FastAPI endpoints under `/mgmt-api` (GitLab #172).
+ * Fetch wrapper for the FastAPI endpoints under `/mgmt-api` (GitLab #172).
  *
- * Deliberately separate from `apiFetch`, which speaks the legacy Flask dialect:
- * that API answers HTTP 200 with an `{errno}` envelope and authenticates with a
- * Basic header, while this one uses real status codes and an httpOnly session
- * cookie the browser attaches on its own. One wrapper trying to speak both would
- * be harder to read than two that each speak one — and this file is the only
- * place that knows the wire format, so changing it later is a single edit.
- *
- * The two coexist until every screen has moved over; see `auth.ts`.
+ * The API uses real status codes and an httpOnly session cookie the browser
+ * attaches on its own. This file is the only place that knows the wire format,
+ * so changing it later is a single edit.
  */
 
-import {ApiError, Unauthorized} from './client'
+import {clearSession} from './auth'
+import {ApiError, Unauthorized} from './errors'
 
 export const MGMT_API = '/mgmt-api'
 
@@ -86,9 +82,10 @@ export interface ApiResult<T> {
  * the thing was just made, 200 that it already existed and was returned as is.
  * Most callers do not care and use `apiFetchV2`.
  *
- * Throws `Unauthorized` on 401 so existing loaders keep redirecting to /login
- * unchanged, and `ApiError` carrying the API's own message on any other non-2xx
- * — that message is written to be shown to the user.
+ * Throws `Unauthorized` on 401, so loaders redirect to /login, and `ApiError`
+ * carrying the API's own message on any other non-2xx — that message is written
+ * to be shown to the user. A 401 also clears the remembered sign-in: the login
+ * screen would otherwise take it as current and send the user straight back.
  */
 export async function apiRequestV2<T>(
     path: string,
@@ -117,6 +114,7 @@ export async function apiRequestV2<T>(
     const error = parseError(res.status, body)
 
     if (res.status === 401) {
+        clearSession()
         throw new Unauthorized(error.message)
     }
     throw new ApiError(res.status, error.message)

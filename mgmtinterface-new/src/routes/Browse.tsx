@@ -1,6 +1,6 @@
 import {Fragment, useState} from 'react'
 import {Link, useLoaderData, useNavigate} from 'react-router-dom'
-import {Unauthorized} from '../api/client'
+import {Unauthorized} from '../api/errors'
 import {apiFetchV2} from '../api/clientV2'
 import type {BrowseAccess, BrowseEntry, BrowseV2} from '../api/types'
 import {CopyButton, CopyField} from '../components/CopyField'
