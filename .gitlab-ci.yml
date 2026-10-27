@@ -270,15 +270,18 @@ container-image-retag:
     - crane tag iffregistry.fz-juelich.de/weber/data-management-system/$IMAGE_NAME:$CI_COMMIT_SHA latest
     - crane tag iffregistry.fz-juelich.de/weber/data-management-system/$IMAGE_NAME:$CI_COMMIT_SHA ${CI_COMMIT_TAG}
 
-agent-binaries-upload:
+# Maintainers create the release (tag + description) in the GitLab UI, so this
+# only uploads the binaries to the generic package registry (as package
+# modama-agent, version = tag) and attaches them to that release. The `release:`
+# keyword would overwrite the release's name and description instead.
+agent-release:
   stage: release
   rules:
     - if: $CI_COMMIT_TAG && $CI_PROJECT_PATH == "weber/data-management-system"
-  image:
-    name: curlimages/curl:8.22.0
-    entrypoint: [""]
+  image: registry.gitlab.com/gitlab-org/cli:v1.123.0
   variables:
     GIT_STRATEGY: none
+    GLAB_ENABLE_CI_AUTOLOGIN: "true"
   needs:
     - job: linux-agent
       artifacts: true
@@ -290,38 +293,10 @@ agent-binaries-upload:
     - cp modama-rs/target/x86_64-unknown-linux-gnu/release/modama-agent-gui dist/modama-agent-gui-linux-x86_64
     - cp modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent.exe dist/modama-agent-win7-x86_64.exe
     - cp modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent-gui.exe dist/modama-agent-gui-win7-x86_64.exe
-    - cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
-    - |
-      for file in *; do
-        curl --fail-with-body -sS --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$file" \
-          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/modama-agent/${CI_COMMIT_TAG}/${file}"
-        echo
-      done
-
-# Maintainers create the release (tag + description) in the GitLab UI, so this
-# only attaches the binaries to it. The `release:` keyword would overwrite the
-# release's name and description instead.
-agent-release:
-  stage: release
-  rules:
-    - if: $CI_COMMIT_TAG && $CI_PROJECT_PATH == "weber/data-management-system"
-  image: registry.gitlab.com/gitlab-org/cli:v1.123.0
-  variables:
-    GIT_STRATEGY: none
-    GLAB_ENABLE_CI_AUTOLOGIN: "true"
-  needs:
-    - job: agent-binaries-upload
-      artifacts: false
-  script:
-    - |
-      PACKAGE_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/modama-agent/${CI_COMMIT_TAG}"
-      glab release upload "$CI_COMMIT_TAG" --assets-links="$(cat <<EOF
-      [
-        {"name": "modama-agent (Linux x86_64, glibc >= 2.17)", "url": "$PACKAGE_URL/modama-agent-linux-x86_64", "link_type": "package"},
-        {"name": "modama-agent-gui (Linux x86_64, glibc >= 2.17)", "url": "$PACKAGE_URL/modama-agent-gui-linux-x86_64", "link_type": "package"},
-        {"name": "modama-agent (Windows 7+ x86_64)", "url": "$PACKAGE_URL/modama-agent-win7-x86_64.exe", "link_type": "package"},
-        {"name": "modama-agent-gui (Windows 7+ x86_64)", "url": "$PACKAGE_URL/modama-agent-gui-win7-x86_64.exe", "link_type": "package"},
-        {"name": "SHA256SUMS", "url": "$PACKAGE_URL/SHA256SUMS", "link_type": "other"}
-      ]
-      EOF
-      )"
+    - (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+    - glab release upload "$CI_COMMIT_TAG" --use-package-registry --package-name modama-agent
+        "dist/modama-agent-linux-x86_64#modama-agent (Linux x86_64, glibc >= 2.17)#package"
+        "dist/modama-agent-gui-linux-x86_64#modama-agent-gui (Linux x86_64, glibc >= 2.17)#package"
+        "dist/modama-agent-win7-x86_64.exe#modama-agent (Windows 7+ x86_64)#package"
+        "dist/modama-agent-gui-win7-x86_64.exe#modama-agent-gui (Windows 7+ x86_64)#package"
+        "dist/SHA256SUMS#SHA256SUMS#other"
