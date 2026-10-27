@@ -102,6 +102,7 @@ windows-7-llvm:
     - just win7-check-agent-imports
   artifacts:
     expire_in: 1 week
+    expose_as: "agent binaries (windows 7)"
     paths:
       - modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent.exe
       - modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent-gui.exe
@@ -113,6 +114,45 @@ windows-7-llvm:
       - .cargo-home/bin/
       - .cargo-home/registry/index/
       - .cargo-home/registry/cache/
+
+# zig is only used as the C compiler/linker for cargo-zigbuild, so the binaries
+# only require glibc 2.17 (see `linux_glibc` in the justfile).
+linux-agent:
+  stage: build
+  image: rust:1-slim-trixie
+  variables:
+    ZIG_VERSION: "0.15.2"
+    ZIG_SHA256: "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
+  script:
+    - apt-get -y update && apt-get -y install curl xz-utils binutils
+    - |
+      if [ ! -x ".zig/$ZIG_VERSION/zig" ]; then
+        curl --fail -sSL -o zig.tar.xz "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
+        echo "$ZIG_SHA256  zig.tar.xz" | sha256sum -c -
+        rm -rf .zig && mkdir -p ".zig/$ZIG_VERSION"
+        tar -xJf zig.tar.xz -C ".zig/$ZIG_VERSION" --strip-components=1
+        rm zig.tar.xz
+      fi
+    - export PATH="$CI_PROJECT_DIR/.zig/$ZIG_VERSION:$PATH"
+    - cargo-zigbuild --version || cargo install cargo-zigbuild --locked -q
+    - just --version || cargo install just --locked -q
+    - cd modama-rs/
+    - just linux-check-agent-glibc
+  artifacts:
+    expire_in: 1 week
+    expose_as: "agent binaries (linux)"
+    paths:
+      - modama-rs/target/x86_64-unknown-linux-gnu/release/modama-agent
+      - modama-rs/target/x86_64-unknown-linux-gnu/release/modama-agent-gui
+  cache:
+    key:
+      files:
+        - modama-rs/Cargo.lock
+    paths:
+      - .cargo-home/bin/
+      - .cargo-home/registry/index/
+      - .cargo-home/registry/cache/
+      - .zig/
 
 py-lint-and-format:
   stage: test
@@ -229,3 +269,66 @@ container-image-retag:
     - crane auth login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - crane tag iffregistry.fz-juelich.de/weber/data-management-system/$IMAGE_NAME:$CI_COMMIT_SHA latest
     - crane tag iffregistry.fz-juelich.de/weber/data-management-system/$IMAGE_NAME:$CI_COMMIT_SHA ${CI_COMMIT_TAG}
+
+agent-binaries-upload:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_TAG && $CI_PROJECT_PATH == "weber/data-management-system"
+  image:
+    name: curlimages/curl:8.22.0
+    entrypoint: [""]
+  variables:
+    GIT_STRATEGY: none
+  needs:
+    - job: linux-agent
+      artifacts: true
+    - job: windows-7-llvm
+      artifacts: true
+  script:
+    - mkdir dist
+    - cp modama-rs/target/x86_64-unknown-linux-gnu/release/modama-agent dist/modama-agent-linux-x86_64
+    - cp modama-rs/target/x86_64-unknown-linux-gnu/release/modama-agent-gui dist/modama-agent-gui-linux-x86_64
+    - cp modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent.exe dist/modama-agent-win7-x86_64.exe
+    - cp modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent-gui.exe dist/modama-agent-gui-win7-x86_64.exe
+    - cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+    - |
+      for file in *; do
+        curl --fail-with-body -sS --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$file" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/modama-agent/${CI_COMMIT_TAG}/${file}"
+        echo
+      done
+
+agent-release:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_TAG && $CI_PROJECT_PATH == "weber/data-management-system"
+  image: registry.gitlab.com/gitlab-org/cli:v1.123.0
+  variables:
+    GIT_STRATEGY: none
+    PACKAGE_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/modama-agent/${CI_COMMIT_TAG}"
+  needs:
+    - job: agent-binaries-upload
+      artifacts: false
+  script:
+    - echo "Creating release $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: $CI_COMMIT_TAG
+    description: "Release $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: modama-agent (Linux x86_64, glibc >= 2.17)
+          url: "$PACKAGE_URL/modama-agent-linux-x86_64"
+          link_type: package
+        - name: modama-agent-gui (Linux x86_64, glibc >= 2.17)
+          url: "$PACKAGE_URL/modama-agent-gui-linux-x86_64"
+          link_type: package
+        - name: modama-agent (Windows 7+ x86_64)
+          url: "$PACKAGE_URL/modama-agent-win7-x86_64.exe"
+          link_type: package
+        - name: modama-agent-gui (Windows 7+ x86_64)
+          url: "$PACKAGE_URL/modama-agent-gui-win7-x86_64.exe"
+          link_type: package
+        - name: SHA256SUMS
+          url: "$PACKAGE_URL/SHA256SUMS"
+          link_type: other
