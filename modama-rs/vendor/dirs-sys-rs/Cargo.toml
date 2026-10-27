@@ -18,8 +18,4 @@ libc = "0.2"
 redox_users = { version = "0.5", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { git = "https://github.com/microsoft/windows-rs.git", rev = "2d02953511f43129370b5732a66aa64367d83342", features = [
-    "combaseapi",
-    "shlobj_core",
-    "winbase",
-] }
+windows-link = "0.2"

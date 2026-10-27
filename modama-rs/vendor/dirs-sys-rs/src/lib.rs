@@ -134,60 +134,82 @@ pub fn user_dirs(home_dir_path: &Path) -> HashMap<String, PathBuf> {
 pub use self::target_unix_not_mac::{user_dir, user_dirs};
 
 #[cfg(target_os = "windows")]
-extern crate windows_sys as windows;
-
-#[cfg(target_os = "windows")]
 mod target_windows {
 
+use std::ffi::c_void;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::slice;
 
-use super::windows::Win32::{
-    combaseapi::CoTaskMemFree, shlobj_core::SHGetKnownFolderPath, winbase::lstrlenW,
-};
+// Declared here instead of using windows-sys: windows-sys 0.61 links
+// CoTaskMemFree from combase.dll, which Windows 7 does not ship.
+// https://learn.microsoft.com/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath
+windows_link::link!("shell32.dll" "system" fn SHGetKnownFolderPath(rfid: *const GUID, dwflags: u32, htoken: *mut c_void, ppszpath: *mut *mut u16) -> i32);
+// https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-lstrlenw
+windows_link::link!("kernel32.dll" "system" fn lstrlenW(lpstring: *const u16) -> i32);
+// https://learn.microsoft.com/windows/win32/api/combaseapi/nf-combaseapi-cotaskmemfree
+windows_link::link!("ole32.dll" "system" fn CoTaskMemFree(pv: *const c_void));
 
-// windows-sys's current minimal bindings omit the known-folder GUID constants.
+// Same layout as the Win32 GUID struct.
+// https://learn.microsoft.com/windows/win32/api/guiddef/ns-guiddef-guid
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GUID {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+impl GUID {
+    const fn from_u128(uuid: u128) -> Self {
+        GUID {
+            data1: (uuid >> 96) as u32,
+            data2: (uuid >> 80 & 0xffff) as u16,
+            data3: (uuid >> 64 & 0xffff) as u16,
+            data4: (uuid as u64).to_be_bytes(),
+        }
+    }
+}
+
 // https://learn.microsoft.com/windows/win32/shell/knownfolderid
-const FOLDERID_DESKTOP: windows::core::GUID =
-    windows::core::GUID::from_u128(0xb4bfcc3a_db2c_424c_b029_7fe99a87c641);
-const FOLDERID_DOCUMENTS: windows::core::GUID =
-    windows::core::GUID::from_u128(0xfdd39ad0_238f_46af_adb4_6c85480369c7);
-const FOLDERID_DOWNLOADS: windows::core::GUID =
-    windows::core::GUID::from_u128(0x374de290_123f_4565_9164_39c4925e467b);
-const FOLDERID_LOCAL_APP_DATA: windows::core::GUID =
-    windows::core::GUID::from_u128(0xf1b32785_6fba_4fcf_9d55_7b8e7f157091);
-const FOLDERID_MUSIC: windows::core::GUID =
-    windows::core::GUID::from_u128(0x4bd8d571_6d19_48d3_be97_422220080e43);
-const FOLDERID_PICTURES: windows::core::GUID =
-    windows::core::GUID::from_u128(0x33e28130_4e1e_4676_835a_98395c3bc3bb);
-const FOLDERID_PROFILE: windows::core::GUID =
-    windows::core::GUID::from_u128(0x5e6c858f_0e22_4760_9afe_ea3317b67173);
-const FOLDERID_PUBLIC: windows::core::GUID =
-    windows::core::GUID::from_u128(0xdfdf76a2_c82a_4d63_906a_5644ac457385);
-const FOLDERID_ROAMING_APP_DATA: windows::core::GUID =
-    windows::core::GUID::from_u128(0x3eb685db_65f9_4cf6_a03a_e3ef65729f3d);
-const FOLDERID_TEMPLATES: windows::core::GUID =
-    windows::core::GUID::from_u128(0xa63293e8_664e_48db_a079_df759e0509f7);
-const FOLDERID_VIDEOS: windows::core::GUID =
-    windows::core::GUID::from_u128(0x18989b1d_99b5_455b_841c_ab7c74e4ddfc);
+const FOLDERID_DESKTOP: GUID =
+    GUID::from_u128(0xb4bfcc3a_db2c_424c_b029_7fe99a87c641);
+const FOLDERID_DOCUMENTS: GUID =
+    GUID::from_u128(0xfdd39ad0_238f_46af_adb4_6c85480369c7);
+const FOLDERID_DOWNLOADS: GUID =
+    GUID::from_u128(0x374de290_123f_4565_9164_39c4925e467b);
+const FOLDERID_LOCAL_APP_DATA: GUID =
+    GUID::from_u128(0xf1b32785_6fba_4fcf_9d55_7b8e7f157091);
+const FOLDERID_MUSIC: GUID =
+    GUID::from_u128(0x4bd8d571_6d19_48d3_be97_422220080e43);
+const FOLDERID_PICTURES: GUID =
+    GUID::from_u128(0x33e28130_4e1e_4676_835a_98395c3bc3bb);
+const FOLDERID_PROFILE: GUID =
+    GUID::from_u128(0x5e6c858f_0e22_4760_9afe_ea3317b67173);
+const FOLDERID_PUBLIC: GUID =
+    GUID::from_u128(0xdfdf76a2_c82a_4d63_906a_5644ac457385);
+const FOLDERID_ROAMING_APP_DATA: GUID =
+    GUID::from_u128(0x3eb685db_65f9_4cf6_a03a_e3ef65729f3d);
+const FOLDERID_TEMPLATES: GUID =
+    GUID::from_u128(0xa63293e8_664e_48db_a079_df759e0509f7);
+const FOLDERID_VIDEOS: GUID =
+    GUID::from_u128(0x18989b1d_99b5_455b_841c_ab7c74e4ddfc);
 
-pub fn known_folder(folder_id: windows::core::GUID) -> Option<PathBuf> {
+pub fn known_folder(folder_id: GUID) -> Option<PathBuf> {
     // SAFETY: SHGetKnownFolderPath initializes `path_ptr` with a
     // NUL-terminated COM allocation on success. lstrlenW only reads that
     // string, and CoTaskMemFree receives the exact pointer returned by Shell.
     // CoTaskMemFree accepts NULL, so the failure path is safe as well.
     // https://learn.microsoft.com/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath
     unsafe {
-        let mut path_ptr: windows::core::PWSTR = std::ptr::null_mut();
+        let mut path_ptr: *mut u16 = std::ptr::null_mut();
         let result = SHGetKnownFolderPath(&folder_id, 0, std::ptr::null_mut(), &mut path_ptr);
         if result == 0 {
             let len = lstrlenW(path_ptr) as usize;
             let path = slice::from_raw_parts(path_ptr, len);
             let ostr: OsString = OsStringExt::from_wide(path);
-            // windows-sys commit 2d029535 links this API from Win7's Ole32.dll.
-            // https://learn.microsoft.com/windows/win32/api/combaseapi/nf-combaseapi-cotaskmemfree
             CoTaskMemFree(path_ptr.cast());
             Some(PathBuf::from(ostr))
         } else {
