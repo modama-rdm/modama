@@ -62,25 +62,42 @@ def user_shares(settings: Settings, uid: int) -> list[SerializedShare]:
     return shares
 
 
-def find_share(settings: Settings, dest_path: str, uid: int) -> SerializedShare | None:
+def find_share(
+    settings: Settings, dest_path: str, uid: int, resource: str | None = None
+) -> SerializedShare | None:
     """
     The share a user already has for a path, if any.
 
     A share belongs to the user whose uid it impersonates, so two users can
     each have one for the same session. Matching on the normalized path mirrors
     the legacy `add_share_info`.
+
+    With a `resource`, only a share bound to that instrument counts: smbdrop
+    offers an agent only the shares bound to its instrument, so handing it an
+    unbound one would leave it waiting. Without one, any of the user's shares
+    for the path does.
     """
     for share in list_shares(settings).values():
-        if share["uid"] == uid and os.path.normpath(share["dest_path"]) == dest_path:
+        if (
+            share["uid"] == uid
+            and os.path.normpath(share["dest_path"]) == dest_path
+            and (resource is None or share["resource"] == resource)
+        ):
             return share
     return None
 
 
 def create_share(
-    settings: Settings, dest_path: str, uid: int, gid: int
+    settings: Settings,
+    dest_path: str,
+    uid: int,
+    gid: int,
+    resource: str | None = None,
 ) -> SerializedShare:
     try:
-        result = make_client(settings).create(dest_path=dest_path, uid=uid, gid=gid)
+        result = make_client(settings).create(
+            dest_path=dest_path, uid=uid, gid=gid, resource=resource
+        )
     except (requests.RequestException, RuntimeError) as exc:
         raise _unavailable() from exc
     return result["share"]

@@ -1,9 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Path, Request, Response, status
 from pydantic import BaseModel, Field
 from smbdrop_client.schema import SerializedShare
 
+from ..agent_tokens import verified_resource
 from ..config import Settings
 from ..errors import APIError, error_responses
 from ..permissions import require_member, require_project, require_session, user_uid
@@ -82,9 +83,31 @@ class IngestShareList(BaseModel):
 class CreateIngestShareRequest(BaseModel):
     project: str = Field(min_length=1, examples=["ghost_imaging_2026"])
     session: str = Field(min_length=1, examples=["2026-10-16-alignment_run"])
+    resource: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The instrument to bind the share to. modama-agent sends it "
+            "together with `X-Agent-Token`, which must have been issued for "
+            "this instrument; other clients leave both out."
+        ),
+    )
 
 
 ShareId = Annotated[str, Path(description="The `share_id` of an open share.")]
+
+AgentToken = Annotated[
+    str | None,
+    Header(
+        alias="X-Agent-Token",
+        description=(
+            "Token from smbdrop's token service, which modama-agent fetches with "
+            "its client certificate. It says which instrument the request comes "
+            "from; the session still says who the user is. Sent together with "
+            "`resource` in the body, or not at all."
+        ),
+    ),
+]
 
 
 def _ingest_share(
@@ -189,9 +212,17 @@ def close_ingest_share(
         **CSRF_ERROR_RESPONSES,
         **error_responses(
             {
-                403: "The signed-in user is neither owner nor member of the project.",
+                400: "Only one of `X-Agent-Token` and `resource` was sent.",
+                403: (
+                    "The signed-in user is neither owner nor member of the "
+                    "project, or the agent token is invalid, expired, or for "
+                    "another resource."
+                ),
                 404: "There is no such project, or no such session in it.",
-                502: "The share service or the account service is unavailable.",
+                502: (
+                    "The share service, the account service or the agent token "
+                    "service is unavailable."
+                ),
             }
         ),
     },
@@ -201,6 +232,7 @@ def add_ingest_share(
     response: Response,
     session: Annotated[SessionData, Depends(current_session)],
     body: CreateIngestShareRequest,
+    agent_token: AgentToken = None,
 ) -> IngestShare:
     """
     Open a share for a session that writes as the signed-in user.
@@ -210,23 +242,47 @@ def add_ingest_share(
     client that lost the first response can simply retry. Another user's share
     for the same session is not reused; each user ingests under their own
     identity.
+
+    modama-agent also sends `X-Agent-Token` and `resource`, which bind the share
+    to the instrument it runs on, so that smbdrop offers the share to that
+    instrument's agent. The token must have been issued for that `resource`. A
+    repeat then counts only a share bound to the same instrument.
     """
     settings = settings_of(request)
     username = session["username"]
+
+    if (agent_token is None) != (body.resource is None):
+        raise APIError(
+            400,
+            "agent_binding_incomplete",
+            "Send X-Agent-Token and resource together, or neither.",
+        )
 
     details = require_project(settings, body.project)
     require_member(details, username)
     require_session(details, body.session)
 
+    resource = None
+    if agent_token is not None:
+        resource = verified_resource(settings, agent_token)
+        if resource != body.resource:
+            raise APIError(
+                403,
+                "resource_mismatch",
+                f"The agent token was issued for {resource!r}, not {body.resource!r}.",
+            )
+
     project = details["project"]
     uid = user_uid(settings, username)
     dest_path = share_path(settings, project["relpath"], body.session)
 
-    existing = find_share(settings, dest_path, uid)
+    existing = find_share(settings, dest_path, uid, resource)
     if existing is not None:
         response.status_code = status.HTTP_200_OK
         share = existing
     else:
-        share = create_share(settings, dest_path, uid=uid, gid=project["gid"])
+        share = create_share(
+            settings, dest_path, uid=uid, gid=project["gid"], resource=resource
+        )
 
     return _ingest_share(settings, share, project["name"], body.session)

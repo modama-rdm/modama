@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # way, so the agent mounts with its own configured host, port and domain.
     ingest_smb_host: str = "moellenstedt.iff.kfa-juelich.de"
     ingest_workgroup: str = "ER-C-INGEST"
+    # smbdrop's token service, which checks the `X-Agent-Token` modama-agent
+    # sends to bind an ingest share to its instrument. It speaks https with a
+    # certificate from the deployment's own CA, so the CA certificate is needed
+    # to trust it; the deployment mounts it where the Flask app reads it.
+    token_api: str = "https://smbdrop:5053"
+    token_ca_cert: str = "/certs/ca/pub/ca.cert.pem"
 
     # The WebDAV server in front of the data tree, which the browse endpoint
     # lists folders through. That server authenticates by username alone

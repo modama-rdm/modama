@@ -1,8 +1,10 @@
+import json
+
 import pytest
 import requests
 from conftest import api_client, signed_in_client
 from fastapi.testclient import TestClient
-from mgmtinterface_api import API_PREFIX, create_app
+from mgmtinterface_api import API_PREFIX, agent_tokens, create_app
 from mgmtinterface_api.config import Settings
 from permissions_client import PermissionsClient
 from smbdrop_client import ShareClient
@@ -65,6 +67,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     def create(self: ShareClient, dest_path: str, uid: int, gid: int, resource=None):
         state["create_calls"].append((dest_path, uid, gid, resource))
         share = make_share(f"new-{len(state['create_calls'])}", uid, dest_path)
+        share["resource"] = resource
         state["shares"][share["share_id"]] = share
         return {"share": share}
 
@@ -208,6 +211,206 @@ def test_reports_a_failed_create(
     response = member.post(INGEST_SHARES, json=REQUEST)
     assert response.status_code == 502
     assert response.json()["code"] == "share_service_unavailable"
+
+
+# --- POST /ingest-shares with an agent token ----------------------------------
+
+TOKEN = "header.payload.signature"
+RESOURCE = "holo"
+AGENT_REQUEST = {**REQUEST, "resource": RESOURCE}
+AGENT_HEADERS = {"X-Agent-Token": TOKEN}
+VERIFIED = {"VerifiedAgent": {"agent_id": f"x-modama-agent://{RESOURCE}#agent-1"}}
+
+
+@pytest.fixture
+def token_service(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """
+    smbdrop's token service, in place of `requests.put`: `answers` maps a
+    token to what `/verify/` says about it, and any other token is
+    `"Invalid"`, as the service answers for a token it did not sign or that
+    has expired. `status`, `body` and `error` make it misbehave.
+    """
+    state: dict = {
+        "answers": {TOKEN: VERIFIED},
+        "calls": [],
+        "status": 200,
+        "body": None,
+        "error": None,
+    }
+
+    def put(url: str, data: bytes, verify: str, timeout: float) -> requests.Response:
+        if state["error"] is not None:
+            raise state["error"]
+        state["calls"].append((url, data, verify))
+        answer = state["answers"].get(data.decode(), "Invalid")
+        response = requests.Response()
+        response.status_code = state["status"]
+        response._content = state["body"] or json.dumps(answer).encode()
+        return response
+
+    monkeypatch.setattr(agent_tokens.requests, "put", put)
+    return state
+
+
+def test_an_agent_token_binds_the_share_to_its_instrument(
+    member: TestClient, backend: dict, token_service: dict
+):
+    response = member.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    assert response.status_code == 201
+    # Still opened as the signed-in user; the token only adds the binding.
+    assert backend["create_calls"] == [
+        (DEST_PATH, UIDS["user2"], PROJECT["gid"], RESOURCE)
+    ]
+    assert response.json()["resource"] == RESOURCE
+
+
+def test_the_token_is_checked_with_the_configured_service(
+    settings: Settings, backend: dict, token_service: dict
+):
+    configured = Settings(
+        **{
+            **settings.model_dump(),
+            "token_api": "https://tokens.example.org:5053",
+            "token_ca_cert": "/etc/ca.pem",
+        }
+    )
+    member = signed_in_client(create_app(configured), configured, "user2")
+    member.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    # Trusting the deployment's CA, not the system's.
+    assert token_service["calls"] == [
+        ("https://tokens.example.org:5053/verify/", TOKEN.encode(), "/etc/ca.pem")
+    ]
+
+
+def test_a_token_does_not_replace_the_session(
+    settings: Settings, backend: dict, token_service: dict
+):
+    # The two pieces answer different questions: without a session nobody is
+    # signed in, whatever instrument the token names.
+    client = api_client(create_app(settings))
+    response = client.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    assert response.status_code == 401
+    assert token_service["calls"] == []
+    assert backend["create_calls"] == []
+
+
+def test_a_token_does_not_make_a_non_member_a_member(
+    settings: Settings, backend: dict, token_service: dict
+):
+    outsider = signed_in_client(create_app(settings), settings, "user3")
+    response = outsider.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    assert response.status_code == 403
+    assert response.json()["code"] == "not_a_member"
+    assert backend["create_calls"] == []
+
+
+def test_a_repeat_with_a_token_returns_the_bound_share(
+    member: TestClient, backend: dict, token_service: dict
+):
+    first = member.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    second = member.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    assert (first.status_code, second.status_code) == (201, 200)
+    assert second.json() == first.json()
+    assert len(backend["create_calls"]) == 1
+
+
+@pytest.mark.parametrize("bound_to", [None, "tem"])
+def test_a_share_not_bound_to_the_instrument_is_not_a_repeat(
+    member: TestClient, backend: dict, token_service: dict, bound_to: str | None
+):
+    # smbdrop offers the agent only shares bound to its instrument; returning
+    # this one would leave the agent waiting for a share that never comes.
+    existing = {**make_share("old", UIDS["user2"]), "resource": bound_to}
+    backend["shares"][existing["share_id"]] = existing
+    response = member.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    assert response.status_code == 201
+    assert response.json()["resource"] == RESOURCE
+
+
+def test_without_a_token_a_bound_share_still_counts_as_a_repeat(
+    member: TestClient, backend: dict, token_service: dict
+):
+    # Unchanged for the web interface: any share the user has for the session.
+    existing = {**make_share("old", UIDS["user2"]), "resource": RESOURCE}
+    backend["shares"][existing["share_id"]] = existing
+    response = member.post(INGEST_SHARES, json=REQUEST)
+    assert response.status_code == 200
+    assert response.json()["share_id"] == "old"
+    assert token_service["calls"] == []
+
+
+def test_a_token_for_another_instrument_is_refused(
+    member: TestClient, backend: dict, token_service: dict
+):
+    response = member.post(
+        INGEST_SHARES, json={**REQUEST, "resource": "tem"}, headers=AGENT_HEADERS
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "resource_mismatch"
+    assert backend["create_calls"] == []
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Invalid",
+        {"VerifiedAgent": {}},
+        {"VerifiedAgent": {"agent_id": f"https://{RESOURCE}#agent-1"}},
+        {"VerifiedAgent": {"agent_id": "x-modama-agent:#agent-1"}},
+        ["VerifiedAgent"],
+    ],
+)
+def test_a_token_the_service_does_not_vouch_for_is_a_403(
+    member: TestClient, backend: dict, token_service: dict, answer: object
+):
+    # 403, not 401: the session is fine, and a 401 would send the agent to log
+    # in again when what it needs is a fresh token.
+    token_service["answers"][TOKEN] = answer
+    response = member.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    assert response.status_code == 403
+    assert response.json()["code"] == "invalid_agent_token"
+    assert backend["create_calls"] == []
+
+
+@pytest.mark.parametrize(
+    ("body", "headers"),
+    [(REQUEST, AGENT_HEADERS), (AGENT_REQUEST, {})],
+    ids=["token without resource", "resource without token"],
+)
+def test_token_and_resource_come_together(
+    member: TestClient, backend: dict, token_service: dict, body: dict, headers: dict
+):
+    response = member.post(INGEST_SHARES, json=body, headers=headers)
+    assert response.status_code == 400
+    assert response.json()["code"] == "agent_binding_incomplete"
+    assert token_service["calls"] == []
+    assert backend["create_calls"] == []
+
+
+@pytest.mark.parametrize(
+    "misbehaviour",
+    [
+        {"error": requests.ConnectionError("the token service is down")},
+        # What the test VM answers: Python 3.13 rejects smbdrop's certificate
+        # there, which was issued without an Authority Key Identifier.
+        {
+            "error": requests.exceptions.SSLError(
+                "certificate verify failed: Missing Authority Key Identifier"
+            )
+        },
+        {"status": 500},
+        {"body": b"<html>Bad Gateway</html>"},
+    ],
+    ids=["unreachable", "rejected certificate", "error status", "no JSON"],
+)
+def test_reports_an_unusable_token_service(
+    member: TestClient, backend: dict, token_service: dict, misbehaviour: dict
+):
+    token_service.update(misbehaviour)
+    response = member.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
+    assert response.status_code == 502
+    assert response.json()["code"] == "token_service_unavailable"
+    assert backend["create_calls"] == []
 
 
 # --- GET /ingest-shares -------------------------------------------------------

@@ -257,6 +257,23 @@ def test_create_endpoints_document_both_outcomes(schema: dict[str, Any], path: s
     assert {"401", "403"} <= set(responses)
 
 
+def test_share_create_documents_the_agent_binding(schema: dict[str, Any]):
+    """
+    The agent's `X-Agent-Token` and `resource` are optional, so the web
+    interface's requests stay valid, and documented, so a generated client can
+    send them.
+    """
+    create = schema["paths"][INGEST_SHARES]["post"]
+    header = next(p for p in create["parameters"] if p["name"] == "X-Agent-Token")
+    assert header["in"] == "header"
+    assert not header.get("required", False)
+    assert header["description"]
+    request = schema["components"]["schemas"]["CreateIngestShareRequest"]
+    assert "resource" in request["properties"]
+    assert "resource" not in request["required"]
+    assert "400" in create["responses"]
+
+
 def test_project_conflict_is_documented(schema: dict[str, Any]):
     responses = schema["paths"][PROJECTS]["post"]["responses"]
     assert "409" in responses
