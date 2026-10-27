@@ -53,7 +53,7 @@ rust-tests:
   cache:
     key:
       files:
-        - Cargo.lock
+        - modama-rs/Cargo.lock
     paths:
       - .cargo-home/bin/
       - .cargo-home/registry/index/
@@ -74,7 +74,7 @@ windows-clippy:
   cache:
     key:
       files:
-        - Cargo.lock
+        - modama-rs/Cargo.lock
     paths:
       - .cargo-home/bin/
       - .cargo-home/registry/index/
@@ -108,7 +108,7 @@ windows-7-llvm:
   cache:
     key:
       files:
-        - Cargo.lock
+        - modama-rs/Cargo.lock
     paths:
       - .cargo-home/bin/
       - .cargo-home/registry/index/
