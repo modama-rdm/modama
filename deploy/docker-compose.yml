@@ -119,6 +119,12 @@ services:
     image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-api:latest
     # Refuses to start without a session secret: docker-compose.prod.yml mounts
     # it from the host, and the dev override sets one.
+    volumes:
+      # The CA certificate, to trust smbdrop's token service (agent tokens).
+      - type: bind
+        source: "/var/local/data-mgmt/CA/ca/pub/"
+        target: "/certs/ca/pub/"
+        read_only: true
     depends_on:
       - "permissions"
       - "smbdrop"
