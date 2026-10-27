@@ -39,7 +39,7 @@ rust-tests:
   stage: test
   parallel:
     matrix:
-      - RUST_VERSION: ['1', '1.92']
+      - RUST_VERSION: ['1', '1.95']
   image: rust:${RUST_VERSION}-slim-trixie
   script:
     - apt-get -y update && apt-get -y install lld build-essential git libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
@@ -67,10 +67,10 @@ windows-clippy:
   image: rust:1-slim-trixie
   script:
     - apt-get -y update && apt-get -y install gcc-mingw-w64-x86-64-win32
-    - rustup toolchain install nightly-2025-09-28 --profile minimal --component rust-src --component clippy
     - just --version || cargo install just --locked -q
     - cd modama-rs/
-    - just win-clippy-gnu
+    - just win7-install-toolchain
+    - just win7-check-gnu
   cache:
     key:
       files:
@@ -87,20 +87,12 @@ windows-7-llvm:
   image: rust:1-slim-trixie
   script:
     - apt-get -y update && apt-get -y install clang-tools-19 lld llvm
-    - rustup toolchain install nightly-2025-09-28 --profile minimal --component rust-src --component clippy
     - xwin --version || cargo install xwin --locked
     - just --version || cargo install just --locked -q
     - cd modama-rs/
-    - xwin --accept-license --arch x86_64 splat --output .xwin-cache/splat
-    - export CARGO_TARGET_X86_64_WIN7_WINDOWS_MSVC_LINKER=lld-link
-    - export CC_x86_64_win7_windows_msvc=clang-cl-19
-    - export CXX_x86_64_win7_windows_msvc=clang-cl-19
-    - export AR_x86_64_win7_windows_msvc=llvm-lib
-    - export CFLAGS_x86_64_win7_windows_msvc="/imsvc$PWD/.xwin-cache/splat/crt/include /imsvc$PWD/.xwin-cache/splat/sdk/include/ucrt /imsvc$PWD/.xwin-cache/splat/sdk/include/shared /imsvc$PWD/.xwin-cache/splat/sdk/include/um"
-    - export RUSTFLAGS="--cfg windows_slim_errors -C panic=abort -C target-feature=+crt-static -L native=$PWD/.xwin-cache/splat/crt/lib/x86_64 -L native=$PWD/.xwin-cache/splat/sdk/lib/um/x86_64 -L native=$PWD/.xwin-cache/splat/sdk/lib/ucrt/x86_64"
-    - cargo +nightly-2025-09-28 check -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-common --lib --locked
-    - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent --lib --bins --all-features --locked -- -D warnings
-    - cargo +nightly-2025-09-28 clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent-gui --lib --bins --locked -- -D warnings
+    - just win7-install-toolchain
+    - just win7-xwin-splat
+    - just win7-check-msvc
     - just win7-check-agent-imports
   artifacts:
     expire_in: 1 week

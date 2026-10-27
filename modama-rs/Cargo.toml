@@ -9,8 +9,10 @@ members = [
     "versioned",
 ]
 package.edition = "2024"
-# 1.92 for slightly fixed win7 build
-package.rust-version = "1.92"
+# 1.95 matches the pinned win7 nightly (1.95.0-nightly) and is what the
+# unreleased windows crate on windows-rs master requires; bumped in advance so
+# we can drop the git windows-sys pin (vendor/dirs-sys-rs) once it is released.
+package.rust-version = "1.95"
 resolver = "2"
 
 [workspace.dependencies]
