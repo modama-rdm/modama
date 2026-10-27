@@ -18,13 +18,15 @@ again once #172 (FastAPI rewrite) changes response shapes.
 - **Never pass credentials as a command-line argument or paste them in chat.**
   Both scripts read `TOKEN_FILE`, a `chmod 600` file holding
   `base64(username:password)`, the value of an `Authorization: Basic` header
-  for the legacy API these scripts read. Create it with
-  `printf`, not `echo`, so it never lands in shell history as a literal:
+  for the legacy API these scripts read. Whatever command writes the file,
+  the shell records the whole command line in its history, so the value must
+  not appear on a command line at all. Type it at a silent prompt instead:
   ```bash
-  printf '%s' 'dXNlcjpwYXNz' > ~/.erc-capture-token && chmod 600 ~/.erc-capture-token
+  (umask 077; printf 'token: '; read -rs TOKEN && printf '%s' "$TOKEN" > ~/.erc-capture-token)
   ```
-  Delete it when you're done — it's a real, reusable Unix password in
-  reversible encoding.
+  `read -s` echoes nothing, the subshell forgets `TOKEN` when it exits, and
+  `umask 077` creates the file readable by you alone. Delete it when you're
+  done — it's a real, reusable Unix password in reversible encoding.
 - **`raw/` and `scrubbed/` are gitignored on purpose.** `raw/` holds real
   identities; it must never be committed. Regenerate it, don't archive it.
 
