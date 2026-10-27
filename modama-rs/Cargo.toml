@@ -9,10 +9,9 @@ members = [
     "versioned",
 ]
 package.edition = "2024"
-# 1.95 matches the pinned win7 nightly (1.95.0-nightly) and is what the
-# unreleased windows crate on windows-rs master requires; bumped in advance so
-# we can drop the git windows-sys pin (vendor/dirs-sys-rs) once it is released.
-package.rust-version = "1.95"
+# 1.94 matches the pinned win7 nightly (nightly-2025-12-11);
+# nightly-2026-02-23 fails to build resvg 0.45.1.
+package.rust-version = "1.94"
 resolver = "2"
 
 [workspace.dependencies]
