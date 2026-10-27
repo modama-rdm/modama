@@ -298,6 +298,9 @@ agent-binaries-upload:
         echo
       done
 
+# Maintainers create the release (tag + description) in the GitLab UI, so this
+# only attaches the binaries to it. The `release:` keyword would overwrite the
+# release's name and description instead.
 agent-release:
   stage: release
   rules:
@@ -305,30 +308,20 @@ agent-release:
   image: registry.gitlab.com/gitlab-org/cli:v1.123.0
   variables:
     GIT_STRATEGY: none
-    PACKAGE_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/modama-agent/${CI_COMMIT_TAG}"
+    GLAB_ENABLE_CI_AUTOLOGIN: "true"
   needs:
     - job: agent-binaries-upload
       artifacts: false
   script:
-    - echo "Creating release $CI_COMMIT_TAG"
-  release:
-    tag_name: $CI_COMMIT_TAG
-    name: $CI_COMMIT_TAG
-    description: "Release $CI_COMMIT_TAG"
-    assets:
-      links:
-        - name: modama-agent (Linux x86_64, glibc >= 2.17)
-          url: "$PACKAGE_URL/modama-agent-linux-x86_64"
-          link_type: package
-        - name: modama-agent-gui (Linux x86_64, glibc >= 2.17)
-          url: "$PACKAGE_URL/modama-agent-gui-linux-x86_64"
-          link_type: package
-        - name: modama-agent (Windows 7+ x86_64)
-          url: "$PACKAGE_URL/modama-agent-win7-x86_64.exe"
-          link_type: package
-        - name: modama-agent-gui (Windows 7+ x86_64)
-          url: "$PACKAGE_URL/modama-agent-gui-win7-x86_64.exe"
-          link_type: package
-        - name: SHA256SUMS
-          url: "$PACKAGE_URL/SHA256SUMS"
-          link_type: other
+    - |
+      PACKAGE_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/modama-agent/${CI_COMMIT_TAG}"
+      glab release upload "$CI_COMMIT_TAG" --assets-links="$(cat <<EOF
+      [
+        {"name": "modama-agent (Linux x86_64, glibc >= 2.17)", "url": "$PACKAGE_URL/modama-agent-linux-x86_64", "link_type": "package"},
+        {"name": "modama-agent-gui (Linux x86_64, glibc >= 2.17)", "url": "$PACKAGE_URL/modama-agent-gui-linux-x86_64", "link_type": "package"},
+        {"name": "modama-agent (Windows 7+ x86_64)", "url": "$PACKAGE_URL/modama-agent-win7-x86_64.exe", "link_type": "package"},
+        {"name": "modama-agent-gui (Windows 7+ x86_64)", "url": "$PACKAGE_URL/modama-agent-gui-win7-x86_64.exe", "link_type": "package"},
+        {"name": "SHA256SUMS", "url": "$PACKAGE_URL/SHA256SUMS", "link_type": "other"}
+      ]
+      EOF
+      )"
