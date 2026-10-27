@@ -9,7 +9,7 @@ use modama_common::{
     cert_helpers::{
         CertHelperError, cert_chain_from_reader, get_root_cert_store, private_key_from_reader,
     },
-    config::{AgentConfigFile, AgentConfigFileClientCert},
+    config::{AgentConfigFile, AgentConfigFileClientCert, AgentConfigFileLinux},
     tokens::{TokenError, TokenFetcher, TokenProvider},
 };
 use thiserror::Error;
@@ -70,6 +70,19 @@ impl Default for AgentLinuxConfig {
             mount_point_prefix: PathBuf::from("/run/modama/ingest/"),
             uid: 1000,
             gid: 1000,
+        }
+    }
+}
+
+impl From<AgentConfigFileLinux> for AgentLinuxConfig {
+    fn from(value: AgentConfigFileLinux) -> Self {
+        let defaults = Self::default();
+        Self {
+            mount_point_prefix: value
+                .mount_point_prefix
+                .unwrap_or(defaults.mount_point_prefix),
+            uid: value.uid.unwrap_or(defaults.uid),
+            gid: value.gid.unwrap_or(defaults.gid),
         }
     }
 }
@@ -270,7 +283,7 @@ impl AgentConfig {
             smb_ip: OnceCell::new(),
             smb_port: config_file.services.smb_port,
             smb_domain: config_file.services.smb_domain.clone(),
-            linux_config: Some(AgentLinuxConfig::default()),
+            linux_config: Some(config_file.linux.map(Into::into).unwrap_or_default()),
             ca_root_store,
             listen_local_api: config_file.listen_local_api.clone(),
             token_service_url,
