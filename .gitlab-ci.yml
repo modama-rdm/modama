@@ -291,6 +291,11 @@ agent-release:
       artifacts: true
     - job: windows-7-llvm
       artifacts: true
+    # the builds don't wait for the tests, so don't release untested binaries
+    - job: rust-tests
+      artifacts: false
+    - job: windows-clippy
+      artifacts: false
   script:
     - mkdir dist
     - cp modama-rs/target/x86_64-unknown-linux-gnu/release/modama-agent dist/modama-agent-linux-x86_64
