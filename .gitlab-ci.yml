@@ -82,6 +82,8 @@ windows-clippy:
 
 windows-7-llvm:
   stage: build
+  # start right away instead of waiting for the test stage
+  needs: []
   image: rust:1-slim-trixie
   script:
     - apt-get -y update && apt-get -y install clang-tools-19 lld llvm
@@ -119,6 +121,8 @@ windows-7-llvm:
 # only require glibc 2.17 (see `linux_glibc` in the justfile).
 linux-agent:
   stage: build
+  # start right away instead of waiting for the test stage
+  needs: []
   image: rust:1-slim-trixie
   variables:
     ZIG_VERSION: "0.15.2"
