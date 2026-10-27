@@ -38,8 +38,11 @@ router = APIRouter(
 class IngestShare(BaseModel):
     """
     An active share. The fields smbdrop reports, plus the project and session
-    it belongs to and the host to connect to, so that a client needs neither to
-    parse `dest_path` nor to know the lab's Samba host.
+    it belongs to, so that a client does not parse `dest_path`, and the host
+    and workgroup the web interface shows a person who connects by hand.
+    modama-agent does not use those two: an instrument PC may reach the Samba
+    server another way than the intranet does, so the agent mounts with the
+    host, port and domain from its own configuration file.
     """
 
     share_id: str
@@ -55,8 +58,15 @@ class IngestShare(BaseModel):
     resource: str | None = Field(
         description="The instrument the share was opened for, if an agent opened it."
     )
-    smb_host: str = Field(description="Samba host to connect to.")
-    workgroup: str = Field(description="Workgroup for the username on Windows.")
+    smb_host: str = Field(
+        description=(
+            "Samba host as seen from the intranet, for a person connecting by "
+            "hand. modama-agent uses its own configured host instead."
+        )
+    )
+    workgroup: str = Field(
+        description="Workgroup for the username on Windows, for connecting by hand."
+    )
 
 
 class IngestShareList(BaseModel):

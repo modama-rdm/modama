@@ -147,27 +147,27 @@ old test fail, that change is breaking and belongs in a new version.
 
 ## Endpoints
 
-| | |
-|---|---|
-| `POST /mgmt-api/auth/login` | takes credentials and an optional `persistent` flag, sets the session cookie |
-| `POST /mgmt-api/auth/logout` | clears the cookie, answers 204 |
-| `GET /mgmt-api/auth/session` | the signed-in user, or 401 |
-| `GET /mgmt-api/projects` | all projects, unfiltered |
-| `POST /mgmt-api/projects` | create a project owned by the signed-in user |
-| `GET /mgmt-api/projects/{project}` | one project with its sessions |
-| `GET /mgmt-api/projects/{project}/usage` | its disk usage (slow) |
-| `PUT /mgmt-api/projects/{project}/members` | set its members |
-| `POST /mgmt-api/projects/{project}/sessions` | create a session in a project |
-| `POST /mgmt-api/projects/{project}/sessions/{session}/seal` | seal a session |
-| `GET /mgmt-api/users` | every account, for picking members |
-| `GET /mgmt-api/ingest-shares` | the signed-in user's open ingest shares |
-| `POST /mgmt-api/ingest-shares` | open an ingest share for a session |
-| `DELETE /mgmt-api/ingest-shares/{share_id}` | close an ingest share |
-| `GET /mgmt-api/browse` | a folder of the data tree, one page at a time, or a file |
-| `GET /mgmt-api/versions` | supported API versions |
-| `GET /mgmt-api/healthz` | liveness probe |
-| `GET /mgmt-api/docs` | Swagger UI for the generated OpenAPI document |
-| `GET /mgmt-api/openapi.json` | the OpenAPI document, for generating clients |
+|                                                             |                                                                              |
+|-------------------------------------------------------------|------------------------------------------------------------------------------|
+| `POST /mgmt-api/auth/login`                                 | takes credentials and an optional `persistent` flag, sets the session cookie |
+| `POST /mgmt-api/auth/logout`                                | clears the cookie, answers 204                                               |
+| `GET /mgmt-api/auth/session`                                | the signed-in user, or 401                                                   |
+| `GET /mgmt-api/projects`                                    | all projects, unfiltered                                                     |
+| `POST /mgmt-api/projects`                                   | create a project owned by the signed-in user                                 |
+| `GET /mgmt-api/projects/{project}`                          | one project with its sessions                                                |
+| `GET /mgmt-api/projects/{project}/usage`                    | its disk usage (slow)                                                        |
+| `PUT /mgmt-api/projects/{project}/members`                  | set its members                                                              |
+| `POST /mgmt-api/projects/{project}/sessions`                | create a session in a project                                                |
+| `POST /mgmt-api/projects/{project}/sessions/{session}/seal` | seal a session                                                               |
+| `GET /mgmt-api/users`                                       | every account, for picking members                                           |
+| `GET /mgmt-api/ingest-shares`                               | the signed-in user's open ingest shares                                      |
+| `POST /mgmt-api/ingest-shares`                              | open an ingest share for a session                                           |
+| `DELETE /mgmt-api/ingest-shares/{share_id}`                 | close an ingest share                                                        |
+| `GET /mgmt-api/browse`                                      | a folder of the data tree, one page at a time, or a file                     |
+| `GET /mgmt-api/versions`                                    | supported API versions                                                       |
+| `GET /mgmt-api/healthz`                                     | liveness probe                                                               |
+| `GET /mgmt-api/docs`                                        | Swagger UI for the generated OpenAPI document                                |
+| `GET /mgmt-api/openapi.json`                                | the OpenAPI document, for generating clients                                 |
 
 The OpenAPI document is the reference for the API. It is complete because the
 relevant parts are declared in code: every route has request and response
@@ -191,11 +191,11 @@ share, rather than the legacy API's dataset and share. They are idempotent:
 the agent retries on flaky networks and may never have seen the answer to its
 first attempt, so a repeat of the same request must not fail.
 
-| | first request | repeat |
-|---|---|---|
-| `POST /projects` | 201, the new project | 200, the existing project, unchanged |
-| `POST /projects/{project}/sessions` | 201, the new session | 200, the existing session |
-| `POST /ingest-shares` | 201, a new share | 200, the share the user already has for that session |
+|                                     | first request        | repeat                                               |
+|-------------------------------------|----------------------|------------------------------------------------------|
+| `POST /projects`                    | 201, the new project | 200, the existing project, unchanged                 |
+| `POST /projects/{project}/sessions` | 201, the new session | 200, the existing session                            |
+| `POST /ingest-shares`               | 201, a new share     | 200, the share the user already has for that session |
 
 Both answers carry the resource; a client treats any 2xx as "I have it". The
 one conflict is `409 project_exists`: a project of that name that belongs to
@@ -227,9 +227,14 @@ constraints, so that they are in the OpenAPI document and a bad name fails
 with a 422 before a round trip. The service stays the authority for everything
 it checks beyond the spelling (Unix groups, existing folders, who may create).
 
-The ingest share response adds what the legacy response left to the client:
-`project`, `session`, and the `smb_host` and `workgroup` to connect with
-(`MODAMA_INGEST_SMB_HOST`, `MODAMA_INGEST_WORKGROUP`). Not in this version:
+The ingest share response adds what the legacy response left to the web
+interface: `project`, `session`, and the `smb_host` and `workgroup` it shows a
+person for connecting by hand (`MODAMA_INGEST_SMB_HOST`,
+`MODAMA_INGEST_WORKGROUP`). They are the Samba server as seen from the
+intranet. modama-agent does not use them: an instrument PC often reaches the
+server another way, for example through a proxy on another machine, so the
+agent mounts a share with the host, port and domain from its own configuration
+file. Not in this version:
 the `X-Agent-Token` path of the legacy endpoint, which binds a share to the
 instrument an agent runs on (`resource`). That comes with the agent's move to
 this API, together with the question of how the agent authenticates.

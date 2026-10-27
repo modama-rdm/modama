@@ -48,9 +48,11 @@ class Settings(BaseSettings):
     # tree at the same place.
     share_api: str = "http://smbdrop:5051"
     smb_base: str = "/data"
-    # Host and workgroup an instrument PC connects to for an ingest share. The
-    # share service does not report them, so the API supplies them with the
-    # share, instead of every client pinning the lab's infrastructure.
+    # Host and workgroup the web interface shows a person for connecting to an
+    # ingest share by hand, as seen from the intranet. The share service does
+    # not report them, so the API supplies them with the share. modama-agent
+    # does not use them: an instrument PC may reach the Samba server another
+    # way, so the agent mounts with its own configured host, port and domain.
     ingest_smb_host: str = "moellenstedt.iff.kfa-juelich.de"
     ingest_workgroup: str = "ER-C-INGEST"
 
