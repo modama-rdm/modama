@@ -219,7 +219,8 @@ How each one tells "already there" from "refused":
   complaint, so the user's open shares are listed and matched on the
   normalized path and uid, like the legacy `add_share_info`. Another user's
   share for the same session does not count; each user ingests under their
-  own identity.
+  own identity. For an agent, the instrument has to match as well (see
+  below).
 
 The project and session name rules of the permissions service
 (`check_valid_group`, `check_valid_dataset`) are repeated as request-model
@@ -234,10 +235,34 @@ person for connecting by hand (`MODAMA_INGEST_SMB_HOST`,
 intranet. modama-agent does not use them: an instrument PC often reaches the
 server another way, for example through a proxy on another machine, so the
 agent mounts a share with the host, port and domain from its own configuration
-file. Not in this version:
-the `X-Agent-Token` path of the legacy endpoint, which binds a share to the
-instrument an agent runs on (`resource`). That comes with the agent's move to
-this API, together with the question of how the agent authenticates.
+file.
+
+modama-agent binds a share to the instrument it runs on with an
+`X-Agent-Token` header and a `resource` field, as with the legacy endpoint.
+The token adds to the login rather than replacing it. The session cookie says
+who the user is; the token, which smbdrop's token service issues to the agent
+for its client certificate and which lives an hour, says which instrument the
+request comes from. With both, the share is opened as the user and bound to
+the resource, which is what makes smbdrop offer it to that instrument's agent
+over the event channel. Without them the share is unbound, as from the web
+interface.
+
+* The token is checked with the token service as the legacy endpoint checks
+  it (`token_client.py`): a `PUT` to `/verify/` on `MODAMA_TOKEN_API`,
+  trusting the deployment's CA certificate at `MODAMA_TOKEN_CA_CERT`. The
+  resource it was issued for has to equal `resource`. The field is redundant
+  once a token is there; the cross-check catches an agent that holds a token
+  for a different instrument than it thinks it is on.
+* The header and the field come together or not at all
+  (`400 agent_binding_incomplete`).
+* A token the service does not accept is `403 invalid_agent_token`, and one
+  for another instrument `403 resource_mismatch`. Neither is a 401: the
+  session is fine, and a 401 would send the agent to log in again when it
+  needs a fresh token. An unreachable token service is
+  `502 token_service_unavailable`.
+* With a token, a repeat counts only a share bound to the same instrument,
+  since the agent is offered no other. Without one, any share the user has
+  for the session counts, as before.
 
 The owner of a new project is the signed-in user. The legacy request carried an
 `owner` field that had to equal the authenticated user; here the session is the
@@ -340,6 +365,7 @@ defaults are the production values.
         throttle.py   in-process failed-login counter
         permissions.py  calls into the permissions service
         shares.py       calls into smbdrop, the share service
+        agent_tokens.py checks agent tokens with smbdrop's token service
         webdav.py       lists the data tree through the WebDAV server
         links.py        where a browsed path opens elsewhere
         routes/auth.py      login / logout / session
