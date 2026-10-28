@@ -160,9 +160,21 @@ function SessionsTable({
     canMutate: boolean
 }) {
     const navigate = useNavigate()
+    // Only Browse in every row (not a member, or every session sealed and not
+    // shared) needs a much narrower actions column.
+    const moreThanBrowse =
+        canMutate && sessions.some((d) => !d.immutable || sharedNames.has(d.name))
     return (
         <Card className="overflow-hidden">
-            <table className="w-full border-collapse">
+            {/* Fixed column widths, so a long session name wraps instead of
+                widening its column and pushing the buttons out of the card. */}
+            <table className="w-full table-fixed border-collapse">
+                <colgroup>
+                    <col/>
+                    <col className="w-48"/>
+                    <col className="w-44"/>
+                    <col className={moreThanBrowse ? 'w-88' : 'w-32'}/>
+                </colgroup>
                 <thead>
                 <tr className="border-b border-default">
                     <SortHeader label="Session" column="name" sort={sort} onSort={onSort} className={thClass}/>
@@ -180,11 +192,11 @@ function SessionsTable({
                             className="border-b border-default/60 last:border-0"
                         >
                             <td className="px-5 py-3.5">
-                                <div className="font-mono text-sm font-semibold text-fg">
+                                <div className="font-mono text-sm font-semibold text-fg wrap-anywhere">
                                     {d.name}
                                 </div>
                             </td>
-                            <td className="px-5 py-3.5 text-sm text-fg-muted">
+                            <td className="whitespace-nowrap px-5 py-3.5 text-sm text-fg-muted">
                                 {formatDateTime(d.mtime)}
                             </td>
                             <td className="px-5 py-3.5">

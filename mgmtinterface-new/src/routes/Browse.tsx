@@ -244,7 +244,9 @@ function AccessCommands({access}: { access: BrowseAccess }) {
 
 /** File/folder breadcrumb for a path, prefixed with a "Projects" crumb back to
  *  the app. The trailing crumb is the current location — shown as mono text,
- *  not a link. Also the way back up from a path that could not be opened. */
+ *  not a link. Also the way back up from a path that could not be opened.
+ *  A crumb too long for the line wraps within itself, so a name without
+ *  spaces cannot run off the page. */
 function Breadcrumb({path}: { path: string }) {
     const pyramid = pathPyramid(path)
     return (
@@ -258,13 +260,13 @@ function Breadcrumb({path}: { path: string }) {
                     <Fragment key={full}>
                         <span className="text-fg-faint">›</span>
                         {isLast ? (
-                            <span className="px-0.5 font-mono text-xs font-medium text-fg-muted">
+                            <span className="px-0.5 font-mono text-xs font-medium text-fg-muted wrap-anywhere">
                                 {tail}
                             </span>
                         ) : (
                             <Link
                                 to={browsePath(full)}
-                                className="rounded px-0.5 text-primary hover:underline"
+                                className="rounded px-0.5 text-primary wrap-anywhere hover:underline"
                             >
                                 {tail}
                             </Link>
@@ -294,14 +296,14 @@ function EntryRow({entry}: { entry: BrowseEntry }) {
                     )}
                     <Link
                         to={browsePath(entry.path)}
-                        className="truncate font-mono text-sm text-fg hover:text-primary"
+                        className="min-w-0 font-mono text-sm text-fg wrap-anywhere hover:text-primary"
                     >
                         {entry.name}
                     </Link>
                     <CopyButton value={browseUrl(entry.path)} label="browse URL"/>
                 </div>
             </td>
-            <td className="px-5 py-3 text-right font-mono text-xs text-fg-subtle">
+            <td className="whitespace-nowrap px-5 py-3 text-right font-mono text-xs text-fg-subtle">
                 {formatSize(entry.size)}
             </td>
             <td className="whitespace-nowrap px-5 py-3 text-[13px] text-fg-muted">
@@ -377,7 +379,17 @@ function FolderListing({first, parent}: { first: BrowseV2; parent: string | null
 
     return (
         <Card className="mb-3.5 overflow-hidden">
-            <table className="w-full border-collapse">
+            {/* Fixed column widths, so the longest name in the folder cannot
+                widen the Name column for every row and push the other columns
+                out of the card: names wrap instead. Wrapped rather than cut off,
+                since files in a series often differ only at the end. */}
+            <table className="w-full table-fixed border-collapse">
+                <colgroup>
+                    <col/>
+                    <col className="w-24"/>
+                    <col className="w-48"/>
+                    <col className="w-72"/>
+                </colgroup>
                 <thead>
                 <tr className="border-b border-default">
                     <th className={thClass}>Name</th>
