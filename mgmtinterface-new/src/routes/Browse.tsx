@@ -1,4 +1,4 @@
-import {Fragment, useState} from 'react'
+import {Fragment, useId, useLayoutEffect, useRef, useState} from 'react'
 import {Link, useLoaderData, useNavigate} from 'react-router-dom'
 import {Unauthorized} from '../api/errors'
 import {apiFetchV2} from '../api/clientV2'
@@ -7,7 +7,7 @@ import {CopyButton, CopyField} from '../components/CopyField'
 import {useCopy} from '../hooks/useCopy'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
-import {CheckCircleIcon, FileIcon, FolderIcon} from '../components/ui/icons'
+import {CheckCircleIcon, ChevronDownIcon, FileIcon, FolderIcon} from '../components/ui/icons'
 import {formatBytes, formatDateTime} from '../lib/format'
 import {parentOf, pathPyramid} from '../lib/paths'
 import {browsePath, browseUrl} from '../lib/quotePath'
@@ -97,11 +97,13 @@ function AccessBadge({
                          label,
                          badge,
                          size,
+                         onOpen,
                      }: {
     href: string
     label: string
     badge: string
     size: 'sm' | 'md'
+    onOpen?: () => void
 }) {
     const dims = size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3 py-1.5 text-sm'
     return (
@@ -109,6 +111,7 @@ function AccessBadge({
             href={href}
             target="_blank"
             rel="noreferrer"
+            onClick={onOpen}
             className={`inline-flex items-center rounded-md font-semibold transition-colors ${dims} ${badge}`}
         >
             {label}
@@ -117,7 +120,7 @@ function AccessBadge({
 }
 
 /** The badges for every link the server answered for this resource. */
-function AccessBadges({access}: { access: BrowseAccess }) {
+function AccessBadges({access, onOpenApp}: { access: BrowseAccess; onOpenApp: (app: AppKey) => void }) {
     return (
         <>
             {APP_LINKS.filter(({key}) => access[key]).map(({key, label, badge}) => (
@@ -127,9 +130,151 @@ function AccessBadges({access}: { access: BrowseAccess }) {
                     label={label}
                     badge={badge}
                     size="sm"
+                    onOpen={() => onOpenApp(key)}
                 />
             ))}
         </>
+    )
+}
+
+type AppKey = keyof BrowseAccess
+
+const LAST_APP_KEY = 'erc-browse-open-in'
+
+/**
+ * The app this browser last opened something in, offered as a one-click button
+ * in every listing row that has it: people often open file after file in the
+ * same tool. Remembered like the table sorts (`useStoredSort`); without storage
+ * it holds for this visit only.
+ */
+function useLastApp(): [AppKey | null, (app: AppKey) => void] {
+    const [last, setLast] = useState<AppKey | null>(() => {
+        try {
+            const stored = localStorage.getItem(LAST_APP_KEY)
+            return APP_LINKS.find(({key}) => key === stored)?.key ?? null
+        } catch {
+            /* storage unavailable — nothing remembered yet */
+            return null
+        }
+    })
+
+    function remember(app: AppKey) {
+        setLast(app)
+        try {
+            localStorage.setItem(LAST_APP_KEY, app)
+        } catch {
+            /* storage unavailable — remembered for this visit only */
+        }
+    }
+
+    return [last, remember]
+}
+
+/**
+ * A listing row's "Open in" links behind one button, so the row stays one line
+ * high instead of stacking five to seven badges. Once an app has been used
+ * (`lastApp`), its badge sits before the button as a one-click link and the
+ * button shrinks to the arrow; a row without that app keeps "Open in".
+ *
+ * The panel is `fixed` and placed under the button (above it when the window
+ * has no room below), so the card's `overflow-hidden` cannot clip it; it
+ * follows the button in the DOM, so Tab goes from the button into the links.
+ * Escape, a click outside or opening a link closes it.
+ */
+function OpenInMenu({
+                        access,
+                        lastApp,
+                        onOpenApp,
+                    }: {
+    access: BrowseAccess
+    lastApp: AppKey | null
+    onOpenApp: (app: AppKey) => void
+}) {
+    const [open, setOpen] = useState(false)
+    const buttonRef = useRef<HTMLButtonElement>(null)
+    const panelRef = useRef<HTMLDivElement>(null)
+    const panelId = useId()
+    const links = APP_LINKS.filter(({key}) => access[key])
+    const quick = links.find(({key}) => key === lastApp)
+
+    // A layout effect, so the panel is in place before it is first painted.
+    useLayoutEffect(() => {
+        const button = buttonRef.current
+        const panel = panelRef.current
+        if (!open || !button || !panel) return
+        const place = () => {
+            const b = button.getBoundingClientRect()
+            const {width, height} = panel.getBoundingClientRect()
+            const fitsBelow = b.bottom + 4 + height <= window.innerHeight - 8
+            panel.style.top = `${fitsBelow ? b.bottom + 4 : Math.max(8, b.top - 4 - height)}px`
+            panel.style.left = `${Math.max(8, b.right - width)}px`
+        }
+        const onPointerDown = (e: PointerEvent) => {
+            const target = e.target as Node
+            if (!button.contains(target) && !panel.contains(target)) setOpen(false)
+        }
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape') return
+            setOpen(false)
+            button.focus()
+        }
+        place()
+        window.addEventListener('scroll', place, true)
+        window.addEventListener('resize', place)
+        document.addEventListener('pointerdown', onPointerDown)
+        document.addEventListener('keydown', onKeyDown)
+        return () => {
+            window.removeEventListener('scroll', place, true)
+            window.removeEventListener('resize', place)
+            document.removeEventListener('pointerdown', onPointerDown)
+            document.removeEventListener('keydown', onKeyDown)
+        }
+    }, [open])
+
+    if (links.length === 0) return null
+    return (
+        <div className="flex items-stretch gap-1">
+            {quick && (
+                <AccessBadge
+                    href={access[quick.key]!}
+                    label={quick.label}
+                    badge={quick.badge}
+                    size="sm"
+                    onOpen={() => onOpenApp(quick.key)}
+                />
+            )}
+            <button
+                ref={buttonRef}
+                type="button"
+                aria-expanded={open}
+                aria-controls={panelId}
+                aria-label={quick ? 'Open in another app' : undefined}
+                onClick={() => setOpen((o) => !o)}
+                className={`inline-flex items-center gap-1 rounded-md border border-default py-1 text-xs font-semibold text-fg-muted transition-colors hover:bg-primary/5 hover:text-primary ${quick ? 'px-1.5' : 'px-2.5'}`}
+            >
+                {!quick && 'Open in'}
+                <ChevronDownIcon className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`}/>
+            </button>
+            {open && (
+                <div
+                    ref={panelRef}
+                    id={panelId}
+                    onClick={() => setOpen(false)}
+                    className="fixed top-0 left-0 z-50 flex min-w-44 flex-col gap-1 rounded-lg border border-default bg-surface p-1.5 shadow-lg"
+                >
+                    {links.map(({key, label, badge}) => (
+                        <AccessBadge
+                            key={key}
+                            href={access[key]!}
+                            label={label}
+                            badge={badge}
+                            size="sm"
+                            onOpen={() => onOpenApp(key)}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
     )
 }
 
@@ -158,7 +303,7 @@ function CopyUrlButton({path}: { path: string }) {
 /** Compact header bar for the current resource: icon + name + a meta line on the
  *  left, the full path + copy button on the right. Replaces the old detail card,
  *  matching the design's browse header. */
-function ResourceBar({info}: { info: BrowseV2 }) {
+function ResourceBar({info, onOpenApp}: { info: BrowseV2; onOpenApp: (app: AppKey) => void }) {
     const meta = info.isdir
         ? `${info.total.toLocaleString()} item${info.total === 1 ? '' : 's'}`
         : formatSize(info.size)
@@ -205,7 +350,7 @@ function ResourceBar({info}: { info: BrowseV2 }) {
             </div>
             {hasLinks && (
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-default/60 pt-3">
-                    <AccessBadges access={info.access}/>
+                    <AccessBadges access={info.access} onOpenApp={onOpenApp}/>
                 </div>
             )}
         </Card>
@@ -284,7 +429,15 @@ const thClass =
 const rowClass =
     'border-b border-default/60 transition-colors last:border-0 hover:bg-surface-muted/60'
 
-function EntryRow({entry}: { entry: BrowseEntry }) {
+function EntryRow({
+                      entry,
+                      lastApp,
+                      onOpenApp,
+                  }: {
+    entry: BrowseEntry
+    lastApp: AppKey | null
+    onOpenApp: (app: AppKey) => void
+}) {
     return (
         <tr className={rowClass}>
             <td className="px-5 py-3">
@@ -310,9 +463,7 @@ function EntryRow({entry}: { entry: BrowseEntry }) {
                 {formatModified(entry.mtime)}
             </td>
             <td className="px-5 py-3">
-                <div className="flex flex-wrap items-center gap-1.5">
-                    <AccessBadges access={entry.access}/>
-                </div>
+                <OpenInMenu access={entry.access} lastApp={lastApp} onOpenApp={onOpenApp}/>
             </td>
         </tr>
     )
@@ -348,7 +499,17 @@ function ParentRow({parent}: { parent: string }) {
  * the button becomes "Try again". A button rather than infinite scroll, so
  * keyboard users can reach it and nothing depends on scroll position.
  */
-function FolderListing({first, parent}: { first: BrowseV2; parent: string | null }) {
+function FolderListing({
+                           first,
+                           parent,
+                           lastApp,
+                           onOpenApp,
+                       }: {
+    first: BrowseV2
+    parent: string | null
+    lastApp: AppKey | null
+    onOpenApp: (app: AppKey) => void
+}) {
     const navigate = useNavigate()
     const [more, setMore] = useState<BrowseEntry[]>([])
     const [cursor, setCursor] = useState(first.next_cursor)
@@ -388,7 +549,7 @@ function FolderListing({first, parent}: { first: BrowseV2; parent: string | null
                     <col/>
                     <col className="w-24"/>
                     <col className="w-48"/>
-                    <col className="w-72"/>
+                    <col className="w-56"/>
                 </colgroup>
                 <thead>
                 <tr className="border-b border-default">
@@ -401,7 +562,7 @@ function FolderListing({first, parent}: { first: BrowseV2; parent: string | null
                 <tbody>
                 {parent !== null && <ParentRow parent={parent}/>}
                 {entries.map((e) => (
-                    <EntryRow key={e.path} entry={e}/>
+                    <EntryRow key={e.path} entry={e} lastApp={lastApp} onOpenApp={onOpenApp}/>
                 ))}
                 </tbody>
             </table>
@@ -460,6 +621,7 @@ function BrowseError({status, message}: { status: number; message: string }) {
 
 export function Browse() {
     const data = useLoaderData() as BrowseLoaderData
+    const [lastApp, rememberApp] = useLastApp()
 
     if (data.error) {
         return (
@@ -476,10 +638,16 @@ export function Browse() {
     return (
         <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
             <Breadcrumb path={result.path}/>
-            <ResourceBar info={result}/>
+            <ResourceBar info={result} onOpenApp={rememberApp}/>
 
             {result.isdir && (result.entries.length > 0 || parent !== null) && (
-                <FolderListing key={result.path} first={result} parent={parent}/>
+                <FolderListing
+                    key={result.path}
+                    first={result}
+                    parent={parent}
+                    lastApp={lastApp}
+                    onOpenApp={rememberApp}
+                />
             )}
 
             <AccessCommands access={result.access}/>

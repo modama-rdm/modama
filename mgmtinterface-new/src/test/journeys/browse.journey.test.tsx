@@ -68,6 +68,58 @@ describe('journey: browse', () => {
         expect(screen.queryByRole('button', {name: /load more/i})).not.toBeInTheDocument()
     })
 
+    it('shows a row\'s "Open in" links behind one button that closes again', async () => {
+        signIn('user1')
+        installApiMock(baseWorld())
+        const {user} = renderApp({route})
+
+        const entry = FIXTURE_BROWSE.entries.find(e => e.access.nextcloud)!
+        const row = (await screen.findByText(entry.name)).closest('tr')!
+        const button = within(row).getByRole('button', {name: /open in/i})
+        expect(button).toHaveAttribute('aria-expanded', 'false')
+        expect(within(row).queryByRole('link', {name: 'Nextcloud'})).not.toBeInTheDocument()
+
+        await user.click(button)
+        expect(button).toHaveAttribute('aria-expanded', 'true')
+        expect(within(row).getByRole('link', {name: 'Nextcloud'})).toHaveAttribute('href', entry.access.nextcloud)
+
+        // Escape closes it and gives the focus back to the button.
+        await user.keyboard('{Escape}')
+        expect(button).toHaveAttribute('aria-expanded', 'false')
+        expect(button).toHaveFocus()
+
+        // So does a click anywhere else on the page.
+        await user.click(button)
+        await user.click(screen.getByRole('columnheader', {name: 'Name'}))
+        expect(button).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('offers the app last opened in as one click on every row that has it', async () => {
+        signIn('user1')
+        installApiMock(baseWorld())
+        const {user} = renderApp({route})
+
+        const folders = FIXTURE_BROWSE.entries.filter(e => e.access.nextcloud)
+        const file = FIXTURE_BROWSE.entries.find(e => !e.access.nextcloud)!
+        const rowOf = (name: string) => screen.getByText(name).closest('tr')!
+        const first = (await screen.findByText(folders[0].name)).closest('tr')!
+
+        await user.click(within(first).getByRole('button', {name: /open in/i}))
+        await user.click(within(first).getByRole('link', {name: 'Nextcloud'}))
+        expect(localStorage.getItem('erc-browse-open-in')).toBe('nextcloud')
+
+        // Every folder now opens in Nextcloud straight from its row, and the
+        // button only opens the other apps.
+        for (const folder of folders) {
+            const row = rowOf(folder.name)
+            expect(within(row).getByRole('link', {name: 'Nextcloud'})).toHaveAttribute('href', folder.access.nextcloud)
+            expect(within(row).getByRole('button', {name: 'Open in another app'})).toBeInTheDocument()
+        }
+        // A file has no Nextcloud link, so its row keeps the plain button.
+        expect(within(rowOf(file.name)).queryByRole('link', {name: 'Nextcloud'})).not.toBeInTheDocument()
+        expect(within(rowOf(file.name)).getByRole('button', {name: 'Open in'})).toBeInTheDocument()
+    })
+
     it('redirects to the normalized path the API answers with', async () => {
         signIn('user1')
         installApiMock(baseWorld())
