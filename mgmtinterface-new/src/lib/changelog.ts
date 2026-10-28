@@ -23,6 +23,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.18.0',
+        date: '2026-10-28',
+        title: 'Search a project’s sessions, and search by words',
+        changes: [
+            'A project’s sessions have a search box of their own above their table. Type any part of a session’s name: “stem map” finds “2026-09-30 4D-STEM map 01”. The box appears once the project has a session.',
+            'The projects search finds a project by any part of its name or its owner. More than one word, in any order, finds the projects that have all of them: “holo demo” finds “demo-holography”.',
+            'In both, a dash, an underscore, a dot and a space count as the same, so “demo holo” finds “demo-holography” too, and capital letters make no difference. Spelling is not corrected: “holgraphy” finds nothing.',
+        ],
+    },
+    {
         version: '0.17.0',
         date: '2026-10-26',
         title: 'Sort tables by clicking a column',

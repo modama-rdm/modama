@@ -11,6 +11,24 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.18.0] - 2026-10-28
+
+### Added
+
+- A search box above a project's sessions table. Type any part of a session's
+  name: "stem map" finds `2026-09-30 4D-STEM map 01`. The box appears once the
+  project has a session. (#113)
+
+### Changed
+
+- The projects search finds a project by any part of its name or its owner.
+  More than one word, in any order, finds the projects that have all of them:
+  "holo demo" finds `demo-holography`. (#113)
+- In both searches a dash, an underscore, a dot and a space count as the same,
+  so "demo holo" finds `demo-holography` too, and case makes no difference.
+  Spelling is not corrected: "holgraphy" finds nothing. Searching in a
+  description comes with the descriptions themselves (#112).
+
 ## [0.17.0] - 2026-10-26
 
 ### Changed
