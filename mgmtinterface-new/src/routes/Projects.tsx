@@ -4,7 +4,8 @@ import type {SerializedProject} from '../api/types'
 import {Avatar} from '../components/ui/Avatar'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
-import {PlusIcon, SearchIcon, UploadIcon} from '../components/ui/icons'
+import {PlusIcon, UploadIcon} from '../components/ui/icons'
+import {SearchInput} from '../components/ui/SearchInput'
 import {SortHeader} from '../components/ui/SortHeader'
 import {useStoredSort} from '../hooks/useStoredSort'
 import {formatDate} from '../lib/format'
@@ -146,16 +147,12 @@ export function Projects() {
                 </Button>
             </div>
 
-            <div className="relative mb-7">
-                <SearchIcon
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-faint"/>
-                <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search projects…"
-                    className="w-full rounded-lg border border-default bg-surface py-2.5 pl-9 pr-3 text-sm text-fg placeholder:text-fg-faint focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]"
-                />
-            </div>
+            <SearchInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search projects…"
+                className="mb-7"
+            />
 
             {shares.length > 0 && (
                 <div

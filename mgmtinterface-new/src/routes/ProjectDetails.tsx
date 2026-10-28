@@ -1,4 +1,4 @@
-import {Suspense, type ReactNode} from 'react'
+import {Suspense, useState, type ReactNode} from 'react'
 import {
     Await,
     Link,
@@ -26,16 +26,20 @@ import {
     PlusIcon,
     UsersIcon,
 } from '../components/ui/icons'
+import {SearchInput} from '../components/ui/SearchInput'
 import {SortHeader} from '../components/ui/SortHeader'
 import {useStoredSort} from '../hooks/useStoredSort'
 import {formatBytes, formatDateTime} from '../lib/format'
 import {
     canonicalProjectPath,
+    filterSessions,
     SESSION_SORT,
     sharedDatasetNames,
     sortSessions,
+    type SessionSortKey,
 } from '../lib/projectsUtil'
 import {browsePath, browseUrl} from '../lib/quotePath'
+import type {Sort} from '../lib/sort'
 import type {ProjectDetailsLoaderData} from './projectDetails.loader'
 
 const badgeBase =
@@ -66,21 +70,28 @@ function StatusBadges({dataset, shared}: { dataset: SerializedDataset; shared: b
 const thClass =
     'px-5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-fg-faint'
 
-function SessionsTable({
-                           project,
-                           datasets,
-                           sharedNames,
-                           canMutate,
-                       }: {
+/**
+ * The Sessions part of the page: the search box and the table, or in their
+ * place the card for a project without sessions, or for a query no session
+ * matches (#113).
+ */
+function Sessions({
+                      project,
+                      sessions,
+                      sharedNames,
+                      canMutate,
+                  }: {
     project: SerializedProject
-    datasets: SerializedDataset[]
+    sessions: SerializedDataset[]
     sharedNames: Set<string>
     canMutate: boolean
 }) {
     const navigate = useNavigate()
     // One remembered sort for every project's sessions table (#75).
     const [sort, sortBy] = useStoredSort('erc-sessions-sort', SESSION_SORT)
-    if (datasets.length === 0) {
+    // The query is for this visit only, unlike the sort.
+    const [query, setQuery] = useState('')
+    if (sessions.length === 0) {
         return (
             <Card className="p-12 text-center">
                 <FolderIcon className="mx-auto h-8 w-8 text-fg-faint"/>
@@ -101,19 +112,67 @@ function SessionsTable({
             </Card>
         )
     }
+    // Filtered before sorted: the column sort orders what matches.
+    const visible = sortSessions(filterSessions(sessions, query), sort, sharedNames)
+    return (
+        <>
+            <SearchInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search sessions…"
+                className="mb-4"
+            />
+            {visible.length === 0 ? (
+                <Card className="p-12 text-center">
+                    <div className="text-base font-semibold text-fg">No sessions found</div>
+                    <div className="mt-1.5 text-sm text-fg-muted">
+                        {`Nothing matches "${query}".`}
+                    </div>
+                </Card>
+            ) : (
+                <SessionsTable
+                    project={project}
+                    sessions={visible}
+                    sort={sort}
+                    onSort={sortBy}
+                    sharedNames={sharedNames}
+                    canMutate={canMutate}
+                />
+            )}
+        </>
+    )
+}
+
+function SessionsTable({
+                           project,
+                           sessions,
+                           sort,
+                           onSort,
+                           sharedNames,
+                           canMutate,
+                       }: {
+    project: SerializedProject
+    /** In the order to show them. */
+    sessions: SerializedDataset[]
+    sort: Sort<SessionSortKey>
+    onSort: (key: SessionSortKey) => void
+    sharedNames: Set<string>
+    canMutate: boolean
+}) {
+    const navigate = useNavigate()
     return (
         <Card className="overflow-hidden">
             <table className="w-full border-collapse">
                 <thead>
                 <tr className="border-b border-default">
-                    <SortHeader label="Session" column="name" sort={sort} onSort={sortBy} className={thClass}/>
-                    <SortHeader label="Last modified" column="mtime" sort={sort} onSort={sortBy} className={thClass}/>
-                    <SortHeader label="Status" column="status" sort={sort} onSort={sortBy} className={thClass}/>
+                    <SortHeader label="Session" column="name" sort={sort} onSort={onSort} className={thClass}/>
+                    <SortHeader label="Last modified" column="mtime" sort={sort} onSort={onSort} className={thClass}/>
+                    <SortHeader label="Status" column="status" sort={sort} onSort={onSort} className={thClass}/>
                     <th className={thClass}/>
                 </tr>
                 </thead>
                 <tbody>
-                {sortSessions(datasets, sort, sharedNames).map((d) => {
+                {sessions.map((d) => {
                     const shared = sharedNames.has(d.name)
                     return (
                         <tr
@@ -324,9 +383,9 @@ function ProjectBody() {
                     </Button>
                 )}
             </div>
-            <SessionsTable
+            <Sessions
                 project={project}
-                datasets={project.sessions}
+                sessions={project.sessions}
                 sharedNames={sharedNames}
                 canMutate={canMutate}
             />

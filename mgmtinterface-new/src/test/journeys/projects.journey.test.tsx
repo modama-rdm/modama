@@ -36,6 +36,30 @@ describe('journey: projects list', () => {
         expect(screen.queryByText(FIXTURE_PROJECT.name)).not.toBeInTheDocument()
     })
 
+    it('search finds a project by its words, in any order, across a dash (#113)', async () => {
+        const {user} = renderApp({route: '/projects'})
+        await screen.findByText('My Projects')
+
+        // "ecspzl-u-aidtht" (user6's) is the only project with both words.
+        await user.type(screen.getByPlaceholderText('Search projects…'), 'aidtht ecspzl')
+
+        expect(screen.getByText('ecspzl-u-aidtht')).toBeInTheDocument()
+        expect(screen.getAllByRole('row')).toHaveLength(2) // the header and the one project
+        expect(screen.queryByText(FIXTURE_PROJECT.name)).not.toBeInTheDocument()
+    })
+
+    it('search finds projects by their owner', async () => {
+        const {user} = renderApp({route: '/projects'})
+        await screen.findByText('My Projects')
+
+        // user39 owns "mws" and "vxb-i667" and nothing else.
+        await user.type(screen.getByPlaceholderText('Search projects…'), 'user39')
+
+        expect(screen.getByText('mws')).toBeInTheDocument()
+        expect(screen.getByText('vxb-i667')).toBeInTheDocument()
+        expect(screen.getAllByRole('row')).toHaveLength(3)
+    })
+
     it('shows "No projects found" for a query that matches nothing', async () => {
         const {user} = renderApp({route: '/projects'})
         await screen.findByText('My Projects')

@@ -4,6 +4,7 @@ import {
     availableMembers,
     canonicalProjectPath,
     filterProjects,
+    filterSessions,
     findDatasetShare,
     groupProjects,
     memberChanges,
@@ -65,8 +66,11 @@ describe('groupProjects', () => {
 })
 
 describe('filterProjects', () => {
+    const names = (ps: SerializedProject[]) => ps.map((p) => p.name)
+
     it('returns all projects for an empty query', () => {
         expect(filterProjects(projects, '')).toHaveLength(projects.length)
+        expect(filterProjects(projects, '  ')).toHaveLength(projects.length)
     })
 
     it('matches names case-insensitively', () => {
@@ -74,6 +78,81 @@ describe('filterProjects', () => {
         expect(result.length).toBeGreaterThan(0)
         expect(result.every((p) => p.name.toLowerCase().includes('ghost'))).toBe(true)
         expect(result.some((p) => p.name === 'ghost_imaging')).toBe(true)
+    })
+
+    it('finds a hyphenated or underscored name by its words (#113)', () => {
+        expect(names(filterProjects(projects, 'ghost imaging'))).toEqual(['ghost_imaging'])
+        expect(names(filterProjects(projects, 'ghost-imaging'))).toEqual(['ghost_imaging'])
+        expect(names(filterProjects(projects, 'shanker project'))).toEqual(['shanker_project'])
+    })
+
+    it('finds a name by two words in either order', () => {
+        expect(names(filterProjects(projects, 'imaging ghost'))).toEqual(['ghost_imaging'])
+        expect(names(filterProjects(projects, 'project shank'))).toEqual(['shanker_project'])
+    })
+
+    it('matches the owner too, each word on its own field', () => {
+        expect(names(filterProjects(projects, 'clausen'))).toEqual(['ghost_imaging'])
+        expect(names(filterProjects(projects, 'weber data'))).toEqual(['datamanagement'])
+        // "shanker" is one project's owner and in another's name.
+        expect(names(filterProjects(projects, 'shanker'))).toEqual(['shanker_project'])
+    })
+
+    it('does not match members or the path', () => {
+        expect(filterProjects(projects, 'landers')).toEqual([])
+        expect(filterProjects(projects, 'data/ghost')).toEqual([])
+    })
+
+    it('returns nothing when a word matches nowhere', () => {
+        expect(filterProjects(projects, 'ghost nope')).toEqual([])
+        expect(filterProjects(projects, 'zzz')).toEqual([])
+    })
+
+    it('puts a name that starts with the query before one that only contains it', () => {
+        const ps = [p('my-demo', 'a', [], 1), p('demo-holo', 'a', [], 1), p('demo_x', 'a', [], 1)]
+        expect(names(filterProjects(ps, 'demo'))).toEqual(['demo-holo', 'demo_x', 'my-demo'])
+    })
+})
+
+describe('filterSessions', () => {
+    const d = (name: string): SerializedDataset => ({name, ctime: 1, mtime: 1, immutable: false})
+    const names = (ds: SerializedDataset[]) => ds.map((x) => x.name)
+    const sessions = [
+        d('2026-10-14 alignment run'),
+        d('v1.2 calibration'),
+        d('2026-09-30 4D-STEM map 01'),
+        d('alignment-run-2'),
+    ]
+
+    it('returns all sessions for an empty query', () => {
+        expect(filterSessions(sessions, '')).toHaveLength(sessions.length)
+        expect(filterSessions(sessions, '  ')).toHaveLength(sessions.length)
+    })
+
+    it('finds a name by its words, dash or space alike (#113)', () => {
+        expect(names(filterSessions(sessions, 'stem map'))).toEqual(['2026-09-30 4D-STEM map 01'])
+        expect(names(filterSessions(sessions, '4d-stem'))).toEqual(['2026-09-30 4D-STEM map 01'])
+        // "alignment-run-2" starts with the query, so it comes first.
+        expect(names(filterSessions(sessions, 'alignment run'))).toEqual([
+            'alignment-run-2', '2026-10-14 alignment run',
+        ])
+        expect(names(filterSessions(sessions, 'v1 2'))).toEqual(['v1.2 calibration'])
+    })
+
+    it('finds a name by two words in either order, regardless of case', () => {
+        expect(names(filterSessions(sessions, 'MAP stem'))).toEqual(['2026-09-30 4D-STEM map 01'])
+        expect(names(filterSessions(sessions, 'run 2026'))).toEqual(['2026-10-14 alignment run'])
+    })
+
+    it('puts a name that starts with the query first', () => {
+        expect(names(filterSessions(sessions, 'alignment'))).toEqual([
+            'alignment-run-2', '2026-10-14 alignment run',
+        ])
+    })
+
+    it('returns nothing when a word matches nowhere', () => {
+        expect(filterSessions(sessions, 'alignment nope')).toEqual([])
+        expect(filterSessions(sessions, 'zzz')).toEqual([])
     })
 })
 

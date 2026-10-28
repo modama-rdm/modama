@@ -1,4 +1,5 @@
 import type {IngestShareV2, SerializedDataset, SerializedProject} from '../api/types'
+import {rankBy} from './search'
 import {compareNames, type Sort, type SortSpec} from './sort'
 
 /** The project tables' sortable columns (#75). */
@@ -50,14 +51,31 @@ export function groupProjects(
     return {own, member, other}
 }
 
-/** Case-insensitive filter by project name. Empty query returns all. */
+/**
+ * The projects matching `query` (#113): every word of it somewhere in the name
+ * or the owner, in any order, case and separators aside (`lib/search.ts`). An
+ * empty query returns all. The result comes best match first, but the screen
+ * groups and column-sorts it afterwards, and that sort is total (ties fall
+ * back to the name), so the ranking only ever shows between equal names, which
+ * there are none of. It is there for a caller that lists matches as they come.
+ */
 export function filterProjects(
     projects: SerializedProject[],
     query: string,
 ): SerializedProject[] {
-    const q = query.trim().toLowerCase()
-    if (!q) return projects
-    return projects.filter((p) => p.name.toLowerCase().includes(q))
+    return rankBy(projects, query, (p) => [p.name, p.owner])
+}
+
+/**
+ * A project's sessions matching `query` (#113), by name, the way
+ * `filterProjects` matches; the same goes for its ranking, which the column
+ * sort that follows overrides.
+ */
+export function filterSessions(
+    sessions: SerializedDataset[],
+    query: string,
+): SerializedDataset[] {
+    return rankBy(sessions, query, (s) => [s.name])
 }
 
 /**
