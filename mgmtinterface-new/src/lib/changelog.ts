@@ -23,6 +23,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.18.1',
+        date: '2026-10-28',
+        title: 'One “Open in” button per row, and long names that fit',
+        changes: [
+            'Each row in the data browser has one “Open in” button instead of a badge for every app, so the rows stay one line high. The button lists the apps the file or folder opens in. Once you have opened something in an app, every row that offers it shows that app as a button of its own, so a series of files opens in LiberTEM with one click each; the arrow next to it lists the other apps. The browser remembers the app you used last. The badges for the folder you are in, at the top of the page, stay as they were.',
+            'A file or folder with a very long name no longer stretches the data browser’s table and pushes the Size, Modified and “Open in” columns out of view. Long names wrap onto more lines, in the table and in the breadcrumb. A project’s sessions table does the same for a long session name.',
+        ],
+    },
+    {
         version: '0.18.0',
         date: '2026-10-28',
         title: 'Search a project’s sessions, and search by words',
