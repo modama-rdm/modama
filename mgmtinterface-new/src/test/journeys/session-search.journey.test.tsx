@@ -24,10 +24,11 @@ describe('journey: searching a project\'s sessions', () => {
         await screen.findByRole('heading', {name: FIXTURE_PROJECT.name})
         return app
     }
-    // The session name is the whole first cell.
+    // The session name is the first line of the first cell; a description's
+    // first line may follow it (#112).
     const sessionNames = () =>
         within(screen.getByRole('table')).getAllByRole('row').slice(1)
-            .map(row => within(row).getAllByRole('cell')[0].textContent)
+            .map(row => within(row).getAllByRole('cell')[0].firstElementChild?.textContent)
 
     it('narrows the table to the sessions with every word, across spaces and dashes', async () => {
         const {user} = await openProject()

@@ -6,6 +6,8 @@ import {RouteError} from './components/RouteError'
 import {Browse} from './routes/Browse'
 import {browseLoader} from './routes/browse.loader'
 import {Changelog} from './routes/Changelog'
+import {EditDescription} from './routes/EditDescription'
+import {editDescriptionLoader} from './routes/editDescription.loader'
 import {IngestShare} from './routes/IngestShare'
 import {ingestShareLoader} from './routes/ingestShare.loader'
 import {Login} from './routes/Login'
@@ -67,10 +69,20 @@ export const routes: RouteObject[] = [
                 loader: manageMembersLoader,
                 element: <ManageMembers/>,
             },
+            {
+                path: 'projects/:name/description',
+                loader: editDescriptionLoader,
+                element: <EditDescription/>,
+            },
             {path: 'projects/:name/sessions/new', element: <NewSession/>},
             {
                 path: 'projects/:name/sessions/:dataset/seal',
                 element: <SealSession/>,
+            },
+            {
+                path: 'projects/:name/sessions/:dataset/description',
+                loader: editDescriptionLoader,
+                element: <EditDescription/>,
             },
             {
                 path: 'projects/:name/sessions/:dataset/ingest',

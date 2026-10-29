@@ -52,8 +52,9 @@ export function groupProjects(
 }
 
 /**
- * The projects matching `query` (#113): every word of it somewhere in the name
- * or the owner, in any order, case and separators aside (`lib/search.ts`). An
+ * The projects matching `query` (#113): every word of it somewhere in the name,
+ * the owner or the description (#112), in any order, case and separators aside
+ * (`lib/search.ts`). An
  * empty query returns all. The result comes best match first, but the screen
  * groups and column-sorts it afterwards, and that sort is total (ties fall
  * back to the name), so the ranking only ever shows between equal names, which
@@ -63,11 +64,11 @@ export function filterProjects(
     projects: SerializedProject[],
     query: string,
 ): SerializedProject[] {
-    return rankBy(projects, query, (p) => [p.name, p.owner])
+    return rankBy(projects, query, (p) => [p.name, p.owner, p.description ?? ''])
 }
 
 /**
- * A project's sessions matching `query` (#113), by name, the way
+ * A project's sessions matching `query` (#113), by name and description, the way
  * `filterProjects` matches; the same goes for its ranking, which the column
  * sort that follows overrides.
  */
@@ -75,7 +76,7 @@ export function filterSessions(
     sessions: SerializedDataset[],
     query: string,
 ): SerializedDataset[] {
-    return rankBy(sessions, query, (s) => [s.name])
+    return rankBy(sessions, query, (s) => [s.name, s.description ?? ''])
 }
 
 /**
@@ -189,4 +190,12 @@ export function availableMembers(
         .filter((u) => !taken.has(u))
         .filter((u) => !q || u.toLowerCase().includes(q))
         .sort((a, b) => a.localeCompare(b))
+}
+
+/** Where a project's or a session's description is edited (#112). */
+export function descriptionPath(project: string, session?: string): string {
+    const base = `/projects/${encodeURIComponent(project)}`
+    return session === undefined
+        ? `${base}/description`
+        : `${base}/sessions/${encodeURIComponent(session)}/description`
 }

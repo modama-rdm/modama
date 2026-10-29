@@ -10,6 +10,7 @@ import type {SerializedProject} from '../../api/types'
 export const FIXTURE_PROJECTS: SerializedProject[] = [
     {
         "ctime": 1783695300.3267505,
+        "description": "# Data management dogfooding\n\nTest bed for the **ER-C data management** tools.\n\n- Sessions from the agent and the SMB drop\n- See the [handbook](https://example.org/rdm-handbook)",
         "gid": 1020,
         "members": [
             "user2",
@@ -115,6 +116,7 @@ export const FIXTURE_PROJECTS: SerializedProject[] = [
     },
     {
         "ctime": 1660562632.411734,
+        "description": "Off-axis holography of Ni nanowires\nTitan G2, 300 kV, Feb 2026",
         "gid": 1020,
         "members": [
             "user19",
@@ -153,6 +155,7 @@ export const FIXTURE_PROJECTS: SerializedProject[] = [
     },
     {
         "ctime": 1699523424.697907,
+        "description": "Lorentz TEM of skyrmion lattices.",
         "gid": 1020,
         "members": [
             "user6",

@@ -49,3 +49,22 @@ export function formatBytes(bytes: number): string {
     }
     return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`
 }
+
+/** Markdown that may open a line: headings, quotes, list bullets and numbers. */
+const LEADING_MARKDOWN = /^(?:#{1,6}(?:\s+|$)|>\s*|[-*+](?:\s+|$)|\d+[.)](?:\s+|$))+/
+/** A line that is only a horizontal rule: `---`, `***`, `___`. */
+const RULE = /^([-*_])(?:\s*\1){2,}$/
+
+/**
+ * What a list shows of a description (#112): its first non-blank line, without
+ * the Markdown that opens it, or null when there is nothing to show. The rest
+ * is the caller's to cut short (CSS `truncate`) and to offer in full on hover.
+ */
+export function descriptionDigest(description: string | null | undefined): string | null {
+    if (!description) return null
+    for (const raw of description.split('\n')) {
+        const line = raw.trim().replace(LEADING_MARKDOWN, '').trim()
+        if (line && !RULE.test(line)) return line
+    }
+    return null
+}

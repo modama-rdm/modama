@@ -13,6 +13,7 @@ import type {SerializedDataset, SerializedProject} from '../../api/types'
  */
 export const FIXTURE_PROJECT: SerializedProject = {
     "ctime": 1783695300.3267505,
+    "description": "# Data management dogfooding\n\nTest bed for the **ER-C data management** tools.\n\n- Sessions from the agent and the SMB drop\n- See the [handbook](https://example.org/rdm-handbook)",
     "gid": 1020,
     "members": [
         "user2",
@@ -37,12 +38,14 @@ export const FIXTURE_PROJECT: SerializedProject = {
 export const FIXTURE_DATASETS: SerializedDataset[] = [
     {
         "ctime": 1783695300.3417509,
+        "description": "# First light\nAlignment of the new detector after the service visit.",
         "immutable": false,
         "mtime": 1707831700.3981373,
         "name": "2022-03-22 my first session"
     },
     {
         "ctime": 1783695300.3417509,
+        "description": "Folder made by hand to try the permissions.\nNothing in raw/ is worth keeping.",
         "immutable": false,
         "mtime": 1698334851.26475,
         "name": "create by hand"
@@ -103,6 +106,7 @@ export const FIXTURE_DATASETS: SerializedDataset[] = [
     },
     {
         "ctime": 1783695300.343751,
+        "description": "Vortex beam holography with the delay-line detector.",
         "immutable": false,
         "mtime": 1700063376.684693,
         "name": "2023-11-15-dld-holo-vortex-test"

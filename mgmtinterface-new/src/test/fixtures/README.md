@@ -33,3 +33,11 @@ browser moved to `GET /mgmt-api/browse` (#90): same entries, new field names,
 sorted as the new API sorts. The capture scripts still read the legacy
 `/api/browse/`; a fresh capture of the new endpoint needs the cookie login
 rather than the Basic token and is left for when the next capture is due.
+
+The `description` fields (#112) are **not** from a capture: prod had no
+descriptions yet. Three projects in `projects.ts` (one of them the project in
+`project.ts`, with the same text) and three sessions in `project.ts` carry a
+hand-written one; every other entry has none, as an API from before #112
+answers. A fresh capture would drop them, so put them back or keep them in the
+journeys that need them. Their words are chosen not to collide with the
+queries the search journeys type (`mws`, `ingest`, `user39`, …).

@@ -1,6 +1,7 @@
 import {useMemo, useState} from 'react'
 import {useLoaderData, useNavigate} from 'react-router-dom'
 import type {SerializedProject} from '../api/types'
+import {DescriptionDigest} from '../components/DescriptionDigest'
 import {Avatar} from '../components/ui/Avatar'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
@@ -91,6 +92,7 @@ function ProjectsSection({
                         >
                             <td className="px-5 py-3.5">
                                 <div className="font-mono text-sm font-semibold text-fg">{p.name}</div>
+                                <DescriptionDigest description={p.description} className="max-w-[28rem]"/>
                                 <div className="mt-0.5 text-[11px] text-fg-faint">/{p.relpath}</div>
                             </td>
                             {showOwner && (

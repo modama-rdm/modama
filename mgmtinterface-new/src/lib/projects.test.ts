@@ -3,6 +3,7 @@ import type {IngestShareV2, SerializedDataset, SerializedProject} from '../api/t
 import {
     availableMembers,
     canonicalProjectPath,
+    descriptionPath,
     filterProjects,
     filterSessions,
     findDatasetShare,
@@ -379,5 +380,48 @@ describe('memberChanges', () => {
             added: [],
             removed: ['landers', 'shanker'],
         })
+    })
+})
+
+describe('descriptions (#112)', () => {
+    const described = (name: string, description: string | null | undefined): SerializedProject => ({
+        ...p(name, 'weber', [], 1),
+        description,
+    })
+    const names = (xs: {name: string}[]) => xs.map((x) => x.name)
+
+    it('filterProjects finds a project by words of its description, in any order', () => {
+        const ps = [
+            described('aaa', 'Off-axis holography of Ni nanowires\nTitan G2'),
+            described('bbb', 'Lorentz TEM'),
+            described('ccc', null),
+            described('ddd', undefined),
+        ]
+        expect(names(filterProjects(ps, 'nanowires titan'))).toEqual(['aaa'])
+        expect(names(filterProjects(ps, 'off axis'))).toEqual(['aaa'])
+        expect(names(filterProjects(ps, 'tem'))).toEqual(['bbb'])
+        // A project without one is still found by its name.
+        expect(names(filterProjects(ps, 'ccc'))).toEqual(['ccc'])
+    })
+
+    it('filterProjects matches words across the name and the description', () => {
+        expect(names(filterProjects([described('ghost_imaging', 'Ni nanowires')], 'ghost nanowires')))
+            .toEqual(['ghost_imaging'])
+    })
+
+    it('filterSessions finds a session by words of its description', () => {
+        const ds: SerializedDataset[] = [
+            {name: 'run 1', ctime: 1, mtime: 1, immutable: false, description: '# First light\nnew detector'},
+            {name: 'run 2', ctime: 1, mtime: 1, immutable: false, description: null},
+            {name: 'run 3', ctime: 1, mtime: 1, immutable: false},
+        ]
+        expect(names(filterSessions(ds, 'detector light'))).toEqual(['run 1'])
+        expect(names(filterSessions(ds, 'run'))).toEqual(['run 1', 'run 2', 'run 3'])
+    })
+
+    it('descriptionPath encodes the project and the session', () => {
+        expect(descriptionPath('ghost_imaging')).toBe('/projects/ghost_imaging/description')
+        expect(descriptionPath('ghost_imaging', '2026-10-29 run 1'))
+            .toBe('/projects/ghost_imaging/sessions/2026-10-29%20run%201/description')
     })
 })

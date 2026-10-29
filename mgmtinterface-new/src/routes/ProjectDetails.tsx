@@ -1,4 +1,4 @@
-import {Suspense, useState, type ReactNode} from 'react'
+import {lazy, Suspense, useState, type ReactNode} from 'react'
 import {
     Await,
     Link,
@@ -17,12 +17,14 @@ import type {
 } from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {CopyButton} from '../components/CopyField'
+import {DescriptionDigest} from '../components/DescriptionDigest'
 import {Avatar} from '../components/ui/Avatar'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {
     CheckCircleIcon,
     FolderIcon,
+    PencilIcon,
     PlusIcon,
     UsersIcon,
 } from '../components/ui/icons'
@@ -32,6 +34,7 @@ import {useStoredSort} from '../hooks/useStoredSort'
 import {formatBytes, formatDateTime} from '../lib/format'
 import {
     canonicalProjectPath,
+    descriptionPath,
     filterSessions,
     SESSION_SORT,
     sharedDatasetNames,
@@ -69,6 +72,70 @@ function StatusBadges({dataset, shared}: { dataset: SerializedDataset; shared: b
 
 const thClass =
     'px-5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-fg-faint'
+
+// The Markdown renderer is about a third of the app's size, and only a project
+// page with a description needs it, so it loads on first use (#112).
+const Markdown = lazy(() =>
+    import('../components/Markdown').then((module) => ({default: module.Markdown})),
+)
+
+/**
+ * The project's description (#112), rendered from Markdown, with a way to edit
+ * it for the owner and the members. Without one, they get a link to add it;
+ * everyone else sees nothing.
+ */
+function ProjectDescription({
+                                project,
+                                canMutate,
+                            }: {
+    project: SerializedProject
+    canMutate: boolean
+}) {
+    const navigate = useNavigate()
+    if (!project.description) {
+        if (!canMutate) return null
+        return (
+            <div className="-mt-3 mb-6">
+                <Link
+                    to={descriptionPath(project.name)}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                >
+                    <PencilIcon className="h-3.5 w-3.5"/>
+                    Add a description
+                </Link>
+            </div>
+        )
+    }
+    return (
+        <Card className="mb-6 px-5 py-4">
+            <div className="mb-2 flex items-center justify-between gap-4">
+                <h2 className="text-[11px] font-bold uppercase tracking-wide text-fg-faint">
+                    Description
+                </h2>
+                {canMutate && (
+                    <Button
+                        variant="secondary"
+                        onClick={() => navigate(descriptionPath(project.name))}
+                        className="px-3 py-1.5 text-xs"
+                    >
+                        <PencilIcon className="h-3.5 w-3.5"/>
+                        Edit
+                    </Button>
+                )}
+            </div>
+            {/* The text as it is until the renderer has loaded. */}
+            <Suspense
+                fallback={
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg wrap-anywhere">
+                        {project.description}
+                    </p>
+                }
+            >
+                <Markdown>{project.description}</Markdown>
+            </Suspense>
+        </Card>
+    )
+}
 
 /**
  * The Sessions part of the page: the search box and the table, or in their
@@ -192,9 +259,22 @@ function SessionsTable({
                             className="border-b border-default/60 last:border-0"
                         >
                             <td className="px-5 py-3.5">
+                                {/* The name first: the journeys read it off the
+                                    cell's first element. */}
                                 <div className="font-mono text-sm font-semibold text-fg wrap-anywhere">
                                     {d.name}
+                                    {canMutate && (
+                                        <Link
+                                            to={descriptionPath(project.name, d.name)}
+                                            aria-label={`Edit the description of ${d.name}`}
+                                            title={d.description ? 'Edit description' : 'Add a description'}
+                                            className="ml-1.5 inline-flex rounded p-0.5 align-[-2px] text-fg-faint hover:bg-surface-muted hover:text-primary"
+                                        >
+                                            <PencilIcon className="h-3.5 w-3.5"/>
+                                        </Link>
+                                    )}
                                 </div>
+                                <DescriptionDigest description={d.description}/>
                             </td>
                             <td className="whitespace-nowrap px-5 py-3.5 text-sm text-fg-muted">
                                 {formatDateTime(d.mtime)}
@@ -320,6 +400,8 @@ function ProjectBody() {
                     </Button>
                 )}
             </div>
+
+            <ProjectDescription project={project} canMutate={canMutate}/>
 
             <Card className="mb-8 divide-y divide-default/60">
                 <dl className="divide-y divide-default/60">
