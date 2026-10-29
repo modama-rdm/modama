@@ -2,11 +2,12 @@ import {useState, type FormEvent} from 'react'
 import {Link, useNavigate, useParams} from 'react-router-dom'
 import {Unauthorized} from '../api/errors'
 import {apiRequestV2} from '../api/clientV2'
-import type {CreateSessionRequestV2, SessionV2} from '../api/types'
+import {DESCRIPTION_MAX_LENGTH, type CreateSessionRequestV2, type SessionV2} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {Input} from '../components/ui/Input'
+import {Textarea} from '../components/ui/Textarea'
 import {AlertTriangleIcon, InfoIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import {sessionNamePrefix} from '../lib/format'
@@ -17,6 +18,7 @@ export function NewSession() {
     const {notify} = useToast()
 
     const [session, setSession] = useState(sessionNamePrefix)
+    const [description, setDescription] = useState('')
     const [error, setError] = useState('')
     /** Name of a session that already exists, after trying to create it again. */
     const [existing, setExisting] = useState<string | null>(null)
@@ -35,12 +37,19 @@ export function NewSession() {
             setError('Session name cannot contain a "/".')
             return
         }
+        if (trimmed.toLowerCase() === 'readme.md') {
+            // The API refuses it too: the project's description lives there.
+            setError('A session cannot be named README.md: that is where the project keeps its description.')
+            return
+        }
         setError('')
         setExisting(null)
         setSubmitting(true)
         try {
             // The signed-in session is the owner; the new API takes no `owner`.
             const body: CreateSessionRequestV2 = {name: trimmed}
+            // Blank is no description (#112): leave the field out.
+            if (description.trim()) body.description = description.trim()
             const {status, body: created} = await apiRequestV2<SessionV2>(
                 `/projects/${encodeURIComponent(name)}/sessions`,
                 {method: 'POST', body: JSON.stringify(body)},
@@ -136,6 +145,25 @@ export function NewSession() {
                             </>
                         }
                         autoFocus
+                    />
+                    <Textarea
+                        label={
+                            <>
+                                Description{' '}
+                                <span className="font-normal text-fg-faint">(optional)</span>
+                            </>
+                        }
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        maxLength={DESCRIPTION_MAX_LENGTH}
+                        placeholder="Sample, settings, what this run is for…"
+                        help={
+                            <>
+                                Saved as README.md in the session folder, next to{' '}
+                                <code className="font-mono">raw/</code>, so it stays editable
+                                after sealing. The first line shows in the sessions table.
+                            </>
+                        }
                     />
                     <div className="mt-1 flex items-center gap-3">
                         <Button type="submit" disabled={submitting}>

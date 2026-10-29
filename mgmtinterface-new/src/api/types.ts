@@ -20,6 +20,12 @@ export interface SerializedProject {
     mtime: number
     gid: number
     usage_bytes: number | null
+    /**
+     * The text of `README.md` in the project folder, or null when there is
+     * none (#112). Markdown, as people write it. Absent from an API older
+     * than #112.
+     */
+    description?: string | null
 }
 
 /** One session (a "dataset" to the permissions service): a folder with `raw/`. */
@@ -28,6 +34,8 @@ export interface SerializedDataset {
     immutable: boolean
     ctime: number
     mtime: number
+    /** The text of `README.md` in the session folder, next to `raw/`, or null (#112). */
+    description?: string | null
 }
 
 /**
@@ -70,6 +78,11 @@ export interface UserListV2 {
 export interface CreateProjectRequestV2 {
     name: string
     members: string[]
+    /**
+     * Saved as `README.md` in the new folder (#112). Left out when blank; the
+     * server treats blank as absent anyway. Up to 10 000 characters.
+     */
+    description?: string
 }
 
 /**
@@ -85,7 +98,22 @@ export interface SetMembersRequestV2 {
 /** `POST /mgmt-api/projects/<name>/sessions` — the session, by its UI name. */
 export interface CreateSessionRequestV2 {
     name: string
+    /** Saved as `README.md` in the session folder; see {@link CreateProjectRequestV2}. */
+    description?: string
 }
+
+/**
+ * `PUT /mgmt-api/projects/<name>/description` and
+ * `PUT /mgmt-api/projects/<name>/sessions/<session>/description` (#112): the
+ * new text of the folder's `README.md`; an empty text removes the file. The
+ * owner and the members may change it. Answers the project or the session.
+ */
+export interface SetDescriptionRequestV2 {
+    description: string
+}
+
+/** The longest description the API takes, in characters. */
+export const DESCRIPTION_MAX_LENGTH = 10_000
 
 /**
  * A session as the new API answers it: on create (200 when it already existed,

@@ -2,12 +2,13 @@ import {useState, type FormEvent} from 'react'
 import {Link, useLoaderData, useNavigate} from 'react-router-dom'
 import {Unauthorized} from '../api/errors'
 import {apiRequestV2} from '../api/clientV2'
-import type {CreateProjectRequestV2, SerializedProject} from '../api/types'
+import {DESCRIPTION_MAX_LENGTH, type CreateProjectRequestV2, type SerializedProject} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {MemberPicker} from '../components/MemberPicker'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {Input} from '../components/ui/Input'
+import {Textarea} from '../components/ui/Textarea'
 import {AlertTriangleIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import type {NewProjectLoaderData} from './newProject.loader'
@@ -35,6 +36,7 @@ export function NewProject() {
 
     const [name, setName] = useState('')
     const [members, setMembers] = useState<string[]>([])
+    const [description, setDescription] = useState('')
     const [error, setError] = useState('')
     /** Name of a project the user already owns, after trying to create it again. */
     const [existing, setExisting] = useState<string | null>(null)
@@ -58,6 +60,9 @@ export function NewProject() {
         try {
             // The signed-in session is the owner; the new API takes no `owner`.
             const body: CreateProjectRequestV2 = {name: trimmed, members}
+            // Blank is no description (#112); leave the field out rather than
+            // send whitespace for the server to drop.
+            if (description.trim()) body.description = description.trim()
             const {status, body: project} = await apiRequestV2<SerializedProject>(
                 '/projects',
                 {method: 'POST', body: JSON.stringify(body)},
@@ -140,6 +145,19 @@ export function NewProject() {
                         className="font-mono"
                         help="Lowercase letters, digits, underscores and dashes, 3 to 32 characters. Will become a folder name."
                         autoFocus
+                    />
+                    <Textarea
+                        label={
+                            <>
+                                Description{' '}
+                                <span className="font-normal text-fg-faint">(optional)</span>
+                            </>
+                        }
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        maxLength={DESCRIPTION_MAX_LENGTH}
+                        placeholder="What is this project about? Sample, instrument, people, aims…"
+                        help="Saved as README.md in the project folder. Markdown is rendered on the project page; the first line shows in the projects list."
                     />
                     <MemberPicker
                         allUsers={users}
