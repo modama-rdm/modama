@@ -1033,12 +1033,11 @@ if __name__ == "__main__":
     except ValidationError:
         pass
 
-    # A failed create leaves no folder behind, README or not.
-    try:
+    # A failed create leaves no folder behind, README or not. The unknown
+    # member fails in `add_members`, after the README was written.
+    with contextlib.suppress(KeyError):
         AdhocProject.create(
             "pythonfailed", "testdieter", ["nosuchuser"], description="gone again"
         )
-    except Exception:
-        pass
     assert not os.path.exists(os.path.join(ADHOC_PATH, "pythonfailed"))
     print("Descriptions: all checks passed")
