@@ -146,8 +146,12 @@ def normalize_description(text: str | None) -> str | None:
     return text or None
 
 
-def _not_a_regular_file(path: str) -> ValidationError:
-    return ValidationError(f"{path} is not a regular file, so it is left alone.")
+def _not_a_plain_file(path: str) -> ValidationError:
+    # A hard link is a regular file too, so the message names what is refused.
+    return ValidationError(
+        f"{path} is not a plain file (it is a symlink, a hard link, a FIFO or a "
+        "folder), so it is left alone."
+    )
 
 
 def read_readme(folder: str) -> str | None:
@@ -243,12 +247,12 @@ def _rewrite_readme(path: str, data: bytes) -> None:
     except OSError as e:
         # ELOOP: a symlink. ENXIO: a FIFO nobody reads. EISDIR: a folder.
         if e.errno in (errno.ELOOP, errno.ENXIO, errno.EISDIR):
-            raise _not_a_regular_file(path) from e
+            raise _not_a_plain_file(path) from e
         raise
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
-            raise _not_a_regular_file(path)
+            raise _not_a_plain_file(path)
         os.ftruncate(fd, 0)
         _write_all(fd, data)
     finally:
@@ -263,7 +267,7 @@ def remove_readme(folder: str) -> None:
     except FileNotFoundError:
         return
     if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
-        raise _not_a_regular_file(path)
+        raise _not_a_plain_file(path)
     # Removes the name only, never what a symlink swapped in meanwhile points to.
     with contextlib.suppress(FileNotFoundError):
         os.unlink(path)
