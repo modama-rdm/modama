@@ -4,7 +4,6 @@ use anyhow::Result;
 use clap::Parser;
 use modama_agent::{
     config::{CliArgs, Command},
-    message_loop::MountPolicy,
     runtime::run_agent,
 };
 use modama_common::logging::init_logging;
@@ -63,7 +62,6 @@ fn run_foreground(path: PathBuf) -> Result<()> {
     init_logging();
     tokio::runtime::Runtime::new()?.block_on(run_agent(
         &path,
-        MountPolicy::Enabled,
         shutdown_signal(),
         || Ok(()),
     ))

@@ -5,12 +5,18 @@ use std::{
 
 use futures_util::future::join_all;
 use log::{debug, error, info, warn};
-use modama_common::messages::Share;
+use modama_common::{
+    internal_api_types::{MountedShare, SessionHelperConfig},
+    messages::Share,
+};
 use widestring::U16CString;
 
 use crate::{
-    config::AgentConfig, mount_backend::MountBackend, platform_common::EnsureMountedError,
-    share::MountedShare,
+    config::AgentConfig,
+    session_helper::{
+        mount_backend::{MountBackend, MountBackendError},
+        platform_common::EnsureMountedError,
+    },
 };
 
 // TODO:
@@ -51,8 +57,8 @@ pub async fn ensure_mounted(
     if let Some(md) = mapped_remote_shares.get(&resource_string) {
         info!("share {} already mounted at {}", share.share_name, md.drive);
         return Ok(MountedShare {
-            share: share.clone(),
-            mount_path: PathBuf::from(&md.drive),
+            share_name: share.share_name.clone(),
+            mount_path: Some(PathBuf::from(&md.drive)),
         });
     }
 
@@ -84,8 +90,8 @@ pub async fn ensure_mounted(
         Err(EnsureMountedError::MountFailed(e.message()))
     } else {
         Ok(MountedShare {
-            share: share.clone(),
-            mount_path: PathBuf::from(&drive),
+            share_name: share.share_name.clone(),
+            mount_path: Some(PathBuf::from(&drive)),
         })
     }
 }
@@ -104,7 +110,8 @@ pub async fn umount_old_shares(config: &AgentConfig, shares: &[MountedShare]) {
         .iter()
         .filter(|md| md.remote_share.starts_with(&our_prefix))
         .collect();
-    let should_be_mapped: HashSet<PathBuf> = shares.iter().map(|s| s.mount_path.clone()).collect();
+    let should_be_mapped: HashSet<PathBuf> =
+        shares.iter().filter_map(|s| s.mount_path.clone()).collect();
 
     info!("should_be_mapped: {:?}", should_be_mapped);
 
@@ -145,7 +152,7 @@ pub mod internal {
         core::{HRESULT, PCWSTR, PWSTR},
     };
 
-    use crate::{config::AgentConfig, platform_common::EnsureMountedError};
+    use crate::{config::AgentConfig, session_helper::platform_common::EnsureMountedError};
 
     #[derive(Error, Debug)]
     pub enum FreeDriveError {
@@ -372,24 +379,19 @@ pub mod internal {
 
 pub struct CurrentPlatformMountBackend {}
 
+impl CurrentPlatformMountBackend {
+    pub async fn new() -> Self {
+        todo!();
+    }
+}
+
+// TODO: port to the reconciliation-based interface, using the WNet functions above
 impl MountBackend for CurrentPlatformMountBackend {
-    async fn initialize(&self, _config: &AgentConfig) {
-        // nothing to do yet
-    }
-
-    async fn cleanup_mount_points(&self, config: &AgentConfig, desired_shares: &[Share]) {
-        cleanup_mount_points(config, desired_shares)
-    }
-
-    async fn ensure_mounted(
+    async fn reconcile(
         &self,
-        share: &Share,
-        config: &AgentConfig,
-    ) -> Result<MountedShare, EnsureMountedError> {
-        ensure_mounted(share, config).await
-    }
-
-    async fn umount_old_shares(&self, config: &AgentConfig, shares: &[MountedShare]) {
-        umount_old_shares(config, shares).await
+        _desired_shares: &[Share],
+        _config: &SessionHelperConfig,
+    ) -> Vec<Result<MountedShare, MountBackendError>> {
+        todo!("reconcile mapped drives");
     }
 }

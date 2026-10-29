@@ -45,7 +45,7 @@ use windows_service::{
     service_manager::{ServiceManager, ServiceManagerAccess},
 };
 
-use crate::{config::AgentConfig, message_loop::MountPolicy, runtime::run_agent};
+use crate::{config::AgentConfig, runtime::run_agent};
 
 const SERVICE_NAME: &str = "modama-agent";
 const SERVICE_DISPLAY_NAME: &str = "Modama Agent";
@@ -710,10 +710,6 @@ fn service_main_inner() -> Result<()> {
         )?;
         runtime.block_on(run_agent(
             &config_path,
-            // Services run in noninteractive Session 0, so WNet mappings made
-            // here would not appear in an interactive user's Explorer session.
-            // https://learn.microsoft.com/windows-hardware/drivers/wdf/session-zero-guidelines-for-umdf-drivers
-            MountPolicy::Disabled,
             async move {
                 if !*shutdown_receiver.borrow() {
                     let _ = shutdown_receiver.changed().await;

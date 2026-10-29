@@ -16,7 +16,9 @@ use axum_macros::debug_handler;
 use log::error;
 use minijinja::{AutoEscape, Environment, Value, context};
 use modama_common::{
-    internal_api_types::MountedShare, messages::Share, mgmt_client::{MgmtClient, MgmtError}, tokens::{TokenError, TokenProvider}
+    messages::Share,
+    mgmt_client::{MgmtClient, MgmtError},
+    tokens::{TokenError, TokenProvider},
 };
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
@@ -26,7 +28,10 @@ use tokio::sync::Mutex;
 use tower_http::csrf::CsrfLayer;
 
 use crate::{
-    agent_state::AgentState, config::{ConfigError, MTLSIdentity}, events_api::add_internal_api, http_api::{add_api_routes, project_and_session}
+    agent_state::{AgentState, ResolvedMount},
+    config::{ConfigError, MTLSIdentity},
+    events_api::add_internal_api,
+    http_api::{add_api_routes, project_and_session},
 };
 
 fn create_env() -> Environment<'static> {
@@ -145,8 +150,8 @@ impl Serialize for SafeLocalUrl {
 enum ForegroundState {
     None,
     Opening(Share),
-    Open(MountedShare),
-    Closing(MountedShare),
+    Open(ResolvedMount),
+    Closing(ResolvedMount),
 }
 
 impl ForegroundState {
@@ -171,7 +176,7 @@ impl ForegroundState {
         matches!(self, Self::None)
     }
 
-    fn open_share(&self, share_id: &str) -> Option<&MountedShare> {
+    fn open_share(&self, share_id: &str) -> Option<&ResolvedMount> {
         match self {
             Self::Open(share) if share.share.share_id == share_id => Some(share),
             _ => None,
@@ -960,10 +965,20 @@ mod tests {
         }
     }
 
-    fn mounted_foreground_share(share_id: &str) -> MountedShare {
-        MountedShare {
-            share_name: "share-name".to_owned(),
-            mount_path: Some(PathBuf::from("/mnt/ingest")),
+    fn mounted_foreground_share(share_id: &str) -> ResolvedMount {
+        ResolvedMount {
+            share: MessageShare {
+                resource: Some("res".to_owned()),
+                share_id: share_id.to_owned(),
+                share_name: "share-name".to_owned(),
+                dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                created_timestamp: 0,
+                username: "share-user".to_owned(),
+                password: "secret-password".to_owned(),
+                uid: 1001,
+                gid: 1001,
+            },
+            mount_path: PathBuf::from("/mnt/ingest"),
         }
     }
 
@@ -1078,9 +1093,19 @@ mod tests {
     async fn test_shares_foreground_endpoint_returns_share() {
         let test_setup = TestSetup::start().await;
 
-        let mshare = MountedShare {
-            share_name: "sname".to_owned(),
-            mount_path: Some(PathBuf::from("/mnt/point")),
+        let mshare = ResolvedMount {
+            share: MessageShare {
+                resource: None,
+                share_id: "id".to_string(),
+                share_name: "sname".to_string(),
+                dest_path: "/adhoc/project/session/".to_string(),
+                created_timestamp: 0,
+                username: "u".to_string(),
+                password: "p".to_string(),
+                uid: 1000,
+                gid: 1000,
+            },
+            mount_path: PathBuf::from("/mnt/point"),
         };
         {
             let mut state = test_setup.shared_state.lock().await;
@@ -1155,9 +1180,19 @@ mod tests {
     #[tokio::test]
     async fn malformed_foreground_destination_is_an_api_error() {
         let test_setup = TestSetup::start().await;
-        let mounted = MountedShare {
-            share_name: "share".to_owned(),
-            mount_path: Some(PathBuf::from("/mnt/share")),
+        let mounted = ResolvedMount {
+            share: MessageShare {
+                resource: None,
+                share_id: "id".to_owned(),
+                share_name: "share".to_owned(),
+                dest_path: "session-only".to_owned(),
+                created_timestamp: 0,
+                username: "user".to_owned(),
+                password: "secret".to_owned(),
+                uid: 1000,
+                gid: 1000,
+            },
+            mount_path: PathBuf::from("/mnt/share"),
         };
         {
             let mut state = test_setup.shared_state.lock().await;

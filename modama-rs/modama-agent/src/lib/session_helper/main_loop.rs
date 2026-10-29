@@ -1,6 +1,6 @@
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
-use anyhow::Context as _;
+use anyhow::{Context as _, Result as AnyResult};
 use futures_util::StreamExt as _;
 use log::{error, info, warn};
 use modama_common::internal_api_types::ToSessionHelper;
@@ -24,10 +24,12 @@ async fn handle_message(
 
     state.lock().await.desired_state = event_msg.share_state.clone();
     if let Some(desired_shares) = event_msg.share_state {
-        backend
+        // TODO: report the resulting mounts back to the agent
+        let _mounts = backend
             .reconcile(&desired_shares.shares, &event_msg.config)
             .await;
     }
+    Ok(())
 }
 
 async fn receive_inner(
@@ -76,7 +78,7 @@ pub async fn session_helper_loop(state: Arc<Mutex<HelperState>>, backend: &impl 
         let (conn, _resp) = connect_async("http://localhost:3003/api/internal/events/")
             .await
             .unwrap();
-        let (mut ws_write, mut ws_read) = conn.split();
+        let (_ws_write, mut ws_read) = conn.split();
 
         state.lock().await.connection_state =
             crate::session_helper::helper_state::HelperConnectionState::Connected;

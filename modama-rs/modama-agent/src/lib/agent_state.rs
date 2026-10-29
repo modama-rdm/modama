@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use log::{info, warn};
 use modama_common::{agent::AgentId, internal_api_types::{MountedShare, SessionId}, messages::Share};
@@ -77,6 +77,17 @@ where
     }
 }
 
+/// A mount joined with the `Share` it belongs to. Agent-internal, not part of the
+/// wire format: helpers only report share names and paths (`MountedShare`), the
+/// agent will later fill this by joining those reports with the desired shares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMount {
+    pub share: Share,
+
+    /// The mount path; a drive letter on Windows, or a path on Linux
+    pub mount_path: PathBuf,
+}
+
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {
     pub connected_agents: Vec<AgentId>,
@@ -119,10 +130,9 @@ pub enum StateUpdateToSession {
 pub struct AgentState {
     pub connection: ConnectionState,
 
-    /// The currently mounted shares, according to the last update
-    /// FIXME: does MountedShare have enough info for `current_share` use? esp. foreground share?
-    /// should this just be `Shares`?
-    pub current_shares: ShareState<MountedShare>,
+    /// The currently mounted shares, joined with their `Share`. Nothing fills this yet;
+    /// see `ResolvedMount`.
+    pub current_shares: ShareState<ResolvedMount>,
 
     /// Per-session list of currently mounted shares
     pub mounted_shares: HashMap<SessionId, Vec<MountedShare>>,
