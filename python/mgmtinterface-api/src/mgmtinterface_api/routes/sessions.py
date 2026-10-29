@@ -1,7 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request, Response, status
-from pydantic import BaseModel, Field, field_validator
+from permissions_client.schema import DESCRIPTION_MAX_LENGTH
+from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 from ..errors import APIError, error_responses
 from ..permissions import (
@@ -12,6 +13,7 @@ from ..permissions import (
     require_project,
     require_session,
     seal_session,
+    set_session_description,
 )
 from ..security import (
     AUTH_ERROR_RESPONSES,
@@ -43,6 +45,49 @@ SessionName = Annotated[
 ]
 
 
+def normalize_description(text: str | None) -> str | None:
+    """
+    Line ends as LF, surrounding whitespace dropped, blank as None: the same
+    rule the permissions service applies, so that what the API sends is what
+    ends up in the file.
+    """
+    if text is None:
+        return None
+    text = text.replace("\r\n", "\n").strip()
+    return text or None
+
+
+# The optional description on the create requests (#112).
+Description = Annotated[
+    str | None,
+    Field(
+        max_length=DESCRIPTION_MAX_LENGTH,
+        description=(
+            "Free text, saved as `README.md` in the new folder. Markdown is "
+            "welcome; the UI renders it. Blank is the same as absent: no file."
+        ),
+        examples=["Off-axis holography of Ni nanowires, Titan G2, Feb 2026."],
+    ),
+    AfterValidator(normalize_description),
+]
+
+
+class SetDescriptionRequest(BaseModel):
+    description: str = Field(
+        max_length=DESCRIPTION_MAX_LENGTH,
+        description=(
+            "The new description, saved as `README.md` in the folder. An empty "
+            "text, or one of only whitespace, removes the file."
+        ),
+        examples=["Off-axis holography of Ni nanowires, Titan G2, Feb 2026."],
+    )
+
+    @field_validator("description")
+    @classmethod
+    def normalized(cls, text: str) -> str:
+        return normalize_description(text) or ""
+
+
 class Session(BaseModel):
     """One session, in the shape the project details of the legacy API use."""
 
@@ -52,6 +97,13 @@ class Session(BaseModel):
     )
     ctime: float
     mtime: float
+    description: str | None = Field(
+        default=None,
+        description=(
+            "The text of the session folder's `README.md`, next to `raw/`, or "
+            "null when there is none."
+        ),
+    )
 
 
 class CreateSessionRequest(BaseModel):
@@ -68,6 +120,7 @@ class CreateSessionRequest(BaseModel):
         ),
         examples=["2026-10-16-alignment_run"],
     )
+    description: Description = None
 
     @field_validator("name")
     @classmethod
@@ -75,6 +128,9 @@ class CreateSessionRequest(BaseModel):
         # Both pass the pattern, and `..` would point at the project folder.
         if name in (".", ".."):
             raise ValueError("A session cannot be named '.' or '..'.")
+        # It would collide with the project's own description file.
+        if name.lower() == "readme.md":
+            raise ValueError("A session cannot be named README.md.")
         return name
 
 
@@ -85,7 +141,10 @@ class CreateSessionRequest(BaseModel):
     responses={
         200: {
             "model": Session,
-            "description": "A session of that name already exists in the project.",
+            "description": (
+                "A session of that name already exists in the project. It is "
+                "returned as it is; the description in the request is not applied."
+            ),
         },
         **AUTH_ERROR_RESPONSES,
         **CSRF_ERROR_RESPONSES,
@@ -114,7 +173,11 @@ def add_session(
     Idempotent: a session that already exists is answered with 200 and its
     current state instead of an error, so a client that lost the first
     response can simply retry. A session has no owner of its own; any member
-    of the project gets the existing one back.
+    of the project gets the existing one back. Its description is returned as
+    it is; the one in the request is not applied (see `PUT .../description`).
+
+    A `description` is saved as `README.md` in the session folder, next to
+    `raw/`, owned by the signed-in user.
     """
     settings = settings_of(request)
     username = session["username"]
@@ -128,7 +191,9 @@ def add_session(
         return Session(**existing)
 
     try:
-        create_session(settings, project, body.name, username)
+        create_session(
+            settings, project, body.name, username, description=body.description
+        )
     except Rejected as rejected:
         # A concurrent request may have created it between the check above and
         # the `mkdir`; that is the retry this endpoint is meant to absorb, not
@@ -208,3 +273,61 @@ def seal(
             "The session was sealed but could not be read back. Please reload.",
         )
     return Session(**sealed)
+
+
+@router.put(
+    "/{session}/description",
+    summary="Set or remove the description of a session",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        **CSRF_ERROR_RESPONSES,
+        **error_responses(
+            {
+                400: (
+                    "The permissions service refused the change. `message` says "
+                    "why, for example a `README.md` that is not a regular file."
+                ),
+                403: "The signed-in user is neither owner nor member of the project.",
+                404: "There is no such project, or no such session in it.",
+            }
+        ),
+    },
+)
+def set_description(
+    request: Request,
+    project: ProjectName,
+    session: SessionName,
+    signed_in: Annotated[SessionData, Depends(current_session)],
+    body: SetDescriptionRequest,
+) -> Session:
+    """
+    Write the session's description to `README.md` in its folder, next to
+    `raw/`, or remove the file when the description is empty. Sealing covers
+    only `raw/`, so a sealed session can still be described.
+
+    An existing file is rewritten in place and keeps its owner; a new one
+    belongs to whoever created the session folder. Owner or member only, like
+    sealing. Sending the same text again changes nothing.
+    """
+    settings = settings_of(request)
+    username = signed_in["username"]
+
+    details = require_project(settings, project)
+    require_member(details, username)
+    require_session(details, session)
+
+    try:
+        set_session_description(settings, project, session, body.description, username)
+    except Rejected as rejected:
+        raise APIError(400, "description_rejected", rejected.message) from rejected
+
+    # The service answers with nothing but `errno`; the session comes from
+    # reading the project back.
+    updated = find_session(require_project(settings, project), session)
+    if updated is None:
+        raise APIError(
+            502,
+            "permissions_unavailable",
+            "The description was saved but could not be read back. Please reload.",
+        )
+    return Session(**updated)

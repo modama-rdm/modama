@@ -13,8 +13,10 @@ from ..permissions import (
     project_not_found,
     project_usage,
     remove_members,
+    require_member,
     require_owner,
     require_project,
+    set_project_description,
 )
 from ..security import (
     AUTH_ERROR_RESPONSES,
@@ -24,7 +26,7 @@ from ..security import (
 )
 from ..session import SessionData
 from ..versioning import VERSION_ERROR_RESPONSES
-from .sessions import ProjectName, Session
+from .sessions import Description, ProjectName, Session, SetDescriptionRequest
 
 router = APIRouter(
     prefix="/projects", tags=["projects"], responses={**VERSION_ERROR_RESPONSES}
@@ -50,6 +52,13 @@ class Project(BaseModel):
     mtime: float
     gid: int
     usage_bytes: int | None
+    description: str | None = Field(
+        default=None,
+        description=(
+            "The text of the project folder's `README.md`, or null when there "
+            "is none (#112)."
+        ),
+    )
 
 
 class ProjectList(BaseModel):
@@ -104,6 +113,7 @@ class CreateProjectRequest(BaseModel):
             "and is a member regardless of this list."
         ),
     )
+    description: Description = None
 
 
 # Sync `def`: the permissions call is blocking, so FastAPI runs it in a threadpool.
@@ -137,7 +147,8 @@ def read_projects(
             "model": Project,
             "description": (
                 "A project of that name already exists and belongs to you. It is "
-                "returned unchanged; the members in the request are not applied."
+                "returned unchanged; the members and the description in the "
+                "request are not applied."
             ),
         },
         **AUTH_ERROR_RESPONSES,
@@ -166,8 +177,11 @@ def add_project(
     Idempotent: sending the same request again answers 200 with the existing
     project instead of an error, so a client that lost the first response can
     simply retry. Only a project that belongs to someone else is a conflict.
-    The existing project is returned as it is; changing its members is a
-    separate operation.
+    The existing project is returned as it is; changing its members or its
+    description is a separate operation.
+
+    A `description` is saved as `README.md` in the project folder, owned by
+    the signed-in user.
     """
     settings = settings_of(request)
     username = session["username"]
@@ -176,7 +190,13 @@ def add_project(
     members = [m for m in dict.fromkeys(body.members) if m != username]
 
     try:
-        created = create_project(settings, body.name, owner=username, members=members)
+        created = create_project(
+            settings,
+            body.name,
+            owner=username,
+            members=members,
+            description=body.description,
+        )
     except Rejected as rejected:
         # Create first, look second: looking first would leave a window in
         # which two concurrent requests both see nothing and one of them fails
@@ -330,4 +350,51 @@ def set_members(
 
     # The service serializes the project with a `du` after a change; the size
     # is not this endpoint's to report. Null, as everywhere but `GET .../usage`.
+    return Project(**{**updated, "usage_bytes": None})
+
+
+@router.put(
+    "/{project}/description",
+    summary="Set or remove the description of a project",
+    responses={
+        **AUTH_ERROR_RESPONSES,
+        **CSRF_ERROR_RESPONSES,
+        **error_responses(
+            {
+                400: (
+                    "The permissions service refused the change. `message` says "
+                    "why, for example a `README.md` that is not a regular file."
+                ),
+                403: "The signed-in user is neither owner nor member of the project.",
+                404: "There is no project of that name.",
+            }
+        ),
+    },
+)
+def set_description(
+    request: Request,
+    project: ProjectName,
+    session: Annotated[SessionData, Depends(current_session)],
+    body: SetDescriptionRequest,
+) -> Project:
+    """
+    Write the project's description to `README.md` in the project folder, or
+    remove the file when the description is empty.
+
+    An existing file is rewritten in place and keeps its owner; a new one
+    belongs to the project's owner. The owner and the members may change it,
+    like they may seal sessions. Sending the same text again changes nothing.
+    """
+    settings = settings_of(request)
+    username = session["username"]
+
+    details = require_project(settings, project)
+    require_member(details, username)
+
+    try:
+        updated = set_project_description(settings, project, body.description, username)
+    except Rejected as rejected:
+        raise APIError(400, "description_rejected", rejected.message) from rejected
+
+    # Null, as everywhere but `GET .../usage`.
     return Project(**{**updated, "usage_bytes": None})

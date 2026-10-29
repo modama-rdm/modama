@@ -29,6 +29,8 @@ PROJECT_USAGE = f"{PROJECT}/usage"
 PROJECT_MEMBERS = f"{PROJECT}/members"
 SESSIONS = f"{PROJECT}/sessions"
 SEAL = f"{SESSIONS}/{{session}}/seal"
+PROJECT_DESCRIPTION = f"{PROJECT}/description"
+SESSION_DESCRIPTION = f"{SESSIONS}/{{session}}/description"
 USERS = f"{API_PREFIX}/users"
 INGEST_SHARES = f"{API_PREFIX}/ingest-shares"
 INGEST_SHARE = f"{INGEST_SHARES}/{{share_id}}"
@@ -47,6 +49,8 @@ SESSION_OPERATIONS = [
     (PROJECT_MEMBERS, "put"),
     (SESSIONS, "post"),
     (SEAL, "post"),
+    (PROJECT_DESCRIPTION, "put"),
+    (SESSION_DESCRIPTION, "put"),
     (USERS, "get"),
     (INGEST_SHARES, "get"),
     (INGEST_SHARES, "post"),
@@ -95,6 +99,8 @@ def test_every_documented_route_is_present(schema: dict[str, Any]):
         PROJECT_MEMBERS,
         SESSIONS,
         SEAL,
+        PROJECT_DESCRIPTION,
+        SESSION_DESCRIPTION,
         USERS,
         INGEST_SHARES,
         INGEST_SHARE,
@@ -211,6 +217,39 @@ def test_members_are_set_as_a_whole_list(schema: dict[str, Any]):
     # The answer is the project, not a dedicated response type.
     ok = operation["responses"]["200"]["content"]["application/json"]["schema"]
     assert ok["$ref"].endswith("/Project")
+
+
+def test_descriptions_are_optional_everywhere(schema: dict[str, Any]):
+    """
+    #112 is additive: a nullable `description` on the project and the session
+    that a client may ignore, and an optional one on both create requests.
+    """
+    schemas = schema["components"]["schemas"]
+    for name in ("Project", "Session", "CreateProjectRequest", "CreateSessionRequest"):
+        model = schemas[name]
+        assert "description" in model["properties"], name
+        assert "description" not in model.get("required", []), name
+    for name in ("CreateProjectRequest", "CreateSessionRequest"):
+        branches = schemas[name]["properties"]["description"]["anyOf"]
+        assert {"type": "string", "maxLength": 10_000} in branches, name
+
+
+@pytest.mark.parametrize(
+    ("path", "answer"),
+    [(PROJECT_DESCRIPTION, "/Project"), (SESSION_DESCRIPTION, "/Session")],
+)
+def test_descriptions_are_set_with_a_put(
+    schema: dict[str, Any], path: str, answer: str
+):
+    operation = schema["paths"][path]["put"]
+    ref = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert ref.endswith("/SetDescriptionRequest")
+    assert schema["components"]["schemas"]["SetDescriptionRequest"]["required"] == [
+        "description"
+    ]
+    ok = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert ok["$ref"].endswith(answer)
+    assert {"400", "401", "403", "404"} <= set(operation["responses"])
 
 
 def test_seal_and_close_document_their_outcomes(schema: dict[str, Any]):

@@ -84,6 +84,11 @@ Sealing a session that is sealed already answers `200` with the session as it
 is. `DELETE /ingest-shares/{{{{share_id}}}}` answers `204`, and `404` once the
 share is gone.
 
+A project or session description is the text of a `README.md` in its folder,
+`null` when there is none. It can be given on create and changed with
+`PUT .../description` by the owner and the members; an empty text removes the
+file. People can also edit the file directly; whatever it says is shown.
+
 ### Slow calls
 
 `GET /projects/{{{{project}}}}/usage` runs `du` over the project and can take a

@@ -19,6 +19,8 @@ FIXTURE = {
     # Null in the list view; the permissions service only computes usage for a
     # single project.
     "usage_bytes": None,
+    # No README.md in the folder (#112).
+    "description": None,
 }
 
 
@@ -96,8 +98,20 @@ NEW_NAME = "ghost_imaging_2026"
 
 # The sessions of `FIXTURE`, as the service lists them (it calls them datasets).
 SESSIONS = [
-    {"name": "create by hand", "immutable": False, "ctime": 1.0, "mtime": 2.0},
-    {"name": "demo session", "immutable": True, "ctime": 3.0, "mtime": 4.0},
+    {
+        "name": "create by hand",
+        "immutable": False,
+        "ctime": 1.0,
+        "mtime": 2.0,
+        "description": None,
+    },
+    {
+        "name": "demo session",
+        "immutable": True,
+        "ctime": 3.0,
+        "mtime": 4.0,
+        "description": "# Demo\nFirst light on the new detector.",
+    },
 ]
 
 
@@ -108,10 +122,24 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     user1). Creating any other name succeeds; creating the existing name is
     refused the way the real service refuses it.
     """
-    state: dict = {"create_calls": [], "reject": None}
+    state: dict = {
+        "create_calls": [],
+        # The description of each create call, in the same order.
+        "descriptions": [],
+        "reject": None,
+        "describe_calls": [],
+        "describe_reject": None,
+    }
 
-    def create_project(self: PermissionsClient, name: str, owner: str, members):
+    def create_project(
+        self: PermissionsClient,
+        name: str,
+        owner: str,
+        members,
+        description: str | None = None,
+    ):
         state["create_calls"].append((name, owner, list(members)))
+        state["descriptions"].append(description)
         if state["reject"] is not None:
             return {"errno": 1, "message": state["reject"]}
         if name == FIXTURE["name"]:
@@ -120,7 +148,17 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
         project["owner"] = owner
         project["members"] = [owner, *members]
         project["usage_bytes"] = 0
+        project["description"] = description
         return {"errno": 0, "project": project}
+
+    def set_project_description(
+        self: PermissionsClient, projectname: str, description: str, user: str
+    ):
+        state["describe_calls"].append((projectname, description, user))
+        if state["describe_reject"] is not None:
+            return {"errno": 1, "message": state["describe_reject"]}
+        # The service answers with the project as `serialize(fast=True)` has it.
+        return {"errno": 0, "project": {**FIXTURE, "description": description or None}}
 
     def projectdetails(self: PermissionsClient, projectname: str, fast: bool = False):
         assert fast, "only the usage endpoint may ask for the slow variant"
@@ -130,6 +168,9 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
 
     monkeypatch.setattr(PermissionsClient, "create_project", create_project)
     monkeypatch.setattr(PermissionsClient, "projectdetails", projectdetails)
+    monkeypatch.setattr(
+        PermissionsClient, "set_project_description", set_project_description
+    )
     return state
 
 
@@ -265,6 +306,92 @@ def test_create_reports_an_unreachable_permissions_service(
     assert response.json()["code"] == "permissions_unavailable"
 
 
+# --- Descriptions on create (#112) ---------------------------------------------
+
+
+def test_a_description_is_passed_on_normalized_and_returned(
+    settings: Settings, backend: dict
+):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.post(
+        PROJECTS,
+        json={"name": NEW_NAME, "description": "  Ni nanowires\r\n\r\n- Feb 2026  \n"},
+    )
+    assert response.status_code == 201
+    # LF line ends and no surrounding whitespace, as the service stores it.
+    assert backend["descriptions"] == ["Ni nanowires\n\n- Feb 2026"]
+    assert response.json()["description"] == "Ni nanowires\n\n- Feb 2026"
+
+
+def test_without_a_description_the_service_gets_none(settings: Settings, backend: dict):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.post(PROJECTS, json={"name": NEW_NAME})
+    assert response.status_code == 201
+    assert backend["descriptions"] == [None]
+    assert response.json()["description"] is None
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\r\n\n\t"])
+def test_a_blank_description_is_no_description(
+    settings: Settings, backend: dict, blank: str
+):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    assert (
+        client.post(PROJECTS, json={"name": NEW_NAME, "description": blank}).status_code
+        == 201
+    )
+    assert backend["descriptions"] == [None]
+
+
+def test_a_description_of_ten_thousand_characters_is_accepted(
+    settings: Settings, backend: dict
+):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    text = "ä" * 10_000
+    response = client.post(PROJECTS, json={"name": NEW_NAME, "description": text})
+    assert response.status_code == 201
+    assert backend["descriptions"] == [text]
+
+
+def test_a_longer_description_is_rejected_before_any_call(
+    settings: Settings, backend: dict
+):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.post(
+        PROJECTS, json={"name": NEW_NAME, "description": "a" * 10_001}
+    )
+    assert response.status_code == 422
+    assert backend["create_calls"] == []
+
+
+def test_repeating_a_create_does_not_apply_the_description(
+    settings: Settings, backend: dict
+):
+    # Like the members: the existing project comes back as it is. Changing
+    # its description is `PUT .../description`.
+    client = signed_in_client(create_app(settings), settings, FIXTURE["owner"])
+    response = client.post(
+        PROJECTS, json={"name": FIXTURE["name"], "description": "something else"}
+    )
+    assert response.status_code == 200
+    assert response.json()["description"] is None
+    assert backend["describe_calls"] == []
+
+
+def test_a_service_without_descriptions_reads_as_none(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+):
+    # A permissions service from before #112 sends no `description` at all.
+    old = {key: value for key, value in FIXTURE.items() if key != "description"}
+    monkeypatch.setattr(
+        PermissionsClient, "list_projects", lambda self: {"errno": 0, "projects": [old]}
+    )
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.get(PROJECTS)
+    assert response.status_code == 200
+    assert response.json()["projects"][0]["description"] is None
+
+
 # --- GET /projects/{project} --------------------------------------------------
 
 DETAILS = f"{PROJECTS}/{FIXTURE['name']}"
@@ -391,3 +518,117 @@ def test_usage_reports_an_unreachable_permissions_service(
     monkeypatch.setattr(PermissionsClient, "projectdetails", unreachable)
     client = signed_in_client(create_app(settings), settings, "user1")
     assert client.get(USAGE).status_code == 502
+
+
+# --- PUT /projects/{project}/description (#112) -------------------------------
+
+DESCRIPTION = f"{DETAILS}/description"
+
+
+@pytest.mark.parametrize("user", [FIXTURE["owner"], "user2"])
+def test_owner_and_members_set_the_description(
+    settings: Settings, backend: dict, user: str
+):
+    client = signed_in_client(create_app(settings), settings, user)
+    response = client.put(DESCRIPTION, json={"description": "  Ni nanowires\r\n"})
+    assert response.status_code == 200
+    assert response.json()["description"] == "Ni nanowires"
+    assert response.json()["name"] == FIXTURE["name"]
+    assert backend["describe_calls"] == [(FIXTURE["name"], "Ni nanowires", user)]
+
+
+@pytest.mark.parametrize("blank", ["", "  \r\n "])
+def test_an_empty_description_removes_it(settings: Settings, backend: dict, blank: str):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.put(DESCRIPTION, json={"description": blank})
+    assert response.status_code == 200
+    assert response.json()["description"] is None
+    # The service is told to remove the file with an empty text.
+    assert backend["describe_calls"] == [(FIXTURE["name"], "", "user1")]
+
+
+def test_setting_the_description_does_not_report_a_size(
+    settings: Settings, backend: dict
+):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    assert (
+        client.put(DESCRIPTION, json={"description": "x"}).json()["usage_bytes"] is None
+    )
+
+
+def test_others_may_not_set_the_description(settings: Settings, backend: dict):
+    outsider = signed_in_client(create_app(settings), settings, "user3")
+    response = outsider.put(DESCRIPTION, json={"description": "mine now"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "not_a_member"
+    assert backend["describe_calls"] == []
+
+
+def test_description_of_an_unknown_project_is_a_404(settings: Settings, backend: dict):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.put(f"{PROJECTS}/nope/description", json={"description": "x"})
+    assert response.status_code == 404
+    assert response.json()["code"] == "project_not_found"
+    assert backend["describe_calls"] == []
+
+
+def test_a_description_refusal_is_reported_with_the_services_message(
+    settings: Settings, backend: dict
+):
+    backend["describe_reject"] = (
+        "/data/adhoc/datamanagement/README.md is not a regular file, so it is "
+        "left alone."
+    )
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.put(DESCRIPTION, json={"description": "x"})
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "description_rejected",
+        "message": backend["describe_reject"],
+    }
+
+
+@pytest.mark.parametrize(
+    "body", [{}, {"description": None}, {"description": "a" * 10_001}]
+)
+def test_a_malformed_description_is_rejected_before_any_call(
+    settings: Settings, backend: dict, body: dict
+):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    assert client.put(DESCRIPTION, json=body).status_code == 422
+    assert backend["describe_calls"] == []
+
+
+def test_setting_the_description_requires_a_session(settings: Settings, backend: dict):
+    response = api_client(create_app(settings)).put(
+        DESCRIPTION, json={"description": "x"}
+    )
+    assert response.status_code == 401
+    assert backend["describe_calls"] == []
+
+
+def test_setting_the_description_is_covered_by_the_origin_check(
+    settings: Settings, backend: dict
+):
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.put(
+        DESCRIPTION,
+        json={"description": "x"},
+        headers={"Origin": "https://evil.example"},
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "bad_origin"
+    assert backend["describe_calls"] == []
+
+
+def test_setting_the_description_reports_an_unreachable_permissions_service(
+    settings: Settings, backend: dict, monkeypatch: pytest.MonkeyPatch
+):
+    def unreachable(self: PermissionsClient, *args, **kwargs):
+        raise requests.ConnectionError("permissions service is down")
+
+    monkeypatch.setattr(PermissionsClient, "set_project_description", unreachable)
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.put(DESCRIPTION, json={"description": "x"})
+    assert response.status_code == 502
+    assert response.json()["code"] == "permissions_unavailable"

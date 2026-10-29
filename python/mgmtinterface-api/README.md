@@ -147,27 +147,29 @@ old test fail, that change is breaking and belongs in a new version.
 
 ## Endpoints
 
-|                                                             |                                                                              |
-|-------------------------------------------------------------|------------------------------------------------------------------------------|
-| `POST /mgmt-api/auth/login`                                 | takes credentials and an optional `persistent` flag, sets the session cookie |
-| `POST /mgmt-api/auth/logout`                                | clears the cookie, answers 204                                               |
-| `GET /mgmt-api/auth/session`                                | the signed-in user, or 401                                                   |
-| `GET /mgmt-api/projects`                                    | all projects, unfiltered                                                     |
-| `POST /mgmt-api/projects`                                   | create a project owned by the signed-in user                                 |
-| `GET /mgmt-api/projects/{project}`                          | one project with its sessions                                                |
-| `GET /mgmt-api/projects/{project}/usage`                    | its disk usage (slow)                                                        |
-| `PUT /mgmt-api/projects/{project}/members`                  | set its members                                                              |
-| `POST /mgmt-api/projects/{project}/sessions`                | create a session in a project                                                |
-| `POST /mgmt-api/projects/{project}/sessions/{session}/seal` | seal a session                                                               |
-| `GET /mgmt-api/users`                                       | every account, for picking members                                           |
-| `GET /mgmt-api/ingest-shares`                               | the signed-in user's open ingest shares                                      |
-| `POST /mgmt-api/ingest-shares`                              | open an ingest share for a session                                           |
-| `DELETE /mgmt-api/ingest-shares/{share_id}`                 | close an ingest share                                                        |
-| `GET /mgmt-api/browse`                                      | a folder of the data tree, one page at a time, or a file                     |
-| `GET /mgmt-api/versions`                                    | supported API versions                                                       |
-| `GET /mgmt-api/healthz`                                     | liveness probe                                                               |
-| `GET /mgmt-api/docs`                                        | Swagger UI for the generated OpenAPI document                                |
-| `GET /mgmt-api/openapi.json`                                | the OpenAPI document, for generating clients                                 |
+|                                                                   |                                                                              |
+|-------------------------------------------------------------------|------------------------------------------------------------------------------|
+| `POST /mgmt-api/auth/login`                                       | takes credentials and an optional `persistent` flag, sets the session cookie |
+| `POST /mgmt-api/auth/logout`                                      | clears the cookie, answers 204                                               |
+| `GET /mgmt-api/auth/session`                                      | the signed-in user, or 401                                                   |
+| `GET /mgmt-api/projects`                                          | all projects, unfiltered                                                     |
+| `POST /mgmt-api/projects`                                         | create a project owned by the signed-in user                                 |
+| `GET /mgmt-api/projects/{project}`                                | one project with its sessions                                                |
+| `GET /mgmt-api/projects/{project}/usage`                          | its disk usage (slow)                                                        |
+| `PUT /mgmt-api/projects/{project}/members`                        | set its members                                                              |
+| `POST /mgmt-api/projects/{project}/sessions`                      | create a session in a project                                                |
+| `POST /mgmt-api/projects/{project}/sessions/{session}/seal`       | seal a session                                                               |
+| `PUT /mgmt-api/projects/{project}/description`                    | set or remove a project's description (`README.md`)                          |
+| `PUT /mgmt-api/projects/{project}/sessions/{session}/description` | set or remove a session's description (`README.md`)                          |
+| `GET /mgmt-api/users`                                             | every account, for picking members                                           |
+| `GET /mgmt-api/ingest-shares`                                     | the signed-in user's open ingest shares                                      |
+| `POST /mgmt-api/ingest-shares`                                    | open an ingest share for a session                                           |
+| `DELETE /mgmt-api/ingest-shares/{share_id}`                       | close an ingest share                                                        |
+| `GET /mgmt-api/browse`                                            | a folder of the data tree, one page at a time, or a file                     |
+| `GET /mgmt-api/versions`                                          | supported API versions                                                       |
+| `GET /mgmt-api/healthz`                                           | liveness probe                                                               |
+| `GET /mgmt-api/docs`                                              | Swagger UI for the generated OpenAPI document                                |
+| `GET /mgmt-api/openapi.json`                                      | the OpenAPI document, for generating clients                                 |
 
 The OpenAPI document is the reference for the API. It is complete because the
 relevant parts are declared in code: every route has request and response
@@ -310,6 +312,33 @@ treat that as closed. Another user's share is `403 not_your_share`.
 
 `GET /users` is the ad-hoc group's members, sorted: the accounts a project can
 have as members.
+
+### Descriptions
+
+A project or session can carry a description (#112): the text of a `README.md`
+in the project folder, or in the session folder next to `raw/`. Every project
+and session in a response has `description`, `null` when there is no file. The
+API has no `/data` mount, so the permissions service writes and reads the file.
+
+- `POST /projects` and `POST /projects/{project}/sessions` take an optional
+  `description`, up to 10 000 characters. Line ends become LF and surrounding
+  whitespace is dropped; blank is the same as absent and writes no file. A
+  repeated create answers with the existing resource and does not apply it.
+- `PUT /projects/{project}/description` and
+  `PUT /projects/{project}/sessions/{session}/description` take
+  `{"description": "..."}` and answer with the project or session. An empty
+  text removes the file. The owner and the members may change it, like they
+  may seal sessions (`403 not_a_member` otherwise); a refusal by the service
+  is `400 description_rejected`.
+- A new file belongs to the project owner or to whoever created the session,
+  mode 0644, no ACL entries; an existing one is rewritten in place and keeps
+  its owner. Sealing covers `raw/` only, so a sealed session's description can
+  still change.
+- People can edit the file over SMB or WebDAV; whatever it says is the
+  description. The service reads at most 64 KiB of it, and anything that is
+  not a regular file with a single link (a symlink, a FIFO, a hard link)
+  reads as no description and is not written through.
+- A session cannot be named `README.md`.
 
 ## Browsing
 

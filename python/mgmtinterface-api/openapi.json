@@ -3,7 +3,7 @@
   "info": {
     "title": "modama API",
     "summary": "Management interface API for the ER-C data management system.",
-    "description": "The API behind the new management interface. The legacy `/api/` endpoints are\na separate API, which stays frozen for existing clients.\n\n### Versioning\n\nEvery request must state the contract version it was written against, as a bare\ninteger in the `X-Modama-API-Version` header. There is no default: a request\nwithout the header is rejected, so a deploy cannot silently move an installed\nclient onto a newer contract. Currently supported: 1.\n\nThe resolved version is echoed on the response, together with\n`X-Modama-API-Versions-Supported`. A deprecated version is announced with\n`Deprecation` and `Sunset` headers before it is switched off. `GET /versions`\nlists the same information and can be called before pinning a version.\n\n### Errors\n\nErrors use HTTP status codes with a body of `{\"code\", \"message\"}`. Clients\ncan branch on `code`, which is stable; `message` is meant for display. The one\nexception is HTTP 422, which carries FastAPI's own field-level `detail` list for\na malformed request body.\n\n### Authentication\n\n`POST /auth/login` sets an `HttpOnly` session cookie, which the browser sends\nback automatically. A session ends after a period of inactivity and after an\nabsolute limit; `\"persistent\": true` on login drops the idle timeout in exchange\nfor a longer absolute limit (\"keep me logged in\"). State-changing requests are\nalso checked against the request `Origin`. Endpoints that need a session are\nmarked with a lock below.\n\n### Creating things\n\nThe `POST` endpoints that create a project, a session or an ingest share are\nidempotent: the first request answers `201` with the new resource, and a repeat\nof the same request answers `200` with the existing one instead of an error. A\nclient that lost a response to a flaky network can therefore simply send the\nrequest again. The only conflict (`409`) is a project of the same name that\nbelongs to someone else.\n\n### Changing things\n\n`PUT /projects/{project}/members` takes the complete member list wanted,\nnot operations; the API works out what to add and remove, so a retry is safe.\nSealing a session that is sealed already answers `200` with the session as it\nis. `DELETE /ingest-shares/{share_id}` answers `204`, and `404` once the\nshare is gone.\n\n### Slow calls\n\n`GET /projects/{project}/usage` runs `du` over the project and can take a\nminute on a large one. Nothing else waits for it: the project details answer\nwith `usage_bytes` null.\n\n### Browsing\n\n`GET /browse?path=…` lists a folder of the data tree one page at a time:\n`entries` holds up to `limit` of them (200 by default, 1000 at most), folders\nfirst and then by name, and `next_cursor` fetches the page after it, until it\nis null. The cursor marks the last entry seen rather than an offset, so an\nentry added or removed while paging neither repeats nor hides another. The\nlisting is made as the signed-in user and shows what that user may see.",
+    "description": "The API behind the new management interface. The legacy `/api/` endpoints are\na separate API, which stays frozen for existing clients.\n\n### Versioning\n\nEvery request must state the contract version it was written against, as a bare\ninteger in the `X-Modama-API-Version` header. There is no default: a request\nwithout the header is rejected, so a deploy cannot silently move an installed\nclient onto a newer contract. Currently supported: 1.\n\nThe resolved version is echoed on the response, together with\n`X-Modama-API-Versions-Supported`. A deprecated version is announced with\n`Deprecation` and `Sunset` headers before it is switched off. `GET /versions`\nlists the same information and can be called before pinning a version.\n\n### Errors\n\nErrors use HTTP status codes with a body of `{\"code\", \"message\"}`. Clients\ncan branch on `code`, which is stable; `message` is meant for display. The one\nexception is HTTP 422, which carries FastAPI's own field-level `detail` list for\na malformed request body.\n\n### Authentication\n\n`POST /auth/login` sets an `HttpOnly` session cookie, which the browser sends\nback automatically. A session ends after a period of inactivity and after an\nabsolute limit; `\"persistent\": true` on login drops the idle timeout in exchange\nfor a longer absolute limit (\"keep me logged in\"). State-changing requests are\nalso checked against the request `Origin`. Endpoints that need a session are\nmarked with a lock below.\n\n### Creating things\n\nThe `POST` endpoints that create a project, a session or an ingest share are\nidempotent: the first request answers `201` with the new resource, and a repeat\nof the same request answers `200` with the existing one instead of an error. A\nclient that lost a response to a flaky network can therefore simply send the\nrequest again. The only conflict (`409`) is a project of the same name that\nbelongs to someone else.\n\n### Changing things\n\n`PUT /projects/{project}/members` takes the complete member list wanted,\nnot operations; the API works out what to add and remove, so a retry is safe.\nSealing a session that is sealed already answers `200` with the session as it\nis. `DELETE /ingest-shares/{share_id}` answers `204`, and `404` once the\nshare is gone.\n\nA project or session description is the text of a `README.md` in its folder,\n`null` when there is none. It can be given on create and changed with\n`PUT .../description` by the owner and the members; an empty text removes the\nfile. People can also edit the file directly; whatever it says is shown.\n\n### Slow calls\n\n`GET /projects/{project}/usage` runs `du` over the project and can take a\nminute on a large one. Nothing else waits for it: the project details answer\nwith `usage_bytes` null.\n\n### Browsing\n\n`GET /browse?path=…` lists a folder of the data tree one page at a time:\n`entries` holds up to `limit` of them (200 by default, 1000 at most), folders\nfirst and then by name, and `next_cursor` fetches the page after it, until it\nis null. The cursor marks the last entry seen rather than an offset, so an\nentry added or removed while paging neither repeats nor hides another. The\nlisting is made as the signed-in user and shows what that user may see.",
     "version": "1"
   },
   "paths": {
@@ -315,7 +315,7 @@
           "projects"
         ],
         "summary": "Create a project, or return it if it already exists",
-        "description": "Create an ad-hoc project owned by the signed-in user.\n\nIdempotent: sending the same request again answers 200 with the existing\nproject instead of an error, so a client that lost the first response can\nsimply retry. Only a project that belongs to someone else is a conflict.\nThe existing project is returned as it is; changing its members is a\nseparate operation.",
+        "description": "Create an ad-hoc project owned by the signed-in user.\n\nIdempotent: sending the same request again answers 200 with the existing\nproject instead of an error, so a client that lost the first response can\nsimply retry. Only a project that belongs to someone else is a conflict.\nThe existing project is returned as it is; changing its members or its\ndescription is a separate operation.\n\nA `description` is saved as `README.md` in the project folder, owned by\nthe signed-in user.",
         "operationId": "add_project_mgmt_api_projects_post",
         "security": [
           {
@@ -370,7 +370,7 @@
             }
           },
           "200": {
-            "description": "A project of that name already exists and belongs to you. It is returned unchanged; the members in the request are not applied.",
+            "description": "A project of that name already exists and belongs to you. It is returned unchanged; the members and the description in the request are not applied.",
             "content": {
               "application/json": {
                 "schema": {
@@ -724,6 +724,120 @@
         }
       }
     },
+    "/mgmt-api/projects/{project}/description": {
+      "put": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Set or remove the description of a project",
+        "description": "Write the project's description to `README.md` in the project folder, or\nremove the file when the description is empty.\n\nAn existing file is rewritten in place and keeps its owner; a new one\nbelongs to the project's owner. The owner and the members may change it,\nlike they may seal sessions. Sending the same text again changes nothing.",
+        "operationId": "set_description_mgmt_api_projects__project__description_put",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the project.",
+              "title": "Project"
+            },
+            "description": "Name of the project."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDescriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The permissions service refused the change. `message` says why, for example a `README.md` that is not a regular file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The signed-in user is neither owner nor member of the project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no project of that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/mgmt-api/users": {
       "get": {
         "tags": [
@@ -803,7 +917,7 @@
           "sessions"
         ],
         "summary": "Create a session in a project, or return it if it already exists",
-        "description": "Create a session folder in a project, as the signed-in user.\n\nIdempotent: a session that already exists is answered with 200 and its\ncurrent state instead of an error, so a client that lost the first\nresponse can simply retry. A session has no owner of its own; any member\nof the project gets the existing one back.",
+        "description": "Create a session folder in a project, as the signed-in user.\n\nIdempotent: a session that already exists is answered with 200 and its\ncurrent state instead of an error, so a client that lost the first\nresponse can simply retry. A session has no owner of its own; any member\nof the project gets the existing one back. Its description is returned as\nit is; the one in the request is not applied (see `PUT .../description`).\n\nA `description` is saved as `README.md` in the session folder, next to\n`raw/`, owned by the signed-in user.",
         "operationId": "add_session_mgmt_api_projects__project__sessions_post",
         "security": [
           {
@@ -869,7 +983,7 @@
             }
           },
           "200": {
-            "description": "A session of that name already exists in the project.",
+            "description": "A session of that name already exists in the project. It is returned as it is; the description in the request is not applied.",
             "content": {
               "application/json": {
                 "schema": {
@@ -985,6 +1099,131 @@
           },
           "400": {
             "description": "The permissions service refused to seal the session. `message` says why, for example a missing `raw/` folder.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The signed-in user is neither owner nor member of the project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no such project, or no such session in it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/projects/{project}/sessions/{session}/description": {
+      "put": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Set or remove the description of a session",
+        "description": "Write the session's description to `README.md` in its folder, next to\n`raw/`, or remove the file when the description is empty. Sealing covers\nonly `raw/`, so a sealed session can still be described.\n\nAn existing file is rewritten in place and keeps its owner; a new one\nbelongs to whoever created the session folder. Owner or member only, like\nsealing. Sending the same text again changes nothing.",
+        "operationId": "set_description_mgmt_api_projects__project__sessions__session__description_put",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the project.",
+              "title": "Project"
+            },
+            "description": "Name of the project."
+          },
+          {
+            "name": "session",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the session, URL-encoded where needed; spaces and dots are allowed in session names.",
+              "title": "Session"
+            },
+            "description": "Name of the session, URL-encoded where needed; spaces and dots are allowed in session names."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDescriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The permissions service refused the change. `message` says why, for example a `README.md` that is not a regular file.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1737,6 +1976,22 @@
             "type": "array",
             "title": "Members",
             "description": "Usernames to add as members. The signed-in user becomes the owner and is a member regardless of this list."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Free text, saved as `README.md` in the new folder. Markdown is welcome; the UI renders it. Blank is the same as absent: no file.",
+            "examples": [
+              "Off-axis holography of Ni nanowires, Titan G2, Feb 2026."
+            ]
           }
         },
         "type": "object",
@@ -1756,6 +2011,22 @@
             "description": "Up to 255 characters: letters, digits, space, `.`, `_` and `-`. Becomes the folder name inside the project.",
             "examples": [
               "2026-10-16-alignment_run"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Free text, saved as `README.md` in the new folder. Markdown is welcome; the UI renders it. Blank is the same as absent: no file.",
+            "examples": [
+              "Off-axis holography of Ni nanowires, Titan G2, Feb 2026."
             ]
           }
         },
@@ -2227,6 +2498,18 @@
               }
             ],
             "title": "Usage Bytes"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "The text of the project folder's `README.md`, or null when there is none (#112)."
           }
         },
         "type": "object",
@@ -2286,6 +2569,18 @@
               }
             ],
             "title": "Usage Bytes"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "The text of the project folder's `README.md`, or null when there is none (#112)."
           },
           "sessions": {
             "items": {
@@ -2358,6 +2653,18 @@
           "mtime": {
             "type": "number",
             "title": "Mtime"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "The text of the session folder's `README.md`, next to `raw/`, or null when there is none."
           }
         },
         "type": "object",
@@ -2388,6 +2695,24 @@
           "persistent"
         ],
         "title": "SessionInfo"
+      },
+      "SetDescriptionRequest": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 10000,
+            "title": "Description",
+            "description": "The new description, saved as `README.md` in the folder. An empty text, or one of only whitespace, removes the file.",
+            "examples": [
+              "Off-axis holography of Ni nanowires, Titan G2, Feb 2026."
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "description"
+        ],
+        "title": "SetDescriptionRequest"
       },
       "SetMembersRequest": {
         "properties": {
