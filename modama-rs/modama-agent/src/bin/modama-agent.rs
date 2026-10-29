@@ -60,11 +60,7 @@ fn config_path(args: &CliArgs) -> Result<PathBuf> {
 
 fn run_foreground(path: PathBuf) -> Result<()> {
     init_logging();
-    tokio::runtime::Runtime::new()?.block_on(run_agent(
-        &path,
-        shutdown_signal(),
-        || Ok(()),
-    ))
+    tokio::runtime::Runtime::new()?.block_on(run_agent(&path, shutdown_signal(), || Ok(())))
 }
 
 fn main() -> Result<()> {

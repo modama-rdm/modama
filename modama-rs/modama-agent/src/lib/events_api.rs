@@ -11,9 +11,10 @@ use axum::{
     routing::get,
 };
 use hyper::StatusCode;
-use log::{error, warn};
+use log::{debug, error, warn};
 use modama_common::internal_api_types::{
-    MountedShare, SessionHelperConfig, SessionId, Shares, ToAgent, ToSessionGui, ToSessionHelper,
+    SessionHelperConfig, SessionHelperState, SessionId, Shares, ToAgent, ToSessionGui,
+    ToSessionHelper,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
@@ -112,7 +113,7 @@ async fn send_update_to_session_helper(
         }
         StateUpdateToSession::MountUpdate {
             session_id: _,
-            shares: _,
+            session_helper: _,
         } => {} // ignore
     }
 
@@ -127,16 +128,18 @@ async fn record_update_from_session_helper(
     state: &mut AgentState,
 ) -> Result<(), EventAPIError> {
     match session_update {
-        ToAgent::SessionUpdate { shares } => {
-            let state_mounted_shares = state
-                .mounted_shares
-                .entry(session_id.clone())
-                .or_insert(Vec::new());
-            *state_mounted_shares = shares.clone();
+        ToAgent::SessionUpdate { shares, errors } => {
+            let helper_state = SessionHelperState {
+                mounted_shares: shares,
+                errors,
+            };
+            state
+                .session_helpers
+                .insert(session_id.clone(), helper_state.clone());
             // forward to the GUI
             tx.send(StateUpdateToSession::MountUpdate {
                 session_id: session_id.clone(),
-                shares: Some(shares),
+                session_helper: Some(helper_state),
             })?;
             Ok(())
         }
@@ -228,7 +231,7 @@ async fn send_update_to_gui(
     config: &SessionHelperConfig,
     socket: &mut WebSocket,
     remote_info: Option<RemoteInfo>,
-    mounted_shares: Option<Vec<MountedShare>>,
+    session_helper: Option<SessionHelperState>,
 ) -> Result<(), EventAPIError> {
     let msg = match update {
         StateUpdateToSession::DesiredState {
@@ -236,20 +239,23 @@ async fn send_update_to_gui(
             shares,
         } => ToSessionGui {
             session_id: own_session_id.clone(),
-            mounted_shares,
+            session_helper,
             desired_shares: Some(Shares {
                 foreground_share_id,
                 shares,
             }),
         },
-        StateUpdateToSession::MountUpdate { session_id, shares } => {
+        StateUpdateToSession::MountUpdate {
+            session_id,
+            session_helper,
+        } => {
             // ignore any updates that don't concern our session:
             if &session_id != own_session_id {
                 return Ok(());
             }
             ToSessionGui {
                 session_id,
-                mounted_shares: shares,
+                session_helper,
                 desired_shares: remote_info.map(|remote| Shares {
                     foreground_share_id: remote
                         .desired_shares
@@ -270,10 +276,10 @@ async fn handle_gui_websocket(
     mut socket: WebSocket,
     session_id: SessionId,
 ) -> Result<(), EventAPIError> {
-    let (mut rx, remote_info, smb_hostname, smb_port, smb_domain, mounted_shares) = {
+    let (mut rx, remote_info, smb_hostname, smb_port, smb_domain, session_helper) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
-        let mounted_shares = agent_state.mounted_shares.get(&session_id).cloned();
+        let session_helper = agent_state.session_helpers.get(&session_id).cloned();
 
         (
             receiver,
@@ -281,7 +287,7 @@ async fn handle_gui_websocket(
             agent_state.config.smb_hostname.clone(),
             agent_state.config.smb_port,
             agent_state.config.smb_domain.clone(),
-            mounted_shares,
+            session_helper,
         )
     };
 
@@ -296,7 +302,7 @@ async fn handle_gui_websocket(
         &mut socket,
         &ToSessionGui {
             session_id: session_id.clone(),
-            mounted_shares,
+            session_helper,
             desired_shares: remote_info.map(|remote| Shares {
                 foreground_share_id: remote
                     .desired_shares
@@ -313,11 +319,11 @@ async fn handle_gui_websocket(
         select! {
             state_update = recv_handle_lagging(&mut rx) => {
                 let update = state_update?;
-                let (remote_info, mounted_shares) = {
+                let (remote_info, session_helper) = {
                     let agent_state = state.lock().await;
-                    (agent_state.remote_info.clone(), agent_state.mounted_shares.get(&session_id).cloned())
+                    (agent_state.remote_info.clone(), agent_state.session_helpers.get(&session_id).cloned())
                  };
-                send_update_to_gui(update, &session_id, &session_config, &mut socket, remote_info, mounted_shares).await?;
+                send_update_to_gui(update, &session_id, &session_config, &mut socket, remote_info, session_helper).await?;
             }
             session_update = recv_obj::<ToAgent>(&mut socket) => {
                 // panic! or rather, don't. the GUI isn't supposed to send us anything,
@@ -364,12 +370,16 @@ impl SessionConnection {
 
 impl Drop for SessionConnection {
     fn drop(&mut self) {
-        #[allow(clippy::expect_used)]
-        self.channel
-            .send(SessionBeginEnd::End {
-                session_id: self.session_id.clone(),
-            })
-            .expect("session cleanup channel should be alive");
+        // On runtime shutdown, the bookkeeper may be gone before us; the state it would clean up
+        // is dropped as well then, so losing this message is fine (and panicking in drop isn't).
+        if let Err(_e) = self.channel.send(SessionBeginEnd::End {
+            session_id: self.session_id.clone(),
+        }) {
+            debug!(
+                "session bookkeeper is gone, not sending cleanup for {:?}",
+                self.session_id
+            );
+        }
     }
 }
 
@@ -444,7 +454,7 @@ mod tests {
     use futures_util::{SinkExt, StreamExt};
     use minijinja::Environment;
     use modama_common::{
-        internal_api_types::MountedShare,
+        internal_api_types::{MountedShare, ShareError},
         messages::Share,
         tokens::{BoxFutureToken, TokenProvider, TokenSignResponse},
     };
@@ -570,12 +580,12 @@ mod tests {
             self.shared_state.lock().await.remote_info = Some(remote_info);
         }
 
-        async fn seed_mounted_shares(&self, id: &str, shares: Vec<MountedShare>) {
+        async fn seed_session_helper(&self, id: &str, helper_state: SessionHelperState) {
             self.shared_state
                 .lock()
                 .await
-                .mounted_shares
-                .insert(session_id(id), shares);
+                .session_helpers
+                .insert(session_id(id), helper_state);
         }
 
         async fn wait_for_state(&self, predicate: impl Fn(&AgentState) -> bool) {
@@ -736,13 +746,22 @@ mod tests {
             .seed_remote_info(foreground_share.clone(), desired_shares.clone())
             .await;
         test_setup
-            .seed_mounted_shares("desktop-1", vec![mounted_share.clone()])
+            .seed_session_helper(
+                "desktop-1",
+                SessionHelperState {
+                    mounted_shares: vec![mounted_share.clone()],
+                    errors: vec![],
+                },
+            )
             .await;
 
         let mut gui = test_setup.connect_gui("desktop-1").await;
         let gui_message: ToSessionGui = receive_message(&mut gui).await;
         assert_eq!(gui_message.session_id, session_id("desktop-1"));
-        assert_eq!(gui_message.mounted_shares, Some(vec![mounted_share]));
+        assert_eq!(
+            gui_message.session_helper.map(|h| h.mounted_shares),
+            Some(vec![mounted_share])
+        );
 
         assert_eq!(
             gui_message
@@ -825,19 +844,18 @@ mod tests {
                     share_name: updated_share.share_name.clone(),
                     mount_path: Some(PathBuf::from("/mnt/share-1")),
                 }],
+                errors: vec![],
             },
         )
         .await;
 
         let message: ToSessionGui = receive_message(&mut gui).await;
         assert_eq!(message.session_id, session_id("desktop-1"));
-        assert_eq!(message.mounted_shares.clone().unwrap().len(), 1);
+        let mounted_shares = message.session_helper.unwrap().mounted_shares;
+        assert_eq!(mounted_shares.len(), 1);
+        assert_eq!(mounted_shares[0].share_name, updated_share.share_name);
         assert_eq!(
-            message.mounted_shares.clone().unwrap()[0].share_name,
-            updated_share.share_name
-        );
-        assert_eq!(
-            message.mounted_shares.clone().unwrap()[0].mount_path,
+            mounted_shares[0].mount_path,
             Some(PathBuf::from("/mnt/share-1"))
         );
         assert!(matches!(
@@ -845,9 +863,9 @@ mod tests {
                 .shared_state
                 .lock()
                 .await
-                .mounted_shares
+                .session_helpers
                 .get(&session_id("desktop-1")),
-            Some(shares) if shares.len() == 1
+            Some(helper) if helper.mounted_shares.len() == 1
         ));
     }
 
@@ -873,6 +891,7 @@ mod tests {
                     share_name: mounted_share.share_name.clone(),
                     mount_path: Some(PathBuf::from("/mnt/mounted")),
                 }],
+                errors: vec![],
             },
         )
         .await;
@@ -880,7 +899,7 @@ mod tests {
         let message: ToSessionGui = receive_message(&mut gui).await;
         assert_eq!(message.session_id, session_id("desktop-1"));
         assert_eq!(
-            message.mounted_shares,
+            message.session_helper.map(|h| h.mounted_shares),
             Some(vec![MountedShare {
                 share_name: mounted_share.share_name,
                 mount_path: Some(PathBuf::from("/mnt/mounted")),
@@ -890,32 +909,31 @@ mod tests {
             message
                 .desired_shares
                 .as_ref()
-                .map(|shares| shares.foreground_share_id.clone()),
-            message.desired_shares.clone().map(|shares| shares
-                .shares
-                .iter()
-                .find(|s| s.share_name == "foreground")
-                .map(|s| s.share_id.clone()))
+                .and_then(|shares| shares.foreground_share_id.as_deref()),
+            Some("foreground")
         );
         assert_eq!(message.desired_shares.unwrap().shares, desired_shares);
     }
 
     #[tokio::test]
-    async fn invalid_initial_messages_terminate_connection_without_response() {
+    async fn invalid_messages_terminate_connection() {
         let test_setup = TestSetup::start().await;
         let invalid_messages = [
             WebSocketMessage::Binary(vec![0, 1, 2].into()),
             WebSocketMessage::Text("{malformed-json".into()),
         ];
 
+        // both endpoints send the initial state right away, only then do we send garbage:
         for message in invalid_messages.clone() {
             let mut socket = test_setup.connect_gui("s1").await;
+            let _: ToSessionGui = receive_message(&mut socket).await;
             socket.send(message).await.unwrap();
             wait_for_termination(&mut socket).await;
         }
 
         for message in invalid_messages {
             let mut socket = test_setup.connect_session_helper("s1").await;
+            let _: ToSessionHelper = receive_message(&mut socket).await;
             socket.send(message).await.unwrap();
             wait_for_termination(&mut socket).await;
         }
@@ -928,12 +946,15 @@ mod tests {
         let _: ToSessionHelper = receive_message(&mut session_helper).await;
         send_message(
             &mut session_helper,
-            &ToAgent::SessionUpdate { shares: vec![] },
+            &ToAgent::SessionUpdate {
+                shares: vec![],
+                errors: vec![],
+            },
         )
         .await;
         test_setup
             .wait_for_state(|state| {
-                state.mounted_shares.contains_key(&session_id("desktop-1"))
+                state.session_helpers.contains_key(&session_id("desktop-1"))
                     && state.session_connections.get(&session_id("desktop-1")) == Some(&1)
             })
             .await;
@@ -942,7 +963,7 @@ mod tests {
 
         test_setup
             .wait_for_state(|state| {
-                !state.mounted_shares.contains_key(&session_id("desktop-1"))
+                !state.session_helpers.contains_key(&session_id("desktop-1"))
                     && !state
                         .session_connections
                         .contains_key(&session_id("desktop-1"))
@@ -954,7 +975,7 @@ mod tests {
     async fn invalid_message_from_gui_are_ignored_and_bookkeeping_stays_alive() {
         let test_setup = TestSetup::start().await;
         let mut gui = test_setup.connect_gui("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut gui).await;
+        let _: ToSessionGui = receive_message(&mut gui).await;
 
         send_message(
             &mut gui,
@@ -963,6 +984,7 @@ mod tests {
                     share_name: share("ignored-share").share_name,
                     mount_path: Some(PathBuf::from("/mnt/ignored")),
                 }],
+                errors: vec![],
             },
         )
         .await;
@@ -984,14 +1006,9 @@ mod tests {
             })
             .unwrap();
 
+        // what the GUI sent must not show up as helper state:
         let message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(
-            message.mounted_shares,
-            Some(vec![MountedShare {
-                share_name: share("ignored-share").share_name,
-                mount_path: Some(PathBuf::from("/mnt/ignored")),
-            }]),
-        );
+        assert_eq!(message.session_helper, None);
         assert_eq!(
             message.desired_shares,
             Some(Shares {
@@ -1004,7 +1021,7 @@ mod tests {
                 .shared_state
                 .lock()
                 .await
-                .mounted_shares
+                .session_helpers
                 .is_empty()
         );
     }
@@ -1019,16 +1036,19 @@ mod tests {
 
         send_message(
             &mut session_helper,
-            &ToAgent::SessionUpdate { shares: vec![] },
+            &ToAgent::SessionUpdate {
+                shares: vec![],
+                errors: vec![],
+            },
         )
         .await;
         let mounted_message: ToSessionGui = receive_message(&mut gui).await;
         assert!(matches!(
             mounted_message,
             ToSessionGui {
-                mounted_shares: Some(ref shares),
+                session_helper: Some(ref helper),
                 ..
-            } if shares.is_empty()
+            } if helper.mounted_shares.is_empty()
         ));
 
         session_helper.close(None).await.unwrap();
@@ -1055,6 +1075,7 @@ mod tests {
                     share_name: updated_share.share_name.clone(),
                     mount_path: Some(PathBuf::from("/mnt/share-1")),
                 }],
+                errors: vec![],
             },
         )
         .await;
@@ -1062,7 +1083,7 @@ mod tests {
         let message: ToSessionGui = receive_message(&mut matching_gui).await;
         assert_eq!(message.session_id, session_id("desktop-1"));
         assert_eq!(
-            message.mounted_shares,
+            message.session_helper.map(|h| h.mounted_shares),
             Some(vec![MountedShare {
                 share_name: updated_share.share_name,
                 mount_path: Some(PathBuf::from("/mnt/share-1")),
@@ -1092,5 +1113,40 @@ mod tests {
             Some("desired-share")
         );
         assert_eq!(message.desired_shares.unwrap().shares, vec![desired_share]);
+    }
+
+    #[tokio::test]
+    async fn share_errors_reach_gui() {
+        let test_setup = TestSetup::start().await;
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+        let _: ToSessionGui = receive_message(&mut gui).await;
+        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: ToSessionHelper = receive_message(&mut session_helper).await;
+        let mounted = MountedShare {
+            share_name: share("mounted").share_name,
+            mount_path: Some(PathBuf::from("/mnt/mounted")),
+        };
+        let error = ShareError {
+            share_id: share("failed").share_id,
+            message: "credential conflict".to_owned(),
+        };
+
+        send_message(
+            &mut session_helper,
+            &ToAgent::SessionUpdate {
+                shares: vec![mounted.clone()],
+                errors: vec![error.clone()],
+            },
+        )
+        .await;
+
+        let message: ToSessionGui = receive_message(&mut gui).await;
+        assert_eq!(
+            message.session_helper,
+            Some(SessionHelperState {
+                mounted_shares: vec![mounted],
+                errors: vec![error],
+            })
+        );
     }
 }

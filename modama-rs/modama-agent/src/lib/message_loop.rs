@@ -161,7 +161,6 @@ pub async fn message_loop(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,8 +177,8 @@ mod tests {
     use smbdrop::share_manager::SmbDropState;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::sync::broadcast::{self, Sender};
     use tokio::sync::Mutex;
+    use tokio::sync::broadcast::{self, Sender};
     use tokio::task::JoinHandle;
     use url::Url;
 
@@ -323,7 +322,10 @@ mod tests {
                         let mut ids: Vec<&str> =
                             desired.shares.iter().map(|s| s.share_id.as_str()).collect();
                         ids.sort();
-                        let fg = desired.foreground_share.as_ref().map(|s| s.share_id.as_str());
+                        let fg = desired
+                            .foreground_share
+                            .as_ref()
+                            .map(|s| s.share_id.as_str());
                         if ids == expected && fg == foreground_share_id {
                             return;
                         }

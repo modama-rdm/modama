@@ -1,13 +1,14 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use log::{info, warn};
-use modama_common::{agent::AgentId, internal_api_types::{MountedShare, SessionId}, messages::Share};
+use modama_common::{
+    agent::AgentId,
+    internal_api_types::{SessionHelperState, SessionId},
+    messages::Share,
+};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
-use crate::{
-    config::AgentConfig,
-    events_api::{SessionBeginEnd, },
-};
+use crate::{config::AgentConfig, events_api::SessionBeginEnd};
 
 #[derive(Debug, Default)]
 pub enum ConnectionState {
@@ -120,9 +121,9 @@ pub enum StateUpdateToSession {
     },
     MountUpdate {
         session_id: SessionId,
-        /// In case the session helper disconnects, this is not an empty Vec
+        /// In case the session helper disconnects, this is not an empty report
         /// but None! Meaning the GUI can distinguish these two cases if needed.
-        shares: Option<Vec<MountedShare>>,
+        session_helper: Option<SessionHelperState>,
     },
 }
 
@@ -134,8 +135,8 @@ pub struct AgentState {
     /// see `ResolvedMount`.
     pub current_shares: ShareState<ResolvedMount>,
 
-    /// Per-session list of currently mounted shares
-    pub mounted_shares: HashMap<SessionId, Vec<MountedShare>>,
+    /// Per-session last report of the session helper
+    pub session_helpers: HashMap<SessionId, SessionHelperState>,
 
     /// Counter for active session helper connections
     /// (to prevent cleanup while there's still an active connection)
@@ -179,14 +180,14 @@ async fn session_bookkeeper(
                     && *c == 0
                 {
                     info!("cleaning up session {session_id:?}");
-                    state.mounted_shares.remove(&session_id);
+                    state.session_helpers.remove(&session_id);
                     state.session_connections.remove(&session_id);
                     if let Err(_e) =
                         state
                             .desired_state_channel
                             .send(StateUpdateToSession::MountUpdate {
                                 session_id,
-                                shares: None,
+                                session_helper: None,
                             })
                     {
                         warn!("tried to send an update on current mounts but no one cared");
@@ -214,7 +215,7 @@ impl AgentState {
             remote_info: None,
             config,
             desired_state_channel: tx,
-            mounted_shares: Default::default(),
+            session_helpers: Default::default(),
             session_connections: Default::default(),
             session_channel_sender: sess_tx,
         }));

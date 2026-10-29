@@ -57,9 +57,9 @@ pub struct ToSessionGui {
     /// in which the GUI is running in.
     pub session_id: SessionId,
 
-    /// Currently mounted shares; None if we haven't received any yet
-    /// (which means they could be mounted already, but we don't know about it)
-    pub mounted_shares: Option<Vec<MountedShare>>,
+    /// The last report of the session helper; None if we haven't received any yet
+    /// (which means shares could be mounted already, but we don't know about it)
+    pub session_helper: Option<SessionHelperState>,
 
     /// The currently desired shares, as received from smbdrop; None if we
     /// haven't received any shares yet (meaning: no reconciliation should be
@@ -70,7 +70,26 @@ pub struct ToSessionGui {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ToAgent {
     /// Update from the session helper informing about the currently mounted ingest shares
-    SessionUpdate { shares: Vec<MountedShare> },
+    SessionUpdate {
+        shares: Vec<MountedShare>,
+        errors: Vec<ShareError>,
+    },
+}
+
+/// What the session helper reported last: mounts and per-share errors are kept together, so
+/// they are either both known or both unknown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionHelperState {
+    pub mounted_shares: Vec<MountedShare>,
+    pub errors: Vec<ShareError>,
+}
+
+/// Why a desired share is not mounted
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareError {
+    /// errors are about desired shares, so unlike `MountedShare`, we can identify them by ID
+    pub share_id: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
