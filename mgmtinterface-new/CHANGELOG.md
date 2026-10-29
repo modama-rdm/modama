@@ -11,6 +11,21 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.19.0] - 2026-10-29
+
+### Added
+
+- Describe a project or a session when you create it. The description is saved
+  as `README.md` in its folder, where you can also edit it directly. (#112)
+- The project page shows the project's description, with headings, lists and
+  links rendered from Markdown. The owner and the members can edit it there, or
+  add one; an empty description removes the `README.md`.
+- The first line of a description shows under the name in the projects list and
+  in a project's sessions table; hover over it for the whole text. The pencil
+  next to a session's name edits its description.
+- Both searches look in the descriptions too: "nanowires titan" finds the
+  project whose description mentions both.
+
 ## [0.18.2] - 2026-11-02
 
 ### Fixed
