@@ -295,7 +295,8 @@ agent-release:
     - cp modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent.exe dist/modama-agent-win7-x86_64.exe
     - cp modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent-gui.exe dist/modama-agent-gui-win7-x86_64.exe
     - (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
-    - glab release upload "$CI_COMMIT_TAG" --use-package-registry --package-name modama-agent
+    # -R: without a checkout, glab can't infer the project from the git remote
+    - glab release upload "$CI_COMMIT_TAG" -R "$CI_PROJECT_URL" --use-package-registry --package-name modama-agent
         "dist/modama-agent-linux-x86_64#modama-agent (Linux x86_64, glibc >= 2.17)#package"
         "dist/modama-agent-gui-linux-x86_64#modama-agent-gui (Linux x86_64, glibc >= 2.17)#package"
         "dist/modama-agent-win7-x86_64.exe#modama-agent (Windows 7+ x86_64)#package"
