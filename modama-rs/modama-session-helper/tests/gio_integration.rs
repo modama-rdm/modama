@@ -49,6 +49,15 @@ fn mount_path<'a>(state: &'a SessionHelperState, name: &str) -> Option<&'a Path>
 #[tokio::test]
 #[ignore = "needs GVfs and the Samba container; run via `just gio-integration-test`"]
 async fn gio_backend_against_samba() {
+    // without GVfs (its SMB backend, reachable over D-Bus), GIO only knows local files, and
+    // every mount fails with "The specified location is not supported"
+    let schemes = gio::prelude::VfsExt::supported_uri_schemes(&gio::Vfs::default());
+    assert!(
+        schemes.iter().any(|scheme| scheme == "smb"),
+        "GIO can't handle smb:// URIs (supported: {schemes:?}); this needs gvfs-backends and a \
+         D-Bus session in which GVfs can start (`just gio-integration-test` provides one)"
+    );
+
     let backend = GioBackend::new().await.unwrap();
     let localhost = config("localhost");
     let ingest = share("1", "ingest", "testpass");
@@ -65,7 +74,7 @@ async fn gio_backend_against_samba() {
         .reconcile(std::slice::from_ref(&ingest), &localhost, false)
         .await
         .unwrap();
-    assert_eq!(result.created, vec!["ingest"]);
+    assert_eq!(result.created, vec!["ingest"], "{:?}", result.state);
     let state = result.state;
     assert!(state.errors.is_empty(), "{state:?}");
     let path = mount_path(&state, "ingest").expect("ingest mounted with a path");

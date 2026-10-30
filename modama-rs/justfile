@@ -158,18 +158,21 @@ win7-check-gnu:
 # Backwards-compatible name retained for existing local invocations.
 win-clippy-gnu: win7-check-gnu
 
-# Run the GIO backend against real GVfs and a Samba container (needs gvfs-backends, gvfs-fuse
-# and a D-Bus session; mounts briefly appear in this user session).
+# Run the GIO backend against real GVfs and a Samba container (needs podman, gvfs-backends,
+# gvfs-fuse and dbus-run-session). GVfs runs in a throwaway D-Bus session with its own runtime
+# directory, so the test mounts never show up in the developer's session.
 gio-integration-test:
     #!/usr/bin/env bash
     set -euo pipefail
+    cargo test -q -p modama-session-helper --test gio_integration --no-run
     podman build -q -t modama-gio-samba modama-session-helper/tests/gio-samba >/dev/null
     podman rm -f modama-gio-samba >/dev/null 2>&1 || true
     podman run -d --rm --name modama-gio-samba -p 127.0.0.1:1445:1445 modama-gio-samba >/dev/null
+    runtime_dir="$(mktemp -d)"
     cleanup() {
-        for uri in smb://localhost:1445/ingest/ smb://localhost:1445/ingest2/ smb://127.0.0.1:1445/other/; do
-            gio mount -u "$uri" >/dev/null 2>&1 || true
-        done
+        # GVfs's FUSE bridge mounts here; unmount before removing, and never cross into a mount
+        fusermount3 -u -z "$runtime_dir/gvfs" 2>/dev/null || fusermount -u -z "$runtime_dir/gvfs" 2>/dev/null || true
+        rm -rf --one-file-system "$runtime_dir"
         podman stop modama-gio-samba >/dev/null 2>&1 || true
     }
     trap cleanup EXIT
@@ -177,4 +180,5 @@ gio-integration-test:
         if (exec 3<>/dev/tcp/127.0.0.1/1445) 2>/dev/null; then break; fi
         sleep 0.5
     done
-    cargo test -q -p modama-session-helper --test gio_integration -- --ignored --test-threads=1
+    XDG_RUNTIME_DIR="$runtime_dir" dbus-run-session -- \
+        cargo test -q -p modama-session-helper --test gio_integration -- --ignored --test-threads=1
