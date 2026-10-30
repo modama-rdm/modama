@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use modama_common::{
-    internal_api_types::{SessionHelperConfig, SessionHelperState},
+    internal_api_types::{SessionHelperConfig, SessionHelperState, ShareError},
     messages::Share,
 };
 
@@ -26,4 +26,30 @@ pub trait MountBackend {
         desired_shares: &[Share],
         config: &SessionHelperConfig,
     ) -> impl Future<Output = Result<SessionHelperState, EnumerationError>>;
+}
+
+/// SMB share names are case-insensitive
+pub fn same_share(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
+}
+
+/// The desired shares, without those whose name another one already has; each of those gets an
+/// error instead
+pub fn unique_by_name(shares: &[Share]) -> (Vec<&Share>, Vec<ShareError>) {
+    let mut unique: Vec<&Share> = Vec::new();
+    let mut errors = Vec::new();
+    for share in shares {
+        if unique
+            .iter()
+            .any(|u| same_share(&u.share_name, &share.share_name))
+        {
+            errors.push(ShareError {
+                share_id: share.share_id.clone(),
+                message: "another desired share has the same name".to_owned(),
+            });
+        } else {
+            unique.push(share);
+        }
+    }
+    (unique, errors)
 }

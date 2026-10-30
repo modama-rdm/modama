@@ -7,6 +7,7 @@ imm32.dll
 iphlpapi.dll
 kernel32.dll
 mpr.dll
+netapi32.dll
 ntdll.dll
 ole32.dll
 oleaut32.dll

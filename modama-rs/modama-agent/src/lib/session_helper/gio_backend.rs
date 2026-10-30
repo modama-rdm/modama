@@ -10,13 +10,7 @@
 //! server, don't get in the way of ours (unlike Windows connections), so they are left alone.
 
 use std::{
-    cell::Cell,
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    rc::Rc,
-    sync::mpsc,
-    thread,
-    time::Duration,
+    cell::Cell, collections::HashMap, path::PathBuf, rc::Rc, sync::mpsc, thread, time::Duration,
 };
 
 use gio::prelude::*;
@@ -29,7 +23,9 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode
 use tokio::sync::oneshot;
 use url::Url;
 
-use crate::session_helper::mount_backend::{EnumerationError, MountBackend};
+use crate::session_helper::mount_backend::{
+    EnumerationError, MountBackend, same_share, unique_by_name,
+};
 
 /// Upper bound for a single mount or unmount operation
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -95,11 +91,6 @@ fn our_share(root_uri: &str, config: &SessionHelperConfig) -> Option<String> {
         .map(|s| s.into_owned())
 }
 
-/// SMB share names are case-insensitive
-fn same_share(a: &str, b: &str) -> bool {
-    a.to_lowercase() == b.to_lowercase()
-}
-
 /// The URI we mount `share_name` with; credentials never go into it
 fn share_uri(config: &SessionHelperConfig, share_name: &str) -> Result<Url, EnumerationError> {
     let host = &config.smb_hostname;
@@ -151,19 +142,7 @@ fn reconcile_pass<A: GioApi>(
     };
     let before = ours(api.mounts().map_err(EnumerationError)?);
 
-    let mut errors = Vec::new();
-    let mut names = HashSet::new();
-    let mut desired = Vec::new();
-    for share in shares {
-        if names.insert(share.share_name.to_lowercase()) {
-            desired.push(share);
-        } else {
-            errors.push(ShareError {
-                share_id: share.share_id.clone(),
-                message: "another desired share has the same name".to_owned(),
-            });
-        }
-    }
+    let (desired, mut errors) = unique_by_name(shares);
     let is_desired = |name: &str| desired.iter().any(|s| same_share(&s.share_name, name));
 
     // removal first: frees resources before we add new mounts
@@ -437,7 +416,7 @@ impl MountBackend for GioBackend {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::{cell::RefCell, collections::HashSet};
 
     use super::*;
 

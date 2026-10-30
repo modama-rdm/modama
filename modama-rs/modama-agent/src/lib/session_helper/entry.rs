@@ -10,12 +10,13 @@
 // - [x] singleton
 // - [x] connection and reconciliation loop
 // - [x] mount backend GIO
-// - [ ] mount backend WNet
+// - [x] mount backend WNet
 // - [ ] open the file manager for newly created foreground mounts
 // - [ ] notification tray icon
 
 use anyhow::{Context as _, Result, anyhow};
 use log::info;
+#[cfg(not(windows))]
 use modama_common::logging::init_logging;
 use url::Url;
 
@@ -43,9 +44,33 @@ fn events_url(agent_url: &Url) -> Result<Url> {
     Ok(url)
 }
 
+/// On Windows, the helper usually runs without a console (started by the GUI or at logon), so
+/// it logs into a file in the user's local app data. Two sessions of one user (console and RDP)
+/// share that file.
+#[cfg(windows)]
+fn init_helper_logging() -> Result<()> {
+    use windows::Win32::UI::Shell::CSIDL_LOCAL_APPDATA;
+
+    let log_dir = crate::windows_service::known_folder(CSIDL_LOCAL_APPDATA)?
+        .join("modama")
+        .join("modama-agent")
+        .join("logs");
+    eprintln!(
+        "logging to {}",
+        log_dir.join("session-helper.log").display()
+    );
+    crate::windows_service::init_file_logging(&log_dir, "session-helper.log")
+}
+
+#[cfg(not(windows))]
+fn init_helper_logging() -> Result<()> {
+    init_logging();
+    Ok(())
+}
+
 /// Run the session helper until Ctrl-C/SIGTERM. Mounts stay in place when it exits.
 pub fn run(agent_url: &Url) -> Result<()> {
-    init_logging();
+    init_helper_logging()?;
 
     #[cfg(windows)]
     if singleton::is_elevated().context("could not check whether we run elevated")? {

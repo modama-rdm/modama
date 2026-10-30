@@ -66,7 +66,7 @@ static SERVICE_CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
 // https://learn.microsoft.com/windows/win32/api/winsvc/nf-winsvc-startservicectrldispatcherw
 define_windows_service!(ffi_service_main, service_main);
 
-fn known_folder(csidl: u32) -> Result<PathBuf> {
+pub(crate) fn known_folder(csidl: u32) -> Result<PathBuf> {
     let mut path = [0u16; 260];
     // SAFETY: `path` is a live, writable MAX_PATH-sized UTF-16 buffer for the
     // duration of the call. `hwnd` and `hToken` are allowed to be NULL, and the
@@ -617,10 +617,14 @@ fn init_service_logging(config_path: &Path) -> Result<()> {
     let data_dir = config_path
         .parent()
         .ok_or_else(|| anyhow!("service config path has no parent directory"))?;
-    let log_dir = data_dir.join("logs");
-    fs::create_dir_all(&log_dir)?;
+    init_file_logging(&data_dir.join("logs"), "modama-agent.log")
+}
+
+/// Log into rotating files `log_dir/file_name`, for processes without a console
+pub(crate) fn init_file_logging(log_dir: &Path, file_name: &str) -> Result<()> {
+    fs::create_dir_all(log_dir)?;
     let writer = FileRotate::new(
-        log_dir.join("modama-agent.log"),
+        log_dir.join(file_name),
         AppendCount::new(5),
         ContentLimit::BytesSurpassed(10 * 1024 * 1024),
         Compression::None,

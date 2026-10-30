@@ -200,6 +200,16 @@ impl AgentConfig {
             .read_to_string(&mut cfg_str)
             .await?;
         let config_file: AgentConfigFile = toml::from_str(&cfg_str)?;
+        // WNet UNC paths carry no port; another port must not silently become 445
+        #[cfg(windows)]
+        if config_file.services.smb_port != 445 {
+            return Err(ConfigError::Config {
+                msg: format!(
+                    "smb_port is {}, but Windows can only connect to SMB on port 445",
+                    config_file.services.smb_port
+                ),
+            });
+        }
         let mut reader = config_file.ca.ca_cert.as_bytes();
 
         let ca_root_store: RootCertStore = get_root_cert_store(&mut reader, path.as_ref())?;
