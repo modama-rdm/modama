@@ -4,41 +4,10 @@ use anyhow::Result;
 use clap::Parser;
 use modama_agent::{
     config::{CliArgs, Command},
-    runtime::run_agent,
+    runtime::{run_agent, shutdown_signal},
+    session_helper,
 };
 use modama_common::logging::init_logging;
-
-#[cfg(unix)]
-async fn shutdown_signal() {
-    use tokio::signal::unix::SignalKind;
-
-    let terminate = async {
-        match tokio::signal::unix::signal(SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(error) => {
-                log::error!("could not register SIGTERM handler: {error}");
-                std::future::pending::<()>().await;
-            }
-        }
-    };
-    tokio::select! {
-        result = tokio::signal::ctrl_c() => {
-            if let Err(error) = result {
-                log::error!("could not wait for Ctrl-C: {error}");
-            }
-        }
-        _ = terminate => {}
-    }
-}
-
-#[cfg(windows)]
-async fn shutdown_signal() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        log::error!("could not wait for Ctrl-C: {error}");
-    }
-}
 
 #[cfg(not(windows))]
 fn default_config_path() -> Result<PathBuf> {
@@ -78,9 +47,7 @@ fn main() -> Result<()> {
                 run_foreground(path)
             }
         }
-        Some(Command::SessionHelper) => {
-            todo!();
-        }
+        Some(Command::SessionHelper { agent_url }) => session_helper::entry::run(&agent_url),
         #[cfg(windows)]
         Some(Command::InstallAsService) => {
             let source =

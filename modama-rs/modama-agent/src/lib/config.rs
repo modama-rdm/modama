@@ -33,8 +33,12 @@ pub enum Command {
     /// Run under an operating-system service manager.
     RunService,
 
-    /// Run the session helper (notification tray icon included if possible)
-    SessionHelper,
+    /// Run the session helper, which mounts ingest shares in the user's session
+    SessionHelper {
+        /// Where the agent's local API is listening
+        #[arg(long, default_value = "http://localhost:3001/")]
+        agent_url: Url,
+    },
 
     /// Install and start the Windows service.
     #[cfg(windows)]

@@ -6,7 +6,7 @@ use std::{
 use futures_util::future::join_all;
 use log::{debug, error, info, warn};
 use modama_common::{
-    internal_api_types::{MountedShare, SessionHelperConfig},
+    internal_api_types::{MountedShare, SessionHelperConfig, SessionHelperState},
     messages::Share,
 };
 use widestring::U16CString;
@@ -14,7 +14,7 @@ use widestring::U16CString;
 use crate::{
     config::AgentConfig,
     session_helper::{
-        mount_backend::{MountBackend, MountBackendError},
+        mount_backend::{EnumerationError, MountBackend},
         platform_common::EnsureMountedError,
     },
 };
@@ -391,7 +391,7 @@ impl MountBackend for CurrentPlatformMountBackend {
         &self,
         _desired_shares: &[Share],
         _config: &SessionHelperConfig,
-    ) -> Vec<Result<MountedShare, MountBackendError>> {
+    ) -> Result<SessionHelperState, EnumerationError> {
         todo!("reconcile mapped drives");
     }
 }

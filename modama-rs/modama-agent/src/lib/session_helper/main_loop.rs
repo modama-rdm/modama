@@ -1,111 +1,476 @@
-use std::{ops::ControlFlow, sync::Arc, time::Duration};
+use std::{future::Future, pin::Pin, time::Duration};
 
-use anyhow::{Context as _, Result as AnyResult};
-use futures_util::StreamExt as _;
-use log::{error, info, warn};
-use modama_common::internal_api_types::ToSessionHelper;
-use rand::RngExt;
-use tokio::{sync::Mutex, time::Instant};
-use tokio_tungstenite::connect_async;
-use tungstenite::Message;
-
-use crate::session_helper::{
-    helper_state::HelperState, mount_backend::MountBackend, reconcile::reconcile,
+use futures_util::{
+    SinkExt as _, StreamExt as _,
+    stream::{SplitSink, SplitStream},
 };
+use log::{debug, error, info, warn};
+use modama_common::internal_api_types::{SessionHelperState, ToAgent, ToSessionHelper};
+use rand::RngExt;
+use tokio::{net::TcpStream, time::Instant};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tungstenite::Message;
+use url::Url;
 
-async fn handle_message(
-    backend: &impl MountBackend,
-    state: &Arc<Mutex<HelperState>>,
-    msg: &str,
-) -> AnyResult<()> {
-    let event_msg: ToSessionHelper = serde_json::from_str(msg)
-        .with_context(|| format!("Invalid message encountered: {}", msg))?;
-    info!("Received EventChannelMessage: {event_msg:?}");
+use crate::session_helper::mount_backend::MountBackend;
 
-    state.lock().await.desired_state = event_msg.share_state.clone();
-    if let Some(desired_shares) = event_msg.share_state {
-        // TODO: report the resulting mounts back to the agent
-        let _mounts = backend
-            .reconcile(&desired_shares.shares, &event_msg.config)
-            .await;
-    }
-    Ok(())
+type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+pub struct LoopOptions {
+    /// The agent's session helper endpoint, `ws://…/internal/events/session-helper/`
+    pub events_url: Url,
+
+    /// Time between reconciliation passes; each wait is drawn from ±20% of this, so helpers on
+    /// many machines don't retry against the SMB host in lockstep
+    pub interval: Duration,
+
+    /// Wait this long before trying to reconnect to the agent
+    pub reconnect_delay: Duration,
 }
 
-async fn receive_inner(
-    message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
-    backend: &impl MountBackend,
-    state: &Arc<Mutex<HelperState>>,
-) -> ControlFlow<(), ()> {
-    match message {
-        Some(Ok(Message::Text(utf8_bytes))) => {
-            if let Err(e) = handle_message(backend, state, &utf8_bytes.as_str()).await {
-                error!("Error while handing message: {e}");
+impl LoopOptions {
+    pub fn new(events_url: Url) -> Self {
+        Self {
+            events_url,
+            interval: Duration::from_secs(30),
+            reconnect_delay: Duration::from_secs(1),
+        }
+    }
+
+    fn next_pass(&self) -> Instant {
+        Instant::now() + self.interval.mul_f64(rand::rng().random_range(0.8..=1.2))
+    }
+}
+
+/// Everything the loop knows; owned by the single loop task, so passes can't overlap
+struct LoopState {
+    /// The last desired state received from the agent; kept across reconnects, so we keep
+    /// reconciling while the agent is gone
+    desired: Option<ToSessionHelper>,
+
+    sink: Option<SplitSink<Socket, Message>>,
+    stream: Option<SplitStream<Socket>>,
+
+    /// What we last sent to the agent over the current connection
+    last_report: Option<SessionHelperState>,
+}
+
+impl LoopState {
+    fn disconnected(&mut self) {
+        self.sink = None;
+        self.stream = None;
+        self.last_report = None;
+    }
+
+    /// One reconciliation pass, then report the result if it changed
+    async fn pass(&mut self, backend: &impl MountBackend) {
+        let Some(desired) = &self.desired else {
+            return;
+        };
+        // None: the agent hasn't heard from smbdrop yet, so we don't know what should be
+        // mounted; leave everything alone
+        let Some(share_state) = &desired.share_state else {
+            return;
+        };
+
+        let report = match backend
+            .reconcile(&share_state.shares, &desired.config)
+            .await
+        {
+            Ok(report) => report,
+            Err(e) => {
+                // we don't know the actual state, so we don't claim anything
+                warn!("{e}");
+                return;
             }
-            ControlFlow::Continue(())
+        };
+
+        let Some(sink) = &mut self.sink else {
+            return;
+        };
+        if self.last_report.as_ref() == Some(&report) {
+            return;
         }
-        Some(Ok(_)) => {
-            warn!("Message is not text, ignoring...");
-            ControlFlow::Continue(())
-        }
-        Some(Err(e)) => {
-            error!("Could not receive message ({e}), reconnecting...");
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            ControlFlow::Break(())
-        }
-        None => {
-            info!("Disconnected, trying to reconnect...");
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            ControlFlow::Break(())
+        let msg = ToAgent::SessionUpdate {
+            shares: report.mounted_shares.clone(),
+            errors: report.errors.clone(),
+        };
+        let text = match serde_json::to_string(&msg) {
+            Ok(text) => text,
+            Err(e) => {
+                error!("could not serialize report: {e}");
+                return;
+            }
+        };
+        match sink.send(Message::Text(text.into())).await {
+            Ok(()) => self.last_report = Some(report),
+            Err(e) => {
+                info!("could not send report ({e}), reconnecting...");
+                self.disconnected();
+            }
         }
     }
 }
 
-pub async fn session_helper_loop(state: Arc<Mutex<HelperState>>, backend: &impl MountBackend) {
-    // [ ] connect to the internal websocket API
-    // receive messages
-    // [x] add a timeout when receiving, so we reconcile periodically
-    // -> we need to keep the latest received desired state around for periodic reconciliation
-    // [ ] handle each message by calling the reconciliation function(s)
-    //
-    //
+/// The agent must answer the websocket handshake within this time
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+type Connecting = Pin<Box<dyn Future<Output = Result<Socket, String>> + Send>>;
+
+fn connect(url: Url) -> Connecting {
+    Box::pin(async move {
+        match tokio::time::timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
+            Ok(Ok((socket, _response))) => Ok(socket),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_elapsed) => Err("timed out".to_owned()),
+        }
+    })
+}
+
+/// Wait for the connection attempt, or forever if there is none
+async fn connected(connecting: &mut Option<Connecting>) -> Result<Socket, String> {
+    match connecting {
+        Some(connecting) => connecting.await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Wait for the next message, or forever if we aren't connected
+async fn next_message(
+    stream: &mut Option<SplitStream<Socket>>,
+) -> Option<Result<Message, tungstenite::Error>> {
+    match stream {
+        Some(stream) => stream.next().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Connect to the agent, receive desired state, reconcile and report, forever.
+pub async fn session_helper_loop(backend: &impl MountBackend, options: &LoopOptions) -> ! {
+    let mut state = LoopState {
+        desired: None,
+        sink: None,
+        stream: None,
+        last_report: None,
+    };
+    let mut next_pass = options.next_pass();
+    let mut next_connect = Instant::now();
+    // connecting runs alongside the passes, so an agent that hangs during the handshake doesn't
+    // stop reconciliation
+    let mut connecting: Option<Connecting> = None;
 
     loop {
-        state.lock().await.connection_state =
-            crate::session_helper::helper_state::HelperConnectionState::Connecting;
-
-        // FIXME: configurable base URL
-        let (conn, _resp) = connect_async("ws://localhost:3003/internal/events/session-helper/")
-            .await
-            .unwrap();
-        let (_ws_write, mut ws_read) = conn.split();
-
-        state.lock().await.connection_state =
-            crate::session_helper::helper_state::HelperConnectionState::Connected;
-
-        let reconcile_interval =
-            Duration::from_millis(1000u64 + rand::rng().random_range(0..500u64));
-        let timer = tokio::time::sleep(reconcile_interval);
-        tokio::pin!(timer);
-        loop {
-            // keep this outside the select! so the reconciliation
-            // can finish even if a websocket message arrives concurrently:
-            if let Some(config) = &state.lock().await.config {
-                reconcile(backend, &config, &state).await;
-            }
-            tokio::select! {
-                _ = &mut timer => {
-                    timer.as_mut().reset(
-                        Instant::now() + reconcile_interval + Duration::from_millis(rand::rng().random_range(0..300u64))
-                    )
+        let idle = state.stream.is_none() && connecting.is_none();
+        tokio::select! {
+            message = next_message(&mut state.stream) => {
+                match message {
+                    Some(Ok(Message::Text(text))) => {
+                        match serde_json::from_str::<ToSessionHelper>(text.as_str()) {
+                            Ok(desired) => {
+                                debug!("received desired state: {desired:?}");
+                                state.desired = Some(desired);
+                                state.pass(backend).await;
+                                next_pass = options.next_pass();
+                            }
+                            Err(e) => warn!("ignoring invalid message from the agent: {e}"),
+                        }
+                    }
+                    Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {}
+                    Some(Ok(Message::Binary(_))) => warn!("ignoring binary message from the agent"),
+                    Some(Ok(Message::Close(_))) | None => {
+                        info!("disconnected from the agent, reconnecting...");
+                        state.disconnected();
+                        next_connect = Instant::now() + options.reconnect_delay;
+                    }
+                    Some(Err(e)) => {
+                        info!("connection to the agent failed ({e}), reconnecting...");
+                        state.disconnected();
+                        next_connect = Instant::now() + options.reconnect_delay;
+                    }
                 }
-                msg = ws_read.next() => {
-                    match receive_inner(msg, backend, &state).await {
-                        ControlFlow::Continue(_) => continue,  // success or ignored message
-                        ControlFlow::Break(_) => break,  // error or disconnected => reconnect
+            }
+            _ = tokio::time::sleep_until(next_pass) => {
+                state.pass(backend).await;
+                next_pass = options.next_pass();
+            }
+            _ = tokio::time::sleep_until(next_connect), if idle => {
+                connecting = Some(connect(options.events_url.clone()));
+            }
+            result = connected(&mut connecting) => {
+                connecting = None;
+                match result {
+                    Ok(socket) => {
+                        info!("connected to the agent at {}", options.events_url);
+                        let (sink, stream) = socket.split();
+                        state.sink = Some(sink);
+                        state.stream = Some(stream);
+                    }
+                    Err(e) => {
+                        debug!("could not connect to the agent: {e}");
+                        next_connect = Instant::now() + options.reconnect_delay;
                     }
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use modama_common::{
+        internal_api_types::{MountedShare, SessionHelperConfig, ShareError, Shares},
+        messages::Share,
+    };
+    use tokio::{net::TcpListener, task::JoinHandle, time::timeout};
+    use tokio_tungstenite::accept_async;
+
+    use super::*;
+    use crate::session_helper::mount_backend::EnumerationError;
+
+    type AgentSocket = WebSocketStream<TcpStream>;
+
+    /// Records the share IDs of every pass, and returns whatever result is configured
+    #[derive(Clone)]
+    struct FakeBackend {
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+        result: Arc<Mutex<Result<SessionHelperState, String>>>,
+    }
+
+    impl FakeBackend {
+        fn new(result: Result<SessionHelperState, String>) -> Self {
+            Self {
+                calls: Arc::default(),
+                result: Arc::new(Mutex::new(result)),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.lock().unwrap().len()
+        }
+
+        fn set_result(&self, result: Result<SessionHelperState, String>) {
+            *self.result.lock().unwrap() = result;
+        }
+    }
+
+    impl MountBackend for FakeBackend {
+        async fn reconcile(
+            &self,
+            desired_shares: &[Share],
+            _config: &SessionHelperConfig,
+        ) -> Result<SessionHelperState, EnumerationError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(desired_shares.iter().map(|s| s.share_id.clone()).collect());
+            self.result
+                .lock()
+                .unwrap()
+                .clone()
+                .map_err(EnumerationError)
+        }
+    }
+
+    /// A fake agent: the helper connects to `listener`
+    struct Setup {
+        listener: TcpListener,
+        backend: FakeBackend,
+        helper: JoinHandle<()>,
+    }
+
+    impl Setup {
+        async fn start(result: Result<SessionHelperState, String>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let backend = FakeBackend::new(result);
+            let options = LoopOptions {
+                events_url: Url::parse(&format!("ws://{address}/")).unwrap(),
+                interval: Duration::from_millis(30),
+                reconnect_delay: Duration::from_millis(10),
+            };
+            let helper_backend = backend.clone();
+            let helper = tokio::spawn(async move {
+                session_helper_loop(&helper_backend, &options).await;
+            });
+            Self {
+                listener,
+                backend,
+                helper,
+            }
+        }
+
+        async fn accept(&self) -> AgentSocket {
+            let (tcp, _) = timeout(Duration::from_secs(2), self.listener.accept())
+                .await
+                .expect("the helper did not connect")
+                .unwrap();
+            accept_async(tcp).await.unwrap()
+        }
+
+        /// Wait until the backend has seen at least `n` passes in total
+        async fn wait_for_calls(&self, n: usize) {
+            timeout(Duration::from_secs(2), async {
+                while self.backend.calls() < n {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("not enough reconciliation passes");
+        }
+    }
+
+    impl Drop for Setup {
+        fn drop(&mut self) {
+            self.helper.abort();
+        }
+    }
+
+    fn share(id: &str) -> Share {
+        Share {
+            resource: Some("resource".to_owned()),
+            share_id: id.to_owned(),
+            share_name: format!("share-{id}"),
+            dest_path: format!("/project/{id}"),
+            created_timestamp: 0,
+            username: "user".to_owned(),
+            password: "password".to_owned(),
+            uid: 1000,
+            gid: 1000,
+        }
+    }
+
+    fn report(paths: &[&str]) -> SessionHelperState {
+        SessionHelperState {
+            mounted_shares: paths
+                .iter()
+                .map(|p| MountedShare {
+                    share_name: format!("share-{p}"),
+                    mount_path: Some(format!("/mnt/{p}").into()),
+                })
+                .collect(),
+            errors: vec![],
+        }
+    }
+
+    async fn send_desired(socket: &mut AgentSocket, shares: Option<Vec<Share>>) {
+        let msg = ToSessionHelper {
+            config: SessionHelperConfig {
+                smb_hostname: "smb.example.test".to_owned(),
+                smb_port: 445,
+                smb_domain: "WORKGROUP".to_owned(),
+            },
+            share_state: shares.map(|shares| Shares {
+                foreground_share_id: None,
+                shares,
+            }),
+        };
+        socket
+            .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
+            .await
+            .unwrap();
+    }
+
+    /// The next report, or None if none arrives within `wait`
+    async fn next_report(socket: &mut AgentSocket, wait: Duration) -> Option<SessionHelperState> {
+        let message = timeout(wait, socket.next()).await.ok()?;
+        let text = message.unwrap().unwrap().into_text().unwrap();
+        let ToAgent::SessionUpdate { shares, errors } = serde_json::from_str(&text).unwrap();
+        Some(SessionHelperState {
+            mounted_shares: shares,
+            errors,
+        })
+    }
+
+    const SHORT: Duration = Duration::from_millis(200);
+    const LONG: Duration = Duration::from_secs(2);
+
+    #[tokio::test]
+    async fn desired_state_triggers_a_pass_and_its_result_is_reported() {
+        let mut result = report(&["a"]);
+        result.errors.push(ShareError {
+            share_id: "b".to_owned(),
+            message: "credential conflict".to_owned(),
+        });
+        let setup = Setup::start(Ok(result.clone())).await;
+        let mut agent = setup.accept().await;
+
+        send_desired(&mut agent, Some(vec![share("a"), share("b")])).await;
+
+        assert_eq!(next_report(&mut agent, LONG).await, Some(result));
+        assert_eq!(setup.backend.calls.lock().unwrap()[0], vec!["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn no_pass_before_the_agent_knows_the_desired_state() {
+        let setup = Setup::start(Ok(report(&[]))).await;
+        let mut agent = setup.accept().await;
+
+        send_desired(&mut agent, None).await;
+
+        // several intervals pass without any reconciliation or report:
+        assert_eq!(next_report(&mut agent, SHORT).await, None);
+        assert_eq!(setup.backend.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn unchanged_reports_are_sent_once() {
+        let setup = Setup::start(Ok(report(&["a"]))).await;
+        let mut agent = setup.accept().await;
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&["a"])));
+
+        setup.wait_for_calls(4).await;
+        assert_eq!(next_report(&mut agent, SHORT).await, None);
+
+        setup.backend.set_result(Ok(report(&[])));
+        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&[])));
+    }
+
+    #[tokio::test]
+    async fn enumeration_errors_are_not_reported() {
+        let setup = Setup::start(Err("no GVfs".to_owned())).await;
+        let mut agent = setup.accept().await;
+
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+
+        setup.wait_for_calls(2).await;
+        assert_eq!(next_report(&mut agent, SHORT).await, None);
+    }
+
+    #[tokio::test]
+    async fn reconciles_while_disconnected_and_reports_again_after_reconnect() {
+        let setup = Setup::start(Ok(report(&["a"]))).await;
+        let mut agent = setup.accept().await;
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&["a"])));
+
+        // the agent goes away; the helper keeps reconciling the retained desired state
+        drop(agent);
+        let calls = setup.backend.calls();
+        setup.wait_for_calls(calls + 3).await;
+
+        // after the reconnect, the same (unchanged) state is reported again
+        let mut agent = setup.accept().await;
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&["a"])));
+    }
+
+    #[tokio::test]
+    async fn hanging_handshake_does_not_stop_reconciliation() {
+        let setup = Setup::start(Ok(report(&["a"]))).await;
+        let mut agent = setup.accept().await;
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&["a"])));
+        drop(agent);
+
+        // accept the TCP connection, but never answer the websocket handshake
+        let (_tcp, _) = timeout(LONG, setup.listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let calls = setup.backend.calls();
+        setup.wait_for_calls(calls + 3).await;
     }
 }
