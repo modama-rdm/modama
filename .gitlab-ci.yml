@@ -42,7 +42,7 @@ rust-tests:
       - RUST_VERSION: ['1', '1.94']
   image: rust:${RUST_VERSION}-slim-trixie
   script:
-    - apt-get -y update && apt-get -y install lld build-essential git libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
+    - apt-get -y update && apt-get -y install lld build-essential git pkg-config libglib2.0-dev libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
     - vulkaninfo --summary
     - rustup component add clippy
     - just --version || cargo install just --locked
