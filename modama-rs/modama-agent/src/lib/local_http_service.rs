@@ -430,12 +430,9 @@ impl IntoResponse for LocalAPIError {
                 error!("backend API error: {e}");
                 if let MgmtError::RequestError(error) = e {
                     let mut error = &error as &(dyn Error + 'static);
-                    loop {
-                        let source = error.source();
-                        if let Some(inner) = source {
-                            error!("  error details: {:?}", inner);
-                            error = inner;
-                        }
+                    while let Some(inner) = error.source() {
+                        error!("  error details: {:?}", inner);
+                        error = inner;
                     }
                 }
                 // FIXME: json/text depending on accept?
