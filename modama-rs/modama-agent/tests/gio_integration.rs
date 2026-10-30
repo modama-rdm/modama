@@ -54,10 +54,12 @@ async fn gio_backend_against_samba() {
     let ingest = share("1", "ingest", "testpass");
 
     // 1. mount: the share gets a FUSE path in the user's runtime directory, and is usable
-    let state = backend
+    let result = backend
         .reconcile(std::slice::from_ref(&ingest), &localhost, false)
         .await
         .unwrap();
+    assert_eq!(result.created, vec!["ingest"]);
+    let state = result.state;
     assert!(state.errors.is_empty(), "{state:?}");
     let path = mount_path(&state, "ingest").expect("ingest mounted with a path");
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap();
@@ -75,7 +77,8 @@ async fn gio_backend_against_samba() {
         .reconcile(std::slice::from_ref(&ingest), &localhost, false)
         .await
         .unwrap();
-    assert_eq!(again, state);
+    assert!(again.created.is_empty(), "{again:?}");
+    assert_eq!(again.state, state);
 
     // 3. a wrong password fails quickly, i.e. it isn't retried until the timeout
     let wrong = share("2", "ingest2", "wrong-password");
@@ -83,7 +86,8 @@ async fn gio_backend_against_samba() {
     let state = backend
         .reconcile(&[ingest.clone(), wrong], &localhost, false)
         .await
-        .unwrap();
+        .unwrap()
+        .state;
     assert!(
         start.elapsed() < Duration::from_secs(20),
         "{:?}",
@@ -103,18 +107,28 @@ async fn gio_backend_against_samba() {
     let state = backend
         .reconcile(std::slice::from_ref(&other), &other_host, false)
         .await
-        .unwrap();
+        .unwrap()
+        .state;
     assert!(mount_path(&state, "other").is_some(), "{state:?}");
-    let state = backend.reconcile(&[], &localhost, false).await.unwrap();
+    let state = backend
+        .reconcile(&[], &localhost, false)
+        .await
+        .unwrap()
+        .state;
     assert!(state.mounted_shares.is_empty(), "{state:?}");
     let state = backend
         .reconcile(std::slice::from_ref(&other), &other_host, false)
         .await
-        .unwrap();
+        .unwrap()
+        .state;
     assert!(mount_path(&state, "other").is_some(), "{state:?}");
 
     // 5. an empty desired state removes our mounts, and their paths disappear
-    let state = backend.reconcile(&[], &other_host, false).await.unwrap();
+    let state = backend
+        .reconcile(&[], &other_host, false)
+        .await
+        .unwrap()
+        .state;
     assert!(state.mounted_shares.is_empty(), "{state:?}");
     assert!(!path.exists(), "{path:?} still exists");
 }

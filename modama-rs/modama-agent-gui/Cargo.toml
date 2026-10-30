@@ -75,6 +75,11 @@ path = "tests/selection_visual.rs"
 required-features = ["visual-tests"]
 
 [[test]]
+name = "mount_popup_visual"
+path = "tests/mount_popup_visual.rs"
+required-features = ["visual-tests"]
+
+[[test]]
 name = "guide_screenshots_visual"
 path = "tests/guide_screenshots_visual.rs"
 required-features = ["visual-tests"]

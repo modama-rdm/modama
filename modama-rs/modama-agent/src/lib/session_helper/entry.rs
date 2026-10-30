@@ -11,19 +11,22 @@
 // - [x] connection and reconciliation loop
 // - [x] mount backend GIO
 // - [x] mount backend WNet
-// - [ ] open the file manager for newly created foreground mounts
+// - [x] mount popup for newly created mounts, opening the file manager on request
 // - [ ] notification tray icon
 
 use anyhow::{Context as _, Result, anyhow};
 use log::info;
 #[cfg(not(windows))]
 use modama_common::logging::init_logging;
+use tokio::sync::mpsc;
 use url::Url;
 
 use crate::{
     runtime::shutdown_signal,
     session_helper::{
         main_loop::{LoopOptions, session_helper_loop},
+        mount_popup::{GuiPopups, run_popup_task},
+        open_folder::SystemFolderOpener,
         platform::CurrentPlatformMountBackend,
         singleton::{self, Singleton},
     },
@@ -89,10 +92,13 @@ pub fn run(agent_url: &Url) -> Result<()> {
     };
 
     let options = LoopOptions::new(events_url(agent_url)?);
+    let popups = GuiPopups::next_to_current_exe().context("could not locate the GUI")?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let backend = CurrentPlatformMountBackend::new().await?;
+        let (popup_tx, popup_rx) = mpsc::unbounded_channel();
         tokio::select! {
-            _ = session_helper_loop(&backend, &options) => {}
+            _ = session_helper_loop(&backend, &options, popup_tx) => {}
+            () = run_popup_task(popup_rx, popups, SystemFolderOpener) => {}
             () = shutdown_signal() => info!("shutting down"),
         }
         Ok(())

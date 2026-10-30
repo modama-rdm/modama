@@ -3,6 +3,8 @@ pub mod entry;
 pub mod gio_backend;
 pub mod main_loop;
 pub mod mount_backend;
+pub mod mount_popup;
+pub mod open_folder;
 #[cfg_attr(target_os = "linux", path = "session_helper/platform_linux.rs")]
 #[cfg_attr(target_os = "windows", path = "session_helper/platform_windows.rs")]
 pub mod platform;

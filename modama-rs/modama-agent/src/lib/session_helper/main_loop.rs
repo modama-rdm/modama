@@ -5,14 +5,19 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
 };
 use log::{debug, error, info, warn};
-use modama_common::internal_api_types::{SessionHelperState, ToAgent, ToSessionHelper};
+use modama_common::{
+    foreground::project_and_session,
+    internal_api_types::{SessionHelperState, ToAgent, ToSessionHelper},
+    messages::Share,
+    mount_popup::PopupMount,
+};
 use rand::RngExt;
-use tokio::{net::TcpStream, time::Instant};
+use tokio::{net::TcpStream, sync::mpsc, time::Instant};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tungstenite::Message;
 use url::Url;
 
-use crate::session_helper::mount_backend::MountBackend;
+use crate::session_helper::mount_backend::{MountBackend, PassResult, same_share};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -53,6 +58,38 @@ struct LoopState {
 
     /// What we last sent to the agent over the current connection
     last_report: Option<SessionHelperState>,
+
+    /// Mounts a pass created go to the mount popup
+    popup: mpsc::UnboundedSender<Vec<PopupMount>>,
+}
+
+/// The mounts this pass created that offer a path, as the mount popup shows them
+fn popup_mounts(desired: &[Share], result: &PassResult) -> Vec<PopupMount> {
+    result
+        .created
+        .iter()
+        .filter_map(|name| {
+            let mount_path = result
+                .state
+                .mounted_shares
+                .iter()
+                .find(|mounted| same_share(&mounted.share_name, name))?
+                .mount_path
+                .clone()?;
+            let share = desired.iter().find(|s| same_share(&s.share_name, name))?;
+            match project_and_session(&share.dest_path) {
+                Ok((project, session)) => Some(PopupMount {
+                    project,
+                    session,
+                    mount_path,
+                }),
+                Err(e) => {
+                    warn!("not announcing share {name}: {e}");
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 impl LoopState {
@@ -73,17 +110,23 @@ impl LoopState {
             return;
         };
 
-        let report = match backend
+        let result = match backend
             .reconcile(&share_state.shares, &desired.config, force)
             .await
         {
-            Ok(report) => report,
+            Ok(result) => result,
             Err(e) => {
                 // we don't know the actual state, so we don't claim anything
                 warn!("{e}");
                 return;
             }
         };
+        let created = popup_mounts(&share_state.shares, &result);
+        if !created.is_empty() {
+            // the popup task only stops with the helper
+            let _ = self.popup.send(created);
+        }
+        let report = result.state;
 
         let Some(sink) = &mut self.sink else {
             return;
@@ -146,12 +189,17 @@ async fn next_message(
 }
 
 /// Connect to the agent, receive desired state, reconcile and report, forever.
-pub async fn session_helper_loop(backend: &impl MountBackend, options: &LoopOptions) -> ! {
+pub async fn session_helper_loop(
+    backend: &impl MountBackend,
+    options: &LoopOptions,
+    popup: mpsc::UnboundedSender<Vec<PopupMount>>,
+) -> ! {
     let mut state = LoopState {
         desired: None,
         sink: None,
         stream: None,
         last_report: None,
+        popup,
     };
     let mut next_pass = options.next_pass();
     let mut next_connect = Instant::now();
@@ -243,6 +291,8 @@ mod tests {
         /// whether each pass was forced
         forced: Arc<Mutex<Vec<bool>>>,
         result: Arc<Mutex<Result<SessionHelperState, String>>>,
+        /// returned as `created` by the next pass only
+        created: Arc<Mutex<Vec<String>>>,
     }
 
     impl FakeBackend {
@@ -251,6 +301,7 @@ mod tests {
                 calls: Arc::default(),
                 forced: Arc::default(),
                 result: Arc::new(Mutex::new(result)),
+                created: Arc::default(),
             }
         }
 
@@ -269,17 +320,22 @@ mod tests {
             desired_shares: &[Share],
             _config: &SessionHelperConfig,
             force: bool,
-        ) -> Result<SessionHelperState, EnumerationError> {
+        ) -> Result<PassResult, EnumerationError> {
             self.forced.lock().unwrap().push(force);
             self.calls
                 .lock()
                 .unwrap()
                 .push(desired_shares.iter().map(|s| s.share_id.clone()).collect());
-            self.result
+            let state = self
+                .result
                 .lock()
                 .unwrap()
                 .clone()
-                .map_err(EnumerationError)
+                .map_err(EnumerationError)?;
+            Ok(PassResult {
+                state,
+                created: std::mem::take(&mut *self.created.lock().unwrap()),
+            })
         }
     }
 
@@ -288,6 +344,7 @@ mod tests {
         listener: TcpListener,
         backend: FakeBackend,
         helper: JoinHandle<()>,
+        popup: mpsc::UnboundedReceiver<Vec<PopupMount>>,
     }
 
     impl Setup {
@@ -301,13 +358,15 @@ mod tests {
                 reconnect_delay: Duration::from_millis(10),
             };
             let helper_backend = backend.clone();
+            let (popup_tx, popup) = mpsc::unbounded_channel();
             let helper = tokio::spawn(async move {
-                session_helper_loop(&helper_backend, &options).await;
+                session_helper_loop(&helper_backend, &options, popup_tx).await;
             });
             Self {
                 listener,
                 backend,
                 helper,
+                popup,
             }
         }
 
@@ -432,6 +491,29 @@ mod tests {
         let forced = setup.backend.forced.lock().unwrap().clone();
         assert!(forced[0]);
         assert!(forced[1..].iter().all(|forced| !forced));
+    }
+
+    #[tokio::test]
+    async fn created_mounts_with_a_path_go_to_the_popup() {
+        let mut setup = Setup::start(Ok(report(&["a"]))).await;
+        // "share-b" was mounted, but has no path in the report:
+        *setup.backend.created.lock().unwrap() = vec!["share-a".to_owned(), "share-b".to_owned()];
+        let mut agent = setup.accept().await;
+
+        send_desired(&mut agent, Some(vec![share("a"), share("b")])).await;
+
+        let mounts = timeout(LONG, setup.popup.recv()).await.unwrap().unwrap();
+        assert_eq!(
+            mounts,
+            vec![PopupMount {
+                project: "project".to_owned(),
+                session: "a".to_owned(),
+                mount_path: "/mnt/a".into(),
+            }]
+        );
+        // later passes create nothing, so nothing more is announced:
+        setup.wait_for_calls(3).await;
+        assert!(setup.popup.try_recv().is_err());
     }
 
     #[tokio::test]

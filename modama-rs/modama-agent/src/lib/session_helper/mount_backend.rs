@@ -16,11 +16,21 @@ pub enum MountBackendError {
 #[error("could not list mounts: {0}")]
 pub struct EnumerationError(pub String);
 
+/// The outcome of one pass
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PassResult {
+    /// What exists afterwards; this is what the helper reports
+    pub state: SessionHelperState,
+    /// Names of the shares this pass mounted; internal to the helper (the mount popup)
+    pub created: Vec<String>,
+}
+
 pub trait MountBackend {
     /// One reconciliation pass: list what is mounted from `config.smb_hostname`, remove what
     /// isn't desired, mount what's missing, and return the actual state afterwards: every mount
     /// from that host (desired or not), plus an error for each desired share that is still
-    /// missing. Mounts should eventually converge, but it might take some passes.
+    /// missing, along with the shares this pass mounted. Mounts should eventually converge, but
+    /// it might take some passes.
     ///
     /// With `force`, mounts that are no longer desired are removed even if files are open on
     /// them (the GUI asked to release a previous user's drive).
@@ -29,7 +39,7 @@ pub trait MountBackend {
         desired_shares: &[Share],
         config: &SessionHelperConfig,
         force: bool,
-    ) -> impl Future<Output = Result<SessionHelperState, EnumerationError>>;
+    ) -> impl Future<Output = Result<PassResult, EnumerationError>>;
 }
 
 /// SMB share names are case-insensitive

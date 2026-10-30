@@ -24,7 +24,7 @@ use tokio::sync::oneshot;
 use url::Url;
 
 use crate::session_helper::mount_backend::{
-    EnumerationError, MountBackend, same_share, unique_by_name,
+    EnumerationError, MountBackend, PassResult, same_share, unique_by_name,
 };
 
 /// Upper bound for a single mount or unmount operation
@@ -133,7 +133,7 @@ fn reconcile_pass<A: GioApi>(
     api: &A,
     shares: &[Share],
     config: &SessionHelperConfig,
-) -> Result<SessionHelperState, EnumerationError> {
+) -> Result<PassResult, EnumerationError> {
     let ours = |listed: Vec<ListedMount<A::Handle>>| {
         listed
             .into_iter()
@@ -156,6 +156,7 @@ fn reconcile_pass<A: GioApi>(
     }
 
     let mut mount_errors = HashMap::new();
+    let mut created = Vec::new();
     for share in &desired {
         if before
             .iter()
@@ -166,7 +167,9 @@ fn reconcile_pass<A: GioApi>(
         let uri = share_uri(config, &share.share_name)?;
         debug!("mounting share {}", share.share_name);
         match api.mount(&uri, share, &config.smb_domain) {
-            Ok(()) | Err(MountError::AlreadyMounted) => {}
+            Ok(()) => created.push(share.share_name.clone()),
+            // someone else mounted it in the meantime, so it isn't ours to announce
+            Err(MountError::AlreadyMounted) => {}
             Err(e) => {
                 mount_errors.insert(share.share_id.clone(), redact(&e.to_string(), &uri, share));
             }
@@ -192,15 +195,18 @@ fn reconcile_pass<A: GioApi>(
             Some(_) => {}
         }
     }
-    Ok(SessionHelperState {
-        mounted_shares: after
-            .into_iter()
-            .map(|(share_name, mount)| MountedShare {
-                share_name,
-                mount_path: mount.path,
-            })
-            .collect(),
-        errors,
+    Ok(PassResult {
+        state: SessionHelperState {
+            mounted_shares: after
+                .into_iter()
+                .map(|(share_name, mount)| MountedShare {
+                    share_name,
+                    mount_path: mount.path,
+                })
+                .collect(),
+            errors,
+        },
+        created,
     })
 }
 
@@ -312,7 +318,7 @@ impl GioApi for NativeGio {
     }
 }
 
-type ReconcileResult = Result<SessionHelperState, EnumerationError>;
+type ReconcileResult = Result<PassResult, EnumerationError>;
 
 enum Command {
     Reconcile {
@@ -604,8 +610,9 @@ mod tests {
             "smb://smb.example.test/",
             "gphoto2://[usb:001,005]/",
         ]);
-        let state =
-            reconcile_pass(&api, &[share("1", "keep"), share("2", "new")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "keep"), share("2", "new")], &config())
+            .unwrap()
+            .state;
 
         assert_eq!(names(&state), vec!["keep", "new"]);
         assert!(state.errors.is_empty());
@@ -636,14 +643,18 @@ mod tests {
         api.mount_errors
             .insert("a".to_owned(), MountError::AlreadyMounted);
         // the fake doesn't record the mount then; the next inventory decides:
-        let state = reconcile_pass(&api, &[share("1", "a")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a")], &config())
+            .unwrap()
+            .state;
         assert_eq!(state.errors[0].message, "not mounted");
 
         api.mounts.borrow_mut().push((
             "smb://smb.example.test/a/".to_owned(),
             Some("/fuse/a".into()),
         ));
-        let state = reconcile_pass(&api, &[share("1", "a")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a")], &config())
+            .unwrap()
+            .state;
         assert!(state.errors.is_empty());
     }
 
@@ -659,7 +670,9 @@ mod tests {
         );
         api.mount_errors
             .insert("c".to_owned(), MountError::AuthenticationFailed);
-        let state = reconcile_pass(&api, &[share("1", "a b"), share("2", "c")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a b"), share("2", "c")], &config())
+            .unwrap()
+            .state;
 
         assert!(state.mounted_shares.is_empty());
         let message = &state.errors[0].message;
@@ -677,14 +690,16 @@ mod tests {
         let mut api = FakeGio::with_mounts(&["smb://smb.example.test/busy/"]);
         api.unmount_errors
             .insert("smb://smb.example.test/busy/".to_owned());
-        let state = reconcile_pass(&api, &[], &config()).unwrap();
+        let state = reconcile_pass(&api, &[], &config()).unwrap().state;
         assert_eq!(names(&state), vec!["busy"]);
     }
 
     #[test]
     fn duplicate_desired_names_get_an_error() {
         let api = FakeGio::default();
-        let state = reconcile_pass(&api, &[share("1", "a"), share("2", "A")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a"), share("2", "A")], &config())
+            .unwrap()
+            .state;
         assert_eq!(names(&state), vec!["a"]);
         assert_eq!(state.errors.len(), 1);
         assert_eq!(state.errors[0].share_id, "2");
@@ -696,8 +711,25 @@ mod tests {
             no_path: true,
             ..FakeGio::default()
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a")], &config())
+            .unwrap()
+            .state;
         assert_eq!(state.mounted_shares[0].mount_path, None);
         assert!(state.errors[0].message.contains("gvfs-fuse"));
+    }
+
+    #[test]
+    fn created_lists_only_what_this_pass_mounted() {
+        let mut api = FakeGio::with_mounts(&["smb://smb.example.test/keep/"]);
+        // someone else mounted "raced" first: not ours to announce
+        api.mount_errors
+            .insert("raced".to_owned(), MountError::AlreadyMounted);
+        let result = reconcile_pass(
+            &api,
+            &[share("1", "keep"), share("2", "new"), share("3", "raced")],
+            &config(),
+        )
+        .unwrap();
+        assert_eq!(result.created, vec!["new"]);
     }
 }

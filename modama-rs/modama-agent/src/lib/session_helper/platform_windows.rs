@@ -8,10 +8,7 @@ use std::{
 };
 
 use log::{debug, warn};
-use modama_common::{
-    internal_api_types::{SessionHelperConfig, SessionHelperState},
-    messages::Share,
-};
+use modama_common::{internal_api_types::SessionHelperConfig, messages::Share};
 use widestring::U16CString;
 use windows::{
     Win32::{
@@ -38,7 +35,7 @@ use windows::{
 };
 
 use crate::session_helper::{
-    mount_backend::{EnumerationError, MountBackend},
+    mount_backend::{EnumerationError, MountBackend, PassResult},
     wnet_reconcile::{AddError, Connection, WNetApi, reconcile_pass},
 };
 
@@ -329,7 +326,7 @@ impl MountBackend for CurrentPlatformMountBackend {
         desired_shares: &[Share],
         config: &SessionHelperConfig,
         force: bool,
-    ) -> Result<SessionHelperState, EnumerationError> {
+    ) -> Result<PassResult, EnumerationError> {
         // WNet calls block, possibly for as long as the server takes to answer
         let (api, shares, config) = (
             Arc::clone(&self.api),

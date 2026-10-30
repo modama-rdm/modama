@@ -10,6 +10,7 @@ mod foreground_monitor;
 #[cfg(feature = "guide-screenshots")]
 pub mod guide_screenshots;
 pub mod helper_launch;
+pub mod mount_popup;
 mod navigation_progress;
 pub mod pages;
 pub mod service;

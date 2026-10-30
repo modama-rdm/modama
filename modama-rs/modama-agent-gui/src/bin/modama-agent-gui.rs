@@ -3,7 +3,7 @@ use std::{error::Error, path::PathBuf, sync::Arc};
 use clap::Parser;
 use eframe::egui;
 use modama_agent_gui::{
-    app::AgentGuiApp, config::load_config, helper_launch::launch_session_helper,
+    app::AgentGuiApp, config::load_config, helper_launch::launch_session_helper, mount_popup,
     service::HttpAgentService, styles,
 };
 use modama_common::logging::init_logging;
@@ -21,12 +21,21 @@ struct Cli {
     /// Start the session helper without a window and exit (used by the autostart entry).
     #[arg(long)]
     start_session_helper: bool,
+
+    /// Show the mount popup for the session helper, which talks to it over stdin/stdout.
+    #[arg(long)]
+    mount_popup: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     init_logging();
 
     let cli = Cli::parse();
+    if cli.mount_popup {
+        // needs no configuration: everything comes from the helper
+        mount_popup::run()?;
+        return Ok(());
+    }
     let config = load_config(cli.config_path.as_deref(), cli.agent_url)?;
     if cli.start_session_helper {
         // nobody sees this process, so only log; the helper keeps running after we exit
