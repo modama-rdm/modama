@@ -309,6 +309,22 @@ impl SmbDropState {
             }
         }
 
+        // all shares attached to a resource belong to one uid (see `detach_other_uids`);
+        // possible healing: keep the newest share's uid, detach the others. Not done, because
+        // the next share created for the resource fixes it anyway.
+        let mut owners: HashMap<&str, u32> = HashMap::new();
+        for share in self.shares.values().sorted_by_key(|s| &s.share_id) {
+            if let Some(resource) = &share.resource
+                && let Some(owner) = owners.insert(resource, share.uid)
+                && owner != share.uid
+            {
+                return Err(ShareError::Inconsistent(format!(
+                    "resource `{resource}` has shares of uids {owner} and {}",
+                    share.uid
+                )));
+            }
+        }
+
         Ok(())
     }
 
@@ -363,6 +379,22 @@ impl SmbDropState {
         let key = share.share_id.clone();
         self.shares.insert(key, share);
         Ok(())
+    }
+
+    /// Detach the shares of other uids from `resource`: all shares attached to a resource
+    /// belong to one uid, so an agent never gets shares with different credentials (Windows
+    /// allows only one set per server). Detached shares stay; they are just no longer sent to
+    /// the resource's agents.
+    pub fn detach_other_uids(&mut self, resource: &str, uid: u32) {
+        for share in self.shares.values_mut() {
+            if share.resource.as_deref() == Some(resource) && share.uid != uid {
+                info!(
+                    "detaching share {} of uid {} from resource {resource}",
+                    share.share_id, share.uid
+                );
+                share.resource = None;
+            }
+        }
     }
 
     pub async fn remove_share(&mut self, share_id: &str) -> Result<Share, ShareError> {
@@ -867,6 +899,11 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 
         self.add_system_user(&user).await?;
 
+        // attaching is part of creating; if re-attaching existing shares is ever needed, move
+        // the resource assignment into its own state transition that calls this as well
+        if let Some(resource) = &share.resource {
+            state.detach_other_uids(resource, uid);
+        }
         state.add_share(share.clone()).await?;
         debug!("create_share: share {share_id} added");
 
@@ -1086,6 +1123,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
 mod tests {
     use std::{collections::HashMap, path::Path, sync::Arc};
 
+    use itertools::Itertools as _;
     use log::debug;
     use modama_common::{logging::init_logging, messages::Share, test_helpers::TempDir};
 
@@ -1398,6 +1436,121 @@ mod tests {
             .unwrap();
         let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
         state.check_consistent(&user_provider).unwrap();
+    }
+
+    fn resource_share(share_id: &str, uid: u32, resource: Option<&str>) -> Share {
+        Share {
+            resource: resource.map(str::to_owned),
+            share_id: share_id.to_owned(),
+            share_name: share_id.to_owned(),
+            dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            created_timestamp: 0,
+            username: format!("user{uid}"),
+            password: "share-pass".to_owned(),
+            uid,
+            gid: uid,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_detach_other_uids() {
+        let mut state = SmbDropState::empty();
+        for share in [
+            resource_share("a", 1001, Some("res")),
+            resource_share("b", 1002, Some("res")),
+            resource_share("c", 1001, Some("other")),
+            resource_share("d", 1001, None),
+        ] {
+            state.add_share(share).await.unwrap();
+        }
+
+        state.detach_other_uids("res", 1002);
+
+        let resources: Vec<(&str, Option<&str>)> = state
+            .shares
+            .values()
+            .sorted_by_key(|s| &s.share_id)
+            .map(|s| (s.share_id.as_str(), s.resource.as_deref()))
+            .collect();
+        assert_eq!(
+            resources,
+            vec![
+                ("a", None),
+                ("b", Some("res")),
+                ("c", Some("other")),
+                ("d", None),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_share_detaches_other_uids() {
+        let tmp = TempDir::new("share_config_file");
+        let dest_path = TempDir::new("dest_path_for_share");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+        let mut share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            tmp.join("shares.json"),
+            tmp.join("smb_dynamic.conf"),
+            MockUserProvider::new(vec![]),
+            Arc::new(MockMountBackend::new()),
+            MockProcessManager::new(),
+        )
+        .await;
+        share_manager.start().await.unwrap();
+        let create =
+            |uid: u32| share_manager.create_share(&dest_path, uid, uid, Some("holo".to_owned()));
+
+        let first = create(1001).await.unwrap();
+        let second = create(1002).await.unwrap();
+        let third = create(1002).await.unwrap();
+
+        let state = share_manager.get_state().await.unwrap();
+        let resource = |share: &Share| state.shares[&share.share_id].resource.clone();
+        // the previous user's share is detached, but still there:
+        assert_eq!(resource(&first), None);
+        // shares of the same uid stay attached together:
+        assert_eq!(resource(&second), Some("holo".to_owned()));
+        assert_eq!(resource(&third), Some("holo".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn test_consistency_one_uid_per_resource() {
+        // two uids with matching users, so only the resource check can fail:
+        let mut state = SmbDropState::empty();
+        let mut known_users = vec![];
+        for (share_id, uid) in [
+            ("b4fdcdf6-e870-4ac5-9942-78463f051c5c", 1001),
+            ("c4fdcdf6-e870-4ac5-9942-78463f051c5c", 1002),
+        ] {
+            let user = state
+                .get_or_create_user(uid, share_id.to_owned())
+                .await
+                .unwrap();
+            let mut share = resource_share(share_id, uid, Some("res"));
+            share.username = user.username.clone();
+            state.add_share(share).await.unwrap();
+            known_users.push((user.username, uid));
+        }
+        let user_provider = MockUserProvider::new(known_users);
+
+        match state.check_consistent(&user_provider) {
+            Err(ShareError::Inconsistent(m)) => {
+                assert_eq!(m, "resource `res` has shares of uids 1001 and 1002")
+            }
+            res => panic!("unexpected result: {res:?}"),
+        }
+
+        // on different resources, or detached, it's fine:
+        for resource in [Some("other"), None] {
+            let mut state = state.clone();
+            state
+                .shares
+                .get_mut("c4fdcdf6-e870-4ac5-9942-78463f051c5c")
+                .unwrap()
+                .resource = resource.map(str::to_owned);
+            state.check_consistent(&user_provider).unwrap();
+        }
     }
 
     #[tokio::test]
