@@ -110,7 +110,7 @@ windows-7-llvm:
       - .cargo-home/registry/cache/
 
 # zig is only used as the C compiler/linker for cargo-zigbuild, so the binaries
-# only require glibc 2.17 (see `linux_glibc` in the justfile).
+# only require glibc 2.17 (see `linux_glibc` in modama-rs/ci.just).
 linux-agent:
   stage: build
   # start right away instead of waiting for the test stage
@@ -133,7 +133,7 @@ linux-agent:
     - cargo-zigbuild --version || cargo install cargo-zigbuild --locked -q
     - just --version || cargo install just --locked -q
     - cd modama-rs/
-    - just linux-check-agent-glibc
+    - just -f ci.just linux-check-agent-glibc
   artifacts:
     expire_in: 1 week
     expose_as: "agent binaries linux"

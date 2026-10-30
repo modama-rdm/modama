@@ -3,8 +3,6 @@ snapshot_dir := "modama-agent-gui/tests/snapshots"
 guide_image_dir := "../docs/guide/src/user/images/agent"
 design_spec := "../mgmtinterface-new/DESIGN.md"
 win7_toolchain := "nightly-2025-12-11"
-linux_glibc := "2.17"
-linux_target := "x86_64-unknown-linux-gnu"
 xwin_cache := justfile_directory() + "/.xwin-cache"
 xwin_sdk := xwin_cache + "/splat"
 xwin_cflags := "/imsvc" + xwin_sdk + "/crt/include /imsvc" + xwin_sdk + "/sdk/include/ucrt /imsvc" + xwin_sdk + "/sdk/include/shared /imsvc" + xwin_sdk + "/sdk/include/um"
@@ -148,24 +146,6 @@ win7-check-agent-imports: win7-build-agent
             exit 1
         fi
         echo "Windows 7 import allowlist passed for $binary"
-    done
-
-# Build the Linux agent binaries against an old glibc with cargo-zigbuild (needs zig on PATH).
-linux-build-agent:
-    cargo zigbuild -q --locked --release -p modama-agent --bin modama-agent -p modama-agent-gui --bin modama-agent-gui --target {{ linux_target }}.{{ linux_glibc }}
-
-# Require both binaries to only reference glibc symbol versions up to linux_glibc.
-linux-check-agent-glibc: linux-build-agent
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for binary in modama-agent modama-agent-gui; do
-        binary="target/{{ linux_target }}/release/$binary"
-        newest="$(objdump -T "$binary" | grep -o 'GLIBC_[0-9.]*' | sed 's/^GLIBC_//' | sort -Vu | tail -n 1)"
-        if [[ "$(printf '%s\n%s\n' "$newest" "{{ linux_glibc }}" | sort -V | tail -n 1)" != "{{ linux_glibc }}" ]]; then
-            echo "$binary requires glibc $newest, newer than the supported {{ linux_glibc }}." >&2
-            exit 1
-        fi
-        echo "glibc check passed for $binary (newest symbol version: $newest)"
     done
 
 win7-check-gnu:
