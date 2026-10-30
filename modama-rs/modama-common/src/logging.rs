@@ -1,8 +1,21 @@
+/// Info by default, but zbus and its tracing spans only from warn on: they log every D-Bus
+/// handshake at info. `MODAMA_LOG_LEVEL` is applied on top, so it can still turn them up
+/// (`debug,zbus=debug`).
+fn builder(env: env_logger::Env) -> env_logger::Builder {
+    let mut builder = env_logger::Builder::new();
+    builder
+        .filter_level(log::LevelFilter::Info)
+        .filter_module("zbus", log::LevelFilter::Warn)
+        .filter_module("tracing", log::LevelFilter::Warn)
+        .parse_env(env);
+    builder
+}
+
 pub fn init_logging() {
     let env = env_logger::Env::default()
-        .filter_or("MODAMA_LOG_LEVEL", "info")
+        .filter("MODAMA_LOG_LEVEL")
         .write_style("always");
-    if let Err(e) = env_logger::try_init_from_env(env) {
+    if let Err(e) = builder(env).try_init() {
         eprintln!("logging already initialized or initialization failed: {e}")
     }
 }
@@ -21,9 +34,9 @@ pub fn init_file_logging(log_dir: &std::path::Path, file_name: &str) -> anyhow::
         None,
     );
     let env = env_logger::Env::default()
-        .filter_or("MODAMA_LOG_LEVEL", "info")
+        .filter("MODAMA_LOG_LEVEL")
         .write_style("never");
-    env_logger::Builder::from_env(env)
+    builder(env)
         .target(env_logger::Target::Pipe(Box::new(writer)))
         .try_init()
         .map_err(Into::into)
