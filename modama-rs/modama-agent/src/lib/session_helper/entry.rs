@@ -12,13 +12,13 @@
 // - [x] mount backend GIO
 // - [x] mount backend WNet
 // - [x] mount popup for newly created mounts, opening the file manager on request
-// - [ ] notification tray icon
+// - [x] notification tray icon
 
 use anyhow::{Context as _, Result, anyhow};
 use log::info;
 #[cfg(not(windows))]
 use modama_common::logging::init_logging;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use url::Url;
 
 use crate::{
@@ -29,6 +29,7 @@ use crate::{
         open_folder::SystemFolderOpener,
         platform::CurrentPlatformMountBackend,
         singleton::{self, Singleton},
+        tray::{TrayState, handle_tray_actions, run_tray},
     },
 };
 
@@ -96,9 +97,17 @@ pub fn run(agent_url: &Url) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let backend = CurrentPlatformMountBackend::new().await?;
         let (popup_tx, popup_rx) = mpsc::unbounded_channel();
+        let (tray_tx, tray_rx) = watch::channel(TrayState::default());
+        let (action_tx, action_rx) = mpsc::unbounded_channel();
         tokio::select! {
-            _ = session_helper_loop(&backend, &options, popup_tx) => {}
+            _ = session_helper_loop(&backend, &options, popup_tx, tray_tx) => {}
             () = run_popup_task(popup_rx, popups, SystemFolderOpener) => {}
+            () = async {
+                // without a notification area, the helper carries on without an icon
+                run_tray(tray_rx.clone(), action_tx).await;
+                std::future::pending().await
+            } => {}
+            () = handle_tray_actions(action_rx, tray_rx.clone(), agent_url) => {}
             () = shutdown_signal() => info!("shutting down"),
         }
         Ok(())

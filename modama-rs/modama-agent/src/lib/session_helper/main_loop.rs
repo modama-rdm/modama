@@ -12,12 +12,19 @@ use modama_common::{
     mount_popup::PopupMount,
 };
 use rand::RngExt;
-use tokio::{net::TcpStream, sync::mpsc, time::Instant};
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc, watch},
+    time::Instant,
+};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tungstenite::Message;
 use url::Url;
 
-use crate::session_helper::mount_backend::{MountBackend, PassResult, same_share};
+use crate::session_helper::{
+    mount_backend::{MountBackend, PassResult, same_share},
+    tray::{TrayState, tray_state},
+};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -61,6 +68,10 @@ struct LoopState {
 
     /// Mounts a pass created go to the mount popup
     popup: mpsc::UnboundedSender<Vec<PopupMount>>,
+
+    /// The last pass's result, connected or not; for the notification-area icon
+    actual: Option<SessionHelperState>,
+    tray: watch::Sender<TrayState>,
 }
 
 /// The mounts this pass created that offer a path, as the mount popup shows them
@@ -97,6 +108,21 @@ impl LoopState {
         self.sink = None;
         self.stream = None;
         self.last_report = None;
+        self.publish_tray_state();
+    }
+
+    /// Tell the notification-area icon, if what it shows changed
+    fn publish_tray_state(&self) {
+        let state = tray_state(
+            self.sink.is_some(),
+            self.desired.as_ref(),
+            self.actual.as_ref(),
+        );
+        self.tray.send_if_modified(|current| {
+            let changed = *current != state;
+            *current = state;
+            changed
+        });
     }
 
     /// One reconciliation pass, then report the result if it changed
@@ -127,6 +153,8 @@ impl LoopState {
             let _ = self.popup.send(created);
         }
         let report = result.state;
+        self.actual = Some(report.clone());
+        self.publish_tray_state();
 
         let Some(sink) = &mut self.sink else {
             return;
@@ -193,6 +221,7 @@ pub async fn session_helper_loop(
     backend: &impl MountBackend,
     options: &LoopOptions,
     popup: mpsc::UnboundedSender<Vec<PopupMount>>,
+    tray: watch::Sender<TrayState>,
 ) -> ! {
     let mut state = LoopState {
         desired: None,
@@ -200,7 +229,10 @@ pub async fn session_helper_loop(
         stream: None,
         last_report: None,
         popup,
+        actual: None,
+        tray,
     };
+    state.publish_tray_state();
     let mut next_pass = options.next_pass();
     let mut next_connect = Instant::now();
     // connecting runs alongside the passes, so an agent that hangs during the handshake doesn't
@@ -257,6 +289,7 @@ pub async fn session_helper_loop(
                         let (sink, stream) = socket.split();
                         state.sink = Some(sink);
                         state.stream = Some(stream);
+                        state.publish_tray_state();
                     }
                     Err(e) => {
                         debug!("could not connect to the agent: {e}");
@@ -345,6 +378,7 @@ mod tests {
         backend: FakeBackend,
         helper: JoinHandle<()>,
         popup: mpsc::UnboundedReceiver<Vec<PopupMount>>,
+        tray: watch::Receiver<TrayState>,
     }
 
     impl Setup {
@@ -359,14 +393,16 @@ mod tests {
             };
             let helper_backend = backend.clone();
             let (popup_tx, popup) = mpsc::unbounded_channel();
+            let (tray_tx, tray) = watch::channel(TrayState::default());
             let helper = tokio::spawn(async move {
-                session_helper_loop(&helper_backend, &options, popup_tx).await;
+                session_helper_loop(&helper_backend, &options, popup_tx, tray_tx).await;
             });
             Self {
                 listener,
                 backend,
                 helper,
                 popup,
+                tray,
             }
         }
 
@@ -514,6 +550,37 @@ mod tests {
         // later passes create nothing, so nothing more is announced:
         setup.wait_for_calls(3).await;
         assert!(setup.popup.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn the_tray_follows_connection_and_convergence() {
+        use crate::session_helper::tray::TrayStatus;
+
+        let mut setup = Setup::start(Ok(report(&["a"]))).await;
+        assert_eq!(setup.tray.borrow().status, TrayStatus::Disconnected);
+        let mut agent = setup.accept().await;
+
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+        timeout(
+            LONG,
+            setup
+                .tray
+                .wait_for(|state| state.status == TrayStatus::Ready),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        drop(agent);
+        timeout(
+            LONG,
+            setup
+                .tray
+                .wait_for(|state| state.status == TrayStatus::Disconnected),
+        )
+        .await
+        .unwrap()
+        .unwrap();
     }
 
     #[tokio::test]

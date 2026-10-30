@@ -123,6 +123,25 @@ pub fn hand_off_blocked(desired: &Shares, helper: &SessionHelperState) -> bool {
     stale_mount && failed_share
 }
 
+/// Whether actual state hasn't caught up with desired state yet: a desired share is missing or
+/// has no usable path, or a mount that is no longer desired is still there. This is the only
+/// health signal; every reason for it heals on a later pass or has its desire withdrawn.
+pub fn is_reconciling(desired: &Shares, helper: &SessionHelperState) -> bool {
+    let all_mounted = desired.shares.iter().all(|share| {
+        helper.mounted_shares.iter().any(|mounted| {
+            mounted.share_name.eq_ignore_ascii_case(&share.share_name)
+                && mounted.mount_path.is_some()
+        })
+    });
+    let all_desired = helper.mounted_shares.iter().all(|mounted| {
+        desired
+            .shares
+            .iter()
+            .any(|share| share.share_name.eq_ignore_ascii_case(&mounted.share_name))
+    });
+    !(all_mounted && all_desired)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -135,7 +154,7 @@ mod tests {
 
     use super::{
         NO_HELPER_MESSAGE, ShareDestinationError, WAITING_MESSAGE, foreground_projection,
-        foreground_share, hand_off_blocked, project_and_session,
+        foreground_share, hand_off_blocked, is_reconciling, project_and_session,
     };
 
     fn share(id: &str) -> Share {
@@ -328,5 +347,47 @@ mod tests {
         assert!(!hand_off_blocked(&desired, &state(vec![], vec![error])));
         // share names are case-insensitive
         assert!(!hand_off_blocked(&desired, &state(vec![current], vec![])));
+    }
+
+    #[test]
+    fn reconciling_until_every_desired_share_has_a_path_and_nothing_else_is_mounted() {
+        let desired = Shares {
+            foreground_share_id: None,
+            shares: vec![share("a")],
+        };
+        let mounted = |name: &str, path: Option<&str>| MountedShare {
+            share_name: name.to_owned(),
+            mount_path: path.map(PathBuf::from),
+        };
+        let state = |mounted_shares: Vec<MountedShare>| SessionHelperState {
+            mounted_shares,
+            errors: vec![],
+        };
+
+        // converged; share names are case-insensitive
+        assert!(!is_reconciling(
+            &desired,
+            &state(vec![mounted("SHARE", Some("/mnt/a"))])
+        ));
+        // missing, or without a usable path
+        assert!(is_reconciling(&desired, &state(vec![])));
+        assert!(is_reconciling(
+            &desired,
+            &state(vec![mounted("share", None)])
+        ));
+        // a stale mount awaiting removal
+        assert!(is_reconciling(
+            &desired,
+            &state(vec![
+                mounted("share", Some("/mnt/a")),
+                mounted("old", Some("/mnt/b"))
+            ])
+        ));
+        // nothing desired, nothing mounted
+        let nothing = Shares {
+            foreground_share_id: None,
+            shares: vec![],
+        };
+        assert!(!is_reconciling(&nothing, &state(vec![])));
     }
 }

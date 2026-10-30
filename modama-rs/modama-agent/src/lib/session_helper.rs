@@ -9,5 +9,10 @@ pub mod open_folder;
 #[cfg_attr(target_os = "windows", path = "session_helper/platform_windows.rs")]
 pub mod platform;
 pub mod singleton;
+pub mod tray;
+#[cfg(target_os = "linux")]
+mod tray_linux;
+#[cfg(windows)]
+mod tray_windows;
 #[cfg(any(windows, test))]
 pub mod wnet_reconcile;

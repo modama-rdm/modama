@@ -105,14 +105,19 @@ pub struct GuiPopups {
     gui: PathBuf,
 }
 
+/// The GUI executable, installed next to ours
+pub fn gui_executable() -> io::Result<PathBuf> {
+    let exe_dir = std::env::current_exe()?
+        .parent()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| io::Error::other("our executable has no parent directory"))?;
+    Ok(exe_dir.join(format!("modama-agent-gui{}", std::env::consts::EXE_SUFFIX)))
+}
+
 impl GuiPopups {
     pub fn next_to_current_exe() -> io::Result<Self> {
-        let exe_dir = std::env::current_exe()?
-            .parent()
-            .map(ToOwned::to_owned)
-            .ok_or_else(|| io::Error::other("our executable has no parent directory"))?;
         Ok(Self {
-            gui: exe_dir.join(format!("modama-agent-gui{}", std::env::consts::EXE_SUFFIX)),
+            gui: gui_executable()?,
         })
     }
 }
