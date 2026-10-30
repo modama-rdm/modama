@@ -53,6 +53,13 @@ async fn gio_backend_against_samba() {
     let localhost = config("localhost");
     let ingest = share("1", "ingest", "testpass");
 
+    // 0. start clean: a run killed before the recipe's cleanup leaves its mounts behind, and
+    // the first pass below must actually mount
+    for host in [&localhost, &config("127.0.0.1")] {
+        let state = backend.reconcile(&[], host, false).await.unwrap().state;
+        assert!(state.mounted_shares.is_empty(), "{state:?}");
+    }
+
     // 1. mount: the share gets a FUSE path in the user's runtime directory, and is usable
     let result = backend
         .reconcile(std::slice::from_ref(&ingest), &localhost, false)
