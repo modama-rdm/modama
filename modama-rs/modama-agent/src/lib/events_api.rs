@@ -3,7 +3,7 @@ use std::{ops::DerefMut as _, sync::Arc};
 use axum::{
     Router,
     extract::{
-        Path, State, WebSocketUpgrade,
+        ConnectInfo, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     http::header::HeaderMap,
@@ -13,8 +13,7 @@ use axum::{
 use hyper::StatusCode;
 use log::{debug, error, warn};
 use modama_common::internal_api_types::{
-    SessionHelperConfig, SessionHelperState, SessionId, Shares, ToAgent, ToSessionGui,
-    ToSessionHelper,
+    SessionHelperConfig, SessionHelperState, Shares, ToAgent, ToSessionGui, ToSessionHelper,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
@@ -24,14 +23,9 @@ use tokio::{
 
 use crate::{
     agent_state::{AgentState, RemoteInfo, StateUpdateToSession},
+    caller_scope::{ConnInfo, HelperScope},
     local_http_service::{ApiState, LocalAPIError},
 };
-
-#[derive(thiserror::Error, Debug)]
-pub enum SessionError {
-    #[error("could not determine session identity")]
-    CouldNotId(#[from] std::env::VarError),
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum EventAPIError {
@@ -112,7 +106,7 @@ async fn send_update_to_session_helper(
             .await?;
         }
         StateUpdateToSession::MountUpdate {
-            session_id: _,
+            scope: _,
             session_helper: _,
         } => {} // ignore
     }
@@ -124,7 +118,7 @@ async fn send_update_to_session_helper(
 async fn record_update_from_session_helper(
     session_update: ToAgent,
     tx: broadcast::Sender<StateUpdateToSession>,
-    session_id: &SessionId,
+    scope: HelperScope,
     state: &mut AgentState,
 ) -> Result<(), EventAPIError> {
     match session_update {
@@ -133,12 +127,10 @@ async fn record_update_from_session_helper(
                 mounted_shares: shares,
                 errors,
             };
-            state
-                .session_helpers
-                .insert(session_id.clone(), helper_state.clone());
+            state.session_helpers.insert(scope, helper_state.clone());
             // forward to the GUI
             tx.send(StateUpdateToSession::MountUpdate {
-                session_id: session_id.clone(),
+                scope,
                 session_helper: Some(helper_state),
             })?;
             Ok(())
@@ -168,13 +160,10 @@ async fn recv_handle_lagging<T: Clone>(
 async fn handle_session_helper_websocket(
     state: Arc<Mutex<AgentState>>,
     mut socket: WebSocket,
-    session_id: SessionId,
+    scope: HelperScope,
 ) -> Result<(), EventAPIError> {
-    let _guard = SessionConnection::new(
-        &session_id,
-        state.lock().await.session_channel_sender.clone(),
-    )
-    .await;
+    let _guard =
+        SessionConnection::new(scope, state.lock().await.session_channel_sender.clone()).await;
     let (mut rx, tx, remote_info, smb_hostname, smb_port, smb_domain) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
@@ -219,7 +208,7 @@ async fn handle_session_helper_websocket(
                 send_update_to_session_helper(update, &session_config, &mut socket).await?;
             }
             session_update = recv_obj::<ToAgent>(&mut socket) => {
-                record_update_from_session_helper(session_update?, tx.clone(), &session_id, state.lock().await.deref_mut()).await?;
+                record_update_from_session_helper(session_update?, tx.clone(), scope, state.lock().await.deref_mut()).await?;
             }
         }
     }
@@ -227,7 +216,7 @@ async fn handle_session_helper_websocket(
 
 async fn send_update_to_gui(
     update: StateUpdateToSession,
-    own_session_id: &SessionId,
+    own_scope: HelperScope,
     config: &SessionHelperConfig,
     socket: &mut WebSocket,
     remote_info: Option<RemoteInfo>,
@@ -238,7 +227,6 @@ async fn send_update_to_gui(
             foreground_share_id,
             shares,
         } => ToSessionGui {
-            session_id: own_session_id.clone(),
             session_helper,
             desired_shares: Some(Shares {
                 foreground_share_id,
@@ -246,15 +234,14 @@ async fn send_update_to_gui(
             }),
         },
         StateUpdateToSession::MountUpdate {
-            session_id,
+            scope,
             session_helper,
         } => {
-            // ignore any updates that don't concern our session:
-            if &session_id != own_session_id {
+            // ignore any updates that don't concern our scope:
+            if scope != own_scope {
                 return Ok(());
             }
             ToSessionGui {
-                session_id,
                 session_helper,
                 desired_shares: remote_info.map(|remote| Shares {
                     foreground_share_id: remote
@@ -274,12 +261,12 @@ async fn send_update_to_gui(
 async fn handle_gui_websocket(
     state: Arc<Mutex<AgentState>>,
     mut socket: WebSocket,
-    session_id: SessionId,
+    scope: HelperScope,
 ) -> Result<(), EventAPIError> {
     let (mut rx, remote_info, smb_hostname, smb_port, smb_domain, session_helper) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
-        let session_helper = agent_state.session_helpers.get(&session_id).cloned();
+        let session_helper = agent_state.session_helpers.get(&scope).cloned();
 
         (
             receiver,
@@ -301,7 +288,6 @@ async fn handle_gui_websocket(
     send_obj(
         &mut socket,
         &ToSessionGui {
-            session_id: session_id.clone(),
             session_helper,
             desired_shares: remote_info.map(|remote| Shares {
                 foreground_share_id: remote
@@ -321,9 +307,9 @@ async fn handle_gui_websocket(
                 let update = state_update?;
                 let (remote_info, session_helper) = {
                     let agent_state = state.lock().await;
-                    (agent_state.remote_info.clone(), agent_state.session_helpers.get(&session_id).cloned())
+                    (agent_state.remote_info.clone(), agent_state.session_helpers.get(&scope).cloned())
                  };
-                send_update_to_gui(update, &session_id, &session_config, &mut socket, remote_info, session_helper).await?;
+                send_update_to_gui(update, scope, &session_config, &mut socket, remote_info, session_helper).await?;
             }
             session_update = recv_obj::<ToAgent>(&mut socket) => {
                 // panic! or rather, don't. the GUI isn't supposed to send us anything,
@@ -337,34 +323,26 @@ async fn handle_gui_websocket(
 
 #[derive(Debug)]
 pub enum SessionBeginEnd {
-    Begin { session_id: SessionId },
-    End { session_id: SessionId },
+    Begin { scope: HelperScope },
+    End { scope: HelperScope },
 }
 
 /// Session connection guard; when dropped, we send a message via the MPSC
 /// channel which triggers cleanup in `agent_state::session_bookkeeper`
 #[derive(Debug)]
 struct SessionConnection {
-    session_id: SessionId,
+    scope: HelperScope,
     channel: mpsc::UnboundedSender<SessionBeginEnd>,
 }
 
 impl SessionConnection {
     #[must_use]
-    pub async fn new(
-        session_id: &SessionId,
-        channel: mpsc::UnboundedSender<SessionBeginEnd>,
-    ) -> Self {
+    pub async fn new(scope: HelperScope, channel: mpsc::UnboundedSender<SessionBeginEnd>) -> Self {
         #[allow(clippy::expect_used)]
         channel
-            .send(SessionBeginEnd::Begin {
-                session_id: session_id.clone(),
-            })
+            .send(SessionBeginEnd::Begin { scope })
             .expect("the session bookkeeping channel should be alive");
-        SessionConnection {
-            session_id: session_id.clone(),
-            channel,
-        }
+        SessionConnection { scope, channel }
     }
 }
 
@@ -372,12 +350,13 @@ impl Drop for SessionConnection {
     fn drop(&mut self) {
         // On runtime shutdown, the bookkeeper may be gone before us; the state it would clean up
         // is dropped as well then, so losing this message is fine (and panicking in drop isn't).
-        if let Err(_e) = self.channel.send(SessionBeginEnd::End {
-            session_id: self.session_id.clone(),
-        }) {
+        if let Err(_e) = self
+            .channel
+            .send(SessionBeginEnd::End { scope: self.scope })
+        {
             debug!(
                 "session bookkeeper is gone, not sending cleanup for {:?}",
-                self.session_id
+                self.scope
             );
         }
     }
@@ -385,9 +364,9 @@ impl Drop for SessionConnection {
 
 pub fn add_internal_api(router: Router<ApiState>) -> Result<Router<ApiState>, LocalAPIError> {
     Ok(router
-        .route("/internal/events/gui/{session_id}/", get(events_api_gui))
+        .route("/internal/events/gui/", get(events_api_gui))
         .route(
-            "/internal/events/session-helper/{session_id}/",
+            "/internal/events/session-helper/",
             get(events_api_session_helper),
         ))
 }
@@ -396,7 +375,7 @@ pub async fn events_api_gui(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
     State(state): State<ApiState>,
-    Path(session_id): Path<String>,
+    ConnectInfo(conn): ConnectInfo<ConnInfo>,
 ) -> Response {
     // Disallow browsers from connecting. Our own clients don't send an Origin header.
     // this assumes that if the browser is too old to send an Origin header (IE10 or older),
@@ -405,14 +384,14 @@ pub async fn events_api_gui(
         return StatusCode::FORBIDDEN.into_response();
     }
 
+    // reject before the upgrade if we can't tell whom this connection belongs to:
+    let scope = match state.resolve_scope(conn).await {
+        Ok(scope) => scope,
+        Err(e) => return e.into_response(),
+    };
+
     ws.on_upgrade(async move |socket| {
-        if let Err(e) = handle_gui_websocket(
-            Arc::clone(&state.state),
-            socket,
-            SessionId { id: session_id },
-        )
-        .await
-        {
+        if let Err(e) = handle_gui_websocket(Arc::clone(&state.state), socket, scope).await {
             error!("dropping websocket connection: {e}");
         }
     })
@@ -423,7 +402,7 @@ pub async fn events_api_session_helper(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
     State(state): State<ApiState>,
-    Path(session_id): Path<String>,
+    ConnectInfo(conn): ConnectInfo<ConnInfo>,
 ) -> Response {
     // Disallow browsers from connecting. Our own clients don't send an Origin header.
     // this assumes that if the browser is too old to send an Origin header (IE10 or older),
@@ -432,13 +411,15 @@ pub async fn events_api_session_helper(
         return StatusCode::FORBIDDEN.into_response();
     }
 
+    // reject before the upgrade if we can't tell whom this connection belongs to:
+    let scope = match state.resolve_scope(conn).await {
+        Ok(scope) => scope,
+        Err(e) => return e.into_response(),
+    };
+
     ws.on_upgrade(async move |socket| {
-        if let Err(e) = handle_session_helper_websocket(
-            Arc::clone(&state.state),
-            socket,
-            SessionId { id: session_id },
-        )
-        .await
+        if let Err(e) =
+            handle_session_helper_websocket(Arc::clone(&state.state), socket, scope).await
         {
             error!("dropping websocket connection: {e}");
         }
@@ -472,6 +453,7 @@ mod tests {
     use url::Url;
 
     use super::*;
+    use crate::caller_scope::QueueScopeResolver;
 
     type TestWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -494,6 +476,7 @@ mod tests {
     struct TestSetup {
         server_task: JoinHandle<()>,
         shared_state: Arc<Mutex<AgentState>>,
+        scopes: Arc<QueueScopeResolver>,
         address: SocketAddr,
     }
 
@@ -524,10 +507,12 @@ mod tests {
             };
             let shared_state = AgentState::new(&config).await;
             let token_provider: Arc<dyn TokenProvider + Send + Sync> = Arc::new(DummyTokenProvider);
+            let scopes = Arc::new(QueueScopeResolver::default());
             let api_state = ApiState {
                 state: Arc::clone(&shared_state),
                 token_provider,
                 jinja_env: Environment::new(),
+                scope_resolver: Arc::clone(&scopes) as Arc<dyn crate::caller_scope::ResolveScope>,
             };
             let app = add_internal_api(Router::new())
                 .unwrap()
@@ -535,12 +520,18 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let server_task = tokio::spawn(async move {
-                axum::serve(listener, app).await.unwrap();
+                axum::serve(
+                    listener,
+                    app.into_make_service_with_connect_info::<ConnInfo>(),
+                )
+                .await
+                .unwrap();
             });
 
             Self {
                 server_task,
                 shared_state,
+                scopes,
                 address,
             }
         }
@@ -549,27 +540,24 @@ mod tests {
             connect_async(url).await.unwrap().0
         }
 
-        fn websocket_gui_for_session(&self, session_id: &str) -> String {
-            format!("ws://{}/internal/events/gui/{session_id}/", &self.address)
+        fn websocket_gui(&self) -> String {
+            format!("ws://{}/internal/events/gui/", self.address)
         }
 
-        fn websocket_helper_for_session(&self, session_id: &str) -> String {
-            format!(
-                "ws://{}/internal/events/session-helper/{session_id}/",
-                &self.address
-            )
+        fn websocket_helper(&self) -> String {
+            format!("ws://{}/internal/events/session-helper/", self.address)
         }
 
+        /// Connect as a GUI that the agent will find to be in scope `id`
         async fn connect_gui(&self, id: &str) -> TestWebSocket {
-            let url = self.websocket_gui_for_session(id);
-            let socket = self.connect(&url).await;
-            socket
+            self.scopes.push(scope(id));
+            self.connect(&self.websocket_gui()).await
         }
 
+        /// Connect as a session helper that the agent will find to be in scope `id`
         async fn connect_session_helper(&self, id: &str) -> TestWebSocket {
-            let url = self.websocket_helper_for_session(id);
-            let socket = self.connect(&url).await;
-            socket
+            self.scopes.push(scope(id));
+            self.connect(&self.websocket_helper()).await
         }
 
         async fn seed_remote_info(&self, foreground_share: Share, shares: Vec<Share>) {
@@ -585,7 +573,7 @@ mod tests {
                 .lock()
                 .await
                 .session_helpers
-                .insert(session_id(id), helper_state);
+                .insert(scope(id), helper_state);
         }
 
         async fn wait_for_state(&self, predicate: impl Fn(&AgentState) -> bool) {
@@ -610,8 +598,14 @@ mod tests {
         }
     }
 
-    fn session_id(id: &str) -> SessionId {
-        SessionId { id: id.to_owned() }
+    /// Tests name scopes; on the agent's side, each name is a distinct uid
+    fn scope(id: &str) -> HelperScope {
+        match id {
+            "desktop-1" => HelperScope::Uid(1001),
+            "desktop-2" => HelperScope::Uid(1002),
+            "s1" => HelperScope::Uid(1),
+            _ => panic!("unknown test scope {id}"),
+        }
     }
 
     fn share(id: &str) -> Share {
@@ -694,10 +688,7 @@ mod tests {
     #[tokio::test]
     async fn browser_connections_are_denied() {
         let test_setup = TestSetup::start().await;
-        let mut request = test_setup
-            .websocket_gui_for_session("1")
-            .into_client_request()
-            .unwrap();
+        let mut request = test_setup.websocket_gui().into_client_request().unwrap();
         request
             .headers_mut()
             .insert("origin", "https://attacker.example".parse().unwrap());
@@ -713,13 +704,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unknown_scope_is_rejected_before_upgrade() {
+        // nothing queued in the scope resolver: the agent can't tell whom this is
+        let test_setup = TestSetup::start().await;
+        for url in [test_setup.websocket_gui(), test_setup.websocket_helper()] {
+            match connect_async(url).await.unwrap_err() {
+                WebSocketError::Http(response) => {
+                    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+                }
+                error => panic!("expected an HTTP rejection, got {error:?}"),
+            }
+        }
+        assert!(
+            test_setup
+                .shared_state
+                .lock()
+                .await
+                .session_connections
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
     async fn initial_empty_state_gui() {
         // connect as a GUI client and receive the initial (empty) state update (desired state and current
         // mount state)
         let test_setup = TestSetup::start().await;
         let mut gui = test_setup.connect_gui("desktop-1").await;
         let message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(message.session_id, session_id("desktop-1"));
+        assert_eq!(message.session_helper, None);
+        assert!(message.desired_shares.is_none());
     }
 
     #[tokio::test]
@@ -757,7 +771,6 @@ mod tests {
 
         let mut gui = test_setup.connect_gui("desktop-1").await;
         let gui_message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(gui_message.session_id, session_id("desktop-1"));
         assert_eq!(
             gui_message.session_helper.map(|h| h.mounted_shares),
             Some(vec![mounted_share])
@@ -850,7 +863,6 @@ mod tests {
         .await;
 
         let message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(message.session_id, session_id("desktop-1"));
         let mounted_shares = message.session_helper.unwrap().mounted_shares;
         assert_eq!(mounted_shares.len(), 1);
         assert_eq!(mounted_shares[0].share_name, updated_share.share_name);
@@ -864,7 +876,7 @@ mod tests {
                 .lock()
                 .await
                 .session_helpers
-                .get(&session_id("desktop-1")),
+                .get(&scope("desktop-1")),
             Some(helper) if helper.mounted_shares.len() == 1
         ));
     }
@@ -897,7 +909,6 @@ mod tests {
         .await;
 
         let message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(message.session_id, session_id("desktop-1"));
         assert_eq!(
             message.session_helper.map(|h| h.mounted_shares),
             Some(vec![MountedShare {
@@ -954,8 +965,8 @@ mod tests {
         .await;
         test_setup
             .wait_for_state(|state| {
-                state.session_helpers.contains_key(&session_id("desktop-1"))
-                    && state.session_connections.get(&session_id("desktop-1")) == Some(&1)
+                state.session_helpers.contains_key(&scope("desktop-1"))
+                    && state.session_connections.get(&scope("desktop-1")) == Some(&1)
             })
             .await;
 
@@ -963,10 +974,8 @@ mod tests {
 
         test_setup
             .wait_for_state(|state| {
-                !state.session_helpers.contains_key(&session_id("desktop-1"))
-                    && !state
-                        .session_connections
-                        .contains_key(&session_id("desktop-1"))
+                !state.session_helpers.contains_key(&scope("desktop-1"))
+                    && !state.session_connections.contains_key(&scope("desktop-1"))
             })
             .await;
     }
@@ -1054,7 +1063,7 @@ mod tests {
         session_helper.close(None).await.unwrap();
 
         let disconnected_message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(disconnected_message.session_id, session_id("desktop-1"));
+        assert_eq!(disconnected_message.session_helper, None);
     }
 
     #[tokio::test]
@@ -1081,7 +1090,6 @@ mod tests {
         .await;
 
         let message: ToSessionGui = receive_message(&mut matching_gui).await;
-        assert_eq!(message.session_id, session_id("desktop-1"));
         assert_eq!(
             message.session_helper.map(|h| h.mounted_shares),
             Some(vec![MountedShare {

@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
     response::IntoResponse,
     routing::get,
 };
@@ -16,11 +16,12 @@ use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use versioned::{VersionedRouterBuilder, semver::Version, versioned_route, versions};
 
 use crate::{
-    agent_state::ResolvedMount,
+    caller_scope::ConnInfo,
     local_http_service::{ApiState, LocalAPIError, get_auth},
 };
 
 use modama_common::{
+    internal_api_types::SessionHelperState,
     local_api_messages::{
         APIAgentIdentity, APICreateSessionRequest, APICreateSessionResponse,
         APICreateShareResponse, APICurrentForegroundShare, APIHealthCheckResponse,
@@ -56,63 +57,67 @@ pub(crate) fn project_and_session(
     Ok((project.to_owned(), session.to_owned()))
 }
 
-// FIXME: simplify response? either a path if current state matches, or no fg share -> what code?
-fn foreground_response(
-    desired: Option<Share>,
-    current: Option<ResolvedMount>,
+/// Shown when no session helper has reported for the caller's scope
+const NO_HELPER_MESSAGE: &str = "No session helper is running for you. Start it with \
+                                 `modama-agent session-helper`.";
+
+/// Shown while the helper is there, but hasn't mounted the share (and hasn't reported an error)
+const WAITING_MESSAGE: &str = "Waiting for the session helper to mount the share.";
+
+/// Answer "where should I write right now?" from the desired foreground share and the
+/// report of the caller's session helper (None if no helper has reported for that scope).
+pub(crate) fn foreground_projection(
+    desired: Option<&Share>,
+    helper: Option<&SessionHelperState>,
 ) -> Result<APICurrentForegroundShare, ShareDestinationError> {
-    Ok(match (desired, current) {
-        (None, None) => APICurrentForegroundShare::None,
-        (None, Some(current)) => match current.mount_path.to_str() {
+    let Some(desired) = desired else {
+        return Ok(APICurrentForegroundShare::None);
+    };
+    let (project, session) = project_and_session(&desired.dest_path)?;
+    let unavailable = |message: String| APICurrentForegroundShare::Unavailable {
+        share_id: desired.share_id.clone(),
+        project: project.clone(),
+        session: session.clone(),
+        dest_path: desired.dest_path.clone(),
+        message,
+    };
+
+    let Some(helper) = helper else {
+        return Ok(unavailable(NO_HELPER_MESSAGE.to_owned()));
+    };
+
+    // mounts are identified by share name, as the helper may report mounts we know nothing about:
+    let mount_path = helper
+        .mounted_shares
+        .iter()
+        .filter(|mounted| mounted.share_name == desired.share_name)
+        .find_map(|mounted| mounted.mount_path.as_ref());
+    if let Some(mount_path) = mount_path {
+        return Ok(match mount_path.to_str() {
+            Some(mount_path) => APICurrentForegroundShare::Mounted {
+                share_id: desired.share_id.clone(),
+                project,
+                session,
+                dest_path: desired.dest_path.clone(),
+                mount_path: mount_path.to_owned(),
+            },
             None => {
-                let path = current.mount_path.to_string_lossy();
-                warn!("Mount path {path} contains invalid unicode, cannot get foreground share!");
-                APICurrentForegroundShare::None
+                let lossy = mount_path.to_string_lossy();
+                warn!("Mount path {lossy} contains invalid unicode, cannot report it");
+                unavailable(format!(
+                    "The share is mounted at {lossy}, but that path can't be represented as \
+                     text."
+                ))
             }
-            Some(mount_path) => {
-                let (project, session) = project_and_session(&current.share.dest_path)?;
-                APICurrentForegroundShare::Unmounting {
-                    share_id: current.share.share_id,
-                    project,
-                    session,
-                    dest_path: current.share.dest_path,
-                    mount_path: mount_path.to_owned(),
-                }
-            }
-        },
-        (Some(desired), current) => {
-            match current.filter(|mounted| mounted.share.share_id == desired.share_id) {
-                None => {
-                    let (project, session) = project_and_session(&desired.dest_path)?;
-                    APICurrentForegroundShare::Mounting {
-                        share_id: desired.share_id,
-                        project,
-                        session,
-                        dest_path: desired.dest_path,
-                    }
-                }
-                Some(s) => match s.mount_path.to_str() {
-                    None => {
-                        let p = s.mount_path.to_string_lossy();
-                        warn!(
-                            "Mount path {p} contains invalid unicode, cannot get foreground share!"
-                        );
-                        APICurrentForegroundShare::None
-                    }
-                    Some(mount_path) => {
-                        let (project, session) = project_and_session(&s.share.dest_path)?;
-                        APICurrentForegroundShare::Share {
-                            share_id: s.share.share_id.clone(),
-                            project,
-                            session,
-                            dest_path: s.share.dest_path.to_owned(),
-                            mount_path: mount_path.to_owned(),
-                        }
-                    }
-                },
-            }
-        }
-    })
+        });
+    }
+
+    let message = helper
+        .errors
+        .iter()
+        .find(|error| error.share_id == desired.share_id)
+        .map_or_else(|| WAITING_MESSAGE.to_owned(), |error| error.message.clone());
+    Ok(unavailable(message))
 }
 
 #[utoipa::path(
@@ -125,19 +130,11 @@ fn foreground_response(
 /// Query for the current foreground share
 async fn api_shares_foreground(
     State(api_state): State<ApiState>,
+    ConnectInfo(conn): ConnectInfo<ConnInfo>,
 ) -> Result<impl IntoResponse, LocalAPIError> {
-    let (desired, current) = {
-        let state = api_state.state.lock().await;
-        (
-            state
-                .remote_info
-                .as_ref()
-                .and_then(|r| r.desired_shares.foreground_share.clone()),
-            state.current_shares.foreground_share.clone(),
-        )
-    };
-    let response = foreground_response(desired, current)?;
-    Ok(Json(response))
+    let scope = api_state.resolve_scope(conn).await?;
+    let state = api_state.state.lock().await;
+    Ok(Json(state.foreground_for(scope)?))
 }
 
 #[utoipa::path(
@@ -482,12 +479,15 @@ pub fn add_api_routes(router: Router<ApiState>, state: ApiState) -> Result<Route
 mod tests {
     use std::path::PathBuf;
 
-    use modama_common::{local_api_messages::APICurrentForegroundShare, messages::Share};
-
-    use crate::agent_state::ResolvedMount;
+    use modama_common::{
+        internal_api_types::{MountedShare, SessionHelperState, ShareError},
+        local_api_messages::APICurrentForegroundShare,
+        messages::Share,
+    };
 
     use super::{
-        ShareDestinationError, foreground_response, openapi_document, project_and_session,
+        NO_HELPER_MESSAGE, ShareDestinationError, WAITING_MESSAGE, foreground_projection,
+        openapi_document, project_and_session,
     };
 
     fn share(id: &str) -> Share {
@@ -532,41 +532,57 @@ mod tests {
         );
     }
 
+    fn helper(mounted: &[(&str, Option<&str>)], errors: &[(&str, &str)]) -> SessionHelperState {
+        SessionHelperState {
+            mounted_shares: mounted
+                .iter()
+                .map(|(share_name, path)| MountedShare {
+                    share_name: (*share_name).to_owned(),
+                    mount_path: path.map(PathBuf::from),
+                })
+                .collect(),
+            errors: errors
+                .iter()
+                .map(|(share_id, message)| ShareError {
+                    share_id: (*share_id).to_owned(),
+                    message: (*message).to_owned(),
+                })
+                .collect(),
+        }
+    }
+
+    fn unavailable(message: &str) -> APICurrentForegroundShare {
+        APICurrentForegroundShare::Unavailable {
+            share_id: "foreground".to_owned(),
+            project: "project".to_owned(),
+            session: "session".to_owned(),
+            dest_path: "/project/session".to_owned(),
+            message: message.to_owned(),
+        }
+    }
+
     #[test]
-    fn foreground_state_distinguishes_none_mounting_unmounting_and_mounted() {
+    fn no_desired_foreground_is_none_even_if_something_is_mounted() {
         assert_eq!(
-            foreground_response(None, None),
+            foreground_projection(None, None),
             Ok(APICurrentForegroundShare::None)
         );
+        // a share that is no longer desired is not shown, even while it is still mounted:
+        assert_eq!(
+            foreground_projection(None, Some(&helper(&[("share", Some("/mnt/old"))], &[]))),
+            Ok(APICurrentForegroundShare::None)
+        );
+    }
 
+    #[test]
+    fn mounted_foreground_share_is_mounted() {
         let desired = share("foreground");
         assert_eq!(
-            foreground_response(Some(desired.clone()), None),
-            Ok(APICurrentForegroundShare::Mounting {
-                share_id: "foreground".to_owned(),
-                project: "project".to_owned(),
-                session: "session".to_owned(),
-                dest_path: "/project/session".to_owned(),
-            })
-        );
-
-        let mounted = ResolvedMount {
-            share: desired.clone(),
-            mount_path: PathBuf::from("/mnt/session"),
-        };
-        assert_eq!(
-            foreground_response(None, Some(mounted.clone())),
-            Ok(APICurrentForegroundShare::Unmounting {
-                share_id: "foreground".to_owned(),
-                project: "project".to_owned(),
-                session: "session".to_owned(),
-                dest_path: "/project/session".to_owned(),
-                mount_path: "/mnt/session".to_owned(),
-            })
-        );
-        assert_eq!(
-            foreground_response(Some(desired), Some(mounted)),
-            Ok(APICurrentForegroundShare::Share {
+            foreground_projection(
+                Some(&desired),
+                Some(&helper(&[("share", Some("/mnt/session"))], &[]))
+            ),
+            Ok(APICurrentForegroundShare::Mounted {
                 share_id: "foreground".to_owned(),
                 project: "project".to_owned(),
                 session: "session".to_owned(),
@@ -577,16 +593,44 @@ mod tests {
     }
 
     #[test]
-    fn desired_foreground_wins_over_a_different_mounted_share() {
-        let desired = share("new");
-        let mounted = ResolvedMount {
-            share: share("old"),
-            mount_path: PathBuf::from("/mnt/old"),
-        };
-        assert!(matches!(
-            foreground_response(Some(desired), Some(mounted)),
-            Ok(APICurrentForegroundShare::Mounting { share_id, .. }) if share_id == "new"
-        ));
+    fn without_helper_the_message_says_how_to_start_one() {
+        let desired = share("foreground");
+        assert_eq!(
+            foreground_projection(Some(&desired), None),
+            Ok(unavailable(NO_HELPER_MESSAGE))
+        );
+    }
+
+    #[test]
+    fn helper_error_for_the_share_is_the_message() {
+        let desired = share("foreground");
+        let report = helper(
+            &[],
+            &[
+                ("other", "unrelated"),
+                ("foreground", "credential conflict"),
+            ],
+        );
+        assert_eq!(
+            foreground_projection(Some(&desired), Some(&report)),
+            Ok(unavailable("credential conflict"))
+        );
+    }
+
+    #[test]
+    fn not_yet_mounted_or_without_usable_path_is_waiting() {
+        let desired = share("foreground");
+        for report in [
+            helper(&[], &[]),
+            helper(&[("other-share", Some("/mnt/other"))], &[]),
+            // mounted, but without a path an application could use:
+            helper(&[("share", None)], &[]),
+        ] {
+            assert_eq!(
+                foreground_projection(Some(&desired), Some(&report)),
+                Ok(unavailable(WAITING_MESSAGE))
+            );
+        }
     }
 
     #[test]

@@ -457,7 +457,6 @@ mod tests {
         for foreground in [
             crate::state::ForegroundSession::None,
             crate::state::ForegroundSession::Mounted(mounted_session("other")),
-            crate::state::ForegroundSession::Unmounting(mounted_session("share")),
         ] {
             let mut app = AgentGuiApp::new();
             app.app_state.foreground = foreground;
@@ -593,13 +592,19 @@ mod tests {
         });
 
         app.handle_action(Action::ForegroundChanged(
-            crate::state::ForegroundSession::Mounting(pending.clone()),
+            crate::state::ForegroundSession::Mounting(
+                pending.clone(),
+                "Waiting for the session helper to mount the share.".to_owned(),
+            ),
         ));
 
         assert_eq!(app.app_state.pending_start(), None);
         assert_eq!(
             app.app_state.foreground,
-            crate::state::ForegroundSession::Mounting(pending)
+            crate::state::ForegroundSession::Mounting(
+                pending,
+                "Waiting for the session helper to mount the share.".to_owned()
+            )
         );
     }
 
@@ -669,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn authoritative_unmounting_replaces_local_close_progress() {
+    fn foreground_gone_after_close_clears_local_close_progress() {
         let mut app = AgentGuiApp::new();
         let session = crate::state::ActiveSession {
             share_id: "share".to_owned(),
@@ -685,13 +690,13 @@ mod tests {
         });
 
         app.handle_action(Action::ForegroundChanged(
-            crate::state::ForegroundSession::Unmounting(session.clone()),
+            crate::state::ForegroundSession::None,
         ));
 
         assert_eq!(app.app_state.pending_close(), None);
         assert_eq!(
             app.app_state.foreground,
-            crate::state::ForegroundSession::Unmounting(session)
+            crate::state::ForegroundSession::None
         );
     }
 

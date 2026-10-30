@@ -21,23 +21,6 @@ pub struct Shares {
     pub shares: Vec<crate::messages::Share>,
 }
 
-/// Desktop session ID: XDG_SESSION_ID or SESSIONNAME
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct SessionId {
-    pub id: String,
-}
-
-impl SessionId {
-    pub fn from_env() -> Result<Self, std::env::VarError> {
-        #[cfg(target_os = "linux")]
-        let environment = std::env::var("XDG_SESSION_ID")?;
-        #[cfg(windows)]
-        let environment = std::env::var("SESSIONNAME")?;
-
-        Ok(Self { id: environment })
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToSessionHelper {
     /// Configuration contains the samba hostname whose mounts are managed by the session helper
@@ -50,13 +33,10 @@ pub struct ToSessionHelper {
     pub share_state: Option<Shares>,
 }
 
-/// Updated state which sessions are mounted in the given desktop session
+/// Desired state and the session helper's report, for the GUI's own scope. The agent determines
+/// the scope from the connection, so it isn't part of the message.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToSessionGui {
-    /// The SessionId this update belongs to; should match the SessionId
-    /// in which the GUI is running in.
-    pub session_id: SessionId,
-
     /// The last report of the session helper; None if we haven't received any yet
     /// (which means shares could be mounted already, but we don't know about it)
     pub session_helper: Option<SessionHelperState>,

@@ -96,25 +96,17 @@ fn overview_snapshots() {
     results.extend_harness(&mut logged_out);
 
     let mut mounting = overview_harness(false, false);
-    mounting.state_mut().app_state.foreground = ForegroundSession::Mounting(PendingSession {
-        share_id: "mounting-share".to_owned(),
-        project: "representative-project".to_owned(),
-        session: "2026-07-29-ingest".to_owned(),
-    });
+    mounting.state_mut().app_state.foreground = ForegroundSession::Mounting(
+        PendingSession {
+            share_id: "mounting-share".to_owned(),
+            project: "representative-project".to_owned(),
+            session: "2026-07-29-ingest".to_owned(),
+        },
+        "Waiting for the session helper to mount the share.".to_owned(),
+    );
     mounting.run_steps(1);
     mounting.snapshot("overview_mounting");
     results.extend_harness(&mut mounting);
-
-    let mut unmounting = overview_harness(false, true);
-    unmounting.state_mut().app_state.foreground = ForegroundSession::Unmounting(ActiveSession {
-        share_id: "unmounting-share".to_owned(),
-        project: "representative-project".to_owned(),
-        session: "2026-07-29-ingest".to_owned(),
-        mount_path: Some("/mnt/modama/representative-project/2026-07-29-ingest".to_owned()),
-    });
-    unmounting.run_steps(1);
-    unmounting.snapshot("overview_unmounting");
-    results.extend_harness(&mut unmounting);
 
     let mut close_confirmation = overview_harness(false, true);
     close_confirmation.get_by_label("Close Session").click();

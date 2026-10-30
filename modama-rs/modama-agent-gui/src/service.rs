@@ -103,22 +103,19 @@ impl HttpAgentService {
             APICurrentForegroundShare::APICurrentForegroundShareVariant(_) => {
                 ForegroundSession::None
             }
+            // Unavailable
             APICurrentForegroundShare::APICurrentForegroundShareVariant2(share) => {
-                ForegroundSession::Mounting(PendingSession {
-                    share_id: share.share_id,
-                    project: share.project,
-                    session: share.session,
-                })
+                ForegroundSession::Mounting(
+                    PendingSession {
+                        share_id: share.share_id,
+                        project: share.project,
+                        session: share.session,
+                    },
+                    share.message,
+                )
             }
+            // Mounted
             APICurrentForegroundShare::APICurrentForegroundShareVariant3(share) => {
-                ForegroundSession::Unmounting(ActiveSession {
-                    share_id: share.share_id,
-                    project: share.project,
-                    session: share.session,
-                    mount_path: Some(share.mount_path),
-                })
-            }
-            APICurrentForegroundShare::APICurrentForegroundShareVariant4(share) => {
                 ForegroundSession::Mounted(ActiveSession {
                     share_id: share.share_id,
                     project: share.project,
@@ -558,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn http_service_maps_mounting_foreground_state() -> Result<(), Box<dyn std::error::Error>> {
+    fn http_service_maps_unavailable_foreground_state() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = mockito::Server::new();
         let mock = server
             .mock("GET", "/api/shares/foreground/")
@@ -566,25 +563,28 @@ mod tests {
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
-                r#"{"type":"Mounting","share_id":"share","project":"project","session":"session","dest_path":"/project/session"}"#,
+                r#"{"type":"Unavailable","share_id":"share","project":"project","session":"session","dest_path":"/project/session","message":"no helper"}"#,
             )
             .create();
 
         let service = HttpAgentService::new(server.url())?;
         assert_eq!(
             service.foreground()?,
-            ForegroundSession::Mounting(PendingSession {
-                share_id: "share".to_owned(),
-                project: "project".to_owned(),
-                session: "session".to_owned(),
-            })
+            ForegroundSession::Mounting(
+                PendingSession {
+                    share_id: "share".to_owned(),
+                    project: "project".to_owned(),
+                    session: "session".to_owned(),
+                },
+                "no helper".to_owned()
+            )
         );
         mock.assert();
         Ok(())
     }
 
     #[test]
-    fn http_service_maps_unmounting_foreground_state() -> Result<(), Box<dyn std::error::Error>> {
+    fn http_service_maps_mounted_foreground_state() -> Result<(), Box<dyn std::error::Error>> {
         let mut server = mockito::Server::new();
         let mock = server
             .mock("GET", "/api/shares/foreground/")
@@ -592,14 +592,14 @@ mod tests {
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
-                r#"{"type":"Unmounting","share_id":"share","project":"project","session":"session","dest_path":"/project/session","mount_path":"/mnt/session"}"#,
+                r#"{"type":"Mounted","share_id":"share","project":"project","session":"session","dest_path":"/project/session","mount_path":"/mnt/session"}"#,
             )
             .create();
 
         let service = HttpAgentService::new(server.url())?;
         assert_eq!(
             service.foreground()?,
-            ForegroundSession::Unmounting(ActiveSession {
+            ForegroundSession::Mounted(ActiveSession {
                 share_id: "share".to_owned(),
                 project: "project".to_owned(),
                 session: "session".to_owned(),

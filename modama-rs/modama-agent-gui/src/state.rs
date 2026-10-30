@@ -23,8 +23,8 @@ impl PendingSession {
 pub enum ForegroundSession {
     #[default]
     None,
-    Mounting(PendingSession),
-    Unmounting(ActiveSession),
+    /// Desired, but not usable yet; the message from the agent says why
+    Mounting(PendingSession, String),
     Mounted(ActiveSession),
 }
 
@@ -32,20 +32,16 @@ impl ForegroundSession {
     pub fn share_id(&self) -> Option<&str> {
         match self {
             Self::None => None,
-            Self::Mounting(session) => Some(&session.share_id),
-            Self::Unmounting(session) | Self::Mounted(session) => Some(&session.share_id),
+            Self::Mounting(session, _) => Some(&session.share_id),
+            Self::Mounted(session) => Some(&session.share_id),
         }
     }
 
     pub fn active_session(&self) -> Option<&ActiveSession> {
         match self {
-            Self::Unmounting(session) | Self::Mounted(session) => Some(session),
-            Self::None | Self::Mounting(_) => None,
+            Self::Mounted(session) => Some(session),
+            Self::None | Self::Mounting(..) => None,
         }
-    }
-
-    pub fn is_unmounting(&self, share_id: &str) -> bool {
-        matches!(self, Self::Unmounting(session) if session.share_id == share_id)
     }
 }
 
@@ -204,10 +200,9 @@ impl AgentAppState {
         }
 
         if let Some(operation) = self.session_operations.close.as_mut()
-            && (foreground.is_unmounting(&operation.share_id)
-                || foreground
-                    .share_id()
-                    .is_none_or(|current| current != operation.share_id))
+            && foreground
+                .share_id()
+                .is_none_or(|current| current != operation.share_id)
         {
             if operation.response_received {
                 self.session_operations.close = None;

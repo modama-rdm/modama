@@ -577,6 +577,7 @@
         "oneOf": [
           {
             "type": "object",
+            "description": "No foreground share is desired.",
             "required": [
               "type"
             ],
@@ -591,17 +592,23 @@
           },
           {
             "type": "object",
+            "description": "A foreground share is desired, but it can't be used in the caller's session (yet).",
             "required": [
               "share_id",
               "project",
               "session",
               "dest_path",
+              "message",
               "type"
             ],
             "properties": {
               "dest_path": {
                 "type": "string",
                 "description": "The path in the data management that is exported with this Share."
+              },
+              "message": {
+                "type": "string",
+                "description": "Why the share is unavailable, written for the person running the client."
               },
               "project": {
                 "type": "string",
@@ -618,52 +625,14 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Mounting"
+                  "Unavailable"
                 ]
               }
             }
           },
           {
             "type": "object",
-            "required": [
-              "share_id",
-              "project",
-              "session",
-              "dest_path",
-              "mount_path",
-              "type"
-            ],
-            "properties": {
-              "dest_path": {
-                "type": "string",
-                "description": "The path in the data management that is exported with this Share."
-              },
-              "mount_path": {
-                "type": "string",
-                "description": "Where the share is still mounted on the local system."
-              },
-              "project": {
-                "type": "string",
-                "description": "Project derived from the share destination."
-              },
-              "session": {
-                "type": "string",
-                "description": "Session derived from the share destination."
-              },
-              "share_id": {
-                "type": "string",
-                "description": "Stable identifier used to close this share."
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "Unmounting"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
+            "description": "The foreground share is mounted; write here.",
             "required": [
               "share_id",
               "project",
@@ -696,7 +665,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Share"
+                  "Mounted"
                 ]
               }
             }

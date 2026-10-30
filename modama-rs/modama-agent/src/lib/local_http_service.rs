@@ -2,7 +2,7 @@
 //! Targets especially older browsers (Internet Explorer, ancient Firefox)
 use axum::{
     Router,
-    extract::{Form, Path, State},
+    extract::{ConnectInfo, Form, Path, State},
     http::{StatusCode, header},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -16,6 +16,7 @@ use axum_macros::debug_handler;
 use log::error;
 use minijinja::{AutoEscape, Environment, Value, context};
 use modama_common::{
+    local_api_messages::APICurrentForegroundShare,
     messages::Share,
     mgmt_client::{MgmtClient, MgmtError},
     tokens::{TokenError, TokenProvider},
@@ -28,7 +29,8 @@ use tokio::sync::Mutex;
 use tower_http::csrf::CsrfLayer;
 
 use crate::{
-    agent_state::{AgentState, ResolvedMount},
+    agent_state::AgentState,
+    caller_scope::{ConnInfo, HelperScope, PlatformScopeResolver, ResolveScope, ScopeError},
     config::{ConfigError, MTLSIdentity},
     events_api::add_internal_api,
     http_api::{add_api_routes, project_and_session},
@@ -79,8 +81,51 @@ struct ForegroundView {
     kind: &'static str,
     project: Option<String>,
     session: Option<String>,
+    message: Option<String>,
     close_href: Option<SafeLocalUrl>,
     refresh_status: bool,
+}
+
+impl ForegroundView {
+    fn new(foreground: &APICurrentForegroundShare) -> Self {
+        match foreground {
+            APICurrentForegroundShare::None => Self {
+                kind: "none",
+                project: None,
+                session: None,
+                message: None,
+                close_href: None,
+                refresh_status: false,
+            },
+            APICurrentForegroundShare::Unavailable {
+                share_id,
+                project,
+                session,
+                message,
+                ..
+            } => Self {
+                kind: "unavailable",
+                project: Some(project.clone()),
+                session: Some(session.clone()),
+                message: Some(message.clone()),
+                close_href: Some(SafeLocalUrl::close_ingest(share_id)),
+                refresh_status: true,
+            },
+            APICurrentForegroundShare::Mounted {
+                share_id,
+                project,
+                session,
+                ..
+            } => Self {
+                kind: "open",
+                project: Some(project.clone()),
+                session: Some(session.clone()),
+                message: None,
+                close_href: Some(SafeLocalUrl::close_ingest(share_id)),
+                refresh_status: false,
+            },
+        }
+    }
 }
 
 /// A same-origin path that can be inserted into HTML without further escaping.
@@ -144,73 +189,6 @@ impl Serialize for SafeLocalUrl {
         // MiniJinja's safe-string marker. Keeping the conversion here ensures
         // templates cannot opt an ordinary String out of autoescaping.
         Value::from_safe_string(self.0.clone()).serialize(serializer)
-    }
-}
-
-enum ForegroundState {
-    None,
-    Opening(Share),
-    Open(ResolvedMount),
-    Closing(ResolvedMount),
-}
-
-impl ForegroundState {
-    fn from_agent_state(state: &AgentState) -> Self {
-        let desired = state
-            .remote_info
-            .as_ref()
-            .and_then(|remote| remote.desired_shares.foreground_share.clone());
-        let current = state.current_shares.foreground_share.clone();
-
-        match (desired, current) {
-            (None, None) => Self::None,
-            (None, Some(current)) => Self::Closing(current),
-            (Some(desired), Some(current)) if desired.share_id == current.share.share_id => {
-                Self::Open(current)
-            }
-            (Some(desired), _) => Self::Opening(desired),
-        }
-    }
-
-    fn is_idle(&self) -> bool {
-        matches!(self, Self::None)
-    }
-
-    fn open_share(&self, share_id: &str) -> Option<&ResolvedMount> {
-        match self {
-            Self::Open(share) if share.share.share_id == share_id => Some(share),
-            _ => None,
-        }
-    }
-
-    fn view(&self) -> Result<ForegroundView, LocalAPIError> {
-        let (kind, share, close_href, refresh_status) = match self {
-            Self::None => {
-                return Ok(ForegroundView {
-                    kind: "none",
-                    project: None,
-                    session: None,
-                    close_href: None,
-                    refresh_status: false,
-                });
-            }
-            Self::Opening(share) => ("opening", share, None, true),
-            Self::Open(mounted) => (
-                "open",
-                &mounted.share,
-                Some(SafeLocalUrl::close_ingest(&mounted.share.share_id)),
-                false,
-            ),
-            Self::Closing(mounted) => ("closing", &mounted.share, None, true),
-        };
-        let (project, session) = project_and_session(&share.dest_path)?;
-        Ok(ForegroundView {
-            kind,
-            project: Some(project),
-            session: Some(session),
-            close_href,
-            refresh_status,
-        })
     }
 }
 
@@ -312,9 +290,7 @@ fn validate_session_name(input: &str) -> Result<String, &'static str> {
     }
 }
 
-async fn local_snapshot(
-    agent_state: &ApiState,
-) -> (url::Url, String, Vec<String>, ForegroundState) {
+async fn local_snapshot(agent_state: &ApiState) -> (url::Url, String, Vec<String>) {
     let state = agent_state.state.lock().await;
     let (identity, resource_name) = match &state.config.identity {
         MTLSIdentity::Anonymous { hostname } => {
@@ -340,16 +316,19 @@ async fn local_snapshot(
                 .collect()
         })
         .unwrap_or_default();
-    (
-        state.config.mgmt_api_url.clone(),
-        identity,
-        agents,
-        ForegroundState::from_agent_state(&state),
-    )
+    (state.config.mgmt_api_url.clone(), identity, agents)
 }
 
-async fn foreground_state(agent_state: &ApiState) -> ForegroundState {
-    ForegroundState::from_agent_state(&*agent_state.state.lock().await)
+/// The desired foreground share; mounted or not, this is what the user can close, and what
+/// prevents opening another ingest
+async fn desired_foreground(agent_state: &ApiState) -> Option<Share> {
+    agent_state
+        .state
+        .lock()
+        .await
+        .remote_info
+        .as_ref()
+        .and_then(|remote| remote.desired_shares.foreground_share.clone())
 }
 
 /// Wrapper around the AgentState for the local API server
@@ -358,6 +337,7 @@ pub struct ApiState {
     pub state: Arc<Mutex<AgentState>>,
     pub token_provider: Arc<dyn TokenProvider + Send + Sync>,
     pub jinja_env: Environment<'static>,
+    pub scope_resolver: Arc<dyn ResolveScope>,
 }
 
 impl ApiState {
@@ -369,7 +349,18 @@ impl ApiState {
             state: Arc::clone(state),
             token_provider: Arc::clone(token_provider),
             jinja_env: create_env(),
+            scope_resolver: Arc::new(PlatformScopeResolver),
         }
+    }
+
+    /// Determine the helper scope of the client on the other end of `conn`
+    pub async fn resolve_scope(&self, conn: ConnInfo) -> Result<HelperScope, LocalAPIError> {
+        let resolver = Arc::clone(&self.scope_resolver);
+        // reading the socket table may take a moment on busy hosts:
+        tokio::task::spawn_blocking(move || resolver.resolve(&conn))
+            .await
+            .map_err(|e| ScopeError::SocketTable(e.to_string()))?
+            .map_err(LocalAPIError::from)
     }
 }
 
@@ -398,6 +389,9 @@ pub enum LocalAPIError {
 
     #[error("invalid API response: {0}")]
     InvalidResponse(#[from] crate::http_api::ShareDestinationError),
+
+    #[error("caller scope: {0}")]
+    Scope(#[from] ScopeError),
 }
 
 impl From<versioned::RouteConfigError> for LocalAPIError {
@@ -493,6 +487,21 @@ impl IntoResponse for LocalAPIError {
                 )
                     .into_response()
             }
+            LocalAPIError::Scope(error @ ScopeError::NotFound) => (
+                StatusCode::FORBIDDEN,
+                [(header::CONTENT_TYPE, "text/plain")],
+                error.to_string(),
+            )
+                .into_response(),
+            LocalAPIError::Scope(error @ ScopeError::SocketTable(_)) => {
+                error!("{error}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    "internal server error: could not determine the caller",
+                )
+                    .into_response()
+            }
         }
     }
 }
@@ -512,10 +521,14 @@ pub async fn get_auth(
 #[debug_handler]
 async fn serve_index_page(
     State(agent_state): State<ApiState>,
+    ConnectInfo(conn): ConnectInfo<ConnInfo>,
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
 ) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
-    let (mgmt_api_url, identity, connected_agents, foreground) = local_snapshot(&agent_state).await;
+    let (mgmt_api_url, identity, connected_agents) = local_snapshot(&agent_state).await;
+    let scope = agent_state.resolve_scope(conn).await?;
+    let foreground = agent_state.state.lock().await.foreground_for(scope)?;
+    let start_allowed = foreground == APICurrentForegroundShare::None;
     let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
     let projects = c
         .list_projects()
@@ -530,14 +543,11 @@ async fn serve_index_page(
                 || project.owner == auth.username()
         })
         .map(|project| LinkItem {
-            href: foreground
-                .is_idle()
-                .then(|| SafeLocalUrl::start_project(&project.name)),
+            href: start_allowed.then(|| SafeLocalUrl::start_project(&project.name)),
             name: project.name,
         })
         .collect::<Vec<_>>();
-    let start_allowed = foreground.is_idle();
-    let foreground = foreground.view()?;
+    let foreground = ForegroundView::new(&foreground);
 
     render_html(
         &agent_state.jinja_env,
@@ -561,7 +571,7 @@ async fn start_ingest_step1(
 ) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
 
-    if !foreground_state(&agent_state).await.is_idle() {
+    if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
             StatusCode::CONFLICT,
@@ -603,7 +613,7 @@ async fn create_session(
 ) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
 
-    if !foreground_state(&agent_state).await.is_idle() {
+    if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
             StatusCode::CONFLICT,
@@ -636,7 +646,7 @@ async fn create_session(
         }
     };
 
-    if !foreground_state(&agent_state).await.is_idle() {
+    if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
             StatusCode::CONFLICT,
@@ -675,7 +685,7 @@ async fn start_ingest_step2(
 ) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
 
-    if !foreground_state(&agent_state).await.is_idle() {
+    if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
             StatusCode::CONFLICT,
@@ -684,7 +694,7 @@ async fn start_ingest_step2(
         );
     }
 
-    let (mgmt_api_url, _, _, _) = local_snapshot(&agent_state).await;
+    let (mgmt_api_url, _, _) = local_snapshot(&agent_state).await;
     let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
 
     let details = c.project_details(&project_name).await?;
@@ -727,7 +737,7 @@ async fn start_ingest_step3(
 ) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
 
-    if !foreground_state(&agent_state).await.is_idle() {
+    if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
             StatusCode::CONFLICT,
@@ -750,7 +760,7 @@ async fn start_ingest_step3(
         );
     }
 
-    if !foreground_state(&agent_state).await.is_idle() {
+    if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
             StatusCode::CONFLICT,
@@ -781,8 +791,10 @@ async fn close_ingest_confirmation(
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
 ) -> Result<Response, LocalAPIError> {
     let _auth = get_auth(auth).await?;
-    let foreground = foreground_state(&agent_state).await;
-    let Some(mounted) = foreground.open_share(&share_id) else {
+    let Some(foreground) = desired_foreground(&agent_state)
+        .await
+        .filter(|share| share.share_id == share_id)
+    else {
         return message_page(
             &agent_state.jinja_env,
             StatusCode::CONFLICT,
@@ -790,7 +802,7 @@ async fn close_ingest_confirmation(
             "This ingest is not the currently open foreground ingest.",
         );
     };
-    let (project, session) = project_and_session(&mounted.share.dest_path)?;
+    let (project, session) = project_and_session(&foreground.dest_path)?;
     let action = SafeLocalUrl::close_ingest(&share_id);
 
     render_html(
@@ -812,8 +824,10 @@ async fn close_ingest(
     auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
 ) -> Result<Response, LocalAPIError> {
     let auth = get_auth(auth).await?;
-    let foreground = foreground_state(&agent_state).await;
-    if foreground.open_share(&share_id).is_none() {
+    if desired_foreground(&agent_state)
+        .await
+        .is_none_or(|share| share.share_id != share_id)
+    {
         return message_page(
             &agent_state.jinja_env,
             StatusCode::CONFLICT,
@@ -846,7 +860,12 @@ pub async fn serve_local_web_api_on(
     let app = make_app(ApiState::new(&state, &token_provider))?;
 
     #[allow(clippy::unwrap_used)] // infallible
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<ConnInfo>(),
+    )
+    .await
+    .unwrap();
 
     Ok(())
 }
@@ -879,8 +898,10 @@ mod tests {
     use super::*;
     use crate::agent_state::RemoteInfo;
     use axum::body::Body;
+    use axum::extract::connect_info::MockConnectInfo;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
+    use modama_common::internal_api_types::{MountedShare, SessionHelperState};
     use modama_common::messages::{self, Share as MessageShare};
     use modama_common::mgmt_client::{
         AdhocProject, DataInProject, ListProjectsResponse, ProjectDetailsResponse,
@@ -958,40 +979,72 @@ mod tests {
                 });
 
             let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
-            let api_state = ApiState::new(&shared_state, &token_provider);
-            let app = make_app(api_state).unwrap();
+            let mut api_state = ApiState::new(&shared_state, &token_provider);
+            api_state.scope_resolver = Arc::new(TestScope);
+            let app = make_app(api_state)
+                .unwrap()
+                .layer(MockConnectInfo(ConnInfo {
+                    local: Some(([127, 0, 0, 1], 3001).into()),
+                    peer: ([127, 0, 0, 1], 50000).into(),
+                }));
 
             Self { app, shared_state }
         }
+
+        /// Make `share` the desired foreground share; if `mount_path` is given, the session
+        /// helper of the test scope reports it as mounted there
+        async fn set_foreground(&self, share: MessageShare, mount_path: Option<&str>) {
+            let mut state = self.shared_state.lock().await;
+            if let Some(mount_path) = mount_path {
+                state.session_helpers.insert(
+                    TEST_SCOPE,
+                    SessionHelperState {
+                        mounted_shares: vec![MountedShare {
+                            share_name: share.share_name.clone(),
+                            mount_path: Some(PathBuf::from(mount_path)),
+                        }],
+                        errors: vec![],
+                    },
+                );
+            }
+            state
+                .remote_info
+                .as_mut()
+                .unwrap()
+                .desired_shares
+                .foreground_share = Some(share);
+        }
     }
 
-    fn mounted_foreground_share(share_id: &str) -> ResolvedMount {
-        ResolvedMount {
-            share: MessageShare {
-                resource: Some("res".to_owned()),
-                share_id: share_id.to_owned(),
-                share_name: "share-name".to_owned(),
-                dest_path: "/adhoc/the-project/test-session/".to_owned(),
-                created_timestamp: 0,
-                username: "share-user".to_owned(),
-                password: "secret-password".to_owned(),
-                uid: 1001,
-                gid: 1001,
-            },
-            mount_path: PathBuf::from("/mnt/ingest"),
+    const TEST_SCOPE: HelperScope = HelperScope::Uid(1001);
+
+    /// Every request comes from the test scope
+    struct TestScope;
+
+    impl ResolveScope for TestScope {
+        fn resolve(&self, _conn: &ConnInfo) -> Result<HelperScope, ScopeError> {
+            Ok(TEST_SCOPE)
+        }
+    }
+
+    fn foreground_share(share_id: &str) -> MessageShare {
+        MessageShare {
+            resource: Some("res".to_owned()),
+            share_id: share_id.to_owned(),
+            share_name: "share-name".to_owned(),
+            dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            created_timestamp: 0,
+            username: "share-user".to_owned(),
+            password: "secret-password".to_owned(),
+            uid: 1001,
+            gid: 1001,
         }
     }
 
     async fn set_open_foreground(test_setup: &TestSetup, share_id: &str) {
-        let mounted = mounted_foreground_share(share_id);
-        let mut state = test_setup.shared_state.lock().await;
-        state
-            .remote_info
-            .as_mut()
-            .unwrap()
-            .desired_shares
-            .foreground_share = Some(mounted.share.clone());
-        state.current_shares.foreground_share = Some(mounted);
+        test_setup
+            .set_foreground(foreground_share(share_id), Some("/mnt/ingest"))
+            .await;
     }
 
     #[tokio::test]
@@ -1093,31 +1146,18 @@ mod tests {
     async fn test_shares_foreground_endpoint_returns_share() {
         let test_setup = TestSetup::start().await;
 
-        let mshare = ResolvedMount {
-            share: MessageShare {
-                resource: None,
-                share_id: "id".to_string(),
-                share_name: "sname".to_string(),
-                dest_path: "/adhoc/project/session/".to_string(),
-                created_timestamp: 0,
-                username: "u".to_string(),
-                password: "p".to_string(),
-                uid: 1000,
-                gid: 1000,
-            },
-            mount_path: PathBuf::from("/mnt/point"),
+        let share = MessageShare {
+            resource: None,
+            share_id: "id".to_string(),
+            share_name: "sname".to_string(),
+            dest_path: "/adhoc/project/session/".to_string(),
+            created_timestamp: 0,
+            username: "u".to_string(),
+            password: "p".to_string(),
+            uid: 1000,
+            gid: 1000,
         };
-        {
-            let mut state = test_setup.shared_state.lock().await;
-            state
-                .remote_info
-                .as_mut()
-                .unwrap()
-                .desired_shares
-                .foreground_share = Some(mshare.share.clone());
-
-            state.current_shares.foreground_share = Some(mshare.clone());
-        }
+        test_setup.set_foreground(share, Some("/mnt/point")).await;
         let req = Request::builder()
             .uri("/api/shares/foreground/")
             .method("GET")
@@ -1130,12 +1170,42 @@ mod tests {
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let got: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(got["type"], "Share");
+        assert_eq!(got["type"], "Mounted");
         assert_eq!(got["share_id"], "id");
         assert_eq!(got["project"], "project");
         assert_eq!(got["session"], "session");
         assert_eq!(got["dest_path"], "/adhoc/project/session/");
         assert_eq!(got["mount_path"], "/mnt/point");
+    }
+
+    #[tokio::test]
+    async fn foreground_endpoint_without_helper_says_how_to_start_one() {
+        let test_setup = TestSetup::start().await;
+        test_setup
+            .set_foreground(foreground_share("id"), None)
+            .await;
+
+        let req = Request::builder()
+            .uri("/api/shares/foreground/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let got: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(got["type"], "Unavailable");
+        assert_eq!(got["share_id"], "id");
+        assert!(
+            got["message"]
+                .as_str()
+                .unwrap()
+                .contains("modama-agent session-helper")
+        );
+        assert!(!bytes.windows(15).any(|w| w == b"secret-password"));
     }
 
     #[tokio::test]
@@ -1180,30 +1250,18 @@ mod tests {
     #[tokio::test]
     async fn malformed_foreground_destination_is_an_api_error() {
         let test_setup = TestSetup::start().await;
-        let mounted = ResolvedMount {
-            share: MessageShare {
-                resource: None,
-                share_id: "id".to_owned(),
-                share_name: "share".to_owned(),
-                dest_path: "session-only".to_owned(),
-                created_timestamp: 0,
-                username: "user".to_owned(),
-                password: "secret".to_owned(),
-                uid: 1000,
-                gid: 1000,
-            },
-            mount_path: PathBuf::from("/mnt/share"),
+        let share = MessageShare {
+            resource: None,
+            share_id: "id".to_owned(),
+            share_name: "share".to_owned(),
+            dest_path: "session-only".to_owned(),
+            created_timestamp: 0,
+            username: "user".to_owned(),
+            password: "secret".to_owned(),
+            uid: 1000,
+            gid: 1000,
         };
-        {
-            let mut state = test_setup.shared_state.lock().await;
-            state
-                .remote_info
-                .as_mut()
-                .unwrap()
-                .desired_shares
-                .foreground_share = Some(mounted.share.clone());
-            state.current_shares.foreground_share = Some(mounted);
-        }
+        test_setup.set_foreground(share, Some("/mnt/share")).await;
         let req = Request::builder()
             .uri("/api/shares/foreground/")
             .method("GET")
@@ -1396,7 +1454,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn index_only_offers_close_for_an_open_foreground_ingest() {
+    async fn index_offers_close_for_an_open_foreground_ingest() {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "share-123").await;
 
@@ -1442,15 +1500,17 @@ mod tests {
     }
 
     #[test]
-    fn transitional_foreground_states_instruct_the_user_to_reload() {
-        let mounted = mounted_foreground_share("share-123");
-        let states = [
-            ForegroundState::Opening(mounted.share.clone()),
-            ForegroundState::Closing(mounted),
-        ];
+    fn unavailable_foreground_shows_the_message_and_instructs_to_reload() {
+        let unavailable = APICurrentForegroundShare::Unavailable {
+            share_id: "share-123".to_owned(),
+            project: "the-project".to_owned(),
+            session: "test-session".to_owned(),
+            dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            message: "Waiting for the session helper to mount the share.".to_owned(),
+        };
 
-        for state in states {
-            let foreground = state.view().unwrap();
+        {
+            let foreground = ForegroundView::new(&unavailable);
             let rendered = create_env()
                 .get_template("index.html")
                 .unwrap()
@@ -1467,10 +1527,13 @@ mod tests {
                 })
                 .unwrap();
 
+            assert!(rendered.contains("Status: unavailable."));
+            assert!(rendered.contains("Waiting for the session helper to mount the share."));
             assert!(rendered.contains("<a href=\"/\">Reload this page</a>"));
             assert!(rendered.contains("to refresh the status."));
-            assert!(!rendered.contains("Close this ingest"));
-            assert!(!rendered.contains("Close the current ingest"));
+            // an unavailable ingest can still be closed, e.g. when no helper is running:
+            assert!(rendered.contains("href=\"/close-ingest/share%2D123/\""));
+            assert!(rendered.contains("Close the current ingest"));
             assert!(!rendered.contains("href=\"/start-ingest/"));
         }
     }

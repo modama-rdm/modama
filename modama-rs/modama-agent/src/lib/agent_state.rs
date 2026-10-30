@@ -1,14 +1,18 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use log::{info, warn};
 use modama_common::{
-    agent::AgentId,
-    internal_api_types::{SessionHelperState, SessionId},
-    messages::Share,
+    agent::AgentId, internal_api_types::SessionHelperState,
+    local_api_messages::APICurrentForegroundShare, messages::Share,
 };
 use tokio::sync::{Mutex, broadcast, mpsc};
 
-use crate::{config::AgentConfig, events_api::SessionBeginEnd};
+use crate::{
+    caller_scope::HelperScope,
+    config::AgentConfig,
+    events_api::SessionBeginEnd,
+    http_api::{ShareDestinationError, foreground_projection},
+};
 
 #[derive(Debug, Default)]
 pub enum ConnectionState {
@@ -78,17 +82,6 @@ where
     }
 }
 
-/// A mount joined with the `Share` it belongs to. Agent-internal, not part of the
-/// wire format: helpers only report share names and paths (`MountedShare`), the
-/// agent will later fill this by joining those reports with the desired shares.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedMount {
-    pub share: Share,
-
-    /// The mount path; a drive letter on Windows, or a path on Linux
-    pub mount_path: PathBuf,
-}
-
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {
     pub connected_agents: Vec<AgentId>,
@@ -120,7 +113,7 @@ pub enum StateUpdateToSession {
         shares: Vec<Share>,
     },
     MountUpdate {
-        session_id: SessionId,
+        scope: HelperScope,
         /// In case the session helper disconnects, this is not an empty report
         /// but None! Meaning the GUI can distinguish these two cases if needed.
         session_helper: Option<SessionHelperState>,
@@ -131,16 +124,12 @@ pub enum StateUpdateToSession {
 pub struct AgentState {
     pub connection: ConnectionState,
 
-    /// The currently mounted shares, joined with their `Share`. Nothing fills this yet;
-    /// see `ResolvedMount`.
-    pub current_shares: ShareState<ResolvedMount>,
-
-    /// Per-session last report of the session helper
-    pub session_helpers: HashMap<SessionId, SessionHelperState>,
+    /// Per-scope last report of the session helper
+    pub session_helpers: HashMap<HelperScope, SessionHelperState>,
 
     /// Counter for active session helper connections
     /// (to prevent cleanup while there's still an active connection)
-    pub session_connections: HashMap<SessionId, u64>,
+    pub session_connections: HashMap<HelperScope, u64>,
 
     pub session_channel_sender: mpsc::UnboundedSender<SessionBeginEnd>,
 
@@ -161,32 +150,32 @@ async fn session_bookkeeper(
 ) {
     loop {
         match channel.recv().await {
-            Some(SessionBeginEnd::Begin { session_id }) => {
+            Some(SessionBeginEnd::Begin { scope }) => {
                 let mut state = agent_state.lock().await;
                 state
                     .session_connections
-                    .entry(session_id.clone())
+                    .entry(scope)
                     .and_modify(|c| *c += 1)
                     .or_insert(1);
             }
-            Some(SessionBeginEnd::End { session_id }) => {
+            Some(SessionBeginEnd::End { scope }) => {
                 let mut state = agent_state.lock().await;
                 state
                     .session_connections
-                    .entry(session_id.clone())
+                    .entry(scope)
                     .and_modify(|c| *c = c.saturating_sub(1))
                     .or_insert(0);
-                if let Some(c) = state.session_connections.get(&session_id)
+                if let Some(c) = state.session_connections.get(&scope)
                     && *c == 0
                 {
-                    info!("cleaning up session {session_id:?}");
-                    state.session_helpers.remove(&session_id);
-                    state.session_connections.remove(&session_id);
+                    info!("cleaning up scope {scope:?}");
+                    state.session_helpers.remove(&scope);
+                    state.session_connections.remove(&scope);
                     if let Err(_e) =
                         state
                             .desired_state_channel
                             .send(StateUpdateToSession::MountUpdate {
-                                session_id,
+                                scope,
                                 session_helper: None,
                             })
                     {
@@ -203,6 +192,19 @@ async fn session_bookkeeper(
 }
 
 impl AgentState {
+    /// The foreground share as seen from `scope`: desired state combined with what that scope's
+    /// session helper reported
+    pub fn foreground_for(
+        &self,
+        scope: HelperScope,
+    ) -> Result<APICurrentForegroundShare, ShareDestinationError> {
+        let desired = self
+            .remote_info
+            .as_ref()
+            .and_then(|remote| remote.desired_shares.foreground_share.as_ref());
+        foreground_projection(desired, self.session_helpers.get(&scope))
+    }
+
     pub async fn new(config: &AgentConfig) -> Arc<Mutex<Self>> {
         let config = config.clone();
         let (tx, _rx) = broadcast::channel(16);
@@ -211,7 +213,6 @@ impl AgentState {
 
         let state = Arc::new(Mutex::new(Self {
             connection: Default::default(),
-            current_shares: Default::default(),
             remote_info: None,
             config,
             desired_state_channel: tx,

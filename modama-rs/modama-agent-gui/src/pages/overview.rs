@@ -95,13 +95,9 @@ impl PageOverview {
                     }
                 }
             }
-            ForegroundSession::Mounting(session) => {
+            ForegroundSession::Mounting(session, message) => {
                 self.close_confirmation_open = false;
-                self.show_mounting_session_card(ui, session, "Mounting ingest share…");
-            }
-            ForegroundSession::Unmounting(session) => {
-                self.close_confirmation_open = false;
-                self.show_unmounting_session_card(ui, session);
+                self.show_mounting_session_card(ui, session, message);
             }
             ForegroundSession::None => {
                 self.close_confirmation_open = false;
@@ -248,28 +244,6 @@ impl PageOverview {
                 response.clicked()
             })
             .inner
-    }
-
-    fn show_unmounting_session_card(&mut self, ui: &mut egui::Ui, session: &ActiveSession) {
-        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            card_heading(ui, "Closing ingest session");
-            session_detail(ui, "Project", &session.project);
-            session_detail(ui, "Session", &session.session);
-            session_detail(
-                ui,
-                "Mount path on this agent",
-                session
-                    .mount_path
-                    .as_deref()
-                    .unwrap_or("Not available on this agent"),
-            );
-            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-            ui.horizontal(|ui| {
-                ui.spinner();
-                card_description(ui, "Closing ingest share…");
-            });
-        });
     }
 
     fn show_close_confirmation(

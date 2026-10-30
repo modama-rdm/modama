@@ -177,11 +177,14 @@ mod tests {
 
     #[test]
     fn monitor_forwards_changed_foreground_state() {
-        let expected = ForegroundSession::Mounting(PendingSession {
-            share_id: "share".to_owned(),
-            project: "project".to_owned(),
-            session: "session".to_owned(),
-        });
+        let expected = ForegroundSession::Mounting(
+            PendingSession {
+                share_id: "share".to_owned(),
+                project: "project".to_owned(),
+                session: "session".to_owned(),
+            },
+            "Waiting for the session helper to mount the share.".to_owned(),
+        );
         let service: Arc<dyn AgentService> = Arc::new(ForegroundOnlyService {
             health: Mutex::new(Ok(())),
             foreground: Mutex::new(Ok(expected.clone())),

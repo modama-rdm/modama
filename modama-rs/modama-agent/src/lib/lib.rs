@@ -1,6 +1,7 @@
 pub mod config;
 
 pub mod agent_state;
+pub mod caller_scope;
 pub mod events_api;
 pub mod http_api;
 pub mod local_http_service;
@@ -9,6 +10,6 @@ pub mod local_net_token_provider;
 pub mod local_net_token_proxy;
 pub mod message_loop;
 pub mod runtime;
+pub mod session_helper;
 #[cfg(windows)]
 pub mod windows_service;
-pub mod session_helper;

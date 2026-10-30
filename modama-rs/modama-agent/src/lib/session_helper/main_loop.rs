@@ -75,7 +75,7 @@ pub async fn session_helper_loop(state: Arc<Mutex<HelperState>>, backend: &impl 
             crate::session_helper::helper_state::HelperConnectionState::Connecting;
 
         // FIXME: configurable base URL
-        let (conn, _resp) = connect_async("http://localhost:3003/api/internal/events/")
+        let (conn, _resp) = connect_async("ws://localhost:3003/internal/events/session-helper/")
             .await
             .unwrap();
         let (_ws_write, mut ws_read) = conn.split();

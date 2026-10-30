@@ -20,8 +20,11 @@ pub enum APIAgentIdentity {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
 #[serde(tag = "type")]
 pub enum APICurrentForegroundShare {
+    /// No foreground share is desired.
     None,
-    Mounting {
+
+    /// A foreground share is desired, but it can't be used in the caller's session (yet).
+    Unavailable {
         /// Stable identifier used to close this share.
         share_id: String,
 
@@ -33,24 +36,13 @@ pub enum APICurrentForegroundShare {
 
         /// The path in the data management that is exported with this Share.
         dest_path: String,
+
+        /// Why the share is unavailable, written for the person running the client.
+        message: String,
     },
-    Unmounting {
-        /// Stable identifier used to close this share.
-        share_id: String,
 
-        /// Project derived from the share destination.
-        project: String,
-
-        /// Session derived from the share destination.
-        session: String,
-
-        /// The path in the data management that is exported with this Share.
-        dest_path: String,
-
-        /// Where the share is still mounted on the local system.
-        mount_path: String,
-    },
-    Share {
+    /// The foreground share is mounted; write here.
+    Mounted {
         /// Stable identifier used to close this share.
         share_id: String,
 
