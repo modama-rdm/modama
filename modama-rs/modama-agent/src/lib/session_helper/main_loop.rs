@@ -63,7 +63,7 @@ impl LoopState {
     }
 
     /// One reconciliation pass, then report the result if it changed
-    async fn pass(&mut self, backend: &impl MountBackend) {
+    async fn pass(&mut self, backend: &impl MountBackend, force: bool) {
         let Some(desired) = &self.desired else {
             return;
         };
@@ -74,7 +74,7 @@ impl LoopState {
         };
 
         let report = match backend
-            .reconcile(&share_state.shares, &desired.config)
+            .reconcile(&share_state.shares, &desired.config, force)
             .await
         {
             Ok(report) => report,
@@ -168,8 +168,13 @@ pub async fn session_helper_loop(backend: &impl MountBackend, options: &LoopOpti
                         match serde_json::from_str::<ToSessionHelper>(text.as_str()) {
                             Ok(desired) => {
                                 debug!("received desired state: {desired:?}");
-                                state.desired = Some(desired);
-                                state.pass(backend).await;
+                                // forcing applies to this one pass only, not to later ones
+                                let force = desired.force_release_obsolete;
+                                state.desired = Some(ToSessionHelper {
+                                    force_release_obsolete: false,
+                                    ..desired
+                                });
+                                state.pass(backend, force).await;
                                 next_pass = options.next_pass();
                             }
                             Err(e) => warn!("ignoring invalid message from the agent: {e}"),
@@ -190,7 +195,7 @@ pub async fn session_helper_loop(backend: &impl MountBackend, options: &LoopOpti
                 }
             }
             _ = tokio::time::sleep_until(next_pass) => {
-                state.pass(backend).await;
+                state.pass(backend, false).await;
                 next_pass = options.next_pass();
             }
             _ = tokio::time::sleep_until(next_connect), if idle => {
@@ -235,6 +240,8 @@ mod tests {
     #[derive(Clone)]
     struct FakeBackend {
         calls: Arc<Mutex<Vec<Vec<String>>>>,
+        /// whether each pass was forced
+        forced: Arc<Mutex<Vec<bool>>>,
         result: Arc<Mutex<Result<SessionHelperState, String>>>,
     }
 
@@ -242,6 +249,7 @@ mod tests {
         fn new(result: Result<SessionHelperState, String>) -> Self {
             Self {
                 calls: Arc::default(),
+                forced: Arc::default(),
                 result: Arc::new(Mutex::new(result)),
             }
         }
@@ -260,7 +268,9 @@ mod tests {
             &self,
             desired_shares: &[Share],
             _config: &SessionHelperConfig,
+            force: bool,
         ) -> Result<SessionHelperState, EnumerationError> {
+            self.forced.lock().unwrap().push(force);
             self.calls
                 .lock()
                 .unwrap()
@@ -355,6 +365,14 @@ mod tests {
     }
 
     async fn send_desired(socket: &mut AgentSocket, shares: Option<Vec<Share>>) {
+        send_to_helper(socket, shares, false).await;
+    }
+
+    async fn send_to_helper(
+        socket: &mut AgentSocket,
+        shares: Option<Vec<Share>>,
+        force_release_obsolete: bool,
+    ) {
         let msg = ToSessionHelper {
             config: SessionHelperConfig {
                 smb_hostname: "smb.example.test".to_owned(),
@@ -365,6 +383,7 @@ mod tests {
                 foreground_share_id: None,
                 shares,
             }),
+            force_release_obsolete,
         };
         socket
             .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
@@ -400,6 +419,19 @@ mod tests {
 
         assert_eq!(next_report(&mut agent, LONG).await, Some(result));
         assert_eq!(setup.backend.calls.lock().unwrap()[0], vec!["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn forced_release_applies_to_one_pass_only() {
+        let setup = Setup::start(Ok(report(&["a"]))).await;
+        let mut agent = setup.accept().await;
+
+        send_to_helper(&mut agent, Some(vec![share("a")]), true).await;
+
+        setup.wait_for_calls(3).await;
+        let forced = setup.backend.forced.lock().unwrap().clone();
+        assert!(forced[0]);
+        assert!(forced[1..].iter().all(|forced| !forced));
     }
 
     #[tokio::test]

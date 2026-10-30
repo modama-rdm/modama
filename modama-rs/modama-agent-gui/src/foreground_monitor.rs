@@ -5,12 +5,12 @@ use std::{
 };
 
 use eframe::egui;
-use futures_util::StreamExt as _;
+use futures_util::{SinkExt as _, StreamExt as _};
 use modama_common::{
-    foreground::{foreground_projection, foreground_share},
-    internal_api_types::ToSessionGui,
+    foreground::{foreground_projection, foreground_share, hand_off_blocked},
+    internal_api_types::{ToAgentFromGui, ToSessionGui},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use url::Url;
 
@@ -21,6 +21,8 @@ pub enum ForegroundMonitorUpdate {
     ForegroundChanged(ForegroundSession),
     ConnectionDropped,
     ConnectionRestored,
+    /// Whether a previous user's drive blocks the hand-off, so the GUI can offer to release it
+    HandOffBlocked(bool),
 }
 
 /// The agent must answer the websocket handshake within this time
@@ -49,6 +51,7 @@ pub fn events_url(agent_url: &str) -> Result<Url, String> {
 
 pub struct ForegroundMonitor {
     updates: mpsc::Receiver<ForegroundMonitorUpdate>,
+    force_release: tokio_mpsc::UnboundedSender<()>,
     stop: Option<oneshot::Sender<()>>,
 }
 
@@ -68,6 +71,9 @@ impl Updates {
 
 struct MonitorState {
     last: ForegroundSession,
+    /// Only Windows mappings block each other, so only there is a release offered
+    offer_force_release: bool,
+    hand_off_blocked: bool,
     connection_dropped: bool,
     last_launch: Option<Instant>,
     launcher: Box<dyn HelperLauncher>,
@@ -91,6 +97,18 @@ impl MonitorState {
             self.launcher.launch();
         }
 
+        let blocked = self.offer_force_release
+            && match (&message.desired_shares, &message.session_helper) {
+                (Some(desired), Some(helper)) => hand_off_blocked(desired, helper),
+                _ => false,
+            };
+        if blocked != self.hand_off_blocked {
+            self.hand_off_blocked = blocked;
+            if !updates.send(ForegroundMonitorUpdate::HandOffBlocked(blocked)) {
+                return false;
+            }
+        }
+
         let desired = message.desired_shares.as_ref().and_then(foreground_share);
         let foreground = match foreground_projection(desired, message.session_helper.as_ref()) {
             Ok(foreground) => ForegroundSession::from(foreground),
@@ -111,6 +129,13 @@ impl MonitorState {
             return true;
         }
         self.connection_dropped = true;
+        // a release can't be requested without a connection
+        if self.hand_off_blocked {
+            self.hand_off_blocked = false;
+            if !updates.send(ForegroundMonitorUpdate::HandOffBlocked(false)) {
+                return false;
+            }
+        }
         updates.send(ForegroundMonitorUpdate::ConnectionDropped)
     }
 }
@@ -120,30 +145,48 @@ async fn run(
     events_url: Url,
     mut state: MonitorState,
     updates: Updates,
+    mut force_release: tokio_mpsc::UnboundedReceiver<()>,
     reconnect_delay: Duration,
 ) {
     loop {
         match tokio::time::timeout(CONNECT_TIMEOUT, connect_async(events_url.as_str())).await {
             Ok(Ok((mut socket, _response))) => {
-                while let Some(message) = socket.next().await {
-                    match message {
-                        Ok(Message::Text(text)) => {
-                            match serde_json::from_str::<ToSessionGui>(text.as_str()) {
-                                Ok(message) => {
-                                    if !state.on_message(&message, &updates) {
-                                        return;
+                // requests are one-shot: those from while we were disconnected are dropped
+                while force_release.try_recv().is_ok() {}
+                loop {
+                    tokio::select! {
+                        message = socket.next() => match message {
+                            Some(Ok(Message::Text(text))) => {
+                                match serde_json::from_str::<ToSessionGui>(text.as_str()) {
+                                    Ok(message) => {
+                                        if !state.on_message(&message, &updates) {
+                                            return;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!("ignoring invalid message from the agent: {e}")
                                     }
                                 }
-                                Err(e) => {
-                                    log::warn!("ignoring invalid message from the agent: {e}")
-                                }
                             }
-                        }
-                        Ok(Message::Close(_)) => break,
-                        Ok(_) => {}
-                        Err(e) => {
-                            log::info!("connection to the agent failed ({e})");
-                            break;
+                            Some(Ok(Message::Close(_))) | None => break,
+                            Some(Ok(_)) => {}
+                            Some(Err(e)) => {
+                                log::info!("connection to the agent failed ({e})");
+                                break;
+                            }
+                        },
+                        Some(()) = force_release.recv() => {
+                            let text = match serde_json::to_string(&ToAgentFromGui::ForceRelease) {
+                                Ok(text) => text,
+                                Err(e) => {
+                                    log::error!("could not serialize the release request: {e}");
+                                    continue;
+                                }
+                            };
+                            if let Err(e) = socket.send(Message::Text(text.into())).await {
+                                log::info!("connection to the agent failed ({e})");
+                                break;
+                            }
                         }
                     }
                 }
@@ -165,20 +208,31 @@ impl ForegroundMonitor {
         initial: ForegroundSession,
         ctx: egui::Context,
     ) -> Self {
-        Self::start_with_delay(events_url, launcher, initial, ctx, RECONNECT_DELAY)
+        Self::start_with(
+            events_url,
+            launcher,
+            initial,
+            ctx,
+            RECONNECT_DELAY,
+            cfg!(windows),
+        )
     }
 
-    fn start_with_delay(
+    fn start_with(
         events_url: Url,
         launcher: Box<dyn HelperLauncher>,
         initial: ForegroundSession,
         ctx: egui::Context,
         reconnect_delay: Duration,
+        offer_force_release: bool,
     ) -> Self {
         let (tx, updates) = mpsc::channel();
+        let (force_release, force_release_rx) = tokio_mpsc::unbounded_channel();
         let (stop, stop_rx) = oneshot::channel();
         let state = MonitorState {
             last: initial,
+            offer_force_release,
+            hand_off_blocked: false,
             connection_dropped: false,
             last_launch: None,
             launcher,
@@ -197,15 +251,28 @@ impl ForegroundMonitor {
             };
             runtime.block_on(async move {
                 tokio::select! {
-                    () = run(events_url, state, Updates { tx, ctx }, reconnect_delay) => {}
+                    () = run(
+                        events_url,
+                        state,
+                        Updates { tx, ctx },
+                        force_release_rx,
+                        reconnect_delay,
+                    ) => {}
                     _ = stop_rx => {}
                 }
             });
         });
         Self {
             updates,
+            force_release,
             stop: Some(stop),
         }
+    }
+
+    /// Ask the agent to force the release of the previous user's drive; dropped if we aren't
+    /// connected right now
+    pub fn force_release(&self) {
+        let _ = self.force_release.send(());
     }
 
     pub fn try_recv(&self) -> Result<ForegroundMonitorUpdate, mpsc::TryRecvError> {
@@ -228,9 +295,8 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use futures_util::SinkExt as _;
     use modama_common::{
-        internal_api_types::{MountedShare, SessionHelperState, Shares},
+        internal_api_types::{MountedShare, SessionHelperState, ShareError, Shares},
         messages::Share,
     };
     use tokio::net::{TcpListener, TcpStream};
@@ -267,12 +333,13 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let launcher = CountingLauncher::default();
-            let monitor = ForegroundMonitor::start_with_delay(
+            let monitor = ForegroundMonitor::start_with(
                 Url::parse(&format!("ws://{address}/")).unwrap(),
                 Box::new(launcher.clone()),
                 ForegroundSession::None,
                 egui::Context::default(),
                 Duration::from_millis(10),
+                true,
             );
             Self {
                 listener,
@@ -389,6 +456,40 @@ mod tests {
         assert_eq!(
             setup.next_update(LONG).await,
             Some(ForegroundMonitorUpdate::ConnectionRestored)
+        );
+    }
+
+    #[tokio::test]
+    async fn blocked_hand_off_is_reported_and_release_is_sent() {
+        let setup = Setup::start().await;
+        let mut agent = setup.accept().await;
+        let mut blocked = mounted("old");
+        blocked.desired_shares = Some(Shares {
+            foreground_share_id: Some("new".to_owned()),
+            shares: vec![share("new")],
+        });
+        if let Some(helper) = &mut blocked.session_helper {
+            helper.errors.push(ShareError {
+                share_id: "new".to_owned(),
+                message: "another user's drive is still connected".to_owned(),
+            });
+        }
+
+        send(&mut agent, &blocked).await;
+        assert_eq!(
+            setup.next_update(LONG).await,
+            Some(ForegroundMonitorUpdate::HandOffBlocked(true))
+        );
+
+        setup.monitor.force_release();
+        let message = tokio::time::timeout(LONG, agent.next())
+            .await
+            .expect("no release request")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<ToAgentFromGui>(message.to_text().unwrap()).unwrap(),
+            ToAgentFromGui::ForceRelease
         );
     }
 

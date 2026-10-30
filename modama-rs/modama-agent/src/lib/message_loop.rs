@@ -361,7 +361,10 @@ mod tests {
                                 return;
                             }
                         }
-                        Ok(StateUpdateToSession::MountUpdate { .. }) => {}
+                        Ok(
+                            StateUpdateToSession::MountUpdate { .. }
+                            | StateUpdateToSession::ForceRelease { .. },
+                        ) => {}
                         Err(broadcast::error::RecvError::Lagged(_)) => {}
                         Err(broadcast::error::RecvError::Closed) => {
                             panic!("desired state channel closed")

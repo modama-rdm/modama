@@ -31,6 +31,20 @@ pub struct ToSessionHelper {
     /// otherwise, it could lead to a flip-flopping situation when re-connecting. If this is
     /// None, and shares are mounted, no reconciliation should be happening.
     pub share_state: Option<Shares>,
+
+    /// Set only on the one message the agent sends when the GUI of this scope asked to force the
+    /// release: the pass it triggers removes mounts that are no longer desired, even if files
+    /// are open on them. Not a lasting mode; later messages don't carry it.
+    #[serde(default)]
+    pub force_release_obsolete: bool,
+}
+
+/// What the GUI may send to the agent
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ToAgentFromGui {
+    /// Force the release of mounts that are no longer desired (another user's drive that blocks
+    /// the hand-off), in the GUI's own scope
+    ForceRelease,
 }
 
 /// Desired state and the session helper's report, for the GUI's own scope. The agent determines

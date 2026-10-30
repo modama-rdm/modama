@@ -10,7 +10,9 @@ use crate::{
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},
-    state::{ActiveSession, Credentials, ForegroundSession, OperationId, PendingSession},
+    state::{
+        ActiveSession, AgentAppState, Credentials, ForegroundSession, OperationId, PendingSession,
+    },
     styles,
 };
 
@@ -53,11 +55,12 @@ impl PageOverview {
         &mut self,
         ui: &mut egui::Ui,
         _frame: &mut eframe::Frame,
-        foreground: &ForegroundSession,
-        pending_start: Option<&PendingSession>,
-        pending_close: Option<&str>,
-        credentials: &Option<Credentials>,
+        app_state: &AgentAppState,
     ) -> Action {
+        let foreground = &app_state.foreground;
+        let pending_start = app_state.pending_start();
+        let pending_close = app_state.pending_close();
+        let credentials = &app_state.creds;
         page_heading(ui, "Overview");
         ui.add_space(styles::content_card_top_margin_adjustment());
 
@@ -97,12 +100,15 @@ impl PageOverview {
             }
             ForegroundSession::Mounting(session, message) => {
                 self.close_confirmation_open = false;
-                self.show_mounting_session_card(ui, session, message);
+                if self.show_mounting_session_card(ui, session, message, app_state.hand_off_blocked)
+                {
+                    return Action::ForceRelease;
+                }
             }
             ForegroundSession::None => {
                 self.close_confirmation_open = false;
                 if let Some(session) = pending_start {
-                    self.show_mounting_session_card(ui, session, "Waiting for agent…");
+                    self.show_mounting_session_card(ui, session, "Waiting for agent…", false);
                 } else if self.show_create_card(ui) {
                     return Action::CreateSession;
                 }
@@ -174,23 +180,37 @@ impl PageOverview {
             .inner
     }
 
+    /// True if the user asked to release the previous user's drive (offered if `blocked`)
     fn show_mounting_session_card(
         &mut self,
         ui: &mut egui::Ui,
         session: &PendingSession,
         status: &str,
-    ) {
-        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            card_heading(ui, "Preparing ingest session");
-            session_detail(ui, "Project", &session.project);
-            session_detail(ui, "Session", &session.session);
-            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-            ui.horizontal(|ui| {
-                ui.spinner();
-                card_description(ui, status);
-            });
-        });
+        blocked: bool,
+    ) -> bool {
+        styles::content_card_frame(ui.visuals())
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                card_heading(ui, "Preparing ingest session");
+                session_detail(ui, "Project", &session.project);
+                session_detail(ui, "Session", &session.session);
+                ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    card_description(ui, status);
+                });
+                if blocked {
+                    ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+                    ui.add(danger_outline_button(
+                        "Disconnect previous user's drive",
+                        ui,
+                    ))
+                    .clicked()
+                } else {
+                    false
+                }
+            })
+            .inner
     }
 
     fn show_active_session_card(

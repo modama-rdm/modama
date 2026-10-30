@@ -236,6 +236,14 @@ impl AgentGuiApp {
             Action::ConnectionRestored => {
                 self.app_state.connection_dropped = false;
             }
+            Action::HandOffBlocked(blocked) => {
+                self.app_state.hand_off_blocked = blocked;
+            }
+            Action::ForceRelease => {
+                if let Some(monitor) = &self.foreground_monitor {
+                    monitor.force_release();
+                }
+            }
             Action::GoToOverview => {
                 self.toast.clear();
                 self.page = self.overview_page();
@@ -329,9 +337,13 @@ impl AgentGuiApp {
                 Ok(ForegroundMonitorUpdate::ConnectionRestored) => {
                     self.handle_action(Action::ConnectionRestored);
                 }
+                Ok(ForegroundMonitorUpdate::HandOffBlocked(blocked)) => {
+                    self.handle_action(Action::HandOffBlocked(blocked));
+                }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.foreground_monitor = None;
+                    self.handle_action(Action::HandOffBlocked(false));
                     self.handle_action(Action::ConnectionDropped);
                     break;
                 }
@@ -428,27 +440,13 @@ impl eframe::App for AgentGuiApp {
             .frame(central_panel_frame)
             .show(ui, |ui| {
                 if matches!(self.page, Page::Login(_)) {
-                    let ui_action = self.page.ui(
-                        ui,
-                        frame,
-                        &self.app_state.foreground,
-                        self.app_state.pending_start(),
-                        self.app_state.pending_close(),
-                        &self.app_state.creds,
-                    );
+                    let ui_action = self.page.ui(ui, frame, &self.app_state);
                     self.handle_action(ui_action);
                 } else {
                     egui::Frame::default()
                         .inner_margin(styles::components::app_shell::padding::EGUI_POINTS)
                         .show(ui, |ui| {
-                            let ui_action = self.page.ui(
-                                ui,
-                                frame,
-                                &self.app_state.foreground,
-                                self.app_state.pending_start(),
-                                self.app_state.pending_close(),
-                                &self.app_state.creds,
-                            );
+                            let ui_action = self.page.ui(ui, frame, &self.app_state);
                             self.handle_action(ui_action);
                         });
                 }

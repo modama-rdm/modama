@@ -13,7 +13,8 @@ use axum::{
 use hyper::StatusCode;
 use log::{debug, error, warn};
 use modama_common::internal_api_types::{
-    SessionHelperConfig, SessionHelperState, Shares, ToAgent, ToSessionGui, ToSessionHelper,
+    SessionHelperConfig, SessionHelperState, Shares, ToAgent, ToAgentFromGui, ToSessionGui,
+    ToSessionHelper,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
@@ -83,9 +84,23 @@ where
     Ok(())
 }
 
+/// The desired shares as sent to helpers and GUIs; None until smbdrop has sent them
+fn desired_shares(remote_info: Option<&RemoteInfo>) -> Option<Shares> {
+    remote_info.map(|remote| Shares {
+        foreground_share_id: remote
+            .desired_shares
+            .foreground_share
+            .as_ref()
+            .map(|s| s.share_id.clone()),
+        shares: remote.desired_shares.shares.clone(),
+    })
+}
+
 async fn send_update_to_session_helper(
     update: StateUpdateToSession,
     config: &SessionHelperConfig,
+    own_scope: HelperScope,
+    state: &Mutex<AgentState>,
     socket: &mut WebSocket,
 ) -> Result<(), EventAPIError> {
     match update {
@@ -101,14 +116,24 @@ async fn send_update_to_session_helper(
                         foreground_share_id,
                         shares,
                     }),
+                    force_release_obsolete: false,
                 },
             )
             .await?;
         }
-        StateUpdateToSession::MountUpdate {
-            scope: _,
-            session_helper: _,
-        } => {} // ignore
+        StateUpdateToSession::ForceRelease { scope } if scope == own_scope => {
+            let share_state = desired_shares(state.lock().await.remote_info.as_ref());
+            send_obj(
+                socket,
+                &ToSessionHelper {
+                    config: config.clone(),
+                    share_state,
+                    force_release_obsolete: true,
+                },
+            )
+            .await?;
+        }
+        StateUpdateToSession::ForceRelease { .. } | StateUpdateToSession::MountUpdate { .. } => {}
     }
 
     Ok(())
@@ -189,14 +214,8 @@ async fn handle_session_helper_websocket(
         &mut socket,
         &ToSessionHelper {
             config: session_config.clone(),
-            share_state: remote_info.map(|remote| Shares {
-                foreground_share_id: remote
-                    .desired_shares
-                    .foreground_share
-                    .clone()
-                    .map(|s| s.share_id),
-                shares: remote.desired_shares.shares.clone(),
-            }),
+            share_state: desired_shares(remote_info.as_ref()),
+            force_release_obsolete: false,
         },
     )
     .await?;
@@ -205,7 +224,7 @@ async fn handle_session_helper_websocket(
         select! {
             state_update = recv_handle_lagging(&mut rx) => {
                 let update = state_update?;
-                send_update_to_session_helper(update, &session_config, &mut socket).await?;
+                send_update_to_session_helper(update, &session_config, scope, &state, &mut socket).await?;
             }
             session_update = recv_obj::<ToAgent>(&mut socket) => {
                 record_update_from_session_helper(session_update?, tx.clone(), scope, state.lock().await.deref_mut()).await?;
@@ -242,16 +261,10 @@ async fn send_update_to_gui(
             }
             ToSessionGui {
                 session_helper,
-                desired_shares: remote_info.map(|remote| Shares {
-                    foreground_share_id: remote
-                        .desired_shares
-                        .foreground_share
-                        .clone()
-                        .map(|s| s.share_id),
-                    shares: remote.desired_shares.shares.clone(),
-                }),
+                desired_shares: desired_shares(remote_info.as_ref()),
             }
         }
+        StateUpdateToSession::ForceRelease { .. } => return Ok(()),
     };
     send_obj(socket, &msg).await?;
     Ok(())
@@ -262,12 +275,17 @@ async fn handle_gui_websocket(
     mut socket: WebSocket,
     scope: HelperScope,
 ) -> Result<(), EventAPIError> {
-    let (mut rx, remote_info, session_helper) = {
+    let (mut rx, tx, remote_info, session_helper) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
         let session_helper = agent_state.session_helpers.get(&scope).cloned();
 
-        (receiver, agent_state.remote_info.clone(), session_helper)
+        (
+            receiver,
+            agent_state.desired_state_channel.clone(),
+            agent_state.remote_info.clone(),
+            session_helper,
+        )
     };
 
     // initial state
@@ -275,14 +293,7 @@ async fn handle_gui_websocket(
         &mut socket,
         &ToSessionGui {
             session_helper,
-            desired_shares: remote_info.map(|remote| Shares {
-                foreground_share_id: remote
-                    .desired_shares
-                    .foreground_share
-                    .clone()
-                    .map(|s| s.share_id),
-                shares: remote.desired_shares.shares.clone(),
-            }),
+            desired_shares: desired_shares(remote_info.as_ref()),
         },
     )
     .await?;
@@ -297,11 +308,17 @@ async fn handle_gui_websocket(
                  };
                 send_update_to_gui(update, scope, &mut socket, remote_info, session_helper).await?;
             }
-            session_update = recv_obj::<ToAgent>(&mut socket) => {
-                // panic! or rather, don't. the GUI isn't supposed to send us anything,
-                // but if it does, just log and continue.
-                let session_update = session_update?;
-                warn!("GUI sent us something unexpected over the websocket connection: {session_update:?}");
+            message = recv_obj::<serde_json::Value>(&mut socket) => {
+                // malformed JSON ends the connection; a well-formed message we don't know is
+                // only logged
+                let message = message?;
+                match serde_json::from_value::<ToAgentFromGui>(message.clone()) {
+                    Ok(ToAgentFromGui::ForceRelease) => {
+                        debug!("GUI of {scope:?} asks to force the release of obsolete mounts");
+                        tx.send(StateUpdateToSession::ForceRelease { scope })?;
+                    }
+                    Err(_) => warn!("GUI sent us something unexpected over the websocket connection: {message}"),
+                }
             }
         }
     }
@@ -1050,6 +1067,47 @@ mod tests {
 
         let disconnected_message: ToSessionGui = receive_message(&mut gui).await;
         assert_eq!(disconnected_message.session_helper, None);
+    }
+
+    #[tokio::test]
+    async fn force_release_reaches_only_the_helper_of_the_gui_scope() {
+        let test_setup = TestSetup::start().await;
+        let desired = share("desired");
+        test_setup
+            .seed_remote_info(desired.clone(), vec![desired.clone()])
+            .await;
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+        let _: ToSessionGui = receive_message(&mut gui).await;
+        let mut own_helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: ToSessionHelper = receive_message(&mut own_helper).await;
+        let mut other_helper = test_setup.connect_session_helper("desktop-2").await;
+        let _: ToSessionHelper = receive_message(&mut other_helper).await;
+
+        send_message(&mut gui, &ToAgentFromGui::ForceRelease).await;
+
+        let message: ToSessionHelper = receive_message(&mut own_helper).await;
+        assert!(message.force_release_obsolete);
+        assert_eq!(
+            message.share_state.map(|s| s.shares),
+            Some(vec![desired.clone()])
+        );
+
+        // the other scope's next message is the next desired state, not a forced one:
+        test_setup
+            .shared_state
+            .lock()
+            .await
+            .desired_state_channel
+            .send(StateUpdateToSession::DesiredState {
+                foreground_share_id: None,
+                shares: vec![],
+            })
+            .unwrap();
+        let message: ToSessionHelper = receive_message(&mut other_helper).await;
+        assert!(!message.force_release_obsolete);
+        assert_eq!(message.share_state.map(|s| s.shares), Some(vec![]));
+        let message: ToSessionHelper = receive_message(&mut own_helper).await;
+        assert!(!message.force_release_obsolete);
     }
 
     #[tokio::test]

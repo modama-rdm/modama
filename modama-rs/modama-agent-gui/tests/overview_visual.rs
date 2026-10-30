@@ -109,6 +109,20 @@ fn overview_snapshots() {
     mounting.snapshot("overview_mounting");
     results.extend_harness(&mut mounting);
 
+    let mut hand_off_blocked = overview_harness(false, false);
+    hand_off_blocked.state_mut().app_state.foreground = ForegroundSession::Mounting(
+        PendingSession {
+            share_id: "mounting-share".to_owned(),
+            project: "representative-project".to_owned(),
+            session: "2026-07-29-ingest".to_owned(),
+        },
+        "another user's drive is still connected; close their files or release it".to_owned(),
+    );
+    hand_off_blocked.state_mut().app_state.hand_off_blocked = true;
+    hand_off_blocked.run_steps(1);
+    hand_off_blocked.snapshot("overview_hand_off_blocked");
+    results.extend_harness(&mut hand_off_blocked);
+
     let mut close_confirmation = overview_harness(false, true);
     close_confirmation.get_by_label("Close Session").click();
     close_confirmation.run();

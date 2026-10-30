@@ -41,7 +41,7 @@ impl std::fmt::Display for AddError {
             Self::LetterTaken => write!(f, "mount failed: drive letter already in use"),
             Self::CredentialConflict => write!(
                 f,
-                "another researcher's drive is still connected; close their files or release it"
+                "another user's drive is still connected; close their files or release it"
             ),
             Self::AuthenticationFailed => write!(f, "mount failed: authentication failed"),
             Self::Other(message) => write!(f, "mount failed: {message}"),
@@ -56,8 +56,9 @@ pub trait WNetApi {
     /// Bitmask of drive letters in use, bit 0 being `A:` (`GetLogicalDrives`)
     fn used_drives(&self) -> u32;
     fn add(&self, drive: &str, remote: &str, user: &str, password: &str) -> Result<(), AddError>;
-    /// Remove a connection by drive letter, or by UNC name for a deviceless one
-    fn cancel(&self, name: &str) -> Result<(), String>;
+    /// Remove a connection by drive letter, or by UNC name for a deviceless one; with `force`,
+    /// even if files are open on it
+    fn cancel(&self, name: &str, force: bool) -> Result<(), String>;
 }
 
 /// The share name (empty for a bare `\\host`), if `remote` is a connection to `host`
@@ -121,12 +122,14 @@ fn map_at_free_letter(
     Err(AddError::Other("no free drive letter".to_owned()))
 }
 
-/// One reconciliation pass: remove our connections that aren't a desired drive mapping, map
-/// the missing shares, and return the actual state afterwards.
+/// One reconciliation pass: remove our connections that aren't a desired drive mapping (with
+/// `force`, even if files are open on them), map the missing shares, and return the actual
+/// state afterwards.
 pub fn reconcile_pass(
     api: &impl WNetApi,
     shares: &[Share],
     config: &SessionHelperConfig,
+    force: bool,
 ) -> Result<SessionHelperState, EnumerationError> {
     let host = valid_host(config)?;
     let ours = |all: Vec<Connection>| {
@@ -151,7 +154,7 @@ pub fn reconcile_pass(
         }
         let target = connection.local.as_deref().unwrap_or(&connection.remote);
         debug!("removing connection {target} to {}", connection.remote);
-        if let Err(e) = api.cancel(target) {
+        if let Err(e) = api.cancel(target, force) {
             // it stays in the report, so the scope reads as not converged; the next pass retries
             warn!(
                 "could not remove connection {target} to {}: {e}",
@@ -316,8 +319,11 @@ mod tests {
             }
         }
 
-        fn cancel(&self, name: &str) -> Result<(), String> {
-            self.calls.borrow_mut().push(format!("cancel {name}"));
+        fn cancel(&self, name: &str, force: bool) -> Result<(), String> {
+            let forced = if force { " (forced)" } else { "" };
+            self.calls
+                .borrow_mut()
+                .push(format!("cancel {name}{forced}"));
             if self.cancel_errors.iter().any(|n| n == name) {
                 return Err("open files".to_owned());
             }
@@ -368,8 +374,13 @@ mod tests {
             mapping("Y:", r"\\smb.example.test\stale"),
             mapping("X:", r"\\other.example.test\stale"),
         ]);
-        let state =
-            reconcile_pass(&api, &[share("1", "keep"), share("2", "new")], &config()).unwrap();
+        let state = reconcile_pass(
+            &api,
+            &[share("1", "keep"), share("2", "new")],
+            &config(),
+            false,
+        )
+        .unwrap();
         assert_eq!(
             mounted(&state),
             vec![entry("keep", Some(r"Z:\")), entry("new", Some(r"Y:\"))]
@@ -393,7 +404,7 @@ mod tests {
                 deviceless(r"\\smb.example.test\IPC$"),
             ])
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false).unwrap();
         assert_eq!(
             api.calls.borrow()[..2],
             [
@@ -414,7 +425,7 @@ mod tests {
             mapping("Z:", r"\\smb.example.test\a"),
             mapping("Y:", r"\\SMB.EXAMPLE.TEST\A"),
         ]);
-        let state = reconcile_pass(&api, &[share("1", "a")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false).unwrap();
         assert_eq!(*api.calls.borrow(), vec!["cancel Y:"]);
         assert_eq!(mounted(&state), vec![entry("a", Some(r"Z:\"))]);
     }
@@ -426,7 +437,7 @@ mod tests {
             taken_on_add: vec!["Y:".to_owned()],
             ..FakeWNet::with(vec![mapping("X:", r"\\other.example.test\x")])
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false).unwrap();
         assert_eq!(
             *api.calls.borrow(),
             vec![
@@ -443,7 +454,7 @@ mod tests {
             local_drives: u32::MAX,
             ..FakeWNet::default()
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false).unwrap();
         assert_eq!(
             state.errors[0].message,
             "mount failed: no free drive letter"
@@ -465,12 +476,13 @@ mod tests {
             ]),
             ..FakeWNet::default()
         };
-        let state = reconcile_pass(&api, &[share("1", "a"), share("2", "b")], &config()).unwrap();
+        let state =
+            reconcile_pass(&api, &[share("1", "a"), share("2", "b")], &config(), false).unwrap();
         let messages: Vec<_> = state.errors.iter().map(|e| e.message.as_str()).collect();
         assert_eq!(
             messages,
             vec![
-                "another researcher's drive is still connected; close their files or release it",
+                "another user's drive is still connected; close their files or release it",
                 "mount failed: authentication failed",
             ]
         );
@@ -490,7 +502,7 @@ mod tests {
             cancel_errors: vec!["Z:".to_owned()],
             ..FakeWNet::with(vec![mapping("Z:", r"\\smb.example.test\busy")])
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config()).unwrap();
+        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false).unwrap();
         assert_eq!(
             mounted(&state),
             vec![entry("a", Some(r"Y:\")), entry("busy", Some(r"Z:\"))]
@@ -503,7 +515,7 @@ mod tests {
             inventory_error: Some("access denied".to_owned()),
             ..FakeWNet::default()
         };
-        assert!(reconcile_pass(&api, &[share("1", "a")], &config()).is_err());
+        assert!(reconcile_pass(&api, &[share("1", "a")], &config(), false).is_err());
         assert!(api.calls.borrow().is_empty());
     }
 
@@ -514,6 +526,7 @@ mod tests {
             &api,
             &[share("1", "a"), share("2", "A"), share("3", r"b\..")],
             &config(),
+            false,
         )
         .unwrap();
         let errors: Vec<_> = state
@@ -537,6 +550,20 @@ mod tests {
             smb_hostname: r"host\share".to_owned(),
             ..config()
         };
-        assert!(reconcile_pass(&FakeWNet::default(), &[], &config).is_err());
+        assert!(reconcile_pass(&FakeWNet::default(), &[], &config, false).is_err());
+    }
+
+    #[test]
+    fn removals_are_forced_only_when_asked() {
+        for force in [false, true] {
+            let api = FakeWNet::with(vec![mapping("Z:", r"\\smb.example.test\old")]);
+            reconcile_pass(&api, &[], &config(), force).unwrap();
+            let expected = if force {
+                "cancel Z: (forced)"
+            } else {
+                "cancel Z:"
+            };
+            assert_eq!(*api.calls.borrow(), vec![expected]);
+        }
     }
 }

@@ -116,6 +116,9 @@ pub enum StateUpdateToSession {
         /// but None! Meaning the GUI can distinguish these two cases if needed.
         session_helper: Option<SessionHelperState>,
     },
+    /// The GUI of `scope` asked to force the release of mounts that are no longer desired; only
+    /// that scope's helper acts on it
+    ForceRelease { scope: HelperScope },
 }
 
 #[derive(Debug)]

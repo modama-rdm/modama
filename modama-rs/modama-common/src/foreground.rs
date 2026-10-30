@@ -102,6 +102,27 @@ pub fn foreground_share(shares: &Shares) -> Option<&Share> {
     shares.shares.iter().find(|share| &share.share_id == id)
 }
 
+/// A hand-off is blocked when a mount that is no longer desired is still there and a desired
+/// share failed: on Windows, the old mount's credentials keep the new ones out (error 1219)
+/// until it is released, by force if files are open on it.
+pub fn hand_off_blocked(desired: &Shares, helper: &SessionHelperState) -> bool {
+    let is_desired = |name: &str| {
+        desired
+            .shares
+            .iter()
+            .any(|share| share.share_name.eq_ignore_ascii_case(name))
+    };
+    let stale_mount = helper
+        .mounted_shares
+        .iter()
+        .any(|mounted| !is_desired(&mounted.share_name));
+    let failed_share = helper
+        .errors
+        .iter()
+        .any(|error| desired.shares.iter().any(|s| s.share_id == error.share_id));
+    stale_mount && failed_share
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -114,7 +135,7 @@ mod tests {
 
     use super::{
         NO_HELPER_MESSAGE, ShareDestinationError, WAITING_MESSAGE, foreground_projection,
-        foreground_share, project_and_session,
+        foreground_share, hand_off_blocked, project_and_session,
     };
 
     fn share(id: &str) -> Share {
@@ -272,5 +293,40 @@ mod tests {
         );
         assert_eq!(foreground_share(&shares(Some("missing"))), None);
         assert_eq!(foreground_share(&shares(None)), None);
+    }
+
+    #[test]
+    fn hand_off_is_blocked_by_a_stale_mount_and_a_failed_share() {
+        let desired = Shares {
+            foreground_share_id: Some("new".to_owned()),
+            shares: vec![share("new")],
+        };
+        let stale = MountedShare {
+            share_name: "old-share".to_owned(),
+            mount_path: Some(PathBuf::from("Z:\\")),
+        };
+        let current = MountedShare {
+            share_name: "SHARE".to_owned(),
+            mount_path: Some(PathBuf::from("Y:\\")),
+        };
+        let error = ShareError {
+            share_id: "new".to_owned(),
+            message: "another user's drive is still connected".to_owned(),
+        };
+        let state =
+            |mounted_shares: Vec<MountedShare>, errors: Vec<ShareError>| SessionHelperState {
+                mounted_shares,
+                errors,
+            };
+
+        assert!(hand_off_blocked(
+            &desired,
+            &state(vec![stale.clone()], vec![error.clone()])
+        ));
+        // a stale mount alone is just not removed yet; an error alone has another cause
+        assert!(!hand_off_blocked(&desired, &state(vec![stale], vec![])));
+        assert!(!hand_off_blocked(&desired, &state(vec![], vec![error])));
+        // share names are case-insensitive
+        assert!(!hand_off_blocked(&desired, &state(vec![current], vec![])));
     }
 }

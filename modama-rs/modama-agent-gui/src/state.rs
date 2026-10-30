@@ -90,6 +90,9 @@ pub struct AgentAppState {
     /// Whether the most recent background monitor cycle failed.
     pub connection_dropped: bool,
 
+    /// Whether a previous user's drive blocks the foreground share (Windows only)
+    pub hand_off_blocked: bool,
+
     session_operations: SessionOperations,
 
     /// Agent mTLS identity, should be set once we are connected

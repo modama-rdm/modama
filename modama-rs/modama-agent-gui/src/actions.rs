@@ -58,6 +58,9 @@ pub enum Action {
     ForegroundChanged(ForegroundSession),
     ConnectionDropped,
     ConnectionRestored,
+    HandOffBlocked(bool),
+    /// Release the previous user's drive that blocks the hand-off
+    ForceRelease,
     GoToOverview,
     CloseRequested {
         operation_id: OperationId,

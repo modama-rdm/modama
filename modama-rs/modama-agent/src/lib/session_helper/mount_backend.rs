@@ -21,10 +21,14 @@ pub trait MountBackend {
     /// isn't desired, mount what's missing, and return the actual state afterwards: every mount
     /// from that host (desired or not), plus an error for each desired share that is still
     /// missing. Mounts should eventually converge, but it might take some passes.
+    ///
+    /// With `force`, mounts that are no longer desired are removed even if files are open on
+    /// them (the GUI asked to release a previous user's drive).
     fn reconcile(
         &self,
         desired_shares: &[Share],
         config: &SessionHelperConfig,
+        force: bool,
     ) -> impl Future<Output = Result<SessionHelperState, EnumerationError>>;
 }
 

@@ -295,13 +295,13 @@ impl WNetApi for NativeWNet {
         }
     }
 
-    fn cancel(&self, name: &str) -> Result<(), String> {
+    fn cancel(&self, name: &str, force: bool) -> Result<(), String> {
         let name = U16CString::from_str(name).map_err(|e| e.to_string())?;
         // SAFETY: NUL-terminated, outlives the call. Flags 0: never touch the user profile.
-        // Not forced: open files keep the connection (forcing is the GUI's decision).
+        // Unless forced, open files keep the connection (forcing is the GUI's decision).
         // https://learn.microsoft.com/windows/win32/api/winnetwk/nf-winnetwk-wnetcancelconnection2w
         let result = unsafe {
-            WNetCancelConnection2W(PCWSTR::from_raw(name.as_ptr()), NET_CONNECT_FLAGS(0), false)
+            WNetCancelConnection2W(PCWSTR::from_raw(name.as_ptr()), NET_CONNECT_FLAGS(0), force)
         };
         if result == NO_ERROR {
             Ok(())
@@ -328,6 +328,7 @@ impl MountBackend for CurrentPlatformMountBackend {
         &self,
         desired_shares: &[Share],
         config: &SessionHelperConfig,
+        force: bool,
     ) -> Result<SessionHelperState, EnumerationError> {
         // WNet calls block, possibly for as long as the server takes to answer
         let (api, shares, config) = (
@@ -335,7 +336,7 @@ impl MountBackend for CurrentPlatformMountBackend {
             desired_shares.to_vec(),
             config.clone(),
         );
-        tokio::task::spawn_blocking(move || reconcile_pass(api.as_ref(), &shares, &config))
+        tokio::task::spawn_blocking(move || reconcile_pass(api.as_ref(), &shares, &config, force))
             .await
             .map_err(|e| EnumerationError(format!("the reconciliation task failed: {e}")))?
     }

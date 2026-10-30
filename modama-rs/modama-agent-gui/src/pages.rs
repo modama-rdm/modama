@@ -6,10 +6,7 @@ pub mod select_project;
 
 use eframe::egui;
 
-use crate::{
-    actions::Action,
-    state::{Credentials, ForegroundSession, PendingSession},
-};
+use crate::{actions::Action, state::AgentAppState};
 
 pub use connecting::PageConnecting;
 pub use login::PageLogin;
@@ -46,21 +43,11 @@ impl Page {
         &mut self,
         ui: &mut egui::Ui,
         frame: &mut eframe::Frame,
-        foreground: &ForegroundSession,
-        pending_start: Option<&PendingSession>,
-        pending_close: Option<&str>,
-        credentials: &Option<Credentials>,
+        app_state: &AgentAppState,
     ) -> Action {
         match self {
             Page::Connecting(p) => p.ui(ui, frame),
-            Page::Overview(p) => p.ui(
-                ui,
-                frame,
-                foreground,
-                pending_start,
-                pending_close,
-                credentials,
-            ),
+            Page::Overview(p) => p.ui(ui, frame, app_state),
             Page::Login(p) => p.ui(ui, frame),
             Page::SelectProject(p) => p.ui(ui, frame),
             Page::SelectCreateSession(p) => p.ui(ui, frame),

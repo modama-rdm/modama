@@ -399,6 +399,9 @@ impl MountBackend for GioBackend {
         &self,
         desired_shares: &[Share],
         config: &SessionHelperConfig,
+        // GVfs keeps credentials per mount, so an old mount never blocks a new one on Linux;
+        // nothing to force
+        _force: bool,
     ) -> ReconcileResult {
         let stopped = || EnumerationError("the GIO thread stopped".to_owned());
         let (reply, result) = oneshot::channel();
