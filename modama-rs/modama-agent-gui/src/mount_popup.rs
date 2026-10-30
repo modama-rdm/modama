@@ -191,6 +191,9 @@ pub fn run() -> eframe::Result {
             .with_minimize_button(false)
             .with_maximize_button(false)
             .with_always_on_top(),
+        // like the GUI's window: no GL backend over forwarded X11 (it crashes there)
+        #[cfg(target_os = "linux")]
+        wgpu_options: crate::wgpu_setup::wgpu_options(),
         ..Default::default()
     };
     eframe::run_native(

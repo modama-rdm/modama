@@ -17,6 +17,8 @@ pub mod service;
 pub mod state;
 pub mod styles;
 mod top_bar;
+#[cfg(target_os = "linux")]
+pub mod wgpu_setup;
 
 #[cfg(test)]
 mod color_parser;
