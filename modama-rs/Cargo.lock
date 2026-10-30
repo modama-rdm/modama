@@ -3709,17 +3709,13 @@ dependencies = [
  "clap",
  "directories",
  "env_logger",
- "file-rotate",
  "futures-util",
- "gio",
- "glib",
  "hostname",
  "http-body-util",
  "hyper",
  "hyper-util",
  "itertools 0.15.0",
  "jsonwebtoken",
- "ksni",
  "log",
  "minijinja",
  "mockito",
@@ -3728,7 +3724,6 @@ dependencies = [
  "nix",
  "percent-encoding",
  "procfs",
- "rand 0.10.2",
  "reqwest",
  "rustls",
  "rustls-pemfile",
@@ -3752,7 +3747,6 @@ dependencies = [
  "windows",
  "windows-service",
  "x509-parser",
- "zbus",
 ]
 
 [[package]]
@@ -3774,6 +3768,7 @@ dependencies = [
  "log",
  "mockito",
  "modama-common",
+ "modama-session-helper",
  "openapi-to-rust",
  "reqwest",
  "reqwest-middleware",
@@ -3797,6 +3792,7 @@ dependencies = [
  "anyhow",
  "clap",
  "env_logger",
+ "file-rotate",
  "git-version",
  "jsonwebtoken",
  "log",
@@ -3815,7 +3811,32 @@ dependencies = [
  "toml 1.1.4+spec-1.1.0",
  "url",
  "utoipa",
+ "windows",
  "x509-parser",
+]
+
+[[package]]
+name = "modama-session-helper"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "gio",
+ "glib",
+ "ksni",
+ "log",
+ "modama-common",
+ "percent-encoding",
+ "rand 0.10.2",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tungstenite 0.30.0",
+ "url",
+ "widestring",
+ "windows",
+ "zbus",
 ]
 
 [[package]]

@@ -9,11 +9,12 @@ linux-build-agent:
     #!/usr/bin/env bash
     set -euo pipefail
     # zig links against its own glibc {{ linux_glibc }} stubs and doesn't search the host's
-    # library directories, so it can't find the GLib libraries the session helper's GIO backend
-    # links (pkg-config leaves out -L for standard paths). Hand it a directory with only those
-    # (not the host's libc). The host GLib itself needs a newer glibc than the stubs offer; that
-    # is the runtime system's business, hence --allow-shlib-undefined. The glibc check below
-    # still covers every glibc symbol our binaries import.
+    # library directories, so it can't find the GLib libraries that modama-agent-gui links for
+    # the session helper's GIO backend (pkg-config leaves out -L for standard paths). Hand it a
+    # directory with only those (not the host's libc). The host GLib itself needs a newer glibc
+    # than the stubs offer; that is the runtime system's business, hence
+    # --allow-shlib-undefined. The glibc check below still covers every glibc symbol our
+    # binaries import.
     glib_link_dir="$PWD/target/glib-link"
     glib_libdir="$(pkg-config --variable=libdir gio-2.0)"
     mkdir -p "$glib_link_dir"

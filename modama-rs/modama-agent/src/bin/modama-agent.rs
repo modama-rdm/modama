@@ -4,10 +4,9 @@ use anyhow::Result;
 use clap::Parser;
 use modama_agent::{
     config::{CliArgs, Command},
-    runtime::{run_agent, shutdown_signal},
-    session_helper,
+    runtime::run_agent,
 };
-use modama_common::logging::init_logging;
+use modama_common::{logging::init_logging, runtime::shutdown_signal};
 
 #[cfg(not(windows))]
 fn default_config_path() -> Result<PathBuf> {
@@ -47,7 +46,6 @@ fn main() -> Result<()> {
                 run_foreground(path)
             }
         }
-        Some(Command::SessionHelper { agent_url }) => session_helper::entry::run(&agent_url),
         #[cfg(windows)]
         Some(Command::InstallAsService) => {
             let source =

@@ -1,12 +1,11 @@
 use eframe::egui::{self, Margin, vec2};
 use std::sync::Arc;
 
+#[cfg(feature = "autostart")]
+use crate::components::autostart_offer::{AutostartOffer, AutostartOfferAction};
 use crate::{
     actions::{Action, LoginDestination, RetryAction, TaskFailure},
-    components::{
-        autostart_offer::{AutostartOffer, AutostartOfferAction},
-        toast::{ToastAction, ToastState},
-    },
+    components::toast::{ToastAction, ToastState},
     foreground_monitor::{ForegroundMonitor, ForegroundMonitorUpdate, events_url},
     helper_launch::ProcessLauncher,
     navigation_progress::NavigationProgress,
@@ -24,6 +23,7 @@ pub struct AgentGuiApp {
     pub app_state: AgentAppState,
     pub toast: ToastState,
     /// Shown at startup on Windows, unless autostart is set up or the offer was dismissed
+    #[cfg(feature = "autostart")]
     pub autostart_offer: Option<AutostartOffer>,
     top_bar: TopBar,
     navigation_progress: NavigationProgress,
@@ -58,6 +58,7 @@ impl AgentGuiApp {
             page: Page::Connecting(PageConnecting::with_service(Arc::clone(&service))),
             app_state: AgentAppState::new(),
             toast: ToastState::default(),
+            #[cfg(feature = "autostart")]
             autostart_offer: None,
             top_bar: TopBar::default(),
             navigation_progress: NavigationProgress::default(),
@@ -68,6 +69,7 @@ impl AgentGuiApp {
     }
 
     /// Offer to start the session helper at logon, unless that's set up or was declined
+    #[cfg(feature = "autostart")]
     #[must_use]
     pub fn with_autostart_offer(self) -> Self {
         #[cfg(windows)]
@@ -80,6 +82,7 @@ impl AgentGuiApp {
         self
     }
 
+    #[cfg(feature = "autostart")]
     fn handle_autostart_offer(&mut self, action: AutostartOfferAction) {
         match action {
             AutostartOfferAction::Enable => match self.enable_autostart() {
@@ -101,6 +104,7 @@ impl AgentGuiApp {
         }
     }
 
+    #[cfg(feature = "autostart")]
     fn enable_autostart(&self) -> Result<(), String> {
         #[cfg(windows)]
         {
@@ -459,6 +463,7 @@ impl eframe::App for AgentGuiApp {
             }
         }
         // the error toast takes the same place, and goes first
+        #[cfg(feature = "autostart")]
         if !self.toast.is_visible()
             && let Some(action) = self
                 .autostart_offer

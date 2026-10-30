@@ -40,9 +40,9 @@ use windows::{
     core::{HSTRING, PCWSTR, w},
 };
 
-use crate::session_helper::tray::{TrayAction, TrayState, ico_image};
+use crate::tray::{TrayAction, TrayState, ico_image};
 
-const ICON: &[u8] = include_bytes!("../../../assets/tray-icon.ico");
+const ICON: &[u8] = include_bytes!("../assets/tray-icon.ico");
 
 /// The shell's messages about our icon
 const TRAY_CALLBACK: u32 = WM_APP + 1;

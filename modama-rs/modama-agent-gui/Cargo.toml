@@ -8,6 +8,9 @@ rust-version.workspace = true
 guide-screenshots = ["dep:egui_kittest", "dep:image"]
 visual-tests = ["guide-screenshots"]
 inspection = ["eframe/inspection"]
+# Offer to start the session helper at sign-in (Windows, HKCU Run entry). Off until there is a
+# proper installer for the session executable.
+autostart = ["windows/Win32_System_Registry"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -22,6 +25,7 @@ egui_extras = { version = "0.35.0", features = ["svg"] }
 egui_taffy = "0.13"
 egui-phosphor = "0.13"
 modama-common = { path = "../modama-common" }
+modama-session-helper = { path = "../modama-session-helper" }
 strsim = "0.11"
 time = { version = "0.3.42", features = ["local-offset"] }
 url = { workspace = true }
@@ -45,7 +49,7 @@ eframe = "0.35.0"
 eframe = { version = "0.35.0", default-features = false, features = ["default_fonts", "wgpu"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62.0", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell"] }
+windows = { version = "0.62.0", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_Shell"] }
 
 [build-dependencies]
 serde = { workspace = true, features = ["derive"] }

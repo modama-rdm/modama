@@ -1,7 +1,6 @@
 use std::{
     ffi::{OsStr, OsString},
     fs,
-    os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex as StdMutex, OnceLock},
     thread,
@@ -9,8 +8,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use env_logger::Target;
-use file_rotate::{ContentLimit, FileRotate, compression::Compression, suffix::AppendCount};
 use log::{error, info};
 use widestring::U16CString;
 use windows::{
@@ -26,10 +23,7 @@ use windows::{
             DACL_SECURITY_INFORMATION, LookupAccountNameW, PROTECTED_DACL_SECURITY_INFORMATION,
             PSECURITY_DESCRIPTOR, PSID, SID_NAME_USE, SetFileSecurityW,
         },
-        UI::Shell::{
-            CSIDL_APPDATA, CSIDL_COMMON_APPDATA, CSIDL_PROGRAM_FILES, SHGFP_TYPE_CURRENT,
-            SHGetFolderPathW,
-        },
+        UI::Shell::{CSIDL_APPDATA, CSIDL_COMMON_APPDATA, CSIDL_PROGRAM_FILES},
     },
     core::{PCWSTR, PWSTR},
 };
@@ -66,37 +60,12 @@ static SERVICE_CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
 // https://learn.microsoft.com/windows/win32/api/winsvc/nf-winsvc-startservicectrldispatcherw
 define_windows_service!(ffi_service_main, service_main);
 
-pub(crate) fn known_folder(csidl: u32) -> Result<PathBuf> {
-    let mut path = [0u16; 260];
-    // SAFETY: `path` is a live, writable MAX_PATH-sized UTF-16 buffer for the
-    // duration of the call. `hwnd` and `hToken` are allowed to be NULL, and the
-    // supplied CSIDL values identify real filesystem folders. On success the
-    // API writes a NUL-terminated path without retaining the buffer pointer.
-    // SHGetFolderPathW is used instead of SHGetKnownFolderPath so the resulting
-    // binary does not import CoTaskMemFree from post-Windows-7 combase.dll.
-    // https://learn.microsoft.com/windows/win32/api/shlobj_core/nf-shlobj_core-shgetfolderpathw
-    unsafe {
-        SHGetFolderPathW(
-            None,
-            csidl as i32,
-            None,
-            SHGFP_TYPE_CURRENT.0 as u32,
-            &mut path,
-        )?;
-    }
-    let length = path
-        .iter()
-        .position(|character| *character == 0)
-        .unwrap_or(path.len());
-    Ok(PathBuf::from(OsString::from_wide(&path[..length])))
-}
-
 fn installation_paths() -> Result<(PathBuf, PathBuf, PathBuf)> {
-    let executable = known_folder(CSIDL_PROGRAM_FILES)?
+    let executable = modama_common::windows_folders::known_folder(CSIDL_PROGRAM_FILES)?
         .join("modama")
         .join("modama-agent")
         .join(EXECUTABLE_FILE);
-    let data_dir = known_folder(CSIDL_COMMON_APPDATA)?
+    let data_dir = modama_common::windows_folders::known_folder(CSIDL_COMMON_APPDATA)?
         .join("modama")
         .join("modama-agent");
     let config = data_dir.join(CONFIG_FILE);
@@ -115,7 +84,7 @@ pub fn resolve_install_config(explicit: Option<&Path>) -> Result<PathBuf> {
 }
 
 pub fn user_config_path() -> Result<PathBuf> {
-    Ok(known_folder(CSIDL_APPDATA)?
+    Ok(modama_common::windows_folders::known_folder(CSIDL_APPDATA)?
         .join("modama")
         .join("modama-agent")
         .join("config")
@@ -617,26 +586,7 @@ fn init_service_logging(config_path: &Path) -> Result<()> {
     let data_dir = config_path
         .parent()
         .ok_or_else(|| anyhow!("service config path has no parent directory"))?;
-    init_file_logging(&data_dir.join("logs"), "modama-agent.log")
-}
-
-/// Log into rotating files `log_dir/file_name`, for processes without a console
-pub(crate) fn init_file_logging(log_dir: &Path, file_name: &str) -> Result<()> {
-    fs::create_dir_all(log_dir)?;
-    let writer = FileRotate::new(
-        log_dir.join(file_name),
-        AppendCount::new(5),
-        ContentLimit::BytesSurpassed(10 * 1024 * 1024),
-        Compression::None,
-        None,
-    );
-    let env = env_logger::Env::default()
-        .filter_or("MODAMA_LOG_LEVEL", "info")
-        .write_style("never");
-    env_logger::Builder::from_env(env)
-        .target(Target::Pipe(Box::new(writer)))
-        .try_init()
-        .map_err(Into::into)
+    modama_common::logging::init_file_logging(&data_dir.join("logs"), "modama-agent.log")
 }
 
 pub fn run_service_dispatcher(config_path: PathBuf) -> Result<()> {

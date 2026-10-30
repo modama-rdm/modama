@@ -9,18 +9,13 @@ pub trait HelperLauncher: Send {
     fn launch(&mut self);
 }
 
-/// Start `modama-agent session-helper` from the GUI's own directory, detached from the GUI.
-/// A helper that is already running makes the new one exit right away (singleton).
+/// Start the session helper from our own executable (`modama-agent-gui session-helper`),
+/// detached from the GUI. A helper that is already running makes the new one exit right away
+/// (singleton).
 pub fn launch_session_helper(agent_url: &str) -> io::Result<Child> {
-    let exe_dir = std::env::current_exe()?
-        .parent()
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| io::Error::other("the GUI executable has no parent directory"))?;
-    let agent = exe_dir.join(format!("modama-agent{}", std::env::consts::EXE_SUFFIX));
-
-    let mut command = Command::new(agent);
+    let mut command = Command::new(std::env::current_exe()?);
     command
-        .args(["session-helper", "--agent-url", agent_url])
+        .args(["--agent-url", agent_url, "session-helper"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -31,7 +26,7 @@ pub fn launch_session_helper(agent_url: &str) -> io::Result<Child> {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    // the helper is a console program; don't open a console window for it:
+    // release builds have no console anyway; a debug build's helper shouldn't open one either:
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

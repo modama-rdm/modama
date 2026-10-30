@@ -14,9 +14,7 @@ use modama_common::{
     messages::Share,
 };
 
-use crate::session_helper::mount_backend::{
-    EnumerationError, PassResult, same_share, unique_by_name,
-};
+use crate::mount_backend::{EnumerationError, PassResult, same_share, unique_by_name};
 
 /// A network connection of this logon session
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

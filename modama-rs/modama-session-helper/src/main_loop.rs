@@ -21,7 +21,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tungstenite::Message;
 use url::Url;
 
-use crate::session_helper::{
+use crate::{
     mount_backend::{MountBackend, PassResult, same_share},
     tray::{TrayState, tray_state},
 };
@@ -313,7 +313,7 @@ mod tests {
     use tokio_tungstenite::accept_async;
 
     use super::*;
-    use crate::session_helper::mount_backend::EnumerationError;
+    use crate::mount_backend::EnumerationError;
 
     type AgentSocket = WebSocketStream<TcpStream>;
 
@@ -554,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_tray_follows_connection_and_convergence() {
-        use crate::session_helper::tray::TrayStatus;
+        use crate::tray::TrayStatus;
 
         let mut setup = Setup::start(Ok(report(&["a"]))).await;
         assert_eq!(setup.tray.borrow().status, TrayStatus::Disconnected);

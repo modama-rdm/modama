@@ -4,6 +4,7 @@ members = [
     "modama-agent",
     "modama-common",
     "modama-agent-gui",
+    "modama-session-helper",
     "version-range",
     "versions-macro",
     "versioned",

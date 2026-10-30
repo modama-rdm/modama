@@ -8,7 +8,7 @@ use std::path::Path;
 
 use log::{debug, warn};
 
-use crate::session_helper::mount_popup::FolderOpener;
+use crate::mount_popup::FolderOpener;
 
 pub struct SystemFolderOpener;
 

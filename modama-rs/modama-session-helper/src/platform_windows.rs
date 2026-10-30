@@ -34,7 +34,7 @@ use windows::{
     core::{PCWSTR, PWSTR},
 };
 
-use crate::session_helper::{
+use crate::{
     mount_backend::{EnumerationError, MountBackend, PassResult},
     wnet_reconcile::{AddError, Connection, WNetApi, reconcile_pass},
 };

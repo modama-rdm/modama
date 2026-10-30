@@ -1,3 +1,4 @@
+#[cfg(feature = "autostart")]
 pub mod autostart_offer;
 pub mod avatar;
 pub mod buttons;

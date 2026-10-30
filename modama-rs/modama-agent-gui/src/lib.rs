@@ -2,7 +2,7 @@ pub mod actions;
 pub mod api_client;
 pub mod app;
 pub mod async_state;
-#[cfg(windows)]
+#[cfg(all(windows, feature = "autostart"))]
 pub mod autostart;
 pub mod components;
 pub mod config;

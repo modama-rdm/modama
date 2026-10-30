@@ -57,25 +57,16 @@ hostname = "0.4.1"
 network-interface = "2.0.3"
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"]}
 directories = "6.0.0"
-rand = { workspace = true }
 percent-encoding.workspace = true
 tower-http = { workspace = true, features = ["csrf"] }
 
 [target.'cfg(windows)'.dependencies]
-file-rotate = "0.8.0"
 windows-service = "0.8.1"
 windows = { version = "0.62.0", features = [
     "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_NetworkManagement_WNet",
-    "Win32_NetworkManagement_NetManagement",
     "Win32_Security",
     "Win32_Security_Authorization",
-    "Win32_Storage_FileSystem",
-    "Win32_System_SystemInformation",
-    "Win32_System_Threading",
     "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
 ] }
 widestring = { version = "1.1.0" }
 
@@ -83,14 +74,6 @@ widestring = { version = "1.1.0" }
 async-dns = "0.1.0"
 procfs = { workspace = true }
 nix = { workspace = true, features = ["mount"] }
-# disabled default features so we don't depend on library symbols that
-# are only available in latest glib:
-gio = { version = "0.22", default-features = false }
-glib = { version = "0.22", default-features = false }
-# FileManager1 for the mount popup's "Open network drive"; the tray (ksni) will use it as well
-zbus = { version = "5.19", default-features = false, features = ["tokio"] }
-# notification-area icon (StatusNotifierItem)
-ksni = { version = "0.3.7", default-features = false, features = ["tokio"] }
 
 [lints]
 workspace = true

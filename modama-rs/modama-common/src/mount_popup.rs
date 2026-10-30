@@ -1,5 +1,5 @@
-//! The mount popup's protocol: the session helper starts the GUI executable with
-//! `--mount-popup` and talks to it in JSON lines over the child's stdin/stdout.
+//! The mount popup's protocol: the session helper starts its own executable (the GUI's) as
+//! `mount-popup` and talks to it in JSON lines over the child's stdin/stdout.
 
 use std::path::PathBuf;
 

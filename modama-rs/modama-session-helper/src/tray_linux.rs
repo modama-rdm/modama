@@ -5,10 +5,10 @@ use ksni::TrayMethods as _;
 use log::info;
 use tokio::sync::mpsc;
 
-use crate::session_helper::tray::{TrayAction, TrayState};
+use crate::tray::{TrayAction, TrayState};
 
-const ICON_32: &[u8] = include_bytes!("../../../assets/tray-icon-32.rgba");
-const ICON_64: &[u8] = include_bytes!("../../../assets/tray-icon-64.rgba");
+const ICON_32: &[u8] = include_bytes!("../assets/tray-icon-32.rgba");
+const ICON_64: &[u8] = include_bytes!("../assets/tray-icon-64.rgba");
 
 /// The committed RGBA pixels in the ARGB32 (network byte order) the protocol wants
 fn pixmap(size: i32, rgba: &[u8]) -> ksni::Icon {

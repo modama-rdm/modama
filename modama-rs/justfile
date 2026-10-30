@@ -163,7 +163,7 @@ win-clippy-gnu: win7-check-gnu
 gio-integration-test:
     #!/usr/bin/env bash
     set -euo pipefail
-    podman build -q -t modama-gio-samba modama-agent/tests/gio-samba >/dev/null
+    podman build -q -t modama-gio-samba modama-session-helper/tests/gio-samba >/dev/null
     podman rm -f modama-gio-samba >/dev/null 2>&1 || true
     podman run -d --rm --name modama-gio-samba -p 127.0.0.1:1445:1445 modama-gio-samba >/dev/null
     cleanup() {
@@ -177,4 +177,4 @@ gio-integration-test:
         if (exec 3<>/dev/tcp/127.0.0.1/1445) 2>/dev/null; then break; fi
         sleep 0.5
     done
-    cargo test -q -p modama-agent --test gio_integration -- --ignored --test-threads=1
+    cargo test -q -p modama-session-helper --test gio_integration -- --ignored --test-threads=1

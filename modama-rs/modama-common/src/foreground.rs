@@ -34,8 +34,8 @@ pub fn project_and_session(dest_path: &str) -> Result<(String, String), ShareDes
 }
 
 /// Shown when no session helper has reported for the caller's scope
-pub const NO_HELPER_MESSAGE: &str = "No session helper is running for you. Start it with \
-                                 `modama-agent session-helper`.";
+pub const NO_HELPER_MESSAGE: &str = "No session helper is running for you. Open the Modama \
+                                 GUI, which starts it, or run `modama-agent-gui session-helper`.";
 
 /// Shown while the helper is there, but hasn't mounted the share (and hasn't reported an error)
 pub const WAITING_MESSAGE: &str = "Waiting for the session helper to mount the share.";

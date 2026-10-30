@@ -10,9 +10,12 @@ pub mod messages;
 pub mod mgmt_client;
 pub mod mount_popup;
 pub mod requests;
+pub mod runtime;
 pub mod test_helpers;
 pub mod tokens;
 pub mod version;
+#[cfg(windows)]
+pub mod windows_folders;
 
 /// Install the workspace's selected rustls provider before constructing clients that defer
 /// provider selection to the application.

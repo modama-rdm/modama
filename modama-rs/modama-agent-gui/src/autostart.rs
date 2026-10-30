@@ -1,6 +1,6 @@
-//! Per-user autostart of the session helper on Windows: an HKCU Run entry that starts this GUI
-//! executable with `--start-session-helper`. The GUI has no console, so nothing flashes up at
-//! logon; it starts the helper without a window and exits.
+//! Per-user autostart of the session helper on Windows: an HKCU Run entry that starts this
+//! executable as `session-helper` (it has no console window). Behind the `autostart` feature
+//! until there is a proper installer.
 
 use std::{ffi::c_void, path::Path};
 
@@ -56,7 +56,7 @@ pub fn dismiss() -> windows::core::Result<()> {
 
 pub fn enable(gui_exe: &Path, agent_url: &str) -> windows::core::Result<()> {
     let command = format!(
-        "\"{}\" --start-session-helper --agent-url \"{agent_url}\"",
+        "\"{}\" --agent-url \"{agent_url}\" session-helper",
         gui_exe.display()
     );
     // REG_SZ data includes the terminating NUL:

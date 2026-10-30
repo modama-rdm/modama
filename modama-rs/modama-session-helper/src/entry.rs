@@ -1,4 +1,4 @@
-// startup sequence:
+// startup sequence (runs from the GUI executable, `modama-agent-gui session-helper`):
 //
 // - refuse to run elevated (Windows; split UAC tokens only)
 // - check singleton "lock"/"mutex" and exit if another session helper is running
@@ -21,16 +21,15 @@ use modama_common::logging::init_logging;
 use tokio::sync::{mpsc, watch};
 use url::Url;
 
+use modama_common::runtime::shutdown_signal;
+
 use crate::{
-    runtime::shutdown_signal,
-    session_helper::{
-        main_loop::{LoopOptions, session_helper_loop},
-        mount_popup::{GuiPopups, run_popup_task},
-        open_folder::SystemFolderOpener,
-        platform::CurrentPlatformMountBackend,
-        singleton::{self, Singleton},
-        tray::{TrayState, handle_tray_actions, run_tray},
-    },
+    main_loop::{LoopOptions, session_helper_loop},
+    mount_popup::{GuiPopups, run_popup_task},
+    open_folder::SystemFolderOpener,
+    platform::CurrentPlatformMountBackend,
+    singleton::{self, Singleton},
+    tray::{TrayState, handle_tray_actions, run_tray},
 };
 
 /// The session helper endpoint, derived from the agent's base URL (`http://localhost:3003/`)
@@ -55,7 +54,7 @@ fn events_url(agent_url: &Url) -> Result<Url> {
 fn init_helper_logging() -> Result<()> {
     use windows::Win32::UI::Shell::CSIDL_LOCAL_APPDATA;
 
-    let log_dir = crate::windows_service::known_folder(CSIDL_LOCAL_APPDATA)?
+    let log_dir = modama_common::windows_folders::known_folder(CSIDL_LOCAL_APPDATA)?
         .join("modama")
         .join("modama-agent")
         .join("logs");
@@ -63,7 +62,7 @@ fn init_helper_logging() -> Result<()> {
         "logging to {}",
         log_dir.join("session-helper.log").display()
     );
-    crate::windows_service::init_file_logging(&log_dir, "session-helper.log")
+    modama_common::logging::init_file_logging(&log_dir, "session-helper.log")
 }
 
 #[cfg(not(windows))]
@@ -93,7 +92,7 @@ pub fn run(agent_url: &Url) -> Result<()> {
     };
 
     let options = LoopOptions::new(events_url(agent_url)?);
-    let popups = GuiPopups::next_to_current_exe().context("could not locate the GUI")?;
+    let popups = GuiPopups::from_current_exe().context("could not locate our own executable")?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let backend = CurrentPlatformMountBackend::new().await?;
         let (popup_tx, popup_rx) = mpsc::unbounded_channel();

@@ -10,11 +10,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use modama_agent::session_helper::{gio_backend::GioBackend, mount_backend::MountBackend};
 use modama_common::{
     internal_api_types::{SessionHelperConfig, SessionHelperState},
     messages::Share,
 };
+use modama_session_helper::{gio_backend::GioBackend, mount_backend::MountBackend};
 
 fn config(host: &str) -> SessionHelperConfig {
     SessionHelperConfig {

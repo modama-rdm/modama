@@ -23,7 +23,7 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode
 use tokio::sync::oneshot;
 use url::Url;
 
-use crate::session_helper::mount_backend::{
+use crate::mount_backend::{
     EnumerationError, MountBackend, PassResult, same_share, unique_by_name,
 };
 

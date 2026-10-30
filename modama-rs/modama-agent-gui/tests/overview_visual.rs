@@ -3,7 +3,6 @@ use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
-    components::autostart_offer::AutostartOffer,
     guide_screenshots::VIEWPORT,
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
@@ -163,11 +162,17 @@ fn overview_snapshots() {
     error_toast.snapshot("overview_error_toast");
     results.extend_harness(&mut error_toast);
 
-    let mut autostart_offer = overview_harness(false, true);
-    autostart_offer.state_mut().autostart_offer = Some(AutostartOffer::default());
-    autostart_offer.run_steps(2);
-    autostart_offer.snapshot("overview_autostart_offer");
-    results.extend_harness(&mut autostart_offer);
+    // only with `--features autostart`; the snapshot stays for when the feature is back
+    #[cfg(feature = "autostart")]
+    {
+        use modama_agent_gui::components::autostart_offer::AutostartOffer;
+
+        let mut autostart_offer = overview_harness(false, true);
+        autostart_offer.state_mut().autostart_offer = Some(AutostartOffer::default());
+        autostart_offer.run_steps(2);
+        autostart_offer.snapshot("overview_autostart_offer");
+        results.extend_harness(&mut autostart_offer);
+    }
 
     let mut connection_dropped = overview_harness(false, true);
     connection_dropped.state_mut().app_state.connection_dropped = true;

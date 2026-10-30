@@ -137,11 +137,11 @@ services:
       - "-c"
       - |
         set -e
-        cargo build --target-dir /usr/src/modama-rs/target/ --release --bin modama-agent
+        cargo build --target-dir /usr/src/modama-rs/target/ --release --bin modama-agent-gui
         install -d -o ingest -m 700 /run/user/1000
         exec runuser -u ingest -- env HOME=/home/ingest XDG_RUNTIME_DIR=/run/user/1000 \
-          dbus-run-session -- /usr/src/modama-rs/target/release/modama-agent \
-          session-helper --agent-url http://localhost:3003/
+          dbus-run-session -- /usr/src/modama-rs/target/release/modama-agent-gui \
+          --agent-url http://localhost:3003/ session-helper
 
   modama-agent-2:
     build:

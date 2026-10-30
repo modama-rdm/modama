@@ -1201,7 +1201,7 @@ mod tests {
             got["message"]
                 .as_str()
                 .unwrap()
-                .contains("modama-agent session-helper")
+                .contains("modama-agent-gui session-helper")
         );
         assert!(!bytes.windows(15).any(|w| w == b"secret-password"));
     }

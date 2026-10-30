@@ -17,15 +17,12 @@ use modama_common::{
 use tokio::sync::{mpsc, watch};
 use url::Url;
 
-use crate::session_helper::{
-    mount_popup::{FolderOpener as _, gui_executable},
-    open_folder::SystemFolderOpener,
-};
+use crate::{mount_popup::FolderOpener as _, open_folder::SystemFolderOpener};
 
 #[cfg(target_os = "linux")]
-use crate::session_helper::tray_linux as platform;
+use crate::tray_linux as platform;
 #[cfg(windows)]
-use crate::session_helper::tray_windows as platform;
+use crate::tray_windows as platform;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TrayStatus {
@@ -147,13 +144,13 @@ pub async fn run_tray(
     }
 }
 
-/// Start the GUI. An already open GUI gets a second window; the GUI has no single-instance
-/// handling yet.
+/// Start the GUI, which is our own executable. An already open GUI gets a second window; the GUI
+/// has no single-instance handling yet.
 fn open_modama(agent_url: &Url) {
-    let gui = match gui_executable() {
+    let gui = match std::env::current_exe() {
         Ok(gui) => gui,
         Err(e) => {
-            warn!("could not locate the GUI: {e}");
+            warn!("could not locate our own executable: {e}");
             return;
         }
     };
@@ -245,7 +242,7 @@ mod tests {
 
     #[test]
     fn ico_images_are_found_by_size() {
-        let ico = include_bytes!("../../../assets/tray-icon.ico");
+        let ico = include_bytes!("../assets/tray-icon.ico");
         let image = |size| ico_image(ico, size).map(<[u8]>::len);
         // the small sizes are 32-bit DIBs: a 40-byte header, the pixels, and a 1-bit mask
         assert_eq!(image(16), Some(40 + 16 * 16 * 4 + 16 * 4));
