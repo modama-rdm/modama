@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use log::{debug, error, info, warn};
+use log::{debug, warn};
 use modama_common::{
     tokens::{BoxFutureToken, TokenError, TokenProvider, TokenSignResponse},
     version::modama_git_version,
@@ -16,17 +16,13 @@ use modama_common::{
 use reqwest::{Certificate, Client, StatusCode};
 use tokio::{
     net::UdpSocket,
-    spawn,
     sync::Mutex,
     task::JoinHandle,
     time::{Instant, sleep},
 };
 use url::Url;
 
-use crate::{
-    local_net_common::{DiscoveryMessage, NOTIFY_MCAST_ADDR, NOTIFY_PORT, create_mcast_socket},
-    local_net_token_proxy::{get_private_addresses, task_exists_and_running},
-};
+use crate::local_net_common::DiscoveryMessage;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct RemoteAgent {
@@ -111,56 +107,275 @@ async fn handle_discovery_msg(msg: &DiscoveryMessage, agents: &mut RemoteAgents)
         .await;
 }
 
-/// Listen for multicast messages on "local interfaces".
-async fn discovery_loop(local: Ipv4Addr, mut agents: RemoteAgents) {
-    'outer: loop {
-        let socket = match create_mcast_socket(NOTIFY_PORT, NOTIFY_MCAST_ADDR, local).await {
-            Ok(socket) => socket,
-            Err(err) => {
-                error!("error creating multicast socket (`{err}`), retrying...");
-                sleep(Duration::from_millis(5000)).await;
-                continue 'outer;
+/// Listen for discovery announcements, feeding `agents`, until aborted
+fn spawn_discovery(local: DiscoveryAddr, agents: RemoteAgents) -> JoinHandle<()> {
+    platform::spawn_discovery(local, agents)
+}
+
+#[cfg(target_os = "linux")]
+use linux as platform;
+#[cfg(windows)]
+use windows as platform;
+
+/// One socket, bound to the discovery group, with a membership on every private interface: it
+/// hears the group there and nowhere else.
+///
+/// - Bound to the group address, the socket only receives datagrams sent to that group; unicast
+///   to the port never reaches it.
+/// - Memberships are per interface (identified by its address), so group traffic arriving on
+///   other interfaces isn't ours.
+/// - `IP_MULTICAST_ALL` off: only our own memberships count, not those of other sockets or
+///   processes on this host.
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::{
+        collections::HashSet,
+        io,
+        net::{Ipv4Addr, SocketAddrV4},
+        time::Duration,
+    };
+
+    use log::{debug, error, info, warn};
+    use socket2::{Domain, Protocol, Socket, Type};
+    use tokio::{net::UdpSocket, spawn, task::JoinHandle, time::sleep};
+
+    use super::{DiscoveryAddr, RemoteAgents, handle_discovery_msg, try_recv_discovery_message};
+    use crate::{
+        local_net_common::{NOTIFY_MCAST_ADDR, NOTIFY_PORT},
+        local_net_token_proxy::get_private_addresses,
+    };
+
+    /// How often new or removed interfaces are picked up
+    const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
+    pub(super) fn spawn_discovery(local: DiscoveryAddr, agents: RemoteAgents) -> JoinHandle<()> {
+        // listen right away, so that announcements sent from now on are heard
+        let listener = Listener::open(local)
+            .inspect_err(|err| error!("error creating multicast socket (`{err}`), retrying..."))
+            .ok();
+        spawn(discovery_loop(local, agents, listener))
+    }
+
+    struct Listener {
+        socket: UdpSocket,
+        memberships: Memberships,
+    }
+
+    impl Listener {
+        fn open(local: DiscoveryAddr) -> io::Result<Self> {
+            let socket = create_listener()?;
+            let mut memberships = Memberships::default();
+            if let Some(wanted) = wanted_addresses(local) {
+                memberships.update(&socket, &wanted);
             }
-        };
-        'inner: loop {
-            match try_recv_discovery_message(&socket).await {
-                Ok(Some((msg, _addr))) => handle_discovery_msg(&msg, &mut agents).await,
-                Ok(None) => continue 'inner,
-                Err(err) => {
-                    error!("error receiving multicast message (`{err}`), re-creating socket...");
-                    sleep(Duration::from_millis(1000)).await;
-                    continue 'outer;
+            Ok(Self {
+                socket,
+                memberships,
+            })
+        }
+    }
+
+    fn create_listener() -> io::Result<UdpSocket> {
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        socket.set_nonblocking(true)?;
+        socket.set_multicast_all_v4(false)?;
+        socket.bind(&SocketAddrV4::new(NOTIFY_MCAST_ADDR, NOTIFY_PORT).into())?;
+        UdpSocket::from_std(socket.into())
+    }
+
+    /// The interfaces (by address) to listen on
+    fn wanted_addresses(local: DiscoveryAddr) -> Option<HashSet<Ipv4Addr>> {
+        match local {
+            DiscoveryAddr::V4(addr) => Some(HashSet::from([addr])),
+            DiscoveryAddr::AnyPrivate => match get_private_addresses() {
+                Ok(addrs) => Some(addrs.into_iter().collect()),
+                Err(e) => {
+                    // keep the memberships we have
+                    warn!("could not list the local interfaces: {e}");
+                    None
+                }
+            },
+        }
+    }
+
+    /// Memberships to add and to drop, to get from `current` to `wanted` (sorted, for the logs)
+    pub(super) fn membership_changes(
+        current: &HashSet<Ipv4Addr>,
+        wanted: &HashSet<Ipv4Addr>,
+    ) -> (Vec<Ipv4Addr>, Vec<Ipv4Addr>) {
+        let mut join: Vec<_> = wanted.difference(current).copied().collect();
+        let mut leave: Vec<_> = current.difference(wanted).copied().collect();
+        join.sort_unstable();
+        leave.sort_unstable();
+        (join, leave)
+    }
+
+    #[derive(Default)]
+    struct Memberships {
+        joined: HashSet<Ipv4Addr>,
+        /// Joins that failed, so each is only logged once; retried on every refresh
+        failed: HashSet<Ipv4Addr>,
+    }
+
+    impl Memberships {
+        fn update(&mut self, socket: &UdpSocket, wanted: &HashSet<Ipv4Addr>) {
+            let (join, leave) = membership_changes(&self.joined, wanted);
+            for addr in leave {
+                // fails if the interface is already gone, which ends the membership anyway
+                if let Err(e) = socket.leave_multicast_v4(NOTIFY_MCAST_ADDR, addr) {
+                    debug!("could not leave the discovery group on {addr}: {e}");
+                }
+                self.joined.remove(&addr);
+                info!("stopped listening for agents on {addr}");
+            }
+            for addr in join {
+                match socket.join_multicast_v4(NOTIFY_MCAST_ADDR, addr) {
+                    Ok(()) => {
+                        info!("listening for agents on {addr}");
+                        self.joined.insert(addr);
+                        self.failed.remove(&addr);
+                    }
+                    Err(e) => {
+                        if self.failed.insert(addr) {
+                            warn!("could not listen for agents on {addr}: {e}");
+                        }
+                    }
+                }
+            }
+            self.failed.retain(|addr| wanted.contains(addr));
+        }
+    }
+
+    async fn discovery_loop(
+        local: DiscoveryAddr,
+        mut agents: RemoteAgents,
+        mut listener: Option<Listener>,
+    ) {
+        loop {
+            let mut current = match listener.take() {
+                Some(listener) => listener,
+                None => match Listener::open(local) {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        error!("error creating multicast socket (`{err}`), retrying...");
+                        sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                },
+            };
+            // the memberships were just set up; refresh them from now on
+            let mut refresh = tokio::time::interval_at(
+                tokio::time::Instant::now() + REFRESH_INTERVAL,
+                REFRESH_INTERVAL,
+            );
+            loop {
+                tokio::select! {
+                    _ = refresh.tick() => {
+                        if let Some(wanted) = wanted_addresses(local) {
+                            current.memberships.update(&current.socket, &wanted);
+                        }
+                    }
+                    // `recv_from` is cancel-safe
+                    received = try_recv_discovery_message(&current.socket) => match received {
+                        Ok(Some((msg, _addr))) => handle_discovery_msg(&msg, &mut agents).await,
+                        Ok(None) => {}
+                        Err(err) => {
+                            error!("error receiving multicast message (`{err}`), re-creating socket...");
+                            sleep(Duration::from_secs(1)).await;
+                            break;
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-async fn discovery_loop_starter(bg_agents: RemoteAgents) {
-    let mut discovery_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
+/// One socket per private interface, each bound to that interface's address and the notify
+/// port; on Windows, different local addresses don't collide on the same port.
+#[cfg(windows)]
+mod windows {
+    use std::{collections::HashMap, net::Ipv4Addr, time::Duration};
 
-    loop {
-        match get_private_addresses() {
-            Ok(addrs) => {
-                // when new interfaces appear, start discovery loop on them;
-                // when interfaces disappear, the tasks should just kill itself
-                for addr in addrs.iter() {
-                    let addr = *addr;
-                    if !task_exists_and_running(&discovery_tasks, addr).await {
-                        info!("starting discovery task on {addr}");
-                        let agents = bg_agents.clone();
-                        let handle = spawn(async move { discovery_loop(addr, agents).await });
-                        discovery_tasks.insert(addr, handle);
+    use log::{error, info};
+    use tokio::{net::UdpSocket, spawn, task::JoinHandle, time::sleep};
+
+    use super::{DiscoveryAddr, RemoteAgents, handle_discovery_msg, try_recv_discovery_message};
+    use crate::{
+        local_net_common::{NOTIFY_MCAST_ADDR, NOTIFY_PORT},
+        local_net_token_proxy::{get_private_addresses, task_exists_and_running},
+    };
+
+    pub(super) fn spawn_discovery(local: DiscoveryAddr, agents: RemoteAgents) -> JoinHandle<()> {
+        match local {
+            DiscoveryAddr::AnyPrivate => spawn(discovery_loop_starter(agents)),
+            DiscoveryAddr::V4(addr) => spawn(discovery_loop(addr, agents)),
+        }
+    }
+
+    async fn create_mcast_socket(
+        port: u16,
+        group: Ipv4Addr,
+        local: Ipv4Addr,
+    ) -> Result<UdpSocket, std::io::Error> {
+        let socket = UdpSocket::bind((local, port)).await?;
+        socket.join_multicast_v4(group, local)?;
+        Ok(socket)
+    }
+
+    /// Listen for multicast messages on "local interfaces".
+    async fn discovery_loop(local: Ipv4Addr, mut agents: RemoteAgents) {
+        'outer: loop {
+            let socket = match create_mcast_socket(NOTIFY_PORT, NOTIFY_MCAST_ADDR, local).await {
+                Ok(socket) => socket,
+                Err(err) => {
+                    error!("error creating multicast socket (`{err}`), retrying...");
+                    sleep(Duration::from_millis(5000)).await;
+                    continue 'outer;
+                }
+            };
+            'inner: loop {
+                match try_recv_discovery_message(&socket).await {
+                    Ok(Some((msg, _addr))) => handle_discovery_msg(&msg, &mut agents).await,
+                    Ok(None) => continue 'inner,
+                    Err(err) => {
+                        error!(
+                            "error receiving multicast message (`{err}`), re-creating socket..."
+                        );
+                        sleep(Duration::from_millis(1000)).await;
+                        continue 'outer;
                     }
                 }
             }
-            Err(e) => {
-                error!("error while discovering local interfaces: {e}");
-                sleep(Duration::from_secs(10)).await;
-                continue;
-            }
-        };
-        sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    async fn discovery_loop_starter(bg_agents: RemoteAgents) {
+        let mut discovery_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
+
+        loop {
+            match get_private_addresses() {
+                Ok(addrs) => {
+                    // when new interfaces appear, start discovery loop on them;
+                    // when interfaces disappear, the tasks should just kill itself
+                    for addr in addrs.iter() {
+                        let addr = *addr;
+                        if !task_exists_and_running(&discovery_tasks, addr).await {
+                            info!("starting discovery task on {addr}");
+                            let agents = bg_agents.clone();
+                            let handle = spawn(async move { discovery_loop(addr, agents).await });
+                            discovery_tasks.insert(addr, handle);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("error while discovering local interfaces: {e}");
+                    sleep(Duration::from_secs(10)).await;
+                    continue;
+                }
+            };
+            sleep(Duration::from_secs(1)).await;
+        }
     }
 }
 
@@ -182,14 +397,7 @@ impl LocalNetTokenProvider {
         let agents = RemoteAgents::new().await;
         let bg_agents = agents.clone();
 
-        let handle = match local_addr {
-            DiscoveryAddr::AnyPrivate => {
-                spawn(async move { discovery_loop_starter(bg_agents).await })
-            }
-            DiscoveryAddr::V4(ipv4_addr) => {
-                spawn(async move { discovery_loop(ipv4_addr, bg_agents).await })
-            }
-        };
+        let handle = spawn_discovery(local_addr, bg_agents);
 
         Ok(Self {
             http_client,
@@ -207,8 +415,12 @@ impl LocalNetTokenProvider {
         Self::new_with_pem(&ca_pem, local_addr).await
     }
 
+    /// Stop discovery; returns once the task has stopped, so its socket is released
     pub async fn abort(&self) {
         self.discovery_loop_handle.abort();
+        while !self.discovery_loop_handle.is_finished() {
+            tokio::task::yield_now().await;
+        }
     }
 
     pub async fn agents(&self) -> HashMap<RemoteAgent, Instant> {
@@ -399,6 +611,24 @@ mod tests {
                 .unwrap();
 
         tp.abort().await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn membership_changes_join_new_and_leave_gone_interfaces() {
+        use std::collections::HashSet;
+
+        let addr = |last| Ipv4Addr::new(192, 168, 1, last);
+        let current = HashSet::from([addr(1), addr(2)]);
+        let wanted = HashSet::from([addr(2), addr(4), addr(3)]);
+        assert_eq!(
+            super::linux::membership_changes(&current, &wanted),
+            (vec![addr(3), addr(4)], vec![addr(1)])
+        );
+        assert_eq!(
+            super::linux::membership_changes(&wanted, &wanted),
+            (vec![], vec![])
+        );
     }
 
     #[tokio::test]
@@ -608,6 +838,8 @@ mod tests {
             receiver.token_from_local_net().await,
             Err(TokenError::NoSource)
         ));
+        // releases the discovery socket before the next test takes the mutex
+        receiver.abort().await;
     }
 
     // TODO: more tests

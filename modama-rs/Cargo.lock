@@ -3731,6 +3731,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smbdrop",
+ "socket2",
  "thiserror 2.0.20",
  "time",
  "tokio",
