@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 
 pub fn default_event_url() -> String {
@@ -62,14 +60,6 @@ pub struct AgentConfigFileClientCert {
     pub private_key: String,
 }
 
-/// Linux-specific settings; unset fields fall back to the agent's defaults.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct AgentConfigFileLinux {
-    pub mount_point_prefix: Option<PathBuf>,
-    pub uid: Option<u32>,
-    pub gid: Option<u32>,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentConfigFile {
     pub services: AgentConfigFileServices,
@@ -80,6 +70,4 @@ pub struct AgentConfigFile {
     pub ca: AgentConfigFileCa,
 
     pub client_cert: Option<AgentConfigFileClientCert>,
-
-    pub linux: Option<AgentConfigFileLinux>,
 }

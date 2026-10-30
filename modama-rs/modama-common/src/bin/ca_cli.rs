@@ -155,7 +155,6 @@ fn generate_agent_config(args: &Cli) -> Result<()> {
         listen_local_api: listen_local_api.unwrap_or_else(default_listen_local_api),
         ca: AgentConfigFileCa { ca_cert },
         client_cert,
-        linux: None,
     };
 
     let output = toml::to_string(&config)?;
