@@ -2,11 +2,14 @@ pub mod actions;
 pub mod api_client;
 pub mod app;
 pub mod async_state;
+#[cfg(windows)]
+pub mod autostart;
 pub mod components;
 pub mod config;
 mod foreground_monitor;
 #[cfg(feature = "guide-screenshots")]
 pub mod guide_screenshots;
+pub mod helper_launch;
 mod navigation_progress;
 pub mod pages;
 pub mod service;

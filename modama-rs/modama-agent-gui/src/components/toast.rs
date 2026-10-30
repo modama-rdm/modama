@@ -30,6 +30,10 @@ impl ToastState {
         self.error = Some(ErrorToast { message, retry });
     }
 
+    pub fn is_visible(&self) -> bool {
+        self.error.is_some()
+    }
+
     pub fn clear(&mut self) {
         self.error = None;
     }

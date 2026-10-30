@@ -2,6 +2,8 @@ pub mod agent;
 pub mod ca;
 pub mod cert_helpers;
 pub mod config;
+pub mod foreground;
+pub mod internal_api_types;
 pub mod local_api_messages;
 pub mod logging;
 pub mod messages;
@@ -10,7 +12,6 @@ pub mod requests;
 pub mod test_helpers;
 pub mod tokens;
 pub mod version;
-pub mod internal_api_types;
 
 /// Install the workspace's selected rustls provider before constructing clients that defer
 /// provider selection to the application.

@@ -64,7 +64,7 @@ async fn receive_inner(
 ) -> ControlFlow<(), ()> {
     match message {
         Some(Ok(Message::Text(utf8_bytes))) => {
-            if let Err(e) = handle_message(state, &utf8_bytes.as_str()).await {
+            if let Err(e) = handle_message(state, utf8_bytes.as_str()).await {
                 error!("Error while handing message: {e}");
             }
             ControlFlow::Continue(())

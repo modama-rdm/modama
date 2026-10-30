@@ -16,6 +16,7 @@ use axum_macros::debug_handler;
 use log::error;
 use minijinja::{AutoEscape, Environment, Value, context};
 use modama_common::{
+    foreground::project_and_session,
     local_api_messages::APICurrentForegroundShare,
     messages::Share,
     mgmt_client::{MgmtClient, MgmtError},
@@ -33,7 +34,7 @@ use crate::{
     caller_scope::{ConnInfo, HelperScope, PlatformScopeResolver, ResolveScope, ScopeError},
     config::{ConfigError, MTLSIdentity},
     events_api::add_internal_api,
-    http_api::{add_api_routes, project_and_session},
+    http_api::add_api_routes,
 };
 
 fn create_env() -> Environment<'static> {
@@ -388,7 +389,7 @@ pub enum LocalAPIError {
     Config(#[from] ConfigError),
 
     #[error("invalid API response: {0}")]
-    InvalidResponse(#[from] crate::http_api::ShareDestinationError),
+    InvalidResponse(#[from] modama_common::foreground::ShareDestinationError),
 
     #[error("caller scope: {0}")]
     Scope(#[from] ScopeError),

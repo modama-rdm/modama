@@ -217,7 +217,6 @@ async fn handle_session_helper_websocket(
 async fn send_update_to_gui(
     update: StateUpdateToSession,
     own_scope: HelperScope,
-    config: &SessionHelperConfig,
     socket: &mut WebSocket,
     remote_info: Option<RemoteInfo>,
     session_helper: Option<SessionHelperState>,
@@ -263,25 +262,12 @@ async fn handle_gui_websocket(
     mut socket: WebSocket,
     scope: HelperScope,
 ) -> Result<(), EventAPIError> {
-    let (mut rx, remote_info, smb_hostname, smb_port, smb_domain, session_helper) = {
+    let (mut rx, remote_info, session_helper) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
         let session_helper = agent_state.session_helpers.get(&scope).cloned();
 
-        (
-            receiver,
-            agent_state.remote_info.clone(),
-            agent_state.config.smb_hostname.clone(),
-            agent_state.config.smb_port,
-            agent_state.config.smb_domain.clone(),
-            session_helper,
-        )
-    };
-
-    let session_config = SessionHelperConfig {
-        smb_hostname,
-        smb_port,
-        smb_domain,
+        (receiver, agent_state.remote_info.clone(), session_helper)
     };
 
     // initial state
@@ -309,7 +295,7 @@ async fn handle_gui_websocket(
                     let agent_state = state.lock().await;
                     (agent_state.remote_info.clone(), agent_state.session_helpers.get(&scope).cloned())
                  };
-                send_update_to_gui(update, scope, &session_config, &mut socket, remote_info, session_helper).await?;
+                send_update_to_gui(update, scope, &mut socket, remote_info, session_helper).await?;
             }
             session_update = recv_obj::<ToAgent>(&mut socket) => {
                 // panic! or rather, don't. the GUI isn't supposed to send us anything,

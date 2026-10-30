@@ -2,7 +2,10 @@ use std::{error::Error, path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use eframe::egui;
-use modama_agent_gui::{app::AgentGuiApp, config::load_config, service::HttpAgentService, styles};
+use modama_agent_gui::{
+    app::AgentGuiApp, config::load_config, helper_launch::launch_session_helper,
+    service::HttpAgentService, styles,
+};
 use modama_common::logging::init_logging;
 
 #[derive(Debug, Parser)]
@@ -14,6 +17,10 @@ struct Cli {
     /// Override the configured local agent URL.
     #[arg(long)]
     agent_url: Option<String>,
+
+    /// Start the session helper without a window and exit (used by the autostart entry).
+    #[arg(long)]
+    start_session_helper: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -21,6 +28,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let cli = Cli::parse();
     let config = load_config(cli.config_path.as_deref(), cli.agent_url)?;
+    if cli.start_session_helper {
+        // nobody sees this process, so only log; the helper keeps running after we exit
+        if let Err(e) = launch_session_helper(&config.agent_url) {
+            log::error!("could not launch the session helper: {e}");
+        }
+        return Ok(());
+    }
     let service = Arc::new(HttpAgentService::new(config.agent_url)?);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([
@@ -38,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Box::new(move |cctx| {
             egui_extras::install_image_loaders(&cctx.egui_ctx);
             styles::theme::install(&cctx.egui_ctx);
-            let app = AgentGuiApp::with_service(service);
+            let app = AgentGuiApp::with_service(service).with_autostart_offer();
             Ok(Box::new(app))
         }),
     )?;

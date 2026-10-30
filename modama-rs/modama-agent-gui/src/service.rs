@@ -11,8 +11,6 @@ use crate::{
     state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession, PendingSession},
 };
 
-pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(500);
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectSummary {
     pub name: String,
@@ -75,18 +73,25 @@ pub trait AgentService: Send + Sync {
 pub struct HttpAgentService {
     runtime: tokio::runtime::Runtime,
     client: AgentClient,
+    agent_url: String,
 }
 
 impl HttpAgentService {
     pub fn new(agent_url: impl Into<String>) -> Result<Self, ServiceError> {
+        let agent_url = agent_url.into();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .map_err(|error| ServiceError::Transport(error.to_string()))?;
         Ok(Self {
             runtime,
-            client: AgentClient::new(agent_url),
+            client: AgentClient::new(agent_url.clone()),
+            agent_url,
         })
+    }
+
+    pub fn agent_url(&self) -> &str {
+        &self.agent_url
     }
 
     fn authenticated_client(&self, credentials: &Credentials) -> AgentClient {
@@ -124,6 +129,41 @@ impl HttpAgentService {
                 })
             }
         })
+    }
+}
+
+impl From<modama_common::local_api_messages::APICurrentForegroundShare> for ForegroundSession {
+    fn from(foreground: modama_common::local_api_messages::APICurrentForegroundShare) -> Self {
+        use modama_common::local_api_messages::APICurrentForegroundShare as Foreground;
+        match foreground {
+            Foreground::None => ForegroundSession::None,
+            Foreground::Unavailable {
+                share_id,
+                project,
+                session,
+                dest_path: _,
+                message,
+            } => ForegroundSession::Mounting(
+                PendingSession {
+                    share_id,
+                    project,
+                    session,
+                },
+                message,
+            ),
+            Foreground::Mounted {
+                share_id,
+                project,
+                session,
+                dest_path: _,
+                mount_path,
+            } => ForegroundSession::Mounted(ActiveSession {
+                share_id,
+                project,
+                session,
+                mount_path: Some(mount_path),
+            }),
+        }
     }
 }
 

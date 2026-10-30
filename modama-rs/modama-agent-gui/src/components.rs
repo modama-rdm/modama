@@ -1,3 +1,4 @@
+pub mod autostart_offer;
 pub mod avatar;
 pub mod buttons;
 pub mod dialogs;

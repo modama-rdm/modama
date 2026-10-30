@@ -2,17 +2,15 @@ use std::{collections::HashMap, sync::Arc};
 
 use log::{info, warn};
 use modama_common::{
-    agent::AgentId, internal_api_types::SessionHelperState,
-    local_api_messages::APICurrentForegroundShare, messages::Share,
+    agent::AgentId,
+    foreground::{ShareDestinationError, foreground_projection},
+    internal_api_types::SessionHelperState,
+    local_api_messages::APICurrentForegroundShare,
+    messages::Share,
 };
 use tokio::sync::{Mutex, broadcast, mpsc};
 
-use crate::{
-    caller_scope::HelperScope,
-    config::AgentConfig,
-    events_api::SessionBeginEnd,
-    http_api::{ShareDestinationError, foreground_projection},
-};
+use crate::{caller_scope::HelperScope, config::AgentConfig, events_api::SessionBeginEnd};
 
 #[derive(Debug, Default)]
 pub enum ConnectionState {

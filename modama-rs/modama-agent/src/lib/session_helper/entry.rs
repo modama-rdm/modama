@@ -28,7 +28,7 @@ use crate::{
     },
 };
 
-/// The session helper endpoint, derived from the agent's base URL (`http://localhost:3001/`)
+/// The session helper endpoint, derived from the agent's base URL (`http://localhost:3003/`)
 fn events_url(agent_url: &Url) -> Result<Url> {
     let mut url = agent_url
         .join("internal/events/session-helper/")
@@ -82,12 +82,12 @@ mod tests {
     fn events_url_is_derived_from_the_agent_url() {
         let url = |s: &str| events_url(&Url::parse(s).unwrap()).map(|u| u.to_string());
         assert_eq!(
-            url("http://localhost:3001/").unwrap(),
-            "ws://localhost:3001/internal/events/session-helper/"
+            url("http://localhost:3003/").unwrap(),
+            "ws://localhost:3003/internal/events/session-helper/"
         );
         assert_eq!(
-            url("https://localhost:3001").unwrap(),
-            "wss://localhost:3001/internal/events/session-helper/"
+            url("https://localhost:3003").unwrap(),
+            "wss://localhost:3003/internal/events/session-helper/"
         );
         assert!(url("ftp://localhost/").is_err());
     }

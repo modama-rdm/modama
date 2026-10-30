@@ -36,7 +36,7 @@ pub enum Command {
     /// Run the session helper, which mounts ingest shares in the user's session
     SessionHelper {
         /// Where the agent's local API is listening
-        #[arg(long, default_value = "http://localhost:3001/")]
+        #[arg(long, default_value = "http://localhost:3003/")]
         agent_url: Url,
     },
 

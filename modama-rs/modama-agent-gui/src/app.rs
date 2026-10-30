@@ -3,13 +3,17 @@ use std::sync::Arc;
 
 use crate::{
     actions::{Action, LoginDestination, RetryAction, TaskFailure},
-    components::toast::{ToastAction, ToastState},
-    foreground_monitor::{ForegroundMonitor, ForegroundMonitorUpdate},
+    components::{
+        autostart_offer::{AutostartOffer, AutostartOfferAction},
+        toast::{ToastAction, ToastState},
+    },
+    foreground_monitor::{ForegroundMonitor, ForegroundMonitorUpdate, events_url},
+    helper_launch::ProcessLauncher,
     navigation_progress::NavigationProgress,
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
     },
-    service::{AgentService, StubAgentService},
+    service::{AgentService, HttpAgentService, StubAgentService},
     state::AgentAppState,
     styles,
     top_bar::TopBar,
@@ -19,11 +23,14 @@ pub struct AgentGuiApp {
     pub page: Page,
     pub app_state: AgentAppState,
     pub toast: ToastState,
+    /// Shown at startup on Windows, unless autostart is set up or the offer was dismissed
+    pub autostart_offer: Option<AutostartOffer>,
     top_bar: TopBar,
     navigation_progress: NavigationProgress,
     service: Arc<dyn AgentService>,
     foreground_monitor: Option<ForegroundMonitor>,
-    monitor_enabled: bool,
+    /// The agent's base URL, if the app should follow the agent's stream and launch helpers
+    agent_url: Option<String>,
 }
 
 impl Default for AgentGuiApp {
@@ -34,27 +41,79 @@ impl Default for AgentGuiApp {
 
 impl AgentGuiApp {
     pub fn new() -> Self {
-        Self::build(StubAgentService::shared(), false)
+        Self::build(StubAgentService::shared(), None)
     }
 
-    pub fn with_service(service: Arc<dyn AgentService>) -> Self {
-        Self::build(service, true)
+    pub fn with_service(service: Arc<HttpAgentService>) -> Self {
+        let agent_url = service.agent_url().to_owned();
+        Self::build(service, Some(agent_url))
     }
 
     pub fn with_service_without_monitor(service: Arc<dyn AgentService>) -> Self {
-        Self::build(service, false)
+        Self::build(service, None)
     }
 
-    fn build(service: Arc<dyn AgentService>, monitor_enabled: bool) -> Self {
+    fn build(service: Arc<dyn AgentService>, agent_url: Option<String>) -> Self {
         Self {
             page: Page::Connecting(PageConnecting::with_service(Arc::clone(&service))),
             app_state: AgentAppState::new(),
             toast: ToastState::default(),
+            autostart_offer: None,
             top_bar: TopBar::default(),
             navigation_progress: NavigationProgress::default(),
             service,
             foreground_monitor: None,
-            monitor_enabled,
+            agent_url,
+        }
+    }
+
+    /// Offer to start the session helper at logon, unless that's set up or was declined
+    #[must_use]
+    pub fn with_autostart_offer(self) -> Self {
+        #[cfg(windows)]
+        if !crate::autostart::dismissed() && !crate::autostart::entry_exists() {
+            return Self {
+                autostart_offer: Some(AutostartOffer::default()),
+                ..self
+            };
+        }
+        self
+    }
+
+    fn handle_autostart_offer(&mut self, action: AutostartOfferAction) {
+        match action {
+            AutostartOfferAction::Enable => match self.enable_autostart() {
+                Ok(()) => self.autostart_offer = None,
+                Err(e) => {
+                    log::warn!("could not set up autostart: {e}");
+                    if let Some(offer) = &mut self.autostart_offer {
+                        offer.error = Some(format!("Could not set up autostart: {e}"));
+                    }
+                }
+            },
+            AutostartOfferAction::Dismiss => {
+                #[cfg(windows)]
+                if let Err(e) = crate::autostart::dismiss() {
+                    log::warn!("could not remember that the autostart offer was dismissed: {e}");
+                }
+                self.autostart_offer = None;
+            }
+        }
+    }
+
+    fn enable_autostart(&self) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let agent_url = self
+                .agent_url
+                .as_deref()
+                .ok_or_else(|| "the agent URL is unknown".to_owned())?;
+            let gui_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            crate::autostart::enable(&gui_exe, agent_url).map_err(|e| e.message())
+        }
+        #[cfg(not(windows))]
+        {
+            Err("autostart is only supported on Windows".to_owned())
         }
     }
 
@@ -232,15 +291,25 @@ impl AgentGuiApp {
     }
 
     fn start_monitor_if_needed(&mut self, ctx: &egui::Context) {
-        if self.monitor_enabled
-            && self.foreground_monitor.is_none()
-            && self.app_state.identity.is_some()
-        {
-            self.foreground_monitor = Some(ForegroundMonitor::start(
-                Arc::clone(&self.service),
-                self.app_state.foreground.clone(),
-                ctx.clone(),
-            ));
+        let Some(agent_url) = &self.agent_url else {
+            return;
+        };
+        if self.foreground_monitor.is_some() || self.app_state.identity.is_none() {
+            return;
+        }
+        match events_url(agent_url) {
+            Ok(url) => {
+                self.foreground_monitor = Some(ForegroundMonitor::start(
+                    url,
+                    Box::new(ProcessLauncher::new(agent_url.clone())),
+                    self.app_state.foreground.clone(),
+                    ctx.clone(),
+                ));
+            }
+            Err(e) => {
+                log::error!("not following the agent: {e}");
+                self.agent_url = None;
+            }
         }
     }
 
@@ -390,6 +459,15 @@ impl eframe::App for AgentGuiApp {
                 ToastAction::Retry(retry) => self.handle_retry(retry, ui.ctx().clone()),
                 ToastAction::Dismiss => self.toast.clear(),
             }
+        }
+        // the error toast takes the same place, and goes first
+        if !self.toast.is_visible()
+            && let Some(action) = self
+                .autostart_offer
+                .as_ref()
+                .and_then(|offer| offer.show(ui.ctx()))
+        {
+            self.handle_autostart_offer(action);
         }
 
         self.navigation_progress.show(
