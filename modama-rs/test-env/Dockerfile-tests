@@ -5,6 +5,11 @@ FROM rust:slim-trixie AS builder
 WORKDIR /usr/src/modama-rs/
 
 RUN --mount=type=cache,sharing=locked,target=/var/cache/apt apt-get update && apt-get -y install clang curl lld samba samba-client winbind strace
+# for the session helper: GVfs with SMB backend and FUSE bridge, and a D-Bus session bus
+RUN --mount=type=cache,sharing=locked,target=/var/cache/apt apt-get -y install gvfs-backends gvfs-fuse dbus dbus-user-session
+# to build the GIO bindings of the session helper
+RUN --mount=type=cache,sharing=locked,target=/var/cache/apt apt-get -y install pkg-config libglib2.0-dev
+RUN useradd --uid 1000 --create-home ingest
 RUN mkdir /etc/smbdrop/
 
 COPY . .

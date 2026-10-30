@@ -177,3 +177,24 @@ win7-check-gnu:
 
 # Backwards-compatible name retained for existing local invocations.
 win-clippy-gnu: win7-check-gnu
+
+# Run the GIO backend against real GVfs and a Samba container (needs gvfs-backends, gvfs-fuse
+# and a D-Bus session; mounts briefly appear in this user session).
+gio-integration-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    podman build -q -t modama-gio-samba modama-agent/tests/gio-samba >/dev/null
+    podman rm -f modama-gio-samba >/dev/null 2>&1 || true
+    podman run -d --rm --name modama-gio-samba -p 127.0.0.1:1445:1445 modama-gio-samba >/dev/null
+    cleanup() {
+        for uri in smb://localhost:1445/ingest/ smb://localhost:1445/ingest2/ smb://127.0.0.1:1445/other/; do
+            gio mount -u "$uri" >/dev/null 2>&1 || true
+        done
+        podman stop modama-gio-samba >/dev/null 2>&1 || true
+    }
+    trap cleanup EXIT
+    for _ in $(seq 1 60); do
+        if (exec 3<>/dev/tcp/127.0.0.1/1445) 2>/dev/null; then break; fi
+        sleep 0.5
+    done
+    cargo test -q -p modama-agent --test gio_integration -- --ignored --test-threads=1

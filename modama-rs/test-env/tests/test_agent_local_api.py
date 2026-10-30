@@ -16,7 +16,7 @@ def wait_for_session(name: str, agent_api: str):
         response.raise_for_status()
         fg = response.json()
         print(fg)
-        if fg["type"] == "Share" and fg["session"] == name:
+        if fg["type"] == "Mounted" and fg["session"] == name:
             break
         time.sleep(0.3)
     else:

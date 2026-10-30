@@ -380,7 +380,7 @@ pub mod internal {
 pub struct CurrentPlatformMountBackend {}
 
 impl CurrentPlatformMountBackend {
-    pub async fn new() -> Self {
+    pub async fn new() -> Result<Self, EnumerationError> {
         todo!();
     }
 }

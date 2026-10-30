@@ -4,8 +4,11 @@ services:
       context: .
       dockerfile: Dockerfile-test-runner
     working_dir: /test-env/
-    networks:
-      - modama-network
+    # The agent answers the foreground API for the caller's user, which it looks up from the
+    # connection in its own network namespace. So the tests run in the agent's namespace, as the
+    # same user as the session helper in `session-1`.
+    network_mode: "service:modama-agent-1"
+    user: "1000"
     volumes:
       - ./:/test-env:ro
       - type: bind
@@ -20,6 +23,8 @@ services:
         condition: service_healthy
       modama-agent-untrusted:
         condition: service_healthy
+      session-1:
+        condition: service_started
     stop_signal: SIGKILL
 
   smbdrop-init:
@@ -40,7 +45,8 @@ services:
     privileged: true  # for mount support
     container_name: smbdrop
     ports:
-      - "445:445"
+      # not needed by the tests (they use the compose network); a high port works with rootless podman
+      - "127.0.0.1:1446:445"
     volumes:
       - ./certs:/certs:ro
       - ./cargo-cache:/usr/local/cargo/registry/cache/
@@ -109,6 +115,33 @@ services:
       timeout: 15s
       start_period: 5m
       retries: 12
+
+  # The session helper of modama-agent-1, mounting via GVfs as user `ingest` (uid 1000).
+  session-1:
+    build:
+      context: ..
+      dockerfile: test-env/Dockerfile-tests
+    privileged: true  # for /dev/fuse (GVfs FUSE bridge)
+    container_name: session-1
+    # same network namespace as the agent, so it can identify the helper's user from the socket
+    network_mode: "service:modama-agent-1"
+    depends_on:
+      modama-agent-1:
+        condition: service_healthy
+    volumes:
+      - ./target:/usr/src/modama-rs/target/
+      - ./cargo-cache:/usr/local/cargo/registry/cache/
+      - ./cargo-git:/usr/local/cargo/git/
+    command:
+      - "bash"
+      - "-c"
+      - |
+        set -e
+        cargo build --target-dir /usr/src/modama-rs/target/ --release --bin modama-agent
+        install -d -o ingest -m 700 /run/user/1000
+        exec runuser -u ingest -- env HOME=/home/ingest XDG_RUNTIME_DIR=/run/user/1000 \
+          dbus-run-session -- /usr/src/modama-rs/target/release/modama-agent \
+          session-helper --agent-url http://localhost:3003/
 
   modama-agent-2:
     build:

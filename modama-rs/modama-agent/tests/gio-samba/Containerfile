@@ -1,0 +1,16 @@
+# Samba server for the GIO integration test (`just gio-integration-test`); test credentials only.
+FROM debian:13-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends samba \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY smb.conf /etc/samba/smb.conf
+
+RUN useradd --no-create-home testuser \
+    && printf 'testpass\ntestpass\n' | smbpasswd -s -a testuser \
+    && mkdir -p /srv/ingest /srv/ingest2 /srv/other \
+    && chown testuser /srv/ingest /srv/ingest2 /srv/other
+
+EXPOSE 1445
+CMD ["smbd", "--foreground", "--no-process-group", "--debug-stdout"]

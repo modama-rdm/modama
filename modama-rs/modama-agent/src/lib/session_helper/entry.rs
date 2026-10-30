@@ -9,7 +9,8 @@
 //
 // - [x] singleton
 // - [x] connection and reconciliation loop
-// - [ ] mount backends (GIO, WNet)
+// - [x] mount backend GIO
+// - [ ] mount backend WNet
 // - [ ] open the file manager for newly created foreground mounts
 // - [ ] notification tray icon
 
@@ -64,13 +65,13 @@ pub fn run(agent_url: &Url) -> Result<()> {
 
     let options = LoopOptions::new(events_url(agent_url)?);
     tokio::runtime::Runtime::new()?.block_on(async {
-        let backend = CurrentPlatformMountBackend::new().await;
+        let backend = CurrentPlatformMountBackend::new().await?;
         tokio::select! {
             _ = session_helper_loop(&backend, &options) => {}
             () = shutdown_signal() => info!("shutting down"),
         }
-    });
-    Ok(())
+        Ok(())
+    })
 }
 
 #[cfg(test)]

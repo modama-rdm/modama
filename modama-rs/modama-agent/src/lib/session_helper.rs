@@ -7,4 +7,4 @@ pub mod singleton;
 #[cfg_attr(target_os = "windows", path = "session_helper/platform_windows.rs")]
 pub mod platform;
 #[cfg(target_os = "linux")]
-pub mod gio_actor;
+pub mod gio_backend;
