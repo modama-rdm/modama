@@ -120,7 +120,7 @@ linux-agent:
     ZIG_VERSION: "0.15.2"
     ZIG_SHA256: "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
   script:
-    - apt-get -y update && apt-get -y install curl xz-utils binutils
+    - apt-get -y update && apt-get -y install curl xz-utils binutils pkg-config
     - |
       if [ ! -x ".zig/$ZIG_VERSION/zig" ]; then
         curl --fail -sSL -o zig.tar.xz "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
