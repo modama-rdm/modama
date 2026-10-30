@@ -123,7 +123,7 @@ pub async fn try_send_discovery_message(
 pub async fn advertisement_loop(local: Ipv4Addr, state: Arc<Mutex<SharedState>>) -> JoinHandle<()> {
     spawn(async move {
         'outer: loop {
-            let socket = match create_mcast_socket_for_sending(NOTIFY_MCAST_ADDR, local).await {
+            let socket = match create_mcast_socket_for_sending(local) {
                 Ok(socket) => socket,
                 Err(err) => {
                     error!("error creating multicast socket (`{err}`), retrying...");

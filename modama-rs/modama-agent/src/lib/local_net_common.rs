@@ -1,7 +1,8 @@
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use modama_common::agent::{AgentId, FromURIError};
 use serde::{Deserialize, Serialize};
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use url::Url;
 
@@ -79,13 +80,17 @@ impl DiscoveryMessage {
     }
 }
 
-pub async fn create_mcast_socket_for_sending(
-    _group: Ipv4Addr,
-    local: Ipv4Addr,
-) -> Result<UdpSocket, std::io::Error> {
-    let socket = UdpSocket::bind((local, 0)).await?;
-    // socket.join_multicast_v4(group, local)?;
-    Ok(socket)
+/// A socket that sends discovery announcements on exactly the interface with address `local`.
+/// An announcement carries the URL of this interface's token API, so it must not reach any other
+/// network: the interface is set explicitly (Windows doesn't derive it from the bound address for
+/// IPv4 multicast, Linux only by a special case), and a TTL of 1 keeps it on the local link.
+pub fn create_mcast_socket_for_sending(local: Ipv4Addr) -> std::io::Result<UdpSocket> {
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&SocketAddrV4::new(local, 0).into())?;
+    socket.set_multicast_if_v4(&local)?;
+    socket.set_multicast_ttl_v4(1)?;
+    UdpSocket::from_std(socket.into())
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -97,5 +102,19 @@ pub struct LocalNetTokenResponse {
 impl LocalNetTokenResponse {
     pub fn agent_id(&self) -> Result<AgentId, FromURIError> {
         AgentId::from_uri(&self.agent_name_uri)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sending_socket_is_pinned_to_its_interface_and_the_local_link() {
+        let local = Ipv4Addr::LOCALHOST;
+        let socket = create_mcast_socket_for_sending(local).unwrap();
+        let socket = socket2::SockRef::from(&socket);
+        assert_eq!(socket.multicast_if_v4().unwrap(), local);
+        assert_eq!(socket.multicast_ttl_v4().unwrap(), 1);
     }
 }
