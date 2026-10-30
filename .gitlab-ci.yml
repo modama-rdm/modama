@@ -150,6 +150,16 @@ linux-agent:
       - .cargo-home/registry/cache/
       - .zig/
 
+# The release binaries from linux-agent must start on the oldest supported distribution
+# (Ubuntu 18.04: glibc 2.27, GLib 2.56); see the script for how this is checked.
+linux-agent-oldest-runtime:
+  # `needs` only reaches jobs of the same or an earlier stage
+  stage: build
+  needs: [linux-agent]
+  image: ubuntu:18.04
+  script:
+    - sh modama-rs/ci/check-oldest-linux-runtime.sh modama-rs/target/x86_64-unknown-linux-gnu/release
+
 py-lint-and-format:
   stage: test
   image: ghcr.io/astral-sh/uv:debian
