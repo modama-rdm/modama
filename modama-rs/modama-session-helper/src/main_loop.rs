@@ -150,7 +150,8 @@ impl LoopState {
         let created = popup_mounts(&share_state.shares, &result);
         if !created.is_empty() {
             // the popup task only stops with the helper
-            let _ = self.popup.send(created);
+            let _ = self.popup.send(created.clone());
+            info!("created the following shares: {created:?}");
         }
         // so the agent can tell which desired state this report answers
         let report = SessionHelperState {
