@@ -194,12 +194,20 @@ impl AgentGuiApp {
                     }
                     LoginDestination::ConfirmClose { share_id } => {
                         let mut page = PageOverview::with_service(Arc::clone(&self.service));
+                        let other_mount = self
+                            .app_state
+                            .other_mounts
+                            .iter()
+                            .find(|mount| mount.share_id == share_id)
+                            .cloned();
                         if matches!(
                             &self.app_state.foreground,
                             crate::state::ForegroundSession::Mounted(session)
                                 if session.share_id == share_id
                         ) {
                             page.open_close_confirmation();
+                        } else if let Some(mount) = other_mount {
+                            page.open_close_confirmation_for(mount);
                         }
                         self.page = Page::Overview(page);
                     }
@@ -273,6 +281,9 @@ impl AgentGuiApp {
             }
             Action::ForegroundChanged(foreground) => {
                 self.app_state.observe_foreground(foreground);
+            }
+            Action::OtherMountsChanged(other_mounts) => {
+                self.app_state.observe_other_mounts(other_mounts);
             }
             Action::ConnectionDropped => {
                 self.app_state.connection_dropped = true;
@@ -393,6 +404,9 @@ impl AgentGuiApp {
             match result {
                 Ok(ForegroundMonitorUpdate::ForegroundChanged(foreground)) => {
                     self.handle_action(Action::ForegroundChanged(foreground));
+                }
+                Ok(ForegroundMonitorUpdate::OtherMountsChanged(other_mounts)) => {
+                    self.handle_action(Action::OtherMountsChanged(other_mounts));
                 }
                 Ok(ForegroundMonitorUpdate::ConnectionDropped) => {
                     self.handle_action(Action::ConnectionDropped);
@@ -668,6 +682,24 @@ mod tests {
             destination: LoginDestination::StartSession,
         });
         assert!(matches!(app.page, Page::SelectProject(_)));
+    }
+
+    #[test]
+    fn signing_in_to_close_a_listed_share_asks_to_confirm_it() {
+        let mut app = AgentGuiApp::new();
+        app.app_state.foreground = crate::state::ForegroundSession::Mounted(own_mounted("new"));
+        app.app_state.observe_other_mounts(vec![own_mounted("old")]);
+        app.handle_action(Action::LoginSuccess {
+            signed_in: signed_in(),
+            destination: LoginDestination::ConfirmClose {
+                share_id: "old".to_owned(),
+            },
+        });
+        let Page::Overview(page) = &app.page else {
+            panic!("signing in to close did not return to the overview");
+        };
+        assert!(page.close_confirmation_is_open());
+        assert_eq!(page.closes_mount(), Some(&own_mounted("old")));
     }
 
     #[test]

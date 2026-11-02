@@ -75,6 +75,18 @@ impl AgentIdentity {
     }
 }
 
+impl From<modama_common::foreground::OtherMount> for ActiveSession {
+    fn from(mount: modama_common::foreground::OtherMount) -> Self {
+        Self {
+            share_id: mount.share_id,
+            session: mount.session,
+            project: mount.project,
+            mount_path: Some(mount.mount_path),
+            created_by: mount.created_by,
+        }
+    }
+}
+
 /// How texts refer to the instrument: the agent's resource name, or "this instrument" if
 /// unknown (anonymous agent, or not connected yet)
 pub fn instrument_name(identity: Option<&AgentIdentity>) -> &str {
@@ -115,6 +127,9 @@ pub struct AgentAppState {
 
     /// The user's own share to close once the session being started has been created
     pub close_after_start: Option<ActiveSession>,
+
+    /// Shares besides the foreground one that are mounted for this user (several on Linux)
+    pub other_mounts: Vec<ActiveSession>,
 
     session_operations: SessionOperations,
 
@@ -225,19 +240,36 @@ impl AgentAppState {
             }
         }
 
-        if let Some(operation) = self.session_operations.close.as_mut()
-            && foreground
-                .share_id()
-                .is_none_or(|current| current != operation.share_id)
-        {
+        self.foreground = foreground;
+        self.observe_close();
+    }
+
+    pub fn observe_other_mounts(&mut self, other_mounts: Vec<ActiveSession>) {
+        self.other_mounts = other_mounts;
+        self.observe_close();
+    }
+
+    /// A share being closed is gone once it is neither the foreground share nor another mount
+    fn observe_close(&mut self) {
+        let Some(operation) = self.session_operations.close.as_ref() else {
+            return;
+        };
+        let share_id = operation.share_id.as_str();
+        let gone = self.foreground.share_id() != Some(share_id)
+            && !self
+                .other_mounts
+                .iter()
+                .any(|mount| mount.share_id == share_id);
+        if !gone {
+            return;
+        }
+        if let Some(operation) = self.session_operations.close.as_mut() {
             if operation.response_received {
                 self.session_operations.close = None;
             } else {
                 operation.observed = true;
             }
         }
-
-        self.foreground = foreground;
     }
 
     pub fn pending_start(&self) -> Option<&PendingSession> {
@@ -284,6 +316,50 @@ struct CloseOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn listed(share_id: &str) -> ActiveSession {
+        ActiveSession {
+            share_id: share_id.to_owned(),
+            project: "project".to_owned(),
+            session: "session".to_owned(),
+            mount_path: Some("/mnt/session".to_owned()),
+            created_by: None,
+        }
+    }
+
+    #[test]
+    fn closing_a_listed_share_is_pending_until_it_leaves_the_list() {
+        let mut state = AgentAppState::new();
+        state.observe_foreground(mounted("current"));
+        state.observe_other_mounts(vec![listed("old")]);
+
+        let operation_id = OperationId::next();
+        state.begin_close(operation_id, "old".to_owned());
+        assert!(state.finish_close(operation_id));
+        // closed at the agent, but still mounted; the foreground changing doesn't matter
+        state.observe_foreground(mounted("current"));
+        assert_eq!(state.pending_close(), Some("old"));
+
+        state.observe_other_mounts(vec![]);
+        assert_eq!(state.pending_close(), None);
+        assert!(state.session_operations.close.is_none());
+    }
+
+    #[test]
+    fn a_previous_foreground_share_being_closed_is_still_pending_while_listed() {
+        let mut state = AgentAppState::new();
+        state.observe_foreground(mounted("old"));
+        let operation_id = OperationId::next();
+        state.begin_close(operation_id, "old".to_owned());
+
+        // the monitor reports the old share as another mount before the new foreground
+        state.observe_other_mounts(vec![listed("old")]);
+        state.observe_foreground(mounted("new"));
+        assert_eq!(state.pending_close(), Some("old"));
+
+        state.observe_other_mounts(vec![]);
+        assert_eq!(state.pending_close(), None);
+    }
 
     #[test]
     fn texts_name_the_instrument_if_known() {

@@ -80,6 +80,9 @@ pub struct PageOverview {
     focus_start_cancel: bool,
     /// The user's previous share, to close on the first frame (after starting a new one)
     close_previous: Option<(SignedIn, ActiveSession)>,
+    /// The share from the "Also mounted" list the close confirmation is for; None while it
+    /// is for the foreground share
+    close_mount: Option<ActiveSession>,
 }
 
 impl Default for PageOverview {
@@ -105,6 +108,7 @@ impl PageOverview {
             start_dialog_open: false,
             focus_start_cancel: false,
             close_previous: None,
+            close_mount: None,
         }
     }
 
@@ -123,6 +127,11 @@ impl PageOverview {
     #[cfg(test)]
     pub(crate) fn closes_previous(&self) -> Option<&ActiveSession> {
         self.close_previous.as_ref().map(|(_, previous)| previous)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn closes_mount(&self) -> Option<&ActiveSession> {
+        self.close_mount.as_ref()
     }
 
     #[cfg(test)]
@@ -147,15 +156,23 @@ impl PageOverview {
         }
 
         if let Some(session) = pending_start {
-            self.close_confirmation_open = false;
+            self.drop_foreground_close_confirmation();
             // a share being started has no creator on record yet; it's the user
             let started_by = session.created_by.as_deref().or(app_state
                 .signed_in
                 .as_ref()
                 .map(|signed_in| signed_in.username.as_str()));
             self.show_mounting_session_card(ui, session, started_by, "Waiting for agent…", false);
+            let action = self.show_other_mounts(ui, app_state);
+            if action != Action::None {
+                return action;
+            }
         } else {
             let action = self.show_foreground_card(ui, app_state);
+            if action != Action::None {
+                return action;
+            }
+            let action = self.show_other_mounts(ui, app_state);
             if action != Action::None {
                 return action;
             }
@@ -193,7 +210,7 @@ impl PageOverview {
                         };
                     }
                 }
-                if self.close_confirmation_open {
+                if self.close_confirmation_open && self.close_mount.is_none() {
                     if let Some(signed_in) = signed_in {
                         let action = self.show_close_confirmation(ui, session, signed_in);
                         if action != Action::None {
@@ -210,7 +227,7 @@ impl PageOverview {
                 }
             }
             ForegroundSession::Mounting(session, message) => {
-                self.close_confirmation_open = false;
+                self.drop_foreground_close_confirmation();
                 let started_by = session.created_by.as_deref();
                 if self.show_mounting_session_card(
                     ui,
@@ -223,7 +240,7 @@ impl PageOverview {
                 }
             }
             ForegroundSession::None => {
-                self.close_confirmation_open = false;
+                self.drop_foreground_close_confirmation();
             }
         }
         Action::None
@@ -521,8 +538,100 @@ impl PageOverview {
     }
 
     pub(crate) fn open_close_confirmation(&mut self) {
+        self.close_mount = None;
         self.close_confirmation_open = true;
         self.focus_confirmation_cancel = true;
+    }
+
+    /// Ask before closing a share from the "Also mounted" list
+    pub(crate) fn open_close_confirmation_for(&mut self, mount: ActiveSession) {
+        self.open_close_confirmation();
+        self.close_mount = Some(mount);
+    }
+
+    /// Without a foreground share, there's no foreground close to confirm; one for a share
+    /// from the list stays open
+    fn drop_foreground_close_confirmation(&mut self) {
+        if self.close_mount.is_none() {
+            self.close_confirmation_open = false;
+        }
+    }
+
+    /// The compact list of the other shares mounted for this user, each with its own close
+    fn show_other_mounts(&mut self, ui: &mut egui::Ui, app_state: &AgentAppState) -> Action {
+        if app_state.other_mounts.is_empty() {
+            if self.close_mount.take().is_some() {
+                self.close_confirmation_open = false;
+            }
+            return Action::None;
+        }
+        let pending_close = app_state.pending_close();
+        let closing_any = self.close_task.is_pending() || pending_close.is_some();
+        let mut clicked = None;
+        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            card_heading(ui, "Also mounted on this computer");
+            for mount in &app_state.other_mounts {
+                ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
+                ui.horizontal(|ui| {
+                    let mut name = format!("{} / {}", mount.project, mount.session);
+                    if let Some(user) = &mount.created_by {
+                        name.push_str(" · ");
+                        name.push_str(user);
+                    }
+                    ui.add(Label::new(
+                        RichText::new(name).font(styles::typography::body::font_id()),
+                    ));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if pending_close == Some(mount.share_id.as_str()) {
+                            ui.add(Label::new(
+                                RichText::new("Closing…")
+                                    .font(styles::typography::supporting_text::font_id())
+                                    .color(
+                                        styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
+                                    ),
+                            ));
+                        } else if compact_close_button(ui, !closing_any).clicked() {
+                            clicked = Some(mount.clone());
+                        }
+                    });
+                });
+                if let Some(mount_path) = &mount.mount_path {
+                    ui.add(Label::new(
+                        RichText::new(mount_path)
+                            .font(styles::typography::mono_medium::font_id())
+                            .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),
+                    ));
+                }
+            }
+        });
+
+        if let Some(mount) = clicked {
+            if app_state.signed_in.is_none() {
+                return Action::GoToLogin {
+                    destination: LoginDestination::ConfirmClose {
+                        share_id: mount.share_id,
+                    },
+                };
+            }
+            self.open_close_confirmation_for(mount);
+        }
+
+        if self.close_confirmation_open
+            && let Some(mount) = self.close_mount.clone()
+        {
+            let Some(signed_in) = &app_state.signed_in else {
+                self.close_confirmation_open = false;
+                self.close_mount = None;
+                return Action::None;
+            };
+            let action = self.show_close_confirmation(ui, &mount, signed_in);
+            if !self.close_confirmation_open {
+                self.close_mount = None;
+            }
+            return action;
+        }
+        Action::None
     }
 
     #[cfg(test)]
@@ -580,6 +689,20 @@ fn card_description(ui: &mut egui::Ui, text: &str) {
             .font(styles::typography::body::font_id())
             .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),
     ));
+}
+
+/// A small text button for a secondary action next to an item, like closing one of several
+/// shares; deliberately less prominent than the cards' buttons
+fn compact_close_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
+    let button = egui::Button::new(
+        RichText::new("Close")
+            .font(styles::typography::supporting_text::font_id())
+            .color(styles::color::error::VALUE.resolve(ui.visuals())),
+    )
+    .frame(false);
+    let response = ui.add_enabled(enabled, button);
+    styles::paint_focus_ring(ui, &response);
+    response
 }
 
 fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {

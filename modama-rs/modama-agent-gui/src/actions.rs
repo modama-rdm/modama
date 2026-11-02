@@ -66,6 +66,7 @@ pub enum Action {
         failure: Option<TaskFailure>,
     },
     ForegroundChanged(ForegroundSession),
+    OtherMountsChanged(Vec<ActiveSession>),
     ConnectionDropped,
     ConnectionRestored,
     HandOffBlocked(bool),

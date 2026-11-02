@@ -622,3 +622,54 @@ fn start_while_open_snapshots() {
     pending.snapshot("overview_start_pending_while_share_open");
     results.extend_harness(&mut pending);
 }
+
+fn other_mount(share_id: &str, session: &str) -> ActiveSession {
+    ActiveSession {
+        share_id: share_id.to_owned(),
+        project: "representative-project".to_owned(),
+        session: session.to_owned(),
+        mount_path: Some(format!("/mnt/modama/representative-project/{session}")),
+        created_by: Some("representative.user".to_owned()),
+    }
+}
+
+fn with_other_mounts(harness: &mut Harness<'static, AgentGuiApp>) {
+    harness.state_mut().app_state.observe_other_mounts(vec![
+        other_mount("older-share", "2026-07-27-ingest"),
+        other_mount("old-share", "2026-07-28-ingest"),
+    ]);
+    harness.run_steps(1);
+}
+
+#[test]
+fn other_mounts_snapshots() {
+    let mut results = SnapshotResults::new();
+
+    let mut listed = overview_harness(false, true);
+    with_other_mounts(&mut listed);
+    listed.snapshot("overview_other_mounts");
+    results.extend_harness(&mut listed);
+
+    let mut confirm = overview_harness(false, true);
+    with_other_mounts(&mut confirm);
+    // labels match exactly: these are the list's buttons, not "Close Session"
+    assert_eq!(confirm.get_all_by_label("Close").count(), 2);
+    confirm
+        .get_all_by_label("Close")
+        .next()
+        .expect("the list has a close button")
+        .click();
+    confirm.run();
+    confirm.snapshot("overview_other_mount_close_confirmation");
+    results.extend_harness(&mut confirm);
+
+    let mut closing = overview_harness(false, true);
+    with_other_mounts(&mut closing);
+    closing
+        .state_mut()
+        .app_state
+        .begin_close(OperationId::next(), "old-share".to_owned());
+    closing.run_steps(1);
+    closing.snapshot("overview_other_mount_closing");
+    results.extend_harness(&mut closing);
+}

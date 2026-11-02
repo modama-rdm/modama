@@ -7,18 +7,23 @@ use std::{
 use eframe::egui;
 use futures_util::{SinkExt as _, StreamExt as _};
 use modama_common::{
-    foreground::{foreground_projection, foreground_share, hand_off_blocked},
+    foreground::{foreground_projection, foreground_share, hand_off_blocked, other_mounted_shares},
     internal_api_types::{ToAgentFromGui, ToSessionGui},
 };
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use url::Url;
 
-use crate::{helper_launch::HelperLauncher, state::ForegroundSession};
+use crate::{
+    helper_launch::HelperLauncher,
+    state::{ActiveSession, ForegroundSession},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ForegroundMonitorUpdate {
     ForegroundChanged(ForegroundSession),
+    /// The desired shares besides the foreground one that are mounted for this user
+    OtherMountsChanged(Vec<ActiveSession>),
     ConnectionDropped,
     ConnectionRestored,
     /// Whether a previous user's drive blocks the hand-off, so the GUI can offer to release it
@@ -71,6 +76,7 @@ impl Updates {
 
 struct MonitorState {
     last: ForegroundSession,
+    last_other_mounts: Vec<ActiveSession>,
     /// Only Windows mappings block each other, so only there is a release offered
     offer_force_release: bool,
     hand_off_blocked: bool,
@@ -105,6 +111,23 @@ impl MonitorState {
         if blocked != self.hand_off_blocked {
             self.hand_off_blocked = blocked;
             if !updates.send(ForegroundMonitorUpdate::HandOffBlocked(blocked)) {
+                return false;
+            }
+        }
+
+        // before the foreground: a share that moves from the foreground to the others has to
+        // be known as mounted when the foreground changes, or a close in flight for it would
+        // count as done
+        let other_mounts = match (&message.desired_shares, &message.session_helper) {
+            (Some(desired), Some(helper)) => other_mounted_shares(desired, helper)
+                .into_iter()
+                .map(ActiveSession::from)
+                .collect(),
+            _ => Vec::new(),
+        };
+        if other_mounts != self.last_other_mounts {
+            self.last_other_mounts = other_mounts.clone();
+            if !updates.send(ForegroundMonitorUpdate::OtherMountsChanged(other_mounts)) {
                 return false;
             }
         }
@@ -231,6 +254,7 @@ impl ForegroundMonitor {
         let (stop, stop_rx) = oneshot::channel();
         let state = MonitorState {
             last: initial,
+            last_other_mounts: Vec::new(),
             offer_force_release,
             hand_off_blocked: false,
             connection_dropped: false,
@@ -437,6 +461,68 @@ mod tests {
         send(&mut agent, &mounted("a")).await;
         assert_eq!(setup.next_update(SHORT).await, None);
         assert_eq!(setup.launcher.count(), 0);
+    }
+
+    fn session(id: &str) -> ActiveSession {
+        ActiveSession {
+            share_id: id.to_owned(),
+            project: "project".to_owned(),
+            session: id.to_owned(),
+            mount_path: Some(format!("/mnt/{id}")),
+            created_by: None,
+        }
+    }
+
+    /// `old` and `new` both mounted, `new` in the foreground
+    fn two_mounted() -> ToSessionGui {
+        ToSessionGui {
+            session_helper: Some(SessionHelperState {
+                mounted_shares: ["old", "new"]
+                    .map(|id| MountedShare {
+                        share_name: format!("share-{id}"),
+                        mount_path: Some(format!("/mnt/{id}").into()),
+                    })
+                    .into(),
+                errors: vec![],
+                reconciled_share_ids: None,
+            }),
+            desired_shares: Some(Shares {
+                foreground_share_id: Some("new".to_owned()),
+                shares: vec![share("old"), share("new")],
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn other_mounts_are_forwarded_once_and_before_the_foreground() {
+        let setup = Setup::start().await;
+        let mut agent = setup.accept().await;
+
+        send(&mut agent, &mounted("old")).await;
+        assert_eq!(
+            setup.next_update(LONG).await,
+            Some(ForegroundMonitorUpdate::ForegroundChanged(
+                ForegroundSession::Mounted(session("old"))
+            ))
+        );
+
+        // a new share takes the foreground; the old one stays mounted next to it
+        send(&mut agent, &two_mounted()).await;
+        assert_eq!(
+            setup.next_update(LONG).await,
+            Some(ForegroundMonitorUpdate::OtherMountsChanged(vec![session(
+                "old"
+            )]))
+        );
+        assert_eq!(
+            setup.next_update(LONG).await,
+            Some(ForegroundMonitorUpdate::ForegroundChanged(
+                ForegroundSession::Mounted(session("new"))
+            ))
+        );
+
+        send(&mut agent, &two_mounted()).await;
+        assert_eq!(setup.next_update(SHORT).await, None);
     }
 
     #[tokio::test]
