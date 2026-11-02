@@ -18,7 +18,7 @@ log = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
 reqwest-middleware = { version = "0.5.2", default-features = false }
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 egui_extras = { version = "0.35.0", features = ["svg"] }
@@ -55,7 +55,7 @@ windows = { version = "0.62.0", features = ["Win32_Foundation", "Win32_System_Th
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "0.9.34"
 csscolorparser = "0.8.3"
-openapi-to-rust = { version = "0.12.0", default-features = false }
+openapi-to-rust = { version = "0.23.0", default-features = false }
 serde_json = { workspace = true }
 
 [dev-dependencies]
