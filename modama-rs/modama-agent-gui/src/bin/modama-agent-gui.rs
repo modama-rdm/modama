@@ -8,8 +8,9 @@ use clap::{Parser, Subcommand};
 use eframe::egui;
 use modama_agent_gui::{
     app::AgentGuiApp, config::load_config, mount_popup, service::HttpAgentService, styles,
+    wgpu_setup,
 };
-use modama_common::logging::init_logging;
+use modama_common::logging::{init_logging, init_user_session_logging};
 use url::Url;
 
 /// The Modama GUI, and the programs it runs in the user's session
@@ -46,17 +47,41 @@ fn main() -> Result<(), Box<dyn Error>> {
             let config = load_config(cli.config_path.as_deref(), cli.agent_url)?;
             let agent_url = Url::parse(&config.agent_url)?;
             modama_session_helper::entry::run(&agent_url)?;
-            return Ok(());
+            Ok(())
         }
         Some(Command::MountPopup) => {
             // needs no configuration: everything comes from the helper
-            init_logging();
-            mount_popup::run()?;
-            return Ok(());
+            init_session_logging("mount-popup.log");
+            mount_popup::run().map_err(|e| {
+                log::error!("could not show the mount popup: {e}");
+                e.into()
+            })
         }
-        None => init_logging(),
+        None => {
+            let log_path = init_session_logging("modama-agent-gui.log");
+            run_gui(cli).map_err(|e| {
+                log::error!("{e}");
+                show_start_error(&e.to_string(), log_path.as_deref());
+                e
+            })
+        }
     }
+}
 
+/// Log to a file on Windows (see `init_user_session_logging`), else or if that fails to stderr.
+/// Returns the log file's path, if there is one.
+fn init_session_logging(file_name: &str) -> Option<PathBuf> {
+    match init_user_session_logging(file_name) {
+        Ok(path) => path,
+        Err(e) => {
+            init_logging();
+            log::warn!("could not log into {file_name}: {e:#}");
+            None
+        }
+    }
+}
+
+fn run_gui(cli: Cli) -> Result<(), Box<dyn Error>> {
     let config = load_config(cli.config_path.as_deref(), cli.agent_url)?;
     let service = Arc::new(HttpAgentService::new(config.agent_url)?);
     let options = eframe::NativeOptions {
@@ -64,8 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             styles::components::app_window::width::EGUI_POINTS,
             styles::components::app_window::height::EGUI_POINTS,
         ]),
-        #[cfg(target_os = "linux")]
-        wgpu_options: modama_agent_gui::wgpu_setup::wgpu_options(),
+        wgpu_options: wgpu_setup::wgpu_options(),
         ..Default::default()
     };
 
@@ -73,6 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "modama-agent",
         options,
         Box::new(move |cctx| {
+            wgpu_setup::log_adapter(cctx);
             egui_extras::install_image_loaders(&cctx.egui_ctx);
             styles::theme::install(&cctx.egui_ctx);
             let app = AgentGuiApp::with_service(service);
@@ -80,7 +105,46 @@ fn main() -> Result<(), Box<dyn Error>> {
             let app = app.with_autostart_offer();
             Ok(Box::new(app))
         }),
-    )?;
+    )
+    .map_err(|e| match e {
+        // no adapter or no surface: another backend may have one
+        eframe::Error::Wgpu(_) => format!(
+            "could not open the Modama window: {e}\n\n{}",
+            wgpu_setup::BACKEND_HINT
+        ),
+        e => format!("could not open the Modama window: {e}"),
+    })?;
 
     Ok(())
 }
+
+/// Release builds on Windows have no console, so a failed start would otherwise go unnoticed
+#[cfg(windows)]
+fn show_start_error(message: &str, log_path: Option<&std::path::Path>) {
+    use windows::{
+        Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW},
+        core::HSTRING,
+    };
+
+    let mut text = message.to_owned();
+    if let Some(path) = log_path {
+        text.push_str(&format!(
+            "\n\nDetails are in the log file {}",
+            path.display()
+        ));
+    }
+    // SAFETY: both strings are valid NUL-terminated UTF-16 for the duration of the call, and no
+    // owner window is passed.
+    // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-messageboxw
+    unsafe {
+        MessageBoxW(
+            None,
+            &HSTRING::from(text),
+            &HSTRING::from("Modama"),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn show_start_error(_message: &str, _log_path: Option<&std::path::Path>) {}

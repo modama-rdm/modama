@@ -28,7 +28,11 @@ fn popup_harness(
         let answers = Arc::clone(&answers);
         MountPopupApp::new(
             content,
-            Box::new(move |choice| answers.lock().unwrap().push(choice)),
+            Box::new(move |choice| {
+                if let Ok(mut answers) = answers.lock() {
+                    answers.push(choice);
+                }
+            }),
         )
     });
     harness

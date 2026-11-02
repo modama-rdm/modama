@@ -16,8 +16,7 @@
 
 use anyhow::{Context as _, Result, anyhow};
 use log::info;
-#[cfg(not(windows))]
-use modama_common::logging::init_logging;
+use modama_common::logging::init_user_session_logging;
 use tokio::sync::{mpsc, watch};
 use url::Url;
 
@@ -50,24 +49,10 @@ fn events_url(agent_url: &Url) -> Result<Url> {
 /// On Windows, the helper usually runs without a console (started by the GUI or at logon), so
 /// it logs into a file in the user's local app data. Two sessions of one user (console and RDP)
 /// share that file.
-#[cfg(windows)]
 fn init_helper_logging() -> Result<()> {
-    use windows::Win32::UI::Shell::CSIDL_LOCAL_APPDATA;
-
-    let log_dir = modama_common::windows_folders::known_folder(CSIDL_LOCAL_APPDATA)?
-        .join("modama")
-        .join("modama-agent")
-        .join("logs");
-    eprintln!(
-        "logging to {}",
-        log_dir.join("session-helper.log").display()
-    );
-    modama_common::logging::init_file_logging(&log_dir, "session-helper.log")
-}
-
-#[cfg(not(windows))]
-fn init_helper_logging() -> Result<()> {
-    init_logging();
+    if let Some(path) = init_user_session_logging("session-helper.log")? {
+        eprintln!("logging to {}", path.display());
+    }
     Ok(())
 }
 

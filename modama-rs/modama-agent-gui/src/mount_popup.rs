@@ -191,8 +191,7 @@ pub fn run() -> eframe::Result {
             .with_minimize_button(false)
             .with_maximize_button(false)
             .with_always_on_top(),
-        // like the GUI's window: no GL backend over forwarded X11 (it crashes there)
-        #[cfg(target_os = "linux")]
+        // like the GUI's window: no GL backend where a primary backend works
         wgpu_options: crate::wgpu_setup::wgpu_options(),
         ..Default::default()
     };
@@ -200,6 +199,7 @@ pub fn run() -> eframe::Result {
         "modama-mount-popup",
         options,
         Box::new(move |cctx| {
+            crate::wgpu_setup::log_adapter(cctx);
             egui_extras::install_image_loaders(&cctx.egui_ctx);
             styles::theme::install(&cctx.egui_ctx);
             let reader_content = Arc::clone(&content);
