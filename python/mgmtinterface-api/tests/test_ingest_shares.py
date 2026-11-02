@@ -50,7 +50,12 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     The permissions service (one project, one session, two resolvable users)
     and smbdrop (whatever `shares` holds; a create appends a share).
     """
-    state: dict = {"shares": {}, "create_calls": [], "delete_calls": []}
+    state: dict = {
+        "shares": {},
+        "create_calls": [],
+        "created_by": [],
+        "delete_calls": [],
+    }
 
     def projectdetails(self: PermissionsClient, projectname: str, fast: bool = False):
         assert fast, "the share endpoints must never ask for the slow variant"
@@ -64,10 +69,19 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     def list_shares(self: ShareClient):
         return dict(state["shares"])
 
-    def create(self: ShareClient, dest_path: str, uid: int, gid: int, resource=None):
+    def create(
+        self: ShareClient,
+        dest_path: str,
+        uid: int,
+        gid: int,
+        resource=None,
+        created_by=None,
+    ):
         state["create_calls"].append((dest_path, uid, gid, resource))
+        state["created_by"].append(created_by)
         share = make_share(f"new-{len(state['create_calls'])}", uid, dest_path)
         share["resource"] = resource
+        share["created_by"] = created_by
         state["shares"][share["share_id"]] = share
         return {"share": share}
 
@@ -108,6 +122,13 @@ def test_opens_a_share_that_writes_as_the_signed_in_user(
     assert body["session"] == SESSION["name"]
     assert body["smb_host"] == "moellenstedt.iff.kfa-juelich.de"
     assert body["workgroup"] == "ER-C-INGEST"
+
+
+def test_the_share_records_who_opened_it(member: TestClient, backend: dict):
+    response = member.post(INGEST_SHARES, json=REQUEST)
+    assert response.status_code == 201
+    assert backend["created_by"] == ["user2"]
+    assert response.json()["created_by"] == "user2"
 
 
 def test_host_and_workgroup_come_from_the_settings(settings: Settings, backend: dict):
@@ -429,6 +450,9 @@ def test_lists_only_the_signed_in_users_shares(member: TestClient, backend: dict
         "shares": [
             {
                 **mine,
+                # smbdrop reports no creator for shares opened before it
+                # recorded one:
+                "created_by": None,
                 "project": PROJECT["name"],
                 "session": SESSION["name"],
                 "smb_host": "moellenstedt.iff.kfa-juelich.de",
@@ -443,6 +467,13 @@ def test_an_opened_share_appears_in_the_list_as_it_was_answered(
 ):
     opened = member.post(INGEST_SHARES, json=REQUEST).json()
     assert member.get(INGEST_SHARES).json() == {"shares": [opened]}
+
+
+def test_the_listed_share_says_who_opened_it(member: TestClient, backend: dict):
+    mine = {**make_share("mine", UIDS["user2"]), "created_by": "user2"}
+    backend["shares"] = {"mine": mine}
+    [listed] = member.get(INGEST_SHARES).json()["shares"]
+    assert listed["created_by"] == "user2"
 
 
 def test_shares_are_listed_oldest_first(member: TestClient, backend: dict):

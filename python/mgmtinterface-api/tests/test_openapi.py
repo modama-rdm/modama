@@ -240,6 +240,14 @@ def test_share_list_is_a_list_of_the_create_response_type(schema: dict[str, Any]
     )
 
 
+def test_ingest_share_documents_its_optional_creator(schema: dict[str, Any]):
+    share = schema["components"]["schemas"]["IngestShare"]
+    assert "created_by" not in share["required"]
+    created_by = share["properties"]["created_by"]
+    assert {"type": "null"} in created_by["anyOf"]
+    assert created_by["description"]
+
+
 @pytest.mark.parametrize("path", [PROJECTS, SESSIONS, INGEST_SHARES])
 def test_create_endpoints_document_both_outcomes(schema: dict[str, Any], path: str):
     """

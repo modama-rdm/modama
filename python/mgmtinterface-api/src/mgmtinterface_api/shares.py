@@ -93,10 +93,15 @@ def create_share(
     uid: int,
     gid: int,
     resource: str | None = None,
+    created_by: str | None = None,
 ) -> SerializedShare:
     try:
         result = make_client(settings).create(
-            dest_path=dest_path, uid=uid, gid=gid, resource=resource
+            dest_path=dest_path,
+            uid=uid,
+            gid=gid,
+            resource=resource,
+            created_by=created_by,
         )
     except (requests.RequestException, RuntimeError) as exc:
         raise _unavailable() from exc

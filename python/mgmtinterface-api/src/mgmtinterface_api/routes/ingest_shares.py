@@ -59,6 +59,13 @@ class IngestShare(BaseModel):
     resource: str | None = Field(
         description="The instrument the share was opened for, if an agent opened it."
     )
+    created_by: str | None = Field(
+        default=None,
+        description=(
+            "Login name of the user who opened the share. Null for shares "
+            "opened before this was recorded."
+        ),
+    )
     smb_host: str = Field(
         description=(
             "Samba host as seen from the intranet, for a person connecting by "
@@ -282,7 +289,12 @@ def add_ingest_share(
         share = existing
     else:
         share = create_share(
-            settings, dest_path, uid=uid, gid=project["gid"], resource=resource
+            settings,
+            dest_path,
+            uid=uid,
+            gid=project["gid"],
+            resource=resource,
+            created_by=username,
         )
 
     return _ingest_share(settings, share, project["name"], body.session)
