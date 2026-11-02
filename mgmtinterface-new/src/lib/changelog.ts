@@ -23,6 +23,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.18.2',
+        date: '2026-11-02',
+        title: 'Sorting keeps your place on the page',
+        changes: [
+            'Sorting a project table by clicking a column header no longer makes the page jump. With the end of the table above still in view, the page used to scroll away with it, often back to “My Projects”; now it stays where it was.',
+        ],
+    },
+    {
         version: '0.18.1',
         date: '2026-10-28',
         title: 'One “Open in” button per row, and long names that fit',

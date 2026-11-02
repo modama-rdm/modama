@@ -11,6 +11,14 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.18.2] - 2026-11-02
+
+### Fixed
+
+- Sorting a project table by clicking a column header no longer makes the page
+  jump. With the end of the table above still in view, the page used to scroll
+  away with it, often back to "My Projects"; now it stays where it was. (#222)
+
 ## [0.18.1] - 2026-10-28
 
 ### Changed
