@@ -22,3 +22,13 @@ pub mod windows_folders;
 pub fn install_rustls_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
+
+/// A reqwest [`ClientBuilder`](reqwest::ClientBuilder) that trusts *only* `ca`.
+///
+/// System and built-in roots are not used. This matters beyond trust hygiene: since reqwest
+/// 0.13, adding a root without `tls_certs_only` selects rustls-platform-verifier, which on
+/// Windows verifies through CryptoAPI and rejects our private-CA chains.
+pub fn pinned_ca_client_builder(ca: reqwest::Certificate) -> reqwest::ClientBuilder {
+    install_rustls_crypto_provider();
+    reqwest::ClientBuilder::new().tls_certs_only([ca])
+}

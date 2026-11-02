@@ -84,7 +84,6 @@ impl TokenFetcher {
         chain_reader: &mut impl BufRead,
         ca_cert_reader: &mut impl BufRead,
     ) -> Result<Self, TokenError> {
-        crate::install_rustls_crypto_provider();
         let mut id_pem: Vec<u8> = Vec::new();
         key_reader.read_to_end(&mut id_pem)?;
         chain_reader.read_to_end(&mut id_pem)?;
@@ -93,10 +92,9 @@ impl TokenFetcher {
         let root_cert = Certificate::from_pem(&ca_pem)?;
 
         let identity = Identity::from_pem(&id_pem)?;
-        let client = reqwest::ClientBuilder::new()
+        let client = crate::pinned_ca_client_builder(root_cert)
             .identity(identity)
             .user_agent(format!("modama-agent/{}", modama_git_version()))
-            .add_root_certificate(root_cert)
             .build()?;
 
         Ok(Self {
@@ -154,15 +152,13 @@ pub struct TokenVerifier {
 
 impl TokenVerifier {
     pub fn new(verify_service_url: &str, ca_cert_file: &Path) -> Result<Self, TokenError> {
-        crate::install_rustls_crypto_provider();
         let mut ca_certs = File::open(ca_cert_file)?;
         let mut ca_pem: Vec<u8> = Vec::new();
         ca_certs.read_to_end(&mut ca_pem)?;
         let root_cert = Certificate::from_pem(&ca_pem)?;
 
         Ok(Self {
-            client: reqwest::ClientBuilder::new()
-                .add_root_certificate(root_cert)
+            client: crate::pinned_ca_client_builder(root_cert)
                 .user_agent(format!("modama-agent/{}", modama_git_version()))
                 .build()?,
             verify_service_url: verify_service_url.to_owned(),

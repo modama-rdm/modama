@@ -1,2 +1,6 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+disallowed-methods = [
+    { path = "reqwest::ClientBuilder::add_root_certificate", reason = "merges with system roots (and on Windows switches to the CryptoAPI verifier); use modama_common::pinned_ca_client_builder" },
+    { path = "reqwest::ClientBuilder::tls_certs_merge", reason = "merges with system roots (and on Windows switches to the CryptoAPI verifier); use modama_common::pinned_ca_client_builder" },
+]

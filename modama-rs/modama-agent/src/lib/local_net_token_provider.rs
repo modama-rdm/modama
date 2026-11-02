@@ -387,10 +387,8 @@ pub enum DiscoveryAddr {
 
 impl LocalNetTokenProvider {
     pub async fn new_with_pem(pem: &[u8], local_addr: DiscoveryAddr) -> Result<Self, TokenError> {
-        modama_common::install_rustls_crypto_provider();
         let root_cert = Certificate::from_pem(pem)?;
-        let http_client = reqwest::ClientBuilder::new()
-            .add_root_certificate(root_cert)
+        let http_client = modama_common::pinned_ca_client_builder(root_cert)
             .user_agent(format!("modama-agent/{}", modama_git_version()))
             .build()?;
 

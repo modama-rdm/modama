@@ -350,8 +350,7 @@ mod tests {
             ca_certs.read_to_end(&mut ca_pem).unwrap();
             let root_cert = Certificate::from_pem(&ca_pem).unwrap();
 
-            let client = reqwest::ClientBuilder::new()
-                .add_root_certificate(root_cert)
+            let client = modama_common::pinned_ca_client_builder(root_cert)
                 .build()
                 .unwrap();
 
