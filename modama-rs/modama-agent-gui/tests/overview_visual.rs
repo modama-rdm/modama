@@ -57,7 +57,7 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
                 mount_path: Some(
                     "/mnt/modama/representative-project/2026-07-29-ingest".to_string(),
                 ),
-                created_by: None,
+                created_by: Some("representative.user".to_owned()),
             });
         }
         app
@@ -101,7 +101,7 @@ fn overview_snapshots() {
             share_id: "mounting-share".to_owned(),
             project: "representative-project".to_owned(),
             session: "2026-07-29-ingest".to_owned(),
-            created_by: None,
+            created_by: Some("representative.user".to_owned()),
         },
         "Waiting for the session helper to mount the share.".to_owned(),
     );
@@ -115,7 +115,7 @@ fn overview_snapshots() {
             share_id: "mounting-share".to_owned(),
             project: "representative-project".to_owned(),
             session: "2026-07-29-ingest".to_owned(),
-            created_by: None,
+            created_by: Some("representative.user".to_owned()),
         },
         "another user's drive is still connected; close their files or release it".to_owned(),
     );
@@ -337,7 +337,12 @@ fn top_bar_session_action_shares_the_card_right_guide() {
         (logout_right - expected_right).abs() <= tolerance,
         "logout right edge {logout_right} does not match guide {expected_right}"
     );
-    let username_rect = logged_in.get_by_label("representative.user").rect();
+    // the top bar's, not the "Started by" row's on the session card
+    let username_rect = logged_in
+        .get_all_by_label("representative.user")
+        .map(|node| node.rect())
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the username is shown");
     assert!(
         (username_rect.center().y - logout_rect.center().y).abs() <= tolerance,
         "username and logout must remain vertically centered on the same text line"
@@ -546,4 +551,18 @@ fn connecting_snapshot() {
     let mut results = SnapshotResults::new();
     results.extend_harness(&mut harness);
     results.unwrap();
+}
+
+#[test]
+fn started_by_is_shown_only_when_known() {
+    let mut known = overview_harness(false, true);
+    known.run_steps(1);
+    assert!(known.query_by_label("Started by").is_some());
+
+    let mut unknown = overview_harness(false, true);
+    if let ForegroundSession::Mounted(session) = &mut unknown.state_mut().app_state.foreground {
+        session.created_by = None;
+    }
+    unknown.run_steps(1);
+    assert!(unknown.query_by_label("Started by").is_none());
 }

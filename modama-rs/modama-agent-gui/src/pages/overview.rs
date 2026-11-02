@@ -100,15 +100,31 @@ impl PageOverview {
             }
             ForegroundSession::Mounting(session, message) => {
                 self.close_confirmation_open = false;
-                if self.show_mounting_session_card(ui, session, message, app_state.hand_off_blocked)
-                {
+                let started_by = session.created_by.as_deref();
+                if self.show_mounting_session_card(
+                    ui,
+                    session,
+                    started_by,
+                    message,
+                    app_state.hand_off_blocked,
+                ) {
                     return Action::ForceRelease;
                 }
             }
             ForegroundSession::None => {
                 self.close_confirmation_open = false;
                 if let Some(session) = pending_start {
-                    self.show_mounting_session_card(ui, session, "Waiting for agent…", false);
+                    // a share being started has no creator on record yet; it's the user
+                    let started_by = session.created_by.as_deref().or(signed_in
+                        .as_ref()
+                        .map(|signed_in| signed_in.username.as_str()));
+                    self.show_mounting_session_card(
+                        ui,
+                        session,
+                        started_by,
+                        "Waiting for agent…",
+                        false,
+                    );
                 } else if self.show_create_card(ui) {
                     return Action::CreateSession;
                 }
@@ -185,6 +201,7 @@ impl PageOverview {
         &mut self,
         ui: &mut egui::Ui,
         session: &PendingSession,
+        started_by: Option<&str>,
         status: &str,
         blocked: bool,
     ) -> bool {
@@ -194,6 +211,9 @@ impl PageOverview {
                 card_heading(ui, "Preparing ingest session");
                 session_detail(ui, "Project", &session.project);
                 session_detail(ui, "Session", &session.session);
+                if let Some(started_by) = started_by {
+                    session_detail(ui, "Started by", started_by);
+                }
                 ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
                 ui.horizontal(|ui| {
                     ui.spinner();
@@ -227,6 +247,9 @@ impl PageOverview {
                 card_heading(ui, "Active ingest session");
                 session_detail(ui, "Project", &session.project);
                 session_detail(ui, "Session", &session.session);
+                if let Some(started_by) = &session.created_by {
+                    session_detail(ui, "Started by", started_by);
+                }
                 session_detail(
                     ui,
                     "Mount path on this agent",

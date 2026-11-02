@@ -152,7 +152,7 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
                 project: PROJECT.to_owned(),
                 session: SESSION.to_owned(),
                 mount_path: Some(format!("/mnt/modama/{PROJECT}/{SESSION}")),
-                created_by: None,
+                created_by: Some(USERNAME.to_owned()),
             });
             app.page = Page::Overview(PageOverview::new());
         }
