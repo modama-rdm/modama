@@ -121,7 +121,10 @@ impl AgentGuiApp {
         }
     }
 
-    fn overview_page(&self) -> Page {
+    /// The overview, for every way back to it but a successful start: a share the user wanted
+    /// closed after starting a new one stays open then
+    fn overview_page(&mut self) -> Page {
+        self.app_state.close_after_start = None;
         Page::Overview(PageOverview::with_service(Arc::clone(&self.service)))
     }
 
@@ -160,6 +163,16 @@ impl AgentGuiApp {
             }
             Action::CreateSession => {
                 self.toast.clear();
+                self.app_state.close_after_start = None;
+                if let Some(page) = self.project_page() {
+                    self.page = page;
+                } else {
+                    self.page = self.login_page(LoginDestination::SelectProject);
+                }
+            }
+            Action::CreateSessionClosingPrevious { previous } => {
+                self.toast.clear();
+                self.app_state.close_after_start = Some(previous);
                 if let Some(page) = self.project_page() {
                     self.page = page;
                 } else {
@@ -190,6 +203,18 @@ impl AgentGuiApp {
                         }
                         self.page = Page::Overview(page);
                     }
+                    LoginDestination::StartSession => {
+                        if self.app_state.foreground.share_id().is_some() {
+                            let mut page = PageOverview::with_service(Arc::clone(&self.service));
+                            page.open_start_dialog();
+                            self.page = Page::Overview(page);
+                        } else {
+                            self.page = Page::SelectProject(PageSelectProject::with_service(
+                                Arc::clone(&self.service),
+                                signed_in,
+                            ));
+                        }
+                    }
                     LoginDestination::Overview => {
                         self.page =
                             Page::Overview(PageOverview::with_service(Arc::clone(&self.service)))
@@ -219,15 +244,27 @@ impl AgentGuiApp {
                 operation_id,
                 session,
             } => {
+                let previous = self.app_state.close_after_start.take();
                 if self.app_state.finish_start(operation_id, session) {
                     self.toast.clear();
-                    self.page = self.overview_page();
+                    self.page = match (previous, self.app_state.signed_in.clone()) {
+                        (Some(previous), Some(signed_in)) => {
+                            Page::Overview(PageOverview::closing_previous(
+                                Arc::clone(&self.service),
+                                signed_in,
+                                previous,
+                            ))
+                        }
+                        _ => self.overview_page(),
+                    };
                 }
             }
             Action::StartFailed {
                 operation_id,
                 failure,
             } => {
+                // the previous share stays open when the new one couldn't be started
+                self.app_state.close_after_start = None;
                 if self.app_state.fail_start(operation_id)
                     && let Some(failure) = failure
                 {
@@ -278,6 +315,7 @@ impl AgentGuiApp {
                 self.toast.clear();
                 self.service.logout();
                 self.app_state.signed_in = None;
+                self.app_state.close_after_start = None;
                 self.page = self.overview_page();
             }
             Action::Connected {
@@ -301,6 +339,7 @@ impl AgentGuiApp {
             return;
         }
         self.app_state.signed_in = None;
+        self.app_state.close_after_start = None;
         self.toast.clear();
         let mut page = PageLogin::with_service_and_destination(
             Arc::clone(&self.service),
@@ -523,6 +562,112 @@ mod tests {
             mount_path: None,
             created_by: None,
         }
+    }
+
+    fn own_mounted(share_id: &str) -> crate::state::ActiveSession {
+        crate::state::ActiveSession {
+            created_by: Some("user".to_owned()),
+            ..mounted_session(share_id)
+        }
+    }
+
+    fn start(app: &mut AgentGuiApp, share_id: &str) {
+        let operation_id = OperationId::next();
+        app.handle_action(Action::StartRequested {
+            operation_id,
+            project: "project".to_owned(),
+            session: "new-session".to_owned(),
+        });
+        app.handle_action(Action::IngestCreated {
+            operation_id,
+            session: crate::state::PendingSession {
+                share_id: share_id.to_owned(),
+                project: "project".to_owned(),
+                session: "new-session".to_owned(),
+                created_by: None,
+            },
+        });
+    }
+
+    fn signed_in_with_open_share() -> (AgentGuiApp, crate::state::ActiveSession) {
+        let mut app = AgentGuiApp::new();
+        app.app_state.signed_in = Some(signed_in());
+        let previous = own_mounted("previous");
+        app.app_state.foreground = crate::state::ForegroundSession::Mounted(previous.clone());
+        (app, previous)
+    }
+
+    #[test]
+    fn the_previous_share_is_closed_only_after_the_new_one_started() {
+        let (mut app, previous) = signed_in_with_open_share();
+        app.handle_action(Action::CreateSessionClosingPrevious {
+            previous: previous.clone(),
+        });
+        assert!(matches!(app.page, Page::SelectProject(_)));
+        assert_eq!(app.app_state.close_after_start, Some(previous.clone()));
+
+        start(&mut app, "new");
+        let Page::Overview(page) = &app.page else {
+            panic!("a started session did not lead back to the overview");
+        };
+        assert_eq!(page.closes_previous(), Some(&previous));
+        assert_eq!(app.app_state.close_after_start, None);
+    }
+
+    #[test]
+    fn keeping_the_previous_share_open_closes_nothing() {
+        let (mut app, _previous) = signed_in_with_open_share();
+        app.handle_action(Action::CreateSession);
+        start(&mut app, "new");
+        let Page::Overview(page) = &app.page else {
+            panic!("a started session did not lead back to the overview");
+        };
+        assert_eq!(page.closes_previous(), None);
+    }
+
+    #[test]
+    fn the_previous_share_stays_open_if_the_start_fails_or_is_abandoned() {
+        let (mut app, previous) = signed_in_with_open_share();
+        app.handle_action(Action::CreateSessionClosingPrevious {
+            previous: previous.clone(),
+        });
+        let operation_id = OperationId::next();
+        app.handle_action(Action::StartRequested {
+            operation_id,
+            project: "project".to_owned(),
+            session: "new-session".to_owned(),
+        });
+        app.handle_action(Action::StartFailed {
+            operation_id,
+            failure: None,
+        });
+        assert_eq!(app.app_state.close_after_start, None);
+
+        app.handle_action(Action::CreateSessionClosingPrevious { previous });
+        app.handle_action(Action::GoToOverview);
+        assert_eq!(app.app_state.close_after_start, None);
+    }
+
+    #[test]
+    fn signing_in_to_start_a_session_asks_first_if_a_share_is_open() {
+        let mut app = AgentGuiApp::new();
+        app.app_state.foreground =
+            crate::state::ForegroundSession::Mounted(own_mounted("previous"));
+        app.handle_action(Action::LoginSuccess {
+            signed_in: signed_in(),
+            destination: LoginDestination::StartSession,
+        });
+        let Page::Overview(page) = &app.page else {
+            panic!("signing in to start did not return to the overview");
+        };
+        assert!(page.start_dialog_is_open());
+
+        let mut app = AgentGuiApp::new();
+        app.handle_action(Action::LoginSuccess {
+            signed_in: signed_in(),
+            destination: LoginDestination::StartSession,
+        });
+        assert!(matches!(app.page, Page::SelectProject(_)));
     }
 
     #[test]

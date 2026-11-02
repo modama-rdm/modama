@@ -6,7 +6,9 @@ use modama_agent_gui::{
     guide_screenshots::VIEWPORT,
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
-    state::{ActiveSession, ForegroundSession, PendingSession, SignedIn},
+    state::{
+        ActiveSession, AgentIdentity, ForegroundSession, OperationId, PendingSession, SignedIn,
+    },
     styles,
 };
 use std::sync::{Arc, Barrier};
@@ -218,10 +220,10 @@ fn overview_entry_focuses_primary_session_action() {
 }
 
 #[test]
-fn overview_actions_are_mutually_exclusive() {
+fn another_session_can_be_started_while_one_is_active() {
     let active = overview_harness(false, true);
     assert!(active.query_by_label("Close Session").is_some());
-    assert!(active.query_by_label("Start Session").is_none());
+    assert!(active.query_by_label("Start Session").is_some());
 
     let inactive = overview_harness(false, false);
     assert!(inactive.query_by_label("Start Session").is_some());
@@ -363,6 +365,11 @@ fn top_bar_tab_order_follows_its_visual_order() {
     for (logged_in, account_action) in [(false, "Log in"), (true, "Log out")] {
         let mut harness = overview_harness(false, logged_in);
 
+        if logged_in {
+            // focus starts on "Close Session"; "Start Session" below it comes next
+            press_tab(&mut harness, false);
+            assert!(harness.get_by_label("Start Session").is_focused());
+        }
         press_tab(&mut harness, false);
         assert!(harness.get_by_label("go to Overview").is_focused());
 
@@ -565,4 +572,53 @@ fn started_by_is_shown_only_when_known() {
     }
     unknown.run_steps(1);
     assert!(unknown.query_by_label("Started by").is_none());
+}
+
+#[test]
+fn start_while_open_snapshots() {
+    let mut results = SnapshotResults::new();
+
+    // the user's own share is open: keep it, or close it once the new one has started
+    let mut own = overview_harness(false, true);
+    own.get_by_label("Start Session").click();
+    own.run();
+    own.snapshot("overview_start_while_own_share_open");
+    results.extend_harness(&mut own);
+
+    // someone else's share: starting detaches it from the instrument
+    let mut others = overview_harness(false, true);
+    others.state_mut().app_state.identity = Some(AgentIdentity::AgentId {
+        agent_name: "k2".to_owned(),
+        resource_name: "Holo".to_owned(),
+    });
+    if let ForegroundSession::Mounted(session) = &mut others.state_mut().app_state.foreground {
+        session.created_by = Some("other.user".to_owned());
+    }
+    others.run_steps(1);
+    others.get_by_label("Start Session").click();
+    others.run();
+    others.snapshot("overview_start_while_others_share_open");
+    results.extend_harness(&mut others);
+
+    // the new session is being prepared while the previous share is still open
+    let mut pending = overview_harness(false, true);
+    let operation_id = OperationId::next();
+    let app_state = &mut pending.state_mut().app_state;
+    app_state.begin_start(
+        operation_id,
+        "representative-project".to_owned(),
+        "2026-07-30-ingest".to_owned(),
+    );
+    app_state.finish_start(
+        operation_id,
+        PendingSession {
+            share_id: "new-share".to_owned(),
+            project: "representative-project".to_owned(),
+            session: "2026-07-30-ingest".to_owned(),
+            created_by: None,
+        },
+    );
+    pending.run_steps(1);
+    pending.snapshot("overview_start_pending_while_share_open");
+    results.extend_harness(&mut pending);
 }

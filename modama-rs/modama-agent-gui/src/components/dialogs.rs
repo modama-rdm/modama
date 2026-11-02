@@ -1,7 +1,7 @@
 use eframe::egui::{self, Align, Layout, RichText};
 
 use crate::{
-    components::buttons::{danger_button, secondary_button},
+    components::buttons::{ButtonVariant, button, secondary_button},
     styles,
 };
 
@@ -13,16 +13,36 @@ pub enum ConfirmationDialogAction {
     Confirm,
 }
 
-/// Show a modal confirmation for a destructive action.
-pub fn destructive_confirmation_dialog(
+/// One of the choices of a [`choice_dialog`], besides cancelling
+pub struct DialogChoice<'a, T> {
+    pub label: &'a str,
+    pub variant: ButtonVariant,
+    pub value: T,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChoiceDialogAction<T> {
+    #[default]
+    None,
+    Cancel,
+    Choose(T),
+}
+
+/// Show a modal with a message, the `choices` and Cancel. The first choice is placed at the
+/// right edge, the others to its left, and Cancel last.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "a dialog's parts; a builder would only move them around"
+)]
+pub fn choice_dialog<T: Copy>(
     ctx: &egui::Context,
     visuals: &egui::Visuals,
     id: impl std::hash::Hash + std::fmt::Debug,
     title: &str,
     message: &str,
-    confirm_label: &str,
+    choices: &[DialogChoice<'_, T>],
     focus_cancel: bool,
-) -> ConfirmationDialogAction {
+) -> ChoiceDialogAction<T> {
     let response = egui::Modal::new(egui::Id::new(id))
         .frame(styles::card_frame(visuals))
         .show(ctx, |ui| {
@@ -43,25 +63,53 @@ pub fn destructive_confirmation_dialog(
             );
             ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let confirm_clicked = ui.add(danger_button(confirm_label, ui)).clicked();
+                let chosen = choices
+                    .iter()
+                    .map(|choice| {
+                        let clicked = ui.add(button(choice.label, ui, choice.variant)).clicked();
+                        clicked.then_some(choice.value)
+                    })
+                    .fold(None, Option::or);
                 let cancel = ui.add(secondary_button("Cancel", ui));
                 if focus_cancel {
                     cancel.request_focus();
                 }
                 if cancel.clicked() {
-                    ConfirmationDialogAction::Cancel
-                } else if confirm_clicked {
-                    ConfirmationDialogAction::Confirm
+                    ChoiceDialogAction::Cancel
+                } else if let Some(value) = chosen {
+                    ChoiceDialogAction::Choose(value)
                 } else {
-                    ConfirmationDialogAction::None
+                    ChoiceDialogAction::None
                 }
             })
             .inner
         });
 
-    if response.inner == ConfirmationDialogAction::None && response.should_close() {
-        ConfirmationDialogAction::Cancel
+    if matches!(response.inner, ChoiceDialogAction::None) && response.should_close() {
+        ChoiceDialogAction::Cancel
     } else {
         response.inner
+    }
+}
+
+/// Show a modal confirmation for a destructive action.
+pub fn destructive_confirmation_dialog(
+    ctx: &egui::Context,
+    visuals: &egui::Visuals,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    title: &str,
+    message: &str,
+    confirm_label: &str,
+    focus_cancel: bool,
+) -> ConfirmationDialogAction {
+    let choices = [DialogChoice {
+        label: confirm_label,
+        variant: ButtonVariant::Danger,
+        value: (),
+    }];
+    match choice_dialog(ctx, visuals, id, title, message, &choices, focus_cancel) {
+        ChoiceDialogAction::None => ConfirmationDialogAction::None,
+        ChoiceDialogAction::Cancel => ConfirmationDialogAction::Cancel,
+        ChoiceDialogAction::Choose(()) => ConfirmationDialogAction::Confirm,
     }
 }

@@ -1,4 +1,6 @@
-use crate::state::{AgentIdentity, ForegroundSession, OperationId, PendingSession, SignedIn};
+use crate::state::{
+    ActiveSession, AgentIdentity, ForegroundSession, OperationId, PendingSession, SignedIn,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetryAction {
@@ -20,7 +22,11 @@ pub enum TaskFailure {
 pub enum LoginDestination {
     Overview,
     SelectProject,
-    ConfirmClose { share_id: String },
+    /// Start a session: the overview asks first if a share is open, else project selection
+    StartSession,
+    ConfirmClose {
+        share_id: String,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -34,6 +40,10 @@ pub enum Action {
         destination: LoginDestination,
     },
     CreateSession,
+    /// Start a session, and close `previous` once the new one has been created
+    CreateSessionClosingPrevious {
+        previous: ActiveSession,
+    },
     LoginSuccess {
         signed_in: SignedIn,
         destination: LoginDestination,

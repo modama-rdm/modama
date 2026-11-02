@@ -75,6 +75,15 @@ impl AgentIdentity {
     }
 }
 
+/// How texts refer to the instrument: the agent's resource name, or "this instrument" if
+/// unknown (anonymous agent, or not connected yet)
+pub fn instrument_name(identity: Option<&AgentIdentity>) -> &str {
+    match identity {
+        Some(AgentIdentity::AgentId { resource_name, .. }) => resource_name,
+        Some(AgentIdentity::Anonymous { .. }) | None => "this instrument",
+    }
+}
+
 /// Username and password, only while signing in
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Credentials {
@@ -103,6 +112,9 @@ pub struct AgentAppState {
 
     /// Whether a previous user's drive blocks the foreground share (Windows only)
     pub hand_off_blocked: bool,
+
+    /// The user's own share to close once the session being started has been created
+    pub close_after_start: Option<ActiveSession>,
 
     session_operations: SessionOperations,
 
@@ -272,6 +284,20 @@ struct CloseOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn texts_name_the_instrument_if_known() {
+        let agent = AgentIdentity::AgentId {
+            agent_name: "k2".to_owned(),
+            resource_name: "Holo".to_owned(),
+        };
+        assert_eq!(instrument_name(Some(&agent)), "Holo");
+        let anonymous = AgentIdentity::Anonymous {
+            hostname: "pc".to_owned(),
+        };
+        assert_eq!(instrument_name(Some(&anonymous)), "this instrument");
+        assert_eq!(instrument_name(None), "this instrument");
+    }
 
     fn pending(share_id: &str) -> PendingSession {
         PendingSession {
