@@ -15,12 +15,11 @@ use modama_common::{
     foreground::project_and_session,
     local_api_messages::APICurrentForegroundShare,
     messages::Share,
-    mgmt_client::MgmtError,
     tokens::{TokenError, TokenProvider},
 };
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
-use std::{error::Error, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use time::{Date, OffsetDateTime};
 use tokio::sync::Mutex;
 use tower_http::csrf::CsrfLayer;
@@ -382,9 +381,6 @@ pub enum LocalAPIError {
     #[error("API route configuration: {0}")]
     RouteConfig(String),
 
-    #[error("error in backend API: {0}")]
-    BackendAPI(#[from] MgmtError),
-
     #[error("token error: {0}")]
     Token(#[from] TokenError),
 
@@ -428,12 +424,6 @@ impl IntoResponse for LocalAPIError {
                 )
                     .into_response()
             }
-            LocalAPIError::BackendAPI(MgmtError::Unauthorized) => (
-                StatusCode::UNAUTHORIZED,
-                [(header::CONTENT_TYPE, "text/plain")],
-                "not signed in",
-            )
-                .into_response(),
             LocalAPIError::NoSession | LocalAPIError::Mgmt(MgmtApiError::Unauthorized) => (
                 StatusCode::UNAUTHORIZED,
                 [
@@ -475,32 +465,6 @@ impl IntoResponse for LocalAPIError {
                     StatusCode::BAD_GATEWAY,
                     [(header::CONTENT_TYPE, "text/plain")],
                     error.to_string(),
-                )
-                    .into_response()
-            }
-            LocalAPIError::BackendAPI(MgmtError::NotFound) => {
-                // FIXME: json/text depending on accept?
-                (
-                    StatusCode::NOT_FOUND,
-                    [(header::CONTENT_TYPE, "text/plain")],
-                    "object not found",
-                )
-                    .into_response()
-            }
-            LocalAPIError::BackendAPI(e) => {
-                error!("backend API error: {e}");
-                if let MgmtError::RequestError(error) = e {
-                    let mut error = &error as &(dyn Error + 'static);
-                    while let Some(inner) = error.source() {
-                        error!("  error details: {:?}", inner);
-                        error = inner;
-                    }
-                }
-                // FIXME: json/text depending on accept?
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    [(header::CONTENT_TYPE, "text/plain")],
-                    "internal server error",
                 )
                     .into_response()
             }

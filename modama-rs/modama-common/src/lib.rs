@@ -7,7 +7,6 @@ pub mod internal_api_types;
 pub mod local_api_messages;
 pub mod logging;
 pub mod messages;
-pub mod mgmt_client;
 pub mod mount_popup;
 pub mod requests;
 pub mod runtime;
