@@ -26,10 +26,13 @@ pub struct AgentClient {
 }
 
 impl AgentClient {
+    /// `base_url` may end in `/` (as `Url::as_str()` always does): the generated client appends
+    /// paths that start with `/`, so trailing slashes are dropped here.
     pub fn new(base_url: impl Into<String>) -> Self {
         modama_common::install_rustls_crypto_provider();
+        let base_url = base_url.into();
         Self {
-            inner: GeneratedClient::new().with_base_url(base_url),
+            inner: GeneratedClient::new().with_base_url(base_url.trim_end_matches('/')),
         }
     }
 
@@ -172,6 +175,26 @@ mod tests {
             .await;
 
         AgentClient::new(server.url()).get_identity().await?;
+        mock.assert_async().await;
+        Ok(())
+    }
+
+    /// `Url::as_str()` always ends in `/`, and the session helper's tray passes exactly that.
+    #[tokio::test]
+    async fn trailing_slash_in_base_url_does_not_double_the_slash()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/identity/")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"type":"Anonymous","hostname":"workstation"}"#)
+            .create_async()
+            .await;
+
+        AgentClient::new(format!("{}/", server.url()))
+            .get_identity()
+            .await?;
         mock.assert_async().await;
         Ok(())
     }
