@@ -672,6 +672,7 @@ def share_dataset(name: str, dataset: str):
                         dest_path=smbpath(pr_info["project"], ds["name"]),
                         uid=user_info["id"]["uid"],
                         gid=pr_info["project"]["gid"],
+                        created_by=current_user.user_id,
                     )
                     result = result["share"]
                 except RuntimeError as e:
@@ -911,6 +912,7 @@ def api_create_share() -> SerializedShare:
         uid=user_info["id"]["uid"],
         gid=pr_info["project"]["gid"],
         resource=resource,
+        created_by=apiauth.current_user(),
     )
     return resp["share"]
 
