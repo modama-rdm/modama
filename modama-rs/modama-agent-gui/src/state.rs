@@ -71,10 +71,17 @@ impl AgentIdentity {
     }
 }
 
+/// Username and password, only while signing in
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
+}
+
+/// Who is signed in. The session itself is a cookie in the agent client, never stored on disk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignedIn {
+    pub username: String,
 }
 
 /// App state - general state of the whole app,
@@ -82,7 +89,7 @@ pub struct Credentials {
 #[derive(Clone, Debug, Default)]
 pub struct AgentAppState {
     /// if None, the user is logged out
-    pub creds: Option<Credentials>,
+    pub signed_in: Option<SignedIn>,
 
     /// Foreground ingest state reported by the local agent.
     pub foreground: ForegroundSession,

@@ -13,7 +13,7 @@ use crate::{
         select_project::representative_projects,
     },
     service::ConnectedAgent,
-    state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession},
+    state::{ActiveSession, AgentIdentity, ForegroundSession, SignedIn},
     styles,
 };
 
@@ -82,9 +82,8 @@ fn seed_identity(app: &mut AgentGuiApp) {
 
 fn seed_logged_in(app: &mut AgentGuiApp) {
     seed_identity(app);
-    app.app_state.creds = Some(Credentials {
+    app.app_state.signed_in = Some(SignedIn {
         username: USERNAME.to_owned(),
-        password: "representative-password".to_owned(),
     });
 }
 

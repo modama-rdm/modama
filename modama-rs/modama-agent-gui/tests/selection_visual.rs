@@ -10,7 +10,7 @@ use modama_agent_gui::{
         CreateSessionError, Page, PageSelectCreateSession, PageSelectProject,
         select_project::{ProjectSort, representative_projects},
     },
-    state::{Credentials, OperationId, PendingSession},
+    state::{OperationId, PendingSession, SignedIn},
     styles,
 };
 use time::{Date, Month};
@@ -48,9 +48,8 @@ fn selection_harness_at_size(
 
         let mut app = AgentGuiApp::new();
         app.page = page;
-        app.app_state.creds = Some(Credentials {
+        app.app_state.signed_in = Some(SignedIn {
             username: "representative.user".to_string(),
-            password: "representative-password".to_string(),
         });
         app
     });

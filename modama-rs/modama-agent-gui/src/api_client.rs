@@ -15,11 +15,14 @@ pub mod generated {
 pub use generated::client::HttpClient as GeneratedClient;
 pub use generated::types::*;
 
-use base64::{Engine, engine::general_purpose::STANDARD};
+use std::sync::Arc;
+
+use reqwest::cookie::Jar;
 
 pub const API_VERSION: &str = "1.0.0";
 
-/// Typed client for the local modama-agent API.
+/// Typed client for the local modama-agent API. It keeps the agent's session cookie in memory,
+/// like a browser does; a new client starts signed out.
 #[derive(Clone)]
 pub struct AgentClient {
     inner: GeneratedClient,
@@ -30,20 +33,19 @@ impl AgentClient {
     /// paths that start with `/`, so trailing slashes are dropped here.
     pub fn new(base_url: impl Into<String>) -> Self {
         modama_common::install_rustls_crypto_provider();
-        let base_url = base_url.into();
+        let inner = match reqwest::Client::builder()
+            .cookie_provider(Arc::new(Jar::default()))
+            .build()
+        {
+            Ok(client) => GeneratedClient::with_client(client),
+            Err(error) => {
+                // without cookies, every authenticated call ends up at the login page again
+                log::error!("could not set up the agent client with cookies: {error}");
+                GeneratedClient::new()
+            }
+        };
         Self {
-            inner: GeneratedClient::new().with_base_url(base_url.trim_end_matches('/')),
-        }
-    }
-
-    pub fn with_basic_auth(&self, username: impl AsRef<str>, password: impl AsRef<str>) -> Self {
-        let credentials = format!("{}:{}", username.as_ref(), password.as_ref());
-        let authorization = format!("Basic {}", STANDARD.encode(credentials));
-        Self {
-            inner: self
-                .inner
-                .clone()
-                .with_header("Authorization", authorization),
+            inner: inner.with_base_url(base_url.into().trim_end_matches('/')),
         }
     }
 
@@ -76,9 +78,16 @@ impl AgentClient {
 
     pub async fn login(
         &self,
+        request: APILoginRequest,
     ) -> Result<APILoginResponse, generated::client::ApiOpError<generated::client::LoginApiError>>
     {
-        self.inner.login(API_VERSION).await
+        self.inner.login(API_VERSION, request).await
+    }
+
+    pub async fn logout(
+        &self,
+    ) -> Result<(), generated::client::ApiOpError<generated::client::LogoutApiError>> {
+        self.inner.logout(API_VERSION).await
     }
 
     pub async fn list_projects(
@@ -138,26 +147,47 @@ impl AgentClient {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentClient;
+    use super::{APILoginRequest, AgentClient};
 
     #[tokio::test]
-    async fn login_sends_basic_auth_and_api_version() -> Result<(), Box<dyn std::error::Error>> {
+    async fn login_keeps_the_session_cookie_for_later_calls()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut server = mockito::Server::new_async().await;
-        let mock = server
+        let login = server
             .mock("POST", "/api/login/")
-            .match_header("authorization", "Basic YWxpY2U6c2VjcmV0")
             .match_header("x-api-version", "1.0.0")
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "username": "alice", "password": "secret",
+            })))
             .with_status(200)
             .with_header("content-type", "application/json")
+            .with_header(
+                "set-cookie",
+                "modama_agent_session=abc; HttpOnly; SameSite=Strict; Path=/",
+            )
             .with_body(r#"{"username":"alice"}"#)
             .create_async()
             .await;
+        let delete = server
+            .mock("DELETE", "/api/shares/share-123/")
+            .match_header("cookie", "modama_agent_session=abc")
+            .match_header("x-api-version", "1.0.0")
+            .with_status(204)
+            .create_async()
+            .await;
 
-        let client = AgentClient::new(server.url()).with_basic_auth("alice", "secret");
-        let response = client.login().await?;
-
+        let client = AgentClient::new(server.url());
+        let response = client
+            .login(APILoginRequest {
+                username: "alice".to_owned(),
+                password: "secret".to_owned(),
+            })
+            .await?;
         assert_eq!(response.username, "alice");
-        mock.assert_async().await;
+        client.delete_share("share-123").await?;
+
+        login.assert_async().await;
+        delete.assert_async().await;
         Ok(())
     }
 
@@ -194,26 +224,6 @@ mod tests {
 
         AgentClient::new(format!("{}/", server.url()))
             .get_identity()
-            .await?;
-        mock.assert_async().await;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn delete_accepts_204_and_sends_auth_and_version()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let mut server = mockito::Server::new_async().await;
-        let mock = server
-            .mock("DELETE", "/api/shares/share-123/")
-            .match_header("authorization", "Basic YWxpY2U6c2VjcmV0")
-            .match_header("x-api-version", "1.0.0")
-            .with_status(204)
-            .create_async()
-            .await;
-
-        AgentClient::new(server.url())
-            .with_basic_auth("alice", "secret")
-            .delete_share("share-123")
             .await?;
         mock.assert_async().await;
         Ok(())

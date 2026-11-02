@@ -1,4 +1,4 @@
-use crate::state::{AgentIdentity, Credentials, ForegroundSession, OperationId, PendingSession};
+use crate::state::{AgentIdentity, ForegroundSession, OperationId, PendingSession, SignedIn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetryAction {
@@ -35,7 +35,7 @@ pub enum Action {
     },
     CreateSession,
     LoginSuccess {
-        creds: Credentials,
+        signed_in: SignedIn,
         destination: LoginDestination,
     },
     GoToSelectProject,

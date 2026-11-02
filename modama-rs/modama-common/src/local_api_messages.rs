@@ -107,7 +107,15 @@ pub struct APICreateSessionResponse {
     pub session: String,
 }
 
-// TODO: what info do we need in here?
+/// Sign in with the management interface's username and password
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+pub struct APILoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+/// Answer to a successful sign-in; the session itself travels in the `modama_agent_session`
+/// cookie
 #[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APILoginResponse {
     pub username: String,

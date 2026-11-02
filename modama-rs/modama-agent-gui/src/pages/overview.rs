@@ -11,7 +11,7 @@ use crate::{
     },
     service::{AgentService, ServiceError, StubAgentService},
     state::{
-        ActiveSession, AgentAppState, Credentials, ForegroundSession, OperationId, PendingSession,
+        ActiveSession, AgentAppState, ForegroundSession, OperationId, PendingSession, SignedIn,
     },
     styles,
 };
@@ -24,7 +24,7 @@ pub struct PageOverview {
     focus_confirmation_cancel: bool,
     focus_on_entry: bool,
     service: Arc<dyn AgentService>,
-    last_close: Option<(Credentials, ActiveSession)>,
+    last_close: Option<(SignedIn, ActiveSession)>,
     close_operation_id: Option<OperationId>,
 }
 
@@ -60,7 +60,7 @@ impl PageOverview {
         let foreground = &app_state.foreground;
         let pending_start = app_state.pending_start();
         let pending_close = app_state.pending_close();
-        let credentials = &app_state.creds;
+        let signed_in = &app_state.signed_in;
         page_heading(ui, "Overview");
         ui.add_space(styles::content_card_top_margin_adjustment());
 
@@ -72,7 +72,7 @@ impl PageOverview {
                     pending_close == Some(&session.share_id),
                 );
                 if close_clicked {
-                    if credentials.is_some() {
+                    if signed_in.is_some() {
                         self.open_close_confirmation();
                     } else {
                         return Action::GoToLogin {
@@ -83,8 +83,8 @@ impl PageOverview {
                     }
                 }
                 if self.close_confirmation_open {
-                    if let Some(credentials) = credentials {
-                        let action = self.show_close_confirmation(ui, session, credentials);
+                    if let Some(signed_in) = signed_in {
+                        let action = self.show_close_confirmation(ui, session, signed_in);
                         if action != Action::None {
                             return action;
                         }
@@ -152,8 +152,8 @@ impl PageOverview {
 
     pub fn retry_close_session(&mut self, ctx: egui::Context) -> Action {
         self.close_task.reset();
-        if let Some((credentials, session)) = self.last_close.clone() {
-            self.start_close(credentials, session, ctx)
+        if let Some((signed_in, session)) = self.last_close.clone() {
+            self.start_close(signed_in, session, ctx)
         } else {
             Action::None
         }
@@ -270,7 +270,7 @@ impl PageOverview {
         &mut self,
         ui: &mut egui::Ui,
         session: &ActiveSession,
-        credentials: &Credentials,
+        signed_in: &SignedIn,
     ) -> Action {
         let message = format!(
             "This will stop incoming data for session {} in project {}. Data already stored will \
@@ -296,8 +296,8 @@ impl PageOverview {
             }
             ConfirmationDialogAction::Confirm => {
                 self.close_confirmation_open = false;
-                self.last_close = Some((credentials.clone(), session.clone()));
-                self.start_close(credentials.clone(), session.clone(), ui.ctx().clone())
+                self.last_close = Some((signed_in.clone(), session.clone()));
+                self.start_close(signed_in.clone(), session.clone(), ui.ctx().clone())
             }
         }
     }
@@ -314,7 +314,7 @@ impl PageOverview {
 
     fn start_close(
         &mut self,
-        credentials: Credentials,
+        signed_in: SignedIn,
         session: ActiveSession,
         ctx: egui::Context,
     ) -> Action {
@@ -323,7 +323,7 @@ impl PageOverview {
         let share_id = session.share_id.clone();
         let service = Arc::clone(&self.service);
         self.close_task
-            .spawn(move || service.close_session(&credentials, &session), ctx);
+            .spawn(move || service.close_session(&signed_in, &session), ctx);
         Action::CloseRequested {
             operation_id,
             share_id,

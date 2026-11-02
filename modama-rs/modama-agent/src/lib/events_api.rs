@@ -516,6 +516,7 @@ mod tests {
                 token_provider,
                 jinja_env: Environment::new(),
                 scope_resolver: Arc::clone(&scopes) as Arc<dyn crate::caller_scope::ResolveScope>,
+                mgmt_api: Arc::new(crate::mgmt_api::MgmtApi::new()),
             };
             let app = add_internal_api(Router::new())
                 .unwrap()

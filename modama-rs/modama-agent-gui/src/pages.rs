@@ -14,6 +14,10 @@ pub use overview::PageOverview;
 pub use select_create_session::{CreateSessionError, PageSelectCreateSession};
 pub use select_project::PageSelectProject;
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the app holds a single page at a time, so boxing the large one saves nothing"
+)]
 pub enum Page {
     Connecting(PageConnecting),
     Overview(PageOverview),

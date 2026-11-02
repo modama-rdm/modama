@@ -1,14 +1,19 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
 use crate::{
     api_client::{
         APIAgentIdentity, APICreateSessionRequest, APICurrentForegroundShare,
-        APIHealthCheckResponse, AgentClient, generated::client::ApiOpError,
+        APIHealthCheckResponse, APILoginRequest, AgentClient, generated::client::ApiOpError,
     },
-    state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession, PendingSession},
+    state::{
+        ActiveSession, AgentIdentity, Credentials, ForegroundSession, PendingSession, SignedIn,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,36 +48,44 @@ pub trait AgentService: Send + Sync {
     fn connect(&self) -> Result<ConnectedAgent, ServiceError>;
     fn health(&self) -> Result<(), ServiceError>;
     fn foreground(&self) -> Result<ForegroundSession, ServiceError>;
-    fn login(&self, credentials: &Credentials) -> Result<(), ServiceError>;
-    fn list_projects(&self, credentials: &Credentials)
-    -> Result<Vec<ProjectSummary>, ServiceError>;
+    fn login(&self, credentials: &Credentials) -> Result<SignedIn, ServiceError>;
+    /// Forget the session; the agent is told in the background
+    fn logout(&self) {}
+    /// Whether the session ended since the last call (an authenticated call was refused), so
+    /// the user has to sign in again
+    fn take_session_ended(&self) -> bool {
+        false
+    }
+    fn list_projects(&self, signed_in: &SignedIn) -> Result<Vec<ProjectSummary>, ServiceError>;
     fn list_sessions(
         &self,
-        credentials: &Credentials,
+        signed_in: &SignedIn,
         project: &str,
     ) -> Result<Vec<String>, ServiceError>;
     fn create_session(
         &self,
-        credentials: &Credentials,
+        signed_in: &SignedIn,
         project: &str,
         session: &str,
     ) -> Result<(), ServiceError>;
     fn start_ingest(
         &self,
-        credentials: &Credentials,
+        signed_in: &SignedIn,
         project: &str,
         session: &str,
     ) -> Result<PendingSession, ServiceError>;
     fn close_session(
         &self,
-        credentials: &Credentials,
+        signed_in: &SignedIn,
         session: &ActiveSession,
     ) -> Result<(), ServiceError>;
 }
 
 pub struct HttpAgentService {
     runtime: tokio::runtime::Runtime,
-    client: AgentClient,
+    /// Holds the session cookie; replaced by a fresh one on login and logout
+    client: RwLock<AgentClient>,
+    session_ended: AtomicBool,
     agent_url: String,
 }
 
@@ -85,7 +98,8 @@ impl HttpAgentService {
             .map_err(|error| ServiceError::Transport(error.to_string()))?;
         Ok(Self {
             runtime,
-            client: AgentClient::new(agent_url.clone()),
+            client: RwLock::new(AgentClient::new(agent_url.clone())),
+            session_ended: AtomicBool::new(false),
             agent_url,
         })
     }
@@ -94,15 +108,38 @@ impl HttpAgentService {
         &self.agent_url
     }
 
-    fn authenticated_client(&self, credentials: &Credentials) -> AgentClient {
-        self.client
-            .with_basic_auth(&credentials.username, &credentials.password)
+    fn client(&self) -> AgentClient {
+        match self.client.read() {
+            Ok(client) => client.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// Start over with an empty cookie jar, returning the client that held the session
+    fn replace_client(&self) -> AgentClient {
+        let fresh = AgentClient::new(self.agent_url.clone());
+        match self.client.write() {
+            Ok(mut client) => std::mem::replace(&mut *client, fresh),
+            Err(poisoned) => std::mem::replace(&mut *poisoned.into_inner(), fresh),
+        }
+    }
+
+    /// The result of an authenticated call; a 401 means the session ended
+    fn authenticated<T, E: std::fmt::Debug>(
+        &self,
+        result: Result<T, ApiOpError<E>>,
+    ) -> Result<T, ServiceError> {
+        let result = result.map_err(map_api_error);
+        if matches!(result, Err(ServiceError::Unauthorized)) {
+            self.session_ended.store(true, Ordering::SeqCst);
+        }
+        result
     }
 
     fn foreground(&self) -> Result<ForegroundSession, ServiceError> {
         let response = self
             .runtime
-            .block_on(self.client.get_foreground_share())
+            .block_on(self.client().get_foreground_share())
             .map_err(map_api_error)?;
         Ok(match response {
             APICurrentForegroundShare::APICurrentForegroundShareVariant(_) => {
@@ -190,7 +227,7 @@ impl AgentService for HttpAgentService {
     fn connect(&self) -> Result<ConnectedAgent, ServiceError> {
         let identity = self
             .runtime
-            .block_on(self.client.get_identity())
+            .block_on(self.client().get_identity())
             .map_err(map_api_error)?;
         let identity = match identity {
             APIAgentIdentity::APIAgentIdentityVariant(identity) => AgentIdentity::Anonymous {
@@ -210,7 +247,7 @@ impl AgentService for HttpAgentService {
     fn health(&self) -> Result<(), ServiceError> {
         match self
             .runtime
-            .block_on(self.client.health())
+            .block_on(self.client().health())
             .map_err(map_api_error)?
         {
             APIHealthCheckResponse::APIHealthCheckResponseVariant(_) => Ok(()),
@@ -224,81 +261,89 @@ impl AgentService for HttpAgentService {
         Self::foreground(self)
     }
 
-    fn login(&self, credentials: &Credentials) -> Result<(), ServiceError> {
-        self.runtime
-            .block_on(self.authenticated_client(credentials).login())
-            .map(|_| ())
-            .map_err(map_api_error)
+    fn login(&self, credentials: &Credentials) -> Result<SignedIn, ServiceError> {
+        // a new sign-in starts from an empty cookie jar, whoever was signed in before
+        self.replace_client();
+        self.session_ended.store(false, Ordering::SeqCst);
+        let response = self
+            .runtime
+            .block_on(self.client().login(APILoginRequest {
+                username: credentials.username.clone(),
+                password: credentials.password.clone(),
+            }))
+            .map_err(map_api_error)?;
+        Ok(SignedIn {
+            username: response.username,
+        })
     }
 
-    fn list_projects(
-        &self,
-        credentials: &Credentials,
-    ) -> Result<Vec<ProjectSummary>, ServiceError> {
-        self.runtime
-            .block_on(self.authenticated_client(credentials).list_projects())
-            .map(|response| {
-                response
-                    .projects
-                    .into_iter()
-                    .map(|project| ProjectSummary {
-                        name: project.name,
-                        owner: project.owner,
-                        members: project.members,
-                        modified_at: project.modified_at,
-                    })
-                    .collect()
+    fn logout(&self) {
+        let previous = self.replace_client();
+        self.runtime.spawn(async move {
+            if let Err(error) = previous.logout().await {
+                log::warn!("signing out at the agent failed: {error}");
+            }
+        });
+    }
+
+    fn take_session_ended(&self) -> bool {
+        self.session_ended.swap(false, Ordering::SeqCst)
+    }
+
+    fn list_projects(&self, _signed_in: &SignedIn) -> Result<Vec<ProjectSummary>, ServiceError> {
+        let response = self.authenticated(self.runtime.block_on(self.client().list_projects()))?;
+        Ok(response
+            .projects
+            .into_iter()
+            .map(|project| ProjectSummary {
+                name: project.name,
+                owner: project.owner,
+                members: project.members,
+                modified_at: project.modified_at,
             })
-            .map_err(map_api_error)
+            .collect())
     }
 
     fn list_sessions(
         &self,
-        credentials: &Credentials,
+        _signed_in: &SignedIn,
         project: &str,
     ) -> Result<Vec<String>, ServiceError> {
-        self.runtime
-            .block_on(
-                self.authenticated_client(credentials)
-                    .list_sessions_in_project(project),
-            )
-            .map(|response| response.sessions)
-            .map_err(map_api_error)
+        let response = self.authenticated(
+            self.runtime
+                .block_on(self.client().list_sessions_in_project(project)),
+        )?;
+        Ok(response.sessions)
     }
 
     fn create_session(
         &self,
-        credentials: &Credentials,
+        _signed_in: &SignedIn,
         project: &str,
         session: &str,
     ) -> Result<(), ServiceError> {
-        self.runtime
-            .block_on(
-                self.authenticated_client(credentials)
-                    .create_session_in_project(
-                        project,
-                        APICreateSessionRequest {
-                            session: session.to_owned(),
-                        },
-                    ),
-            )
-            .map(|_| ())
-            .map_err(map_api_error)
+        self.authenticated(
+            self.runtime
+                .block_on(self.client().create_session_in_project(
+                    project,
+                    APICreateSessionRequest {
+                        session: session.to_owned(),
+                    },
+                )),
+        )?;
+        Ok(())
     }
 
     fn start_ingest(
         &self,
-        credentials: &Credentials,
+        _signed_in: &SignedIn,
         project: &str,
         session: &str,
     ) -> Result<PendingSession, ServiceError> {
-        let response = self
-            .runtime
-            .block_on(
-                self.authenticated_client(credentials)
-                    .start_ingest(project, session),
-            )
-            .map_err(map_api_error)?;
+        let response = self.authenticated(
+            self.runtime
+                .block_on(self.client().start_ingest(project, session)),
+        )?;
         if response.project != project || response.session != session {
             return Err(ServiceError::InvalidResponse(
                 "started share does not match the requested project and session".to_owned(),
@@ -313,15 +358,13 @@ impl AgentService for HttpAgentService {
 
     fn close_session(
         &self,
-        credentials: &Credentials,
+        _signed_in: &SignedIn,
         session: &ActiveSession,
     ) -> Result<(), ServiceError> {
-        self.runtime
-            .block_on(
-                self.authenticated_client(credentials)
-                    .delete_share(&session.share_id),
-            )
-            .map_err(map_api_error)?;
+        self.authenticated(
+            self.runtime
+                .block_on(self.client().delete_share(&session.share_id)),
+        )?;
         Ok(())
     }
 }
@@ -334,6 +377,7 @@ struct StubState {
 pub struct StubAgentService {
     state: Mutex<StubState>,
     delay: Duration,
+    session_ended: AtomicBool,
 }
 
 impl Default for StubAgentService {
@@ -351,7 +395,13 @@ impl StubAgentService {
             } else {
                 Duration::from_millis(500)
             },
+            session_ended: AtomicBool::new(false),
         }
+    }
+
+    /// Act as if the session ended, so the app's next look sends the user to the login page
+    pub fn end_session(&self) {
+        self.session_ended.store(true, Ordering::SeqCst);
     }
 
     pub fn shared() -> Arc<dyn AgentService> {
@@ -393,26 +443,29 @@ impl AgentService for StubAgentService {
             .clone())
     }
 
-    fn login(&self, credentials: &Credentials) -> Result<(), ServiceError> {
+    fn login(&self, credentials: &Credentials) -> Result<SignedIn, ServiceError> {
         self.delay();
         if credentials.username.trim() == "stupid" {
             Err(ServiceError::Unauthorized)
         } else {
-            Ok(())
+            Ok(SignedIn {
+                username: credentials.username.clone(),
+            })
         }
     }
 
-    fn list_projects(
-        &self,
-        _credentials: &Credentials,
-    ) -> Result<Vec<ProjectSummary>, ServiceError> {
+    fn take_session_ended(&self) -> bool {
+        self.session_ended.swap(false, Ordering::SeqCst)
+    }
+
+    fn list_projects(&self, _signed_in: &SignedIn) -> Result<Vec<ProjectSummary>, ServiceError> {
         self.delay();
         Ok(crate::pages::select_project::representative_projects())
     }
 
     fn list_sessions(
         &self,
-        _credentials: &Credentials,
+        _signed_in: &SignedIn,
         _project: &str,
     ) -> Result<Vec<String>, ServiceError> {
         self.delay();
@@ -424,7 +477,7 @@ impl AgentService for StubAgentService {
 
     fn create_session(
         &self,
-        _credentials: &Credentials,
+        _signed_in: &SignedIn,
         _project: &str,
         session: &str,
     ) -> Result<(), ServiceError> {
@@ -441,7 +494,7 @@ impl AgentService for StubAgentService {
 
     fn start_ingest(
         &self,
-        _credentials: &Credentials,
+        _signed_in: &SignedIn,
         project: &str,
         session: &str,
     ) -> Result<PendingSession, ServiceError> {
@@ -466,7 +519,7 @@ impl AgentService for StubAgentService {
 
     fn close_session(
         &self,
-        _credentials: &Credentials,
+        _signed_in: &SignedIn,
         session: &ActiveSession,
     ) -> Result<(), ServiceError> {
         self.delay();
@@ -495,13 +548,15 @@ mod tests {
     #[test]
     fn stub_restores_started_state_and_closes_it() -> Result<(), ServiceError> {
         let service = StubAgentService::new();
-        let credentials = credentials("user");
-        let pending = service.start_ingest(&credentials, "project", "session")?;
+        let signed_in = SignedIn {
+            username: "user".to_owned(),
+        };
+        let pending = service.start_ingest(&signed_in, "project", "session")?;
         let ForegroundSession::Mounted(session) = service.connect()?.foreground else {
             panic!("stub session was not mounted");
         };
         assert_eq!(session.share_id, pending.share_id);
-        service.close_session(&credentials, &session)?;
+        service.close_session(&signed_in, &session)?;
         assert_eq!(service.connect()?.foreground, ForegroundSession::None);
         Ok(())
     }
@@ -514,7 +569,13 @@ mod tests {
             Err(ServiceError::Unauthorized)
         );
         assert!(matches!(
-            service.create_session(&credentials("user"), "project", "forbidden-session"),
+            service.create_session(
+                &SignedIn {
+                    username: "user".to_owned()
+                },
+                "project",
+                "forbidden-session"
+            ),
             Err(ServiceError::Server { status: 400, .. })
         ));
     }

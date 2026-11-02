@@ -5,7 +5,7 @@ use eframe::egui;
 use modama_agent_gui::{
     app::AgentGuiApp,
     pages::{Page, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject},
-    state::{ActiveSession, AgentIdentity, Credentials, ForegroundSession},
+    state::{ActiveSession, AgentIdentity, ForegroundSession, SignedIn},
     styles,
 };
 use modama_common::logging::init_logging;
@@ -101,9 +101,8 @@ fn seed_identity(app: &mut AgentGuiApp) {
 
 fn seed_logged_in(app: &mut AgentGuiApp) {
     seed_identity(app);
-    app.app_state.creds = Some(Credentials {
+    app.app_state.signed_in = Some(SignedIn {
         username: DEFAULT_USERNAME.to_owned(),
-        password: "representative-password".to_owned(),
     });
 }
 
@@ -154,7 +153,7 @@ mod tests {
 
         assert!(matches!(app.page, Page::Connecting(_)));
         assert!(app.app_state.identity.is_none());
-        assert!(app.app_state.creds.is_none());
+        assert!(app.app_state.signed_in.is_none());
         assert_eq!(app.app_state.foreground, ForegroundSession::None);
         Ok(())
     }
@@ -168,7 +167,7 @@ mod tests {
 
         assert!(matches!(app.page, Page::SelectProject(_)));
         assert!(app.app_state.identity.is_some());
-        assert!(app.app_state.creds.is_some());
+        assert!(app.app_state.signed_in.is_some());
         assert_eq!(app.app_state.foreground, ForegroundSession::None);
         Ok(())
     }
@@ -185,7 +184,7 @@ mod tests {
         };
         assert_eq!(page.project, "Test Project");
         assert!(app.app_state.identity.is_some());
-        assert!(app.app_state.creds.is_some());
+        assert!(app.app_state.signed_in.is_some());
         Ok(())
     }
 
@@ -205,7 +204,7 @@ mod tests {
 
         assert!(matches!(app.page, Page::Overview(_)));
         assert!(app.app_state.identity.is_some());
-        assert!(app.app_state.creds.is_some());
+        assert!(app.app_state.signed_in.is_some());
         assert_eq!(
             app.app_state.foreground,
             ForegroundSession::Mounted(ActiveSession {

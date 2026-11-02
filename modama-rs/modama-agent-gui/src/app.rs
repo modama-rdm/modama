@@ -133,20 +133,20 @@ impl AgentGuiApp {
     }
 
     fn project_page(&self) -> Option<Page> {
-        self.app_state.creds.clone().map(|credentials| {
+        self.app_state.signed_in.clone().map(|signed_in| {
             Page::SelectProject(PageSelectProject::with_service(
                 Arc::clone(&self.service),
-                credentials,
+                signed_in,
             ))
         })
     }
 
     fn session_page(&self, project: String) -> Option<Page> {
-        self.app_state.creds.clone().map(|credentials| {
+        self.app_state.signed_in.clone().map(|signed_in| {
             Page::SelectCreateSession(PageSelectCreateSession::with_service(
                 project,
                 Arc::clone(&self.service),
-                credentials,
+                signed_in,
             ))
         })
     }
@@ -166,14 +166,17 @@ impl AgentGuiApp {
                     self.page = self.login_page(LoginDestination::SelectProject);
                 }
             }
-            Action::LoginSuccess { creds, destination } => {
+            Action::LoginSuccess {
+                signed_in,
+                destination,
+            } => {
                 self.toast.clear();
-                self.app_state.creds = Some(creds.clone());
+                self.app_state.signed_in = Some(signed_in.clone());
                 match destination {
                     LoginDestination::SelectProject => {
                         self.page = Page::SelectProject(PageSelectProject::with_service(
                             Arc::clone(&self.service),
-                            creds,
+                            signed_in,
                         ));
                     }
                     LoginDestination::ConfirmClose { share_id } => {
@@ -273,7 +276,8 @@ impl AgentGuiApp {
             }
             Action::LogoutSuccess => {
                 self.toast.clear();
-                self.app_state.creds = None;
+                self.service.logout();
+                self.app_state.signed_in = None;
                 self.page = self.overview_page();
             }
             Action::Connected {
@@ -288,6 +292,22 @@ impl AgentGuiApp {
             }
             Action::TaskFailed(failure) => self.handle_task_failure(failure),
         }
+    }
+
+    /// An authenticated call was refused: the agent or the management API ended the session
+    /// (idle timeout, sign-out elsewhere). Drop it and show the login page.
+    fn check_session_ended(&mut self) {
+        if !self.service.take_session_ended() || self.app_state.signed_in.is_none() {
+            return;
+        }
+        self.app_state.signed_in = None;
+        self.toast.clear();
+        let mut page = PageLogin::with_service_and_destination(
+            Arc::clone(&self.service),
+            LoginDestination::Overview,
+        );
+        page.login_error = Some("Your session has ended. Please sign in again.".to_owned());
+        self.page = Page::Login(page);
     }
 
     fn handle_task_failure(&mut self, failure: TaskFailure) {
@@ -411,6 +431,9 @@ impl eframe::App for AgentGuiApp {
             };
         }
 
+        // before the page sees its failed call: the session ended, so sign in again
+        self.check_session_ended();
+
         // Poll current page for async completions
         let poll_action = self.page.poll();
         self.handle_action(poll_action);
@@ -421,9 +444,9 @@ impl eframe::App for AgentGuiApp {
 
         let username = self
             .app_state
-            .creds
+            .signed_in
             .as_ref()
-            .map(|credentials| credentials.username.clone());
+            .map(|signed_in| signed_in.username.clone());
         let page_busy = self.page.is_busy();
         let show_login_action = !matches!(self.page, Page::Login(_));
         let action = self.top_bar.show_inside(
@@ -484,12 +507,11 @@ impl eframe::App for AgentGuiApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Credentials, OperationId};
+    use crate::state::{OperationId, SignedIn};
 
-    fn credentials() -> Credentials {
-        Credentials {
+    fn signed_in() -> SignedIn {
+        SignedIn {
             username: "user".to_owned(),
-            password: "pass".to_owned(),
         }
     }
 
@@ -507,7 +529,7 @@ mod tests {
         let mut app = AgentGuiApp::new();
 
         app.handle_action(Action::LoginSuccess {
-            creds: credentials(),
+            signed_in: signed_in(),
             destination: LoginDestination::SelectProject,
         });
 
@@ -521,7 +543,7 @@ mod tests {
             crate::state::ForegroundSession::Mounted(mounted_session("share"));
 
         app.handle_action(Action::LoginSuccess {
-            creds: credentials(),
+            signed_in: signed_in(),
             destination: LoginDestination::ConfirmClose {
                 share_id: "share".to_owned(),
             },
@@ -543,7 +565,7 @@ mod tests {
             app.app_state.foreground = foreground;
 
             app.handle_action(Action::LoginSuccess {
-                creds: credentials(),
+                signed_in: signed_in(),
                 destination: LoginDestination::ConfirmClose {
                     share_id: "share".to_owned(),
                 },
@@ -559,7 +581,7 @@ mod tests {
     #[test]
     fn test_create_session_action_logged_out() {
         let mut app = AgentGuiApp::new();
-        assert!(app.app_state.creds.is_none());
+        assert!(app.app_state.signed_in.is_none());
 
         app.handle_action(Action::CreateSession);
         assert!(matches!(app.page, Page::Login(_)));
@@ -568,9 +590,8 @@ mod tests {
     #[test]
     fn test_create_session_action_logged_in() {
         let mut app = AgentGuiApp::new();
-        app.app_state.creds = Some(Credentials {
+        app.app_state.signed_in = Some(SignedIn {
             username: "user".to_string(),
-            password: "pass".to_string(),
         });
 
         app.handle_action(Action::CreateSession);
@@ -580,9 +601,8 @@ mod tests {
     #[test]
     fn test_logout_clears_credentials_and_returns_to_overview_without_closing_session() {
         let mut app = AgentGuiApp::new();
-        app.app_state.creds = Some(Credentials {
+        app.app_state.signed_in = Some(SignedIn {
             username: "user".to_string(),
-            password: "pass".to_string(),
         });
         app.app_state.foreground =
             crate::state::ForegroundSession::Mounted(crate::state::ActiveSession {
@@ -594,12 +614,35 @@ mod tests {
 
         app.handle_action(Action::LogoutSuccess);
 
-        assert!(app.app_state.creds.is_none());
+        assert!(app.app_state.signed_in.is_none());
         assert!(matches!(
             app.app_state.foreground,
             crate::state::ForegroundSession::Mounted(_)
         ));
         assert!(matches!(app.page, Page::Overview(_)));
+    }
+
+    #[test]
+    fn an_ended_session_leads_to_the_login_page() {
+        let service = Arc::new(crate::service::StubAgentService::new());
+        let mut app = AgentGuiApp::with_service_without_monitor(Arc::clone(&service) as _);
+        app.app_state.signed_in = Some(signed_in());
+        app.page = app.overview_page();
+
+        // nothing happened yet:
+        app.check_session_ended();
+        assert!(matches!(app.page, Page::Overview(_)));
+
+        service.end_session();
+        app.check_session_ended();
+        assert!(app.app_state.signed_in.is_none());
+        let Page::Login(page) = &app.page else {
+            panic!("an ended session did not lead to the login page");
+        };
+        assert_eq!(
+            page.login_error.as_deref(),
+            Some("Your session has ended. Please sign in again.")
+        );
     }
 
     #[test]

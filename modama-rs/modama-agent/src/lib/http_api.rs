@@ -1,32 +1,29 @@
 use axum::{
     Json, Router,
     extract::{ConnectInfo, Path, State},
-    response::IntoResponse,
+    http::header,
+    response::{IntoResponse, Response},
     routing::get,
 };
-use axum_extra::{
-    TypedHeader,
-    headers::{Authorization, authorization::Basic},
-    typed_header::TypedHeaderRejection,
-};
 use hyper::StatusCode;
+use log::warn;
 use std::sync::Arc;
-use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
+use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use versioned::{VersionedRouterBuilder, semver::Version, versioned_route, versions};
 
 use crate::{
     caller_scope::ConnInfo,
-    local_http_service::{ApiState, LocalAPIError, get_auth},
+    local_http_service::{ApiState, LocalAPIError},
+    local_session::{
+        CallerSession, MaybeCallerSession, SESSION_COOKIE, expired_session_cookie,
+        with_refreshed_session,
+    },
 };
 
-use modama_common::{
-    foreground::project_and_session,
-    local_api_messages::{
-        APIAgentIdentity, APICreateSessionRequest, APICreateSessionResponse,
-        APICreateShareResponse, APICurrentForegroundShare, APIHealthCheckResponse,
-        APIListProjectsResponse, APIListSessionsResponse, APILoginResponse, APIProjectSummary,
-    },
-    mgmt_client::MgmtClient,
+use modama_common::local_api_messages::{
+    APIAgentIdentity, APICreateSessionRequest, APICreateSessionResponse, APICreateShareResponse,
+    APICurrentForegroundShare, APIHealthCheckResponse, APIListProjectsResponse,
+    APIListSessionsResponse, APILoginRequest, APILoginResponse, APIProjectSummary,
 };
 
 #[utoipa::path(
@@ -78,49 +75,39 @@ async fn api_identity(State(api_state): State<ApiState>) -> Json<APIAgentIdentit
         ("session_name" = String, Path, description = "Session name")
     ),
     responses(
-        (status = 200, description = "Created ingest share", body = APICreateShareResponse),
-        (status = 401, description = "Authentication failed"),
+        (status = 200, description = "The ingest share: a new one, or the caller's open one for this session", body = APICreateShareResponse),
+        (status = 401, description = "Not signed in, or the session has ended"),
+        (status = 403, description = "Not a member of the project"),
         (status = 404, description = "Project or session not found")
     ),
-    security(("basic_auth" = []))
+    security(("session_cookie" = []))
 )]
 async fn api_start_ingest(
     Path((project_name, session_name)): Path<(String, String)>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<impl IntoResponse, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-
-    let c = MgmtClient::new(
-        &agent_state.state.lock().await.config.mgmt_api_url,
-        auth.username(),
-        auth.password(),
-    )?;
-
-    let details = c.project_details(&project_name).await?;
-
-    if !details.datasets.iter().any(|d| d.name == session_name) {
-        return Ok((StatusCode::NOT_FOUND).into_response());
-    }
-
-    let sign_response = agent_state.token_provider.fetch_token().await?;
-    let share = c
-        .create_share(
+    CallerSession(session): CallerSession,
+) -> Result<Response, LocalAPIError> {
+    let sign_response = Arc::clone(&agent_state.token_provider)
+        .fetch_token()
+        .await?;
+    let share = agent_state
+        .mgmt()
+        .await?
+        .open_ingest_share(
+            &session,
             &project_name,
             &session_name,
             &sign_response.resource,
             &sign_response.token,
         )
         .await?;
-
-    let (project, session) = project_and_session(&share.dest_path)?;
-    Ok(Json(APICreateShareResponse {
-        share_id: share.share_id,
-        project,
-        session,
-        dest_path: share.dest_path,
-    })
-    .into_response())
+    let response = Json(APICreateShareResponse {
+        share_id: share.value.share_id,
+        project: share.value.project,
+        session: share.value.session,
+        dest_path: share.value.dest_path,
+    });
+    Ok(with_refreshed_session(share.refreshed, response))
 }
 
 #[utoipa::path(
@@ -132,25 +119,27 @@ async fn api_start_ingest(
         ("share_id" = String, Path, description = "Share identifier")
     ),
     responses(
-        (status = 204, description = "Share deletion accepted"),
-        (status = 401, description = "Authentication failed"),
+        (status = 204, description = "Share closed"),
+        (status = 401, description = "Not signed in, or the session has ended"),
+        (status = 403, description = "The share belongs to someone else"),
         (status = 404, description = "Share not found")
     ),
-    security(("basic_auth" = []))
+    security(("session_cookie" = []))
 )]
 async fn api_delete_share(
     Path(share_id): Path<String>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<StatusCode, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-    let client = MgmtClient::new(
-        &agent_state.state.lock().await.config.mgmt_api_url,
-        auth.username(),
-        auth.password(),
-    )?;
-    client.delete_share(&share_id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    CallerSession(session): CallerSession,
+) -> Result<Response, LocalAPIError> {
+    let closed = agent_state
+        .mgmt()
+        .await?
+        .close_ingest_share(&session, &share_id)
+        .await?;
+    Ok(with_refreshed_session(
+        closed.refreshed,
+        StatusCode::NO_CONTENT,
+    ))
 }
 
 #[utoipa::path(
@@ -158,30 +147,53 @@ async fn api_delete_share(
     path = "/api/login/",
     operation_id = "login",
     params(("X-API-Version" = String, Header, description = "API version")),
+    request_body = APILoginRequest,
     responses(
-        (status = 200, description = "Authenticated user", body = APILoginResponse),
-        (status = 401, description = "Authentication failed")
-    ),
-    security(("basic_auth" = []))
+        (status = 200, description = "Signed in; the session is in the `modama_agent_session` cookie", body = APILoginResponse),
+        (status = 401, description = "Wrong username or password")
+    )
 )]
 async fn api_login(
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
     State(agent_state): State<ApiState>,
-) -> Result<impl IntoResponse, LocalAPIError> {
-    let auth = get_auth(auth).await?;
+    Json(request): Json<APILoginRequest>,
+) -> Result<Response, LocalAPIError> {
+    let (username, session) = agent_state
+        .mgmt()
+        .await?
+        .login(&request.username, &request.password)
+        .await?;
+    Ok(with_refreshed_session(
+        Some(session),
+        Json(APILoginResponse { username }),
+    ))
+}
 
-    let c = MgmtClient::new(
-        &agent_state.state.lock().await.config.mgmt_api_url,
-        auth.username(),
-        auth.password(),
-    )?;
-
-    let _ = c.list_projects().await?;
-
-    Ok(Json(APILoginResponse {
-        username: auth.username().to_owned(),
-    })
-    .into_response())
+#[utoipa::path(
+    post,
+    path = "/api/logout/",
+    operation_id = "logout",
+    params(("X-API-Version" = String, Header, description = "API version")),
+    responses((status = 204, description = "Signed out; the session cookie is removed"))
+)]
+async fn api_logout(
+    State(agent_state): State<ApiState>,
+    MaybeCallerSession(session): MaybeCallerSession,
+) -> Response {
+    if let Some(session) = session {
+        let result = match agent_state.mgmt().await {
+            Ok(mgmt) => mgmt.logout(&session).await.map_err(LocalAPIError::from),
+            Err(error) => Err(error),
+        };
+        // the session is gone here either way; the management API's cookie just expires
+        if let Err(error) = result {
+            warn!("signing out at the management API failed: {error}");
+        }
+    }
+    (
+        StatusCode::NO_CONTENT,
+        [(header::SET_COOKIE, expired_session_cookie())],
+    )
+        .into_response()
 }
 
 #[utoipa::path(
@@ -191,37 +203,29 @@ async fn api_login(
     params(("X-API-Version" = String, Header, description = "API version")),
     responses(
         (status = 200, description = "Available projects", body = APIListProjectsResponse),
-        (status = 401, description = "Authentication failed")
+        (status = 401, description = "Not signed in, or the session has ended")
     ),
-    security(("basic_auth" = []))
+    security(("session_cookie" = []))
 )]
 async fn api_list_projects(
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<impl IntoResponse, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-    let c = MgmtClient::new(
-        &agent_state.state.lock().await.config.mgmt_api_url,
-        auth.username(),
-        auth.password(),
-    )?;
-
-    let projects = c.list_projects().await?;
-
-    let resp = APIListProjectsResponse {
+    CallerSession(session): CallerSession,
+) -> Result<Response, LocalAPIError> {
+    let projects = agent_state.mgmt().await?.projects(&session).await?;
+    let response = Json(APIListProjectsResponse {
         projects: projects
+            .value
             .projects
-            .iter()
+            .into_iter()
             .map(|project| APIProjectSummary {
-                name: project.name.clone(),
-                owner: project.owner.clone(),
-                members: project.members.clone(),
+                name: project.name,
+                owner: project.owner,
+                members: project.members,
                 modified_at: project.mtime as i64,
             })
             .collect(),
-    };
-
-    Ok(Json(resp).into_response())
+    });
+    Ok(with_refreshed_session(projects.refreshed, response))
 }
 
 #[utoipa::path(
@@ -234,31 +238,31 @@ async fn api_list_projects(
     ),
     responses(
         (status = 200, description = "Sessions in the project", body = APIListSessionsResponse),
-        (status = 401, description = "Authentication failed"),
+        (status = 401, description = "Not signed in, or the session has ended"),
         (status = 404, description = "Project not found")
     ),
-    security(("basic_auth" = []))
+    security(("session_cookie" = []))
 )]
 async fn api_list_sessions_in_project(
     Path(project_name): Path<String>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<impl IntoResponse, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-    let c = MgmtClient::new(
-        &agent_state.state.lock().await.config.mgmt_api_url,
-        auth.username(),
-        auth.password(),
-    )?;
-
-    let details = c.project_details(&project_name).await?;
-
-    let resp = APIListSessionsResponse {
-        project: project_name.clone(),
-        sessions: details.datasets.iter().map(|d| d.name.clone()).collect(),
-    };
-
-    Ok(Json(resp).into_response())
+    CallerSession(session): CallerSession,
+) -> Result<Response, LocalAPIError> {
+    let details = agent_state
+        .mgmt()
+        .await?
+        .project(&session, &project_name)
+        .await?;
+    let response = Json(APIListSessionsResponse {
+        project: project_name,
+        sessions: details
+            .value
+            .sessions
+            .into_iter()
+            .map(|session| session.name)
+            .collect(),
+    });
+    Ok(with_refreshed_session(details.refreshed, response))
 }
 
 #[utoipa::path(
@@ -272,32 +276,27 @@ async fn api_list_sessions_in_project(
     request_body = APICreateSessionRequest,
     responses(
         (status = 200, description = "Created session", body = APICreateSessionResponse),
-        (status = 401, description = "Authentication failed"),
+        (status = 401, description = "Not signed in, or the session has ended"),
         (status = 404, description = "Project not found")
     ),
-    security(("basic_auth" = []))
+    security(("session_cookie" = []))
 )]
 async fn api_create_session_in_project(
     Path(project_name): Path<String>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    CallerSession(session): CallerSession,
     Json(create_session_req): Json<APICreateSessionRequest>,
-) -> Result<impl IntoResponse, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-    let c = MgmtClient::new(
-        &agent_state.state.lock().await.config.mgmt_api_url,
-        auth.username(),
-        auth.password(),
-    )?;
-
-    c.create_dataset(&project_name, &create_session_req.session, auth.username())
+) -> Result<Response, LocalAPIError> {
+    let created = agent_state
+        .mgmt()
+        .await?
+        .create_session(&session, &project_name, &create_session_req.session)
         .await?;
-
-    Ok(Json(APICreateSessionResponse {
-        project: project_name.clone(),
-        session: create_session_req.session.clone(),
-    })
-    .into_response())
+    let response = Json(APICreateSessionResponse {
+        project: project_name,
+        session: create_session_req.session,
+    });
+    Ok(with_refreshed_session(created.refreshed, response))
 }
 
 #[utoipa::path(
@@ -337,6 +336,7 @@ fn api_routes() -> VersionedRouterBuilder<ApiState> {
         .route(versions!("1.0.0.."), versioned_route!(api_delete_share))
         .route(versions!("1.0.0.."), versioned_route!(api_health))
         .route(versions!("1.0.0.."), versioned_route!(api_login))
+        .route(versions!("1.0.0.."), versioned_route!(api_logout))
         .route(versions!("1.0.0.."), versioned_route!(api_list_projects))
         .route(
             versions!("1.0.0.."),
@@ -353,8 +353,8 @@ fn customize_openapi(mut openapi: utoipa::openapi::OpenApi) -> utoipa::openapi::
     openapi.info.title = "modama-agent local API".to_owned();
     if let Some(components) = openapi.components.as_mut() {
         components.add_security_scheme(
-            "basic_auth",
-            SecurityScheme::Http(Http::new(HttpAuthScheme::Basic)),
+            "session_cookie",
+            SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new(SESSION_COOKIE))),
         );
     }
     openapi

@@ -8,6 +8,7 @@ pub mod local_http_service;
 pub mod local_net_common;
 pub mod local_net_token_provider;
 pub mod local_net_token_proxy;
+pub mod local_session;
 pub mod message_loop;
 pub mod mgmt_api;
 pub mod mgmt_api_client;

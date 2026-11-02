@@ -35,6 +35,8 @@ use crate::{
     config::{ConfigError, MTLSIdentity},
     events_api::add_internal_api,
     http_api::add_api_routes,
+    local_session::expired_session_cookie,
+    mgmt_api::{MgmtApi, MgmtApiConnection, MgmtApiError},
 };
 
 fn create_env() -> Environment<'static> {
@@ -339,6 +341,7 @@ pub struct ApiState {
     pub token_provider: Arc<dyn TokenProvider + Send + Sync>,
     pub jinja_env: Environment<'static>,
     pub scope_resolver: Arc<dyn ResolveScope>,
+    pub mgmt_api: Arc<MgmtApi>,
 }
 
 impl ApiState {
@@ -351,7 +354,14 @@ impl ApiState {
             token_provider: Arc::clone(token_provider),
             jinja_env: create_env(),
             scope_resolver: Arc::new(PlatformScopeResolver),
+            mgmt_api: Arc::new(MgmtApi::new()),
         }
+    }
+
+    /// mgmtinterface-api below the configured `mgmt_api_url`
+    pub async fn mgmt(&self) -> Result<MgmtApiConnection, LocalAPIError> {
+        let server = self.state.lock().await.config.mgmt_api_url.clone();
+        Ok(self.mgmt_api.connect(&server).await?)
     }
 
     /// Determine the helper scope of the client on the other end of `conn`
@@ -378,6 +388,12 @@ pub enum LocalAPIError {
 
     #[error("authentication failed")]
     Auth,
+
+    #[error("not signed in")]
+    NoSession,
+
+    #[error("management API: {0}")]
+    Mgmt(#[from] MgmtApiError),
 
     #[error("template error: {0}")]
     Template(#[from] minijinja::Error),
@@ -418,6 +434,50 @@ impl IntoResponse for LocalAPIError {
                 [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
             )
                 .into_response(),
+            LocalAPIError::NoSession | LocalAPIError::Mgmt(MgmtApiError::Unauthorized) => (
+                StatusCode::UNAUTHORIZED,
+                [
+                    (header::SET_COOKIE, expired_session_cookie()),
+                    (
+                        header::CONTENT_TYPE,
+                        header::HeaderValue::from_static("text/plain"),
+                    ),
+                ],
+                "not signed in, or the session has ended",
+            )
+                .into_response(),
+            LocalAPIError::Mgmt(MgmtApiError::Forbidden { message, .. }) => (
+                StatusCode::FORBIDDEN,
+                [(header::CONTENT_TYPE, "text/plain")],
+                message,
+            )
+                .into_response(),
+            LocalAPIError::Mgmt(MgmtApiError::Missing { message, .. }) => (
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "text/plain")],
+                message,
+            )
+                .into_response(),
+            // the caller's request was refused, e.g. an invalid session name
+            LocalAPIError::Mgmt(MgmtApiError::Backend { status, message })
+                if (400..500).contains(&status) =>
+            {
+                (
+                    StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    message,
+                )
+                    .into_response()
+            }
+            LocalAPIError::Mgmt(error) => {
+                error!("management API: {error}");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    error.to_string(),
+                )
+                    .into_response()
+            }
             LocalAPIError::BackendAPI(MgmtError::NotFound) => {
                 // FIXME: json/text depending on accept?
                 (
@@ -1347,7 +1407,11 @@ mod tests {
         assert!(paths.contains_key("/api/shares/foreground/"));
         assert!(paths.contains_key("/api/shares/{share_id}/"));
         assert!(got["components"]["schemas"]["APIListProjectsResponse"].is_object());
-        assert!(got["components"]["securitySchemes"]["basic_auth"].is_object());
+        assert!(paths.contains_key("/api/logout/"));
+        assert_eq!(
+            got["components"]["securitySchemes"]["session_cookie"],
+            serde_json::json!({"type": "apiKey", "in": "cookie", "name": "modama_agent_session"})
+        );
     }
 
     #[tokio::test]
@@ -2178,43 +2242,116 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 
-    #[tokio::test]
-    async fn local_api_lists_enriched_projects() {
-        let test_setup = TestSetup::start().await;
-        let projects = ListProjectsResponse {
-            errno: 0,
-            projects: vec![AdhocProject {
-                relpath: "project".to_owned(),
-                name: "Project One".to_owned(),
-                owner: "owner".to_owned(),
-                members: vec!["member".to_owned()],
-                ctime: 10.0,
-                mtime: 1_782_432_123.75,
-                gid: 1000,
-                usage_bytes: None,
-            }],
-        };
+    const UPSTREAM_SESSION: &str = "modama_session=abc";
+
+    /// A mock management API at /mgmt-api, which the agent is pointed at
+    async fn mgmt_api_server(test_setup: &TestSetup) -> mockito::ServerGuard {
         let mut server = mockito::Server::new_async().await;
-        let mock = server
-            .mock("GET", "/api/project/")
-            .match_header("authorization", "Basic dGVzdHVzZXI6cGFzcw==")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&projects).unwrap())
+        server
+            .mock("GET", "/api/versions")
+            .with_status(404)
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/mgmt-api/versions")
+            .with_body(r#"{"supported": [1], "latest": 1, "deprecated": []}"#)
             .create_async()
             .await;
         test_setup.shared_state.lock().await.config.mgmt_api_url =
             Url::parse(&server.url()).unwrap();
+        server
+    }
+
+    /// The `Cookie` header of a caller signed in with `upstream`
+    fn signed_in_cookie(upstream: &str) -> String {
+        let set_cookie = crate::local_session::session_cookie(
+            &crate::mgmt_api::UpstreamSession::from_token(upstream),
+        );
+        set_cookie
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn set_cookies(resp: &axum::response::Response) -> Vec<String> {
+        resp.headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn local_api_login_sets_the_session_cookie() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        let login = server
+            .mock("POST", "/mgmt-api/auth/login")
+            // a normal session, not "keep me logged in": agents run on shared computers
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "username": "testuser", "password": "pass",
+            })))
+            .with_header(
+                "set-cookie",
+                "modama_session=abc; HttpOnly; Path=/; SameSite=lax",
+            )
+            .with_body(r#"{"username": "testuser", "persistent": false}"#)
+            .create_async()
+            .await;
+        let req = Request::builder()
+            .uri("/api/login/")
+            .method("POST")
+            .header("X-API-Version", "1.0.0")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"username": "testuser", "password": "pass"}"#,
+            ))
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let cookies = set_cookies(&resp);
+        assert_eq!(cookies.len(), 1);
+        assert!(cookies[0].starts_with(&signed_in_cookie(UPSTREAM_SESSION)));
+        assert!(cookies[0].contains("HttpOnly"));
+        assert!(cookies[0].contains("SameSite=Strict"));
+        assert!(!cookies[0].contains("Max-Age"));
+        let got: Value =
+            serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(got["username"], "testuser");
+        login.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn local_api_lists_enriched_projects() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        let mock = server
+            .mock("GET", "/mgmt-api/projects")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"projects": [{"relpath": "project", "name": "Project One",
+                    "owner": "owner", "members": ["member"], "ctime": 10.0,
+                    "mtime": 1782432123.75, "gid": 1000, "usage_bytes": null}]}"#,
+            )
+            .create_async()
+            .await;
         let req = Request::builder()
             .uri("/api/projects/")
             .method("GET")
             .header("X-API-Version", "1.0.0")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
             .body(Body::empty())
             .unwrap();
 
         let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+        // the management API didn't re-issue the session, so neither does the agent:
+        assert!(set_cookies(&resp).is_empty());
         let got: Value =
             serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
         assert_eq!(got["projects"][0]["name"], "Project One");
@@ -2225,24 +2362,127 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_api_deletes_share_without_returning_management_body() {
+    async fn a_reissued_management_session_is_passed_on_to_the_caller() {
         let test_setup = TestSetup::start().await;
-        let mut server = mockito::Server::new_async().await;
-        let mock = server
-            .mock("DELETE", "/api/share/share-123/")
-            .match_header("authorization", "Basic dGVzdHVzZXI6cGFzcw==")
-            .with_status(200)
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("GET", "/mgmt-api/projects/p")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_header(
+                "set-cookie",
+                "modama_session=def; HttpOnly; Path=/; SameSite=lax",
+            )
             .with_header("content-type", "application/json")
-            .with_body(r#"{"status":"ok"}"#)
+            .with_body(
+                r#"{"name": "p", "owner": "o", "members": [], "ctime": 1.0, "mtime": 2.0,
+                    "gid": 1, "relpath": "adhoc/p", "usage_bytes": null,
+                    "sessions": [{"name": "s", "immutable": false, "ctime": 1.0, "mtime": 2.0}]}"#,
+            )
             .create_async()
             .await;
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
+        let req = Request::builder()
+            .uri("/api/projects/p/sessions/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let cookies = set_cookies(&resp);
+        assert_eq!(cookies.len(), 1);
+        assert!(cookies[0].starts_with(&signed_in_cookie("modama_session=def")));
+    }
+
+    #[tokio::test]
+    async fn an_ended_management_session_ends_the_local_one() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("GET", "/mgmt-api/projects")
+            .with_status(401)
+            .with_body(r#"{"code": "not_authenticated", "message": "Please sign in."}"#)
+            .create_async()
+            .await;
+        let req = Request::builder()
+            .uri("/api/projects/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        // no browser login popup, but the stale cookie goes:
+        assert!(resp.headers().get(header::WWW_AUTHENTICATE).is_none());
+        assert!(set_cookies(&resp)[0].contains("Max-Age=0"));
+    }
+
+    #[tokio::test]
+    async fn closing_someone_elses_share_is_forbidden_with_the_reason() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("DELETE", "/mgmt-api/ingest-shares/theirs")
+            .with_status(403)
+            .with_body(r#"{"code": "not_share_owner", "message": "Only the owner can close it."}"#)
+            .create_async()
+            .await;
+        let req = Request::builder()
+            .uri("/api/shares/theirs/")
+            .method("DELETE")
+            .header("X-API-Version", "1.0.0")
+            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&body[..], b"Only the owner can close it.");
+    }
+
+    #[tokio::test]
+    async fn local_api_logout_signs_out_and_removes_the_cookie() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        let logout = server
+            .mock("POST", "/mgmt-api/auth/logout")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_status(204)
+            .create_async()
+            .await;
+        let req = Request::builder()
+            .uri("/api/logout/")
+            .method("POST")
+            .header("X-API-Version", "1.0.0")
+            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(set_cookies(&resp)[0].contains("Max-Age=0"));
+        logout.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn local_api_deletes_share_without_returning_management_body() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        let mock = server
+            .mock("DELETE", "/mgmt-api/ingest-shares/share-123")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_status(204)
+            .create_async()
+            .await;
         let req = Request::builder()
             .uri("/api/shares/share-123/")
             .method("DELETE")
             .header("X-API-Version", "1.0.0")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
             .body(Body::empty())
             .unwrap();
 
@@ -2262,61 +2502,28 @@ mod tests {
     #[tokio::test]
     async fn local_api_start_response_contains_only_safe_share_metadata() {
         let test_setup = TestSetup::start().await;
-        let project = AdhocProject {
-            relpath: "project".to_owned(),
-            name: "project".to_owned(),
-            owner: "testuser".to_owned(),
-            members: vec!["testuser".to_owned()],
-            ctime: 0.0,
-            mtime: 0.0,
-            gid: 1000,
-            usage_bytes: None,
-        };
-        let details = ProjectDetailsResponse {
-            errno: 0,
-            project,
-            datasets: vec![DataInProject {
-                name: "session".to_owned(),
-                immutable: false,
-                ctime: 0.0,
-                mtime: 0.0,
-            }],
-        };
-        let share = messages::Share {
-            resource: Some("resource".to_owned()),
-            share_id: "share-123".to_owned(),
-            share_name: "share-name".to_owned(),
-            dest_path: "/adhoc/project/session/".to_owned(),
-            created_timestamp: 0,
-            username: "temporary-user".to_owned(),
-            password: "temporary-secret".to_owned(),
-            uid: 1000,
-            gid: 1000,
-            created_by: None,
-        };
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/api/project/project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&details).unwrap())
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/api/share/")
+        let mut server = mgmt_api_server(&test_setup).await;
+        let open = server
+            .mock("POST", "/mgmt-api/ingest-shares")
             .match_header("x-agent-token", "dummy-token")
-            .with_status(200)
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_status(201)
             .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&share).unwrap())
+            .with_body(
+                r#"{"share_id": "share-123", "share_name": "share-name",
+                    "project": "project", "session": "session",
+                    "dest_path": "/adhoc/project/session/", "created_timestamp": 0,
+                    "username": "temporary-user", "password": "temporary-secret",
+                    "uid": 1000, "gid": 1000, "resource": "resource",
+                    "created_by": "testuser", "smb_host": "host", "workgroup": "W"}"#,
+            )
             .create_async()
             .await;
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
         let req = Request::builder()
             .uri("/api/projects/project/sessions/session/start-ingest/")
             .method("POST")
             .header("X-API-Version", "1.0.0")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
+            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
             .body(Body::empty())
             .unwrap();
 
@@ -2331,6 +2538,7 @@ mod tests {
         assert!(got.get("username").is_none());
         assert!(got.get("password").is_none());
         assert!(got.get("share").is_none());
+        open.assert_async().await;
     }
 
     #[tokio::test]

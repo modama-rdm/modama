@@ -6,7 +6,7 @@ use modama_agent_gui::{
     guide_screenshots::VIEWPORT,
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
-    state::{ActiveSession, Credentials, ForegroundSession, PendingSession},
+    state::{ActiveSession, ForegroundSession, PendingSession, SignedIn},
     styles,
 };
 use std::sync::{Arc, Barrier};
@@ -47,9 +47,8 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
         let mut app = AgentGuiApp::new();
         app.page = Page::Overview(PageOverview::new());
         if logged_in {
-            app.app_state.creds = Some(Credentials {
+            app.app_state.signed_in = Some(SignedIn {
                 username: "representative.user".to_string(),
-                password: "representative-password".to_string(),
             });
             app.app_state.foreground = ForegroundSession::Mounted(ActiveSession {
                 share_id: "representative-share".to_owned(),
@@ -74,7 +73,7 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
 
 fn active_logged_out_harness() -> Harness<'static, AgentGuiApp> {
     let mut harness = overview_harness(false, true);
-    harness.state_mut().app_state.creds = None;
+    harness.state_mut().app_state.signed_in = None;
     harness.run_steps(1);
     harness
 }
@@ -301,9 +300,8 @@ fn error_toast_aligns_with_the_app_shell_geometry() {
 #[test]
 fn error_toast_retry_routes_back_to_the_failed_selection_page() {
     let mut harness = overview_harness(false, false);
-    harness.state_mut().app_state.creds = Some(Credentials {
+    harness.state_mut().app_state.signed_in = Some(SignedIn {
         username: "representative.user".to_owned(),
-        password: "representative-password".to_owned(),
     });
     harness.state_mut().toast.show_error(
         "Could not load projects.".to_owned(),
@@ -423,9 +421,8 @@ fn logged_out_close_authenticates_before_showing_confirmation() {
 
     if let Page::Login(login) = &mut harness.state_mut().page {
         login.login_task = AsyncState::Ready {
-            payload: Ok(Credentials {
+            payload: Ok(SignedIn {
                 username: "representative.user".to_owned(),
-                password: "representative-password".to_owned(),
             }),
         };
     }

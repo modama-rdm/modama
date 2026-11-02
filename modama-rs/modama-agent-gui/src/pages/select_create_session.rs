@@ -26,7 +26,7 @@ use crate::{
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},
-    state::{Credentials, OperationId, PendingSession},
+    state::{OperationId, PendingSession, SignedIn},
     styles,
 };
 
@@ -72,7 +72,7 @@ pub struct PageSelectCreateSession {
     focused_session: RovingListState,
     focus_target: SessionFocusTarget,
     service: Arc<dyn AgentService>,
-    credentials: Box<Credentials>,
+    signed_in: SignedIn,
     /// Operation identity paired with the public async task fields in test fixtures.
     pub start_operation_id: Option<OperationId>,
     started_action: Option<Box<Action>>,
@@ -83,9 +83,8 @@ impl PageSelectCreateSession {
         Self::with_service(
             project,
             StubAgentService::shared(),
-            Credentials {
+            SignedIn {
                 username: "representative.user".to_owned(),
-                password: "representative-password".to_owned(),
             },
         )
     }
@@ -93,7 +92,7 @@ impl PageSelectCreateSession {
     pub fn with_service(
         project: String,
         service: Arc<dyn AgentService>,
-        credentials: Credentials,
+        signed_in: SignedIn,
     ) -> Self {
         let session_date = today();
         Self {
@@ -110,7 +109,7 @@ impl PageSelectCreateSession {
             focused_session: RovingListState::default(),
             focus_target: SessionFocusTarget::ExistingList,
             service,
-            credentials: Box::new(credentials),
+            signed_in,
             start_operation_id: None,
             started_action: None,
         }
@@ -121,10 +120,10 @@ impl PageSelectCreateSession {
         if self.sessions_task.is_idle() && self.available_sessions.is_empty() {
             let project = self.project.clone();
             let service = Arc::clone(&self.service);
-            let credentials = self.credentials.clone();
+            let signed_in = self.signed_in.clone();
             let ctx = ui.ctx().clone();
             self.sessions_task
-                .spawn(move || service.list_sessions(&credentials, &project), ctx);
+                .spawn(move || service.list_sessions(&signed_in, &project), ctx);
         }
 
         if let Some(stage) = flow_navigation(ui, FlowStage::Session, !self.is_busy()) {
@@ -398,9 +397,9 @@ impl PageSelectCreateSession {
             let project = self.project.clone();
             self.record_start(project.clone(), session.clone());
             let service = Arc::clone(&self.service);
-            let credentials = self.credentials.clone();
+            let signed_in = self.signed_in.clone();
             self.create_ingest_task.spawn(
-                move || service.start_ingest(&credentials, &project, &session),
+                move || service.start_ingest(&signed_in, &project, &session),
                 ctx,
             );
         }
@@ -535,9 +534,9 @@ impl PageSelectCreateSession {
         self.create_ingest_task.reset();
         self.record_start(project.clone(), session.clone());
         let service = Arc::clone(&self.service);
-        let credentials = self.credentials.clone();
+        let signed_in = self.signed_in.clone();
         self.create_ingest_task.spawn(
-            move || service.start_ingest(&credentials, &project, &session),
+            move || service.start_ingest(&signed_in, &project, &session),
             ctx,
         );
         self.take_started_action()
@@ -575,14 +574,14 @@ impl PageSelectCreateSession {
         self.record_start(project.clone(), session.clone());
         self.create_session_task.reset();
         let service = Arc::clone(&self.service);
-        let credentials = self.credentials.clone();
+        let signed_in = self.signed_in.clone();
         self.create_session_task.spawn(
             move || {
                 service
-                    .create_session(&credentials, &project, &session)
+                    .create_session(&signed_in, &project, &session)
                     .map_err(|error| CreateSessionError::Server(error.to_string()))?;
                 service
-                    .start_ingest(&credentials, &project, &session)
+                    .start_ingest(&signed_in, &project, &session)
                     .map_err(|error| CreateSessionError::Start(error.to_string()))
             },
             ctx,

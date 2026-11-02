@@ -107,9 +107,19 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APILoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "Authenticated user",
+            "description": "Signed in; the session is in the `modama_agent_session` cookie",
             "content": {
               "application/json": {
                 "schema": {
@@ -129,14 +139,41 @@
             }
           },
           "401": {
-            "description": "Authentication failed"
+            "description": "Wrong username or password"
           }
         },
-        "security": [
+        "x-introduced-in-version": "1.0.0"
+      }
+    },
+    "/api/logout/": {
+      "post": {
+        "operationId": "logout",
+        "parameters": [
           {
-            "basic_auth": []
+            "name": "X-API-Version",
+            "in": "header",
+            "description": "API version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
+        "responses": {
+          "204": {
+            "description": "Signed out; the session cookie is removed"
+          },
+          "400": {
+            "description": "Version negotiation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersioningError"
+                }
+              }
+            }
+          }
+        },
         "x-introduced-in-version": "1.0.0"
       }
     },
@@ -176,12 +213,12 @@
             }
           },
           "401": {
-            "description": "Authentication failed"
+            "description": "Not signed in, or the session has ended"
           }
         },
         "security": [
           {
-            "basic_auth": []
+            "session_cookie": []
           }
         ],
         "x-introduced-in-version": "1.0.0"
@@ -232,7 +269,7 @@
             }
           },
           "401": {
-            "description": "Authentication failed"
+            "description": "Not signed in, or the session has ended"
           },
           "404": {
             "description": "Project not found"
@@ -240,7 +277,7 @@
         },
         "security": [
           {
-            "basic_auth": []
+            "session_cookie": []
           }
         ],
         "x-introduced-in-version": "1.0.0"
@@ -299,7 +336,7 @@
             }
           },
           "401": {
-            "description": "Authentication failed"
+            "description": "Not signed in, or the session has ended"
           },
           "404": {
             "description": "Project not found"
@@ -307,7 +344,7 @@
         },
         "security": [
           {
-            "basic_auth": []
+            "session_cookie": []
           }
         ],
         "x-introduced-in-version": "1.0.0"
@@ -347,7 +384,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Created ingest share",
+            "description": "The ingest share: a new one, or the caller's open one for this session",
             "content": {
               "application/json": {
                 "schema": {
@@ -367,7 +404,10 @@
             }
           },
           "401": {
-            "description": "Authentication failed"
+            "description": "Not signed in, or the session has ended"
+          },
+          "403": {
+            "description": "Not a member of the project"
           },
           "404": {
             "description": "Project or session not found"
@@ -375,7 +415,7 @@
         },
         "security": [
           {
-            "basic_auth": []
+            "session_cookie": []
           }
         ],
         "x-introduced-in-version": "1.0.0"
@@ -446,7 +486,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Share deletion accepted"
+            "description": "Share closed"
           },
           "400": {
             "description": "Version negotiation failed",
@@ -459,7 +499,10 @@
             }
           },
           "401": {
-            "description": "Authentication failed"
+            "description": "Not signed in, or the session has ended"
+          },
+          "403": {
+            "description": "The share belongs to someone else"
           },
           "404": {
             "description": "Share not found"
@@ -467,7 +510,7 @@
         },
         "security": [
           {
-            "basic_auth": []
+            "session_cookie": []
           }
         ],
         "x-introduced-in-version": "1.0.0"
@@ -740,8 +783,25 @@
           }
         }
       },
+      "APILoginRequest": {
+        "type": "object",
+        "description": "Sign in with the management interface's username and password",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "APILoginResponse": {
         "type": "object",
+        "description": "Answer to a successful sign-in; the session itself travels in the `modama_agent_session`\ncookie",
         "required": [
           "username"
         ],
@@ -877,9 +937,10 @@
       }
     },
     "securitySchemes": {
-      "basic_auth": {
-        "type": "http",
-        "scheme": "basic"
+      "session_cookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "modama_agent_session"
       }
     }
   }

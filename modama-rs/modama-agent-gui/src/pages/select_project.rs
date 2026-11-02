@@ -24,7 +24,7 @@ use crate::{
         page_heading,
     },
     service::{AgentService, ServiceError, StubAgentService},
-    state::Credentials,
+    state::SignedIn,
     styles,
 };
 
@@ -57,7 +57,7 @@ pub struct PageSelectProject {
     focused_project: RovingListState,
     focus_search_on_entry: bool,
     service: Arc<dyn AgentService>,
-    credentials: Credentials,
+    signed_in: SignedIn,
 }
 
 impl Default for PageSelectProject {
@@ -70,14 +70,13 @@ impl PageSelectProject {
     pub fn new() -> Self {
         Self::with_service(
             StubAgentService::shared(),
-            Credentials {
+            SignedIn {
                 username: "representative.user".to_owned(),
-                password: "representative-password".to_owned(),
             },
         )
     }
 
-    pub fn with_service(service: Arc<dyn AgentService>, credentials: Credentials) -> Self {
+    pub fn with_service(service: Arc<dyn AgentService>, signed_in: SignedIn) -> Self {
         Self {
             selected_project: None,
             projects_task: AsyncState::Idle,
@@ -87,7 +86,7 @@ impl PageSelectProject {
             focused_project: RovingListState::default(),
             focus_search_on_entry: true,
             service,
-            credentials,
+            signed_in,
         }
     }
 
@@ -110,9 +109,9 @@ impl PageSelectProject {
         if self.projects_task.is_idle() && self.available_projects.is_empty() {
             let ctx = ui.ctx().clone();
             let service = Arc::clone(&self.service);
-            let credentials = self.credentials.clone();
+            let signed_in = self.signed_in.clone();
             self.projects_task
-                .spawn(move || service.list_projects(&credentials), ctx);
+                .spawn(move || service.list_projects(&signed_in), ctx);
         }
     }
 

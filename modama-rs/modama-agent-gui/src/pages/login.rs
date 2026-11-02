@@ -10,7 +10,7 @@ use crate::{
         forms::labeled_text_input,
     },
     service::{AgentService, ServiceError, StubAgentService},
-    state::Credentials,
+    state::{Credentials, SignedIn},
     styles,
 };
 
@@ -21,9 +21,8 @@ pub struct LoginRequest {
 }
 
 impl LoginRequest {
-    pub fn execute(&self) -> Result<Credentials, ServiceError> {
-        self.service.login(&self.credentials)?;
-        Ok(self.credentials.clone())
+    pub fn execute(&self) -> Result<SignedIn, ServiceError> {
+        self.service.login(&self.credentials)
     }
 }
 
@@ -31,7 +30,7 @@ pub struct PageLogin {
     pub username: String,
     pub password: String,
     pub login_error: Option<String>,
-    pub login_task: AsyncState<Result<Credentials, ServiceError>>,
+    pub login_task: AsyncState<Result<SignedIn, ServiceError>>,
     service: Arc<dyn AgentService>,
     focus_username_on_entry: bool,
     destination: LoginDestination,
@@ -180,9 +179,9 @@ impl PageLogin {
             Ok(task) => {
                 if let Some(res) = task.take_ready() {
                     match res {
-                        Ok(creds) => {
+                        Ok(signed_in) => {
                             return Action::LoginSuccess {
-                                creds,
+                                signed_in,
                                 destination: self.destination.clone(),
                             };
                         }
@@ -298,13 +297,18 @@ mod tests {
 
         assert_eq!(page.poll(), Action::None);
 
-        let creds = Credentials {
+        let signed_in = SignedIn {
             username: "user".to_owned(),
-            password: "pass".to_owned(),
         };
         page.login_task = AsyncState::Ready {
-            payload: Ok(creds.clone()),
+            payload: Ok(signed_in.clone()),
         };
-        assert_eq!(page.poll(), Action::LoginSuccess { creds, destination });
+        assert_eq!(
+            page.poll(),
+            Action::LoginSuccess {
+                signed_in,
+                destination
+            }
+        );
     }
 }
