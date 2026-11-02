@@ -15,7 +15,8 @@ To understand how `modama-agent` works, let's first define some terms and compon
 
 There can be multiple `modama-agent` instances running per [resource](#resource), which can cooperatively provide data ingest services on all data generating systems belonging to the resource.
 
-Part of `modama-agent` is a session helper, which runs for each login session (this includes desktop sessions and remote/RDP/SSH sessions, as far as possible). The session helper takes care of mounting the ingest share in the user's context, and umounting it at the end of the session.
+To support `modama-agent`, two more applications exist: `modama-agent-gui` and `modama-session-helper`. They
+run in a user's session, under their uid, and ensure the user has access to the current ingest shares.
 
 ### `resource`
 
@@ -190,13 +191,20 @@ otherwise you may get a `KeyMismatch` error!
 
 The configuration is read from the following locations:
 
-- Linux: `~/.config/modama-agent/modama-agent.toml`
+- Linux: `~/.config/modama-agent/modama-agent.toml` or `/etc/modama-agent.toml`
 
 TODO: add system-wide locations, and other platforms
 
 #### Linux
 
-On Linux, the service can be automatically managed by systemd. An example systemd unit follows:
+`modama-agent` needs some packages installed on the system to fully function:
+
+- `gvfs-backends` and `gvfs-fuse` for mounting SMB ingest shares
+- For the GUI and session helper, `glib2.0` needs to be installed (for talking to dbus)
+
+Distributions as old as Ubuntu 18.04, Debian 10 or RHEL 8 should be supported, as should anything newer.
+
+On Linux, the `modama-agent` service can be automatically managed by systemd. An example systemd unit follows:
 
 ```
 [Unit]
@@ -221,6 +229,27 @@ Save this file as `/etc/systemd/system/modama-agent.service`, enable and start t
 systemctl enable modama-agent
 systemctl start modama-agent
 ```
+
+If you would like to automatically start session helper services for each user,
+you can also do this via systemd, using the following configuration:
+
+
+```
+[Unit]
+Description=Modama session helper (mounts ingest shares)
+
+[Service]
+ExecStart=/usr/local/bin/modama-agent-gui --agent-url http://localhost:3003/ session-helper
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Together with `modama-agent`, this will automatically mount ingest shares for all users.
+Save this file as `/etc/systemd/user/modama-session-helper.service` and run
+`systemctl --global enable modama-session-helper.service` to enable it for all users.
 
 #### Windows
 
