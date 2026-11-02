@@ -21,10 +21,21 @@ class ShareClient:
         return None
 
     def create(
-        self, dest_path: str, uid: int, gid: int, resource: str | None = None
+        self,
+        dest_path: str,
+        uid: int,
+        gid: int,
+        resource: str | None = None,
+        created_by: str | None = None,
     ) -> CreateShareResponse:
         url = _make_url(self._base_url, "/share/")
-        payload = {"dest_path": dest_path, "uid": uid, "gid": gid, "resource": resource}
+        payload = {
+            "dest_path": dest_path,
+            "uid": uid,
+            "gid": gid,
+            "resource": resource,
+            "created_by": created_by,
+        }
         resp = requests.post(url, json=payload, auth=self.auth)
         if not resp.ok:
             raise RuntimeError(

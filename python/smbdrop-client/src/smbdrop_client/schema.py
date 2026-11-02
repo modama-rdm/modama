@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 CREATE_SHARE_REQUEST_SCHEMA = {
     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -24,6 +24,10 @@ CREATE_SHARE_REQUEST_SCHEMA = {
             "type": "string",
             "description": "The name of the resource this share belongs to",
         },
+        "created_by": {
+            "type": ["string", "null"],
+            "description": "Login name of the user who asked for the share",
+        },
     },
     "required": ["dest_path"],
 }
@@ -34,6 +38,7 @@ class CreateShareRequest(TypedDict):
     uid: int
     gid: int
     resource: str | None
+    created_by: NotRequired[str | None]
 
 
 class SerializedShare(TypedDict):
@@ -51,6 +56,10 @@ class SerializedShare(TypedDict):
     # mapped to this unix user:
     uid: int
     gid: int
+
+    # login name of the user who created the share; missing or None for shares
+    # created before smbdrop recorded it:
+    created_by: NotRequired[str | None]
 
 
 class DeleteShareResponse(TypedDict):
