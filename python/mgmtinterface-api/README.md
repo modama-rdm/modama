@@ -392,6 +392,17 @@ python3 -m venv /tmp/venv
 cd python/mgmtinterface-api && /tmp/venv/bin/pytest tests
 ```
 
+## OpenAPI snapshot
+
+`openapi.json` in this directory is the committed OpenAPI document.
+modama-agent generates its client for this API from it, so a Rust build does
+not need Python. `tests/test_openapi.py` fails while the file is out of date.
+After changing the API, regenerate it:
+
+```
+cd python/mgmtinterface-api && /tmp/venv/bin/python -m mgmtinterface_api.openapi_snapshot openapi.json
+```
+
 ## Local stack
 
 `docker-compose.override.yml` bind-mounts this directory into the container and

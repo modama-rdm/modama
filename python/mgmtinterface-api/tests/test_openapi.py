@@ -8,10 +8,11 @@ while the test suite stayed green. The tests cover the parts a client author
 depends on, not the whole schema.
 """
 
+from pathlib import Path
 from typing import Any
 
 import pytest
-from mgmtinterface_api import API_PREFIX, create_app
+from mgmtinterface_api import API_PREFIX, create_app, openapi_snapshot
 from mgmtinterface_api.config import Settings
 from mgmtinterface_api.security import CSRF_ERROR_RESPONSES
 from mgmtinterface_api.versioning import (
@@ -325,3 +326,13 @@ def test_document_is_stable_across_calls(settings: Settings):
     """
     app = create_app(settings)
     assert app.openapi() == app.openapi()
+
+
+def test_committed_snapshot_is_current():
+    """
+    modama-agent generates its client from the committed `openapi.json`.
+    Regenerate it with
+    `python -m mgmtinterface_api.openapi_snapshot openapi.json`.
+    """
+    committed = Path(__file__).parent.parent / "openapi.json"
+    assert committed.read_text(encoding="utf-8") == openapi_snapshot.render()

@@ -1,0 +1,2542 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "modama API",
+    "summary": "Management interface API for the ER-C data management system.",
+    "description": "The API behind the new management interface. The legacy `/api/` endpoints are\na separate API, which stays frozen for existing clients.\n\n### Versioning\n\nEvery request must state the contract version it was written against, as a bare\ninteger in the `X-Modama-API-Version` header. There is no default: a request\nwithout the header is rejected, so a deploy cannot silently move an installed\nclient onto a newer contract. Currently supported: 1.\n\nThe resolved version is echoed on the response, together with\n`X-Modama-API-Versions-Supported`. A deprecated version is announced with\n`Deprecation` and `Sunset` headers before it is switched off. `GET /versions`\nlists the same information and can be called before pinning a version.\n\n### Errors\n\nErrors use HTTP status codes with a body of `{\"code\", \"message\"}`. Clients\ncan branch on `code`, which is stable; `message` is meant for display. The one\nexception is HTTP 422, which carries FastAPI's own field-level `detail` list for\na malformed request body.\n\n### Authentication\n\n`POST /auth/login` sets an `HttpOnly` session cookie, which the browser sends\nback automatically. A session ends after a period of inactivity and after an\nabsolute limit; `\"persistent\": true` on login drops the idle timeout in exchange\nfor a longer absolute limit (\"keep me logged in\"). State-changing requests are\nalso checked against the request `Origin`. Endpoints that need a session are\nmarked with a lock below.\n\n### Creating things\n\nThe `POST` endpoints that create a project, a session or an ingest share are\nidempotent: the first request answers `201` with the new resource, and a repeat\nof the same request answers `200` with the existing one instead of an error. A\nclient that lost a response to a flaky network can therefore simply send the\nrequest again. The only conflict (`409`) is a project of the same name that\nbelongs to someone else.\n\n### Changing things\n\n`PUT /projects/{project}/members` takes the complete member list wanted,\nnot operations; the API works out what to add and remove, so a retry is safe.\nSealing a session that is sealed already answers `200` with the session as it\nis. `DELETE /ingest-shares/{share_id}` answers `204`, and `404` once the\nshare is gone.\n\n### Slow calls\n\n`GET /projects/{project}/usage` runs `du` over the project and can take a\nminute on a large one. Nothing else waits for it: the project details answer\nwith `usage_bytes` null.\n\n### Browsing\n\n`GET /browse?path=…` lists a folder of the data tree one page at a time:\n`entries` holds up to `limit` of them (200 by default, 1000 at most), folders\nfirst and then by name, and `next_cursor` fetches the page after it, until it\nis null. The cursor marks the last entry seen rather than an offset, so an\nentry added or removed while paging neither repeats nor hides another. The\nlisting is made as the signed-in user and shows what that user may see.",
+    "version": "1"
+  },
+  "paths": {
+    "/mgmt-api/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign in and receive a session cookie",
+        "description": "Sign in. A normal session ends after a period of inactivity and after an\nabsolute limit. With `persistent: true` there is no idle timeout and the\nabsolute limit is the longer, persistent one.",
+        "operationId": "login_mgmt_api_auth_login_post",
+        "parameters": [
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected: the request came from another origin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong username or password.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed attempts for this username. `Retry-After` says how long to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Clear the session cookie",
+        "operationId": "logout_mgmt_api_auth_logout_post",
+        "parameters": [
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected: the request came from another origin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/auth/session": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "The signed-in user",
+        "description": "The signed-in user, or 401 when there is no valid session.",
+        "operationId": "read_session_mgmt_api_auth_session_get",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/projects": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "List every project",
+        "description": "All projects, unfiltered, like the legacy endpoint.\n\nGrouping into own/member/other happens in the client, and access is\nenforced by the file system rather than by hiding rows here. This changes\nwith private projects (Theme D), which need a filtered query.",
+        "operationId": "read_projects_mgmt_api_projects_get",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Create a project, or return it if it already exists",
+        "description": "Create an ad-hoc project owned by the signed-in user.\n\nIdempotent: sending the same request again answers 200 with the existing\nproject instead of an error, so a client that lost the first response can\nsimply retry. Only a project that belongs to someone else is a conflict.\nThe existing project is returned as it is; changing its members is a\nseparate operation.",
+        "operationId": "add_project_mgmt_api_projects_post",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The permissions service refused the project. `message` says why, for example a name that collides with a Unix group, or an account that may not create projects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "A project of that name already exists and belongs to you. It is returned unchanged; the members in the request are not applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected: the request came from another origin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A project of that name exists and belongs to someone else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/projects/{project}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "A project with its sessions",
+        "description": "One project and the sessions in it, readable by anyone signed in, like the\nlist. Access to the data is enforced by the file system, not by hiding the\nproject here.\n\n`usage_bytes` is null: the size needs a `du` over the project, which can\ntake a minute on a large one, so it has its own endpoint.",
+        "operationId": "read_project_mgmt_api_projects__project__get",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the project.",
+              "title": "Project"
+            },
+            "description": "Name of the project."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no project of that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/projects/{project}/usage": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "The disk usage of a project",
+        "description": "The size of the project folder. Slow: the permissions service runs `du`\nover the whole project, so call this after the details, not instead.",
+        "operationId": "read_project_usage_mgmt_api_projects__project__usage_get",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the project.",
+              "title": "Project"
+            },
+            "description": "Name of the project."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectUsage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no project of that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/projects/{project}/members": {
+      "put": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Set the members of a project",
+        "description": "Replace the members of a project with the given list.\n\nThe API works out who to add and who to remove against the current\nmembers, so the client sends the list it wants rather than operations.\nSending the same list again changes nothing and answers with the project\nas it is, which also makes a retry after a lost or partial answer safe:\nthe difference is computed afresh each time. The owner is a member\nwhatever the list says and is never added or removed.",
+        "operationId": "set_members_mgmt_api_projects__project__members_put",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the project.",
+              "title": "Project"
+            },
+            "description": "Name of the project."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMembersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The permissions service refused the change; `message` says why. `members_rejected` means nothing was changed. `members_partially_changed` means the new members were added but the dropped ones could not be removed; the message names both. Sending the request again applies what is still missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the owner of a project can change its members.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no project of that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "List every user",
+        "description": "Every account that may use the system, for picking the members of a\nproject. Unfiltered, like the legacy endpoint; narrowing happens in the\nclient.",
+        "operationId": "read_users_mgmt_api_users_get",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/projects/{project}/sessions": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Create a session in a project, or return it if it already exists",
+        "description": "Create a session folder in a project, as the signed-in user.\n\nIdempotent: a session that already exists is answered with 200 and its\ncurrent state instead of an error, so a client that lost the first\nresponse can simply retry. A session has no owner of its own; any member\nof the project gets the existing one back.",
+        "operationId": "add_session_mgmt_api_projects__project__sessions_post",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the project.",
+              "title": "Project"
+            },
+            "description": "Name of the project."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The permissions service refused the session. `message` says why; it is the error of the `mkdir` run as the signed-in user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "A session of that name already exists in the project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The signed-in user is neither owner nor member of the project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no project of that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/projects/{project}/sessions/{session}/seal": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Seal a session: make its raw data read-only for good",
+        "description": "Make the `raw/` folder of a session and everything in it immutable. This\ncannot be undone through the API.\n\nIdempotent: a session that is already sealed is answered with 200 and its\ncurrent state, without asking the permissions service again. The rest of\nthe session folder stays writable; only `raw/` is sealed.",
+        "operationId": "seal_mgmt_api_projects__project__sessions__session__seal_post",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the project.",
+              "title": "Project"
+            },
+            "description": "Name of the project."
+          },
+          {
+            "name": "session",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Name of the session, URL-encoded where needed; spaces and dots are allowed in session names.",
+              "title": "Session"
+            },
+            "description": "Name of the session, URL-encoded where needed; spaces and dots are allowed in session names."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The permissions service refused to seal the session. `message` says why, for example a missing `raw/` folder.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The signed-in user is neither owner nor member of the project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no such project, or no such session in it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/ingest-shares": {
+      "get": {
+        "tags": [
+          "ingest shares"
+        ],
+        "summary": "List your open ingest shares",
+        "description": "The shares the signed-in user has open, across all projects. Shares write\nas the user who opened them, so another user's shares are not listed, as\nin the legacy endpoint.",
+        "operationId": "read_ingest_shares_mgmt_api_ingest_shares_get",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestShareList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The share service or the account service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "ingest shares"
+        ],
+        "summary": "Open an ingest share for a session, or return the one already open",
+        "description": "Open a share for a session that writes as the signed-in user.\n\nIdempotent per user and session: if the signed-in user already has a share\nfor that session, it is answered with 200 instead of a second share, so a\nclient that lost the first response can simply retry. Another user's share\nfor the same session is not reused; each user ingests under their own\nidentity.\n\nmodama-agent also sends `X-Agent-Token` and `resource`, which bind the share\nto the instrument it runs on, so that smbdrop offers the share to that\ninstrument's agent. The token must have been issued for that `resource`. A\nrepeat then counts only a share bound to the same instrument.",
+        "operationId": "add_ingest_share_mgmt_api_ingest_shares_post",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Agent-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token from smbdrop's token service, which modama-agent fetches with its client certificate. It says which instrument the request comes from; the session still says who the user is. Sent together with `resource` in the body, or not at all.",
+              "title": "X-Agent-Token"
+            },
+            "description": "Token from smbdrop's token service, which modama-agent fetches with its client certificate. It says which instrument the request comes from; the session still says who the user is. Sent together with `resource` in the body, or not at all."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIngestShareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestShare"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Only one of `X-Agent-Token` and `resource` was sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "You already have a share open for this session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestShare"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The signed-in user is neither owner nor member of the project, or the agent token is invalid, expired, or for another resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no such project, or no such session in it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The share service, the account service or the agent token service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/ingest-shares/{share_id}": {
+      "delete": {
+        "tags": [
+          "ingest shares"
+        ],
+        "summary": "Close an ingest share",
+        "description": "Close a share: its one-time credentials stop working and the Samba export\ngoes away. The data written through it stays in the session.\n\nOnly the user who opened a share can close it. A share that is gone\nalready is a 404; a client that lost the answer to its first attempt can\ntreat that as closed.",
+        "operationId": "close_ingest_share_mgmt_api_ingest_shares__share_id__delete",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "share_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The `share_id` of an open share.",
+              "title": "Share Id"
+            },
+            "description": "The `share_id` of an open share."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "The `X-Modama-API-Version` header is missing, or names a version this server does not support.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The share was opened by someone else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no open share with that id. A share that was closed already answers this too.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The share service or the account service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/browse": {
+      "get": {
+        "tags": [
+          "browse"
+        ],
+        "summary": "List a folder of the data tree, one page at a time",
+        "description": "The file or folder at `path`, with the links to open it elsewhere, and for\na folder one page of its entries.\n\nPages are keyed, not offset: the cursor marks the last entry of the page\nbefore, so the next page starts after it whatever was added to or removed\nfrom the folder in between, and no entry repeats or goes missing. The\ncursor is opaque, and it does not depend on `limit`.\n\nThe listing is made as the signed-in user, so it shows what that user may\nsee. The file server cannot page, so each page lists the whole folder on\nthe server; that costs well under a second even for a folder of tens of\nthousands of entries.",
+        "operationId": "read_path_mgmt_api_browse_get",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Absolute path in the data tree, `/` for the root. It is normalized before use; the answer's `path` is that spelling.",
+              "default": "/",
+              "title": "Path"
+            },
+            "description": "Absolute path in the data tree, `/` for the root. It is normalized before use; the answer's `path` is that spelling."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Entries per page.",
+              "default": 200,
+              "title": "Limit"
+            },
+            "description": "Entries per page."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next_cursor` of the previous page.",
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "X-Modama-API-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use.",
+              "examples": [
+                "1"
+              ],
+              "title": "X-Modama-Api-Version",
+              "type": "string"
+            },
+            "description": "The contract version the client was built against, as a bare integer. Required on every endpoint except `/versions` and `/healthz`, which a client can call before it knows which version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Browse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The cursor is not one this endpoint issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the session has expired. Sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The signed-in user may not read that folder.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no file or folder at that path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The file server did not answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/versions": {
+      "get": {
+        "tags": [
+          "versions"
+        ],
+        "summary": "Read Versions",
+        "description": "The contract versions this server supports.\n\nUnauthenticated and unversioned on purpose: a locally installed client\ncalls this at startup, before it has a session or knows which version to\nuse. That way it can report a problem in its own log, where the person\nrunning the instrument sees it, instead of failing in the middle of an\ningest later.",
+        "operationId": "read_versions_mgmt_api_versions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mgmt-api/healthz": {
+      "get": {
+        "tags": [
+          "versions"
+        ],
+        "summary": "Liveness probe",
+        "description": "Liveness probe.",
+        "operationId": "healthz_mgmt_api_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Healthz Mgmt Api Healthz Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Browse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "The browsed path, normalized. A client that asked with another spelling (a trailing slash, a `..`) should switch to this one."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The last segment of `path`; empty for the root."
+          },
+          "isdir": {
+            "type": "boolean",
+            "title": "Isdir"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project",
+            "description": "The project the path is in: the second segment of `path`, where there is one."
+          },
+          "mtime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "access": {
+            "$ref": "#/components/schemas/LocationAccess"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            },
+            "type": "array",
+            "title": "Entries",
+            "description": "One page of the folder's entries: folders first, then by name ignoring case. Empty for a file."
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "How many entries the folder has in all."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` to get the page after this one; null on the last."
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "isdir",
+          "project",
+          "mtime",
+          "size",
+          "access",
+          "entries",
+          "total",
+          "next_cursor"
+        ],
+        "title": "Browse"
+      },
+      "CreateIngestShareRequest": {
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Project",
+            "examples": [
+              "ghost_imaging_2026"
+            ]
+          },
+          "session": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Session",
+            "examples": [
+              "2026-10-16-alignment_run"
+            ]
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource",
+            "description": "The instrument to bind the share to. modama-agent sends it together with `X-Agent-Token`, which must have been issued for this instrument; other clients leave both out."
+          }
+        },
+        "type": "object",
+        "required": [
+          "project",
+          "session"
+        ],
+        "title": "CreateIngestShareRequest"
+      },
+      "CreateProjectRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "title": "Name",
+            "description": "3 to 32 characters: lowercase letters, digits, `_` and `-`, starting with a letter. Becomes the folder name, and later possibly the Unix group name.",
+            "examples": [
+              "ghost_imaging_2026"
+            ]
+          },
+          "members": {
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": "array",
+            "title": "Members",
+            "description": "Usernames to add as members. The signed-in user becomes the owner and is a member regardless of this list."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateProjectRequest"
+      },
+      "CreateSessionRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9 ._-]+$",
+            "title": "Name",
+            "description": "Up to 255 characters: letters, digits, space, `.`, `_` and `-`. Becomes the folder name inside the project.",
+            "examples": [
+              "2026-10-16-alignment_run"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateSessionRequest"
+      },
+      "DeprecatedVersion": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "deprecated_since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Deprecated Since"
+          },
+          "sunset": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Sunset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "deprecated_since",
+          "sunset"
+        ],
+        "title": "DeprecatedVersion"
+      },
+      "Entry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Normalized absolute path: what to browse to next."
+          },
+          "isdir": {
+            "type": "boolean",
+            "title": "Isdir"
+          },
+          "mtime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime",
+            "description": "Modification time as epoch seconds; null if the file server reported none."
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size",
+            "description": "Size in bytes; null for a folder."
+          },
+          "access": {
+            "$ref": "#/components/schemas/EntryAccess"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "isdir",
+          "mtime",
+          "size",
+          "access"
+        ],
+        "title": "Entry"
+      },
+      "EntryAccess": {
+        "properties": {
+          "nextcloud": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcloud",
+            "description": "Folders only."
+          },
+          "jupyter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jupyter",
+            "description": "Folders only."
+          },
+          "imageviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imageviewer",
+            "description": "Files only."
+          },
+          "libertem": {
+            "type": "string",
+            "title": "Libertem"
+          },
+          "sampledb": {
+            "type": "string",
+            "title": "Sampledb"
+          },
+          "sampledb_erc3": {
+            "type": "string",
+            "title": "Sampledb Erc3"
+          },
+          "elabftw_erc3": {
+            "type": "string",
+            "title": "Elabftw Erc3"
+          }
+        },
+        "type": "object",
+        "required": [
+          "libertem",
+          "sampledb",
+          "sampledb_erc3",
+          "elabftw_erc3"
+        ],
+        "title": "EntryAccess",
+        "description": "Where an entry opens elsewhere, as the \"Open in\" badges of the browse\nscreen show them. Built on the server, because the links encode the path\nin three different ways that the SampleDB and ElabFTW searches depend on;\nsee `links.py`."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Stable, machine-readable reason. Part of the contract; it only changes with the API version.",
+            "examples": [
+              "not_authenticated"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation, safe to show to the user.",
+            "examples": [
+              "Sign in to continue."
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorResponse",
+        "description": "The documented body of every error this API returns, except HTTP 422.\n\nA model rather than an inline description, so that `error_responses` can\nreference the same schema from every operation and a generated client gets\none error type instead of one per endpoint."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IngestShare": {
+        "properties": {
+          "share_id": {
+            "type": "string",
+            "title": "Share Id"
+          },
+          "share_name": {
+            "type": "string",
+            "title": "Share Name",
+            "description": "The share part of the SMB address."
+          },
+          "project": {
+            "type": "string",
+            "title": "Project"
+          },
+          "session": {
+            "type": "string",
+            "title": "Session"
+          },
+          "dest_path": {
+            "type": "string",
+            "title": "Dest Path",
+            "description": "The exported folder, as smbdrop sees it."
+          },
+          "created_timestamp": {
+            "type": "integer",
+            "title": "Created Timestamp",
+            "description": "Unix time of creation."
+          },
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "One-time Samba username."
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "One-time Samba password."
+          },
+          "uid": {
+            "type": "integer",
+            "title": "Uid",
+            "description": "Unix uid the share writes as."
+          },
+          "gid": {
+            "type": "integer",
+            "title": "Gid",
+            "description": "Unix gid the share writes as."
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource",
+            "description": "The instrument the share was opened for, if an agent opened it."
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By",
+            "description": "Login name of the user who opened the share. Null for shares opened before this was recorded."
+          },
+          "smb_host": {
+            "type": "string",
+            "title": "Smb Host",
+            "description": "Samba host as seen from the intranet, for a person connecting by hand. modama-agent uses its own configured host instead."
+          },
+          "workgroup": {
+            "type": "string",
+            "title": "Workgroup",
+            "description": "Workgroup for the username on Windows, for connecting by hand."
+          }
+        },
+        "type": "object",
+        "required": [
+          "share_id",
+          "share_name",
+          "project",
+          "session",
+          "dest_path",
+          "created_timestamp",
+          "username",
+          "password",
+          "uid",
+          "gid",
+          "resource",
+          "smb_host",
+          "workgroup"
+        ],
+        "title": "IngestShare",
+        "description": "An active share. The fields smbdrop reports, plus the project and session\nit belongs to, so that a client does not parse `dest_path`, and the host\nand workgroup the web interface shows a person who connects by hand.\nmodama-agent does not use those two: an instrument PC may reach the Samba\nserver another way than the intranet does, so the agent mounts with the\nhost, port and domain from its own configuration file."
+      },
+      "IngestShareList": {
+        "properties": {
+          "shares": {
+            "items": {
+              "$ref": "#/components/schemas/IngestShare"
+            },
+            "type": "array",
+            "title": "Shares",
+            "description": "The signed-in user's open shares, oldest first."
+          }
+        },
+        "type": "object",
+        "required": [
+          "shares"
+        ],
+        "title": "IngestShareList"
+      },
+      "LocationAccess": {
+        "properties": {
+          "nextcloud": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcloud",
+            "description": "Folders only."
+          },
+          "jupyter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jupyter",
+            "description": "Folders only."
+          },
+          "imageviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imageviewer",
+            "description": "Files only."
+          },
+          "libertem": {
+            "type": "string",
+            "title": "Libertem"
+          },
+          "sampledb": {
+            "type": "string",
+            "title": "Sampledb"
+          },
+          "sampledb_erc3": {
+            "type": "string",
+            "title": "Sampledb Erc3"
+          },
+          "elabftw_erc3": {
+            "type": "string",
+            "title": "Elabftw Erc3"
+          },
+          "rsync": {
+            "type": "string",
+            "title": "Rsync",
+            "description": "An rsync command that pushes to the path."
+          },
+          "sftp": {
+            "type": "string",
+            "title": "Sftp",
+            "description": "An sftp command that opens the path's folder."
+          },
+          "smb_windows": {
+            "type": "string",
+            "title": "Smb Windows",
+            "description": "The path on the Samba share, as a UNC path."
+          },
+          "smb_unix": {
+            "type": "string",
+            "title": "Smb Unix",
+            "description": "The path on the Samba share, as an smb:// URL."
+          }
+        },
+        "type": "object",
+        "required": [
+          "libertem",
+          "sampledb",
+          "sampledb_erc3",
+          "elabftw_erc3",
+          "rsync",
+          "sftp",
+          "smb_windows",
+          "smb_unix"
+        ],
+        "title": "LocationAccess",
+        "description": "The entry links plus the transfer commands for the browsed path."
+      },
+      "LoginRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Password"
+          },
+          "persistent": {
+            "type": "boolean",
+            "title": "Persistent",
+            "description": "Keep the session without an idle timeout, up to the configured persistent lifetime. For the UI's \"keep me logged in\" and for long-running clients such as modama-agent.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "Project": {
+        "properties": {
+          "relpath": {
+            "type": "string",
+            "title": "Relpath"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "ctime": {
+            "type": "number",
+            "title": "Ctime"
+          },
+          "mtime": {
+            "type": "number",
+            "title": "Mtime"
+          },
+          "gid": {
+            "type": "integer",
+            "title": "Gid"
+          },
+          "usage_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "relpath",
+          "name",
+          "owner",
+          "members",
+          "ctime",
+          "mtime",
+          "gid",
+          "usage_bytes"
+        ],
+        "title": "Project",
+        "description": "One project, in the shape the permissions service returns.\n\nThe fields are identical to those of the legacy `/api/project/` response, so\nthat screens can migrate one endpoint at a time without changing how they\nread a project. `usage_bytes` is null everywhere but in the answer of\n`GET /projects/{project}/usage`: computing it means a `du` over the whole\nproject, which nothing else should wait for."
+      },
+      "ProjectDetails": {
+        "properties": {
+          "relpath": {
+            "type": "string",
+            "title": "Relpath"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "ctime": {
+            "type": "number",
+            "title": "Ctime"
+          },
+          "mtime": {
+            "type": "number",
+            "title": "Mtime"
+          },
+          "gid": {
+            "type": "integer",
+            "title": "Gid"
+          },
+          "usage_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage Bytes"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            },
+            "type": "array",
+            "title": "Sessions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "relpath",
+          "name",
+          "owner",
+          "members",
+          "ctime",
+          "mtime",
+          "gid",
+          "usage_bytes",
+          "sessions"
+        ],
+        "title": "ProjectDetails",
+        "description": "A project with its sessions. `usage_bytes` is null; see `GET .../usage`."
+      },
+      "ProjectList": {
+        "properties": {
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            },
+            "type": "array",
+            "title": "Projects"
+          }
+        },
+        "type": "object",
+        "required": [
+          "projects"
+        ],
+        "title": "ProjectList"
+      },
+      "ProjectUsage": {
+        "properties": {
+          "usage_bytes": {
+            "type": "integer",
+            "title": "Usage Bytes",
+            "description": "Disk usage of the project folder in bytes, as `du` reports it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "usage_bytes"
+        ],
+        "title": "ProjectUsage"
+      },
+      "Session": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "immutable": {
+            "type": "boolean",
+            "title": "Immutable",
+            "description": "True once the session has been sealed: its `raw/` folder is read-only."
+          },
+          "ctime": {
+            "type": "number",
+            "title": "Ctime"
+          },
+          "mtime": {
+            "type": "number",
+            "title": "Mtime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "immutable",
+          "ctime",
+          "mtime"
+        ],
+        "title": "Session",
+        "description": "One session, in the shape the project details of the legacy API use."
+      },
+      "SessionInfo": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "persistent": {
+            "type": "boolean",
+            "title": "Persistent",
+            "description": "Whether the session was opened with `persistent: true`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "persistent"
+        ],
+        "title": "SessionInfo"
+      },
+      "SetMembersRequest": {
+        "properties": {
+          "members": {
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": "array",
+            "title": "Members",
+            "description": "The complete list of members wanted. Members not in it are removed, names not yet members are added. The owner is a member regardless and may be left out.",
+            "examples": [
+              [
+                "clausen",
+                "weber"
+              ]
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "members"
+        ],
+        "title": "SetMembersRequest"
+      },
+      "UserList": {
+        "properties": {
+          "users": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Users",
+            "description": "Usernames of everyone who may use the data management system, sorted. These are the accounts a project can have as members."
+          }
+        },
+        "type": "object",
+        "required": [
+          "users"
+        ],
+        "title": "UserList"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VersionsResponse": {
+        "properties": {
+          "supported": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Supported"
+          },
+          "latest": {
+            "type": "integer",
+            "title": "Latest"
+          },
+          "deprecated": {
+            "items": {
+              "$ref": "#/components/schemas/DeprecatedVersion"
+            },
+            "type": "array",
+            "title": "Deprecated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "supported",
+          "latest",
+          "deprecated"
+        ],
+        "title": "VersionsResponse"
+      }
+    },
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "description": "Signed session cookie, set by `POST /auth/login` and sent back automatically by the browser. Requests without a usable one get 401.",
+        "in": "cookie",
+        "name": "__Host-modama_session"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "auth",
+      "description": "Login, logout, and the current session."
+    },
+    {
+      "name": "projects",
+      "description": "Projects: list, details, disk usage, members, creation."
+    },
+    {
+      "name": "users",
+      "description": "The accounts a project can have as members."
+    },
+    {
+      "name": "sessions",
+      "description": "Sessions, one folder per measurement run inside a project. The legacy API calls them datasets."
+    },
+    {
+      "name": "ingest shares",
+      "description": "Temporary Samba shares with one-time credentials for writing data into a session from an instrument PC. The legacy API calls them shares."
+    },
+    {
+      "name": "browse",
+      "description": "The data tree, as the signed-in user sees it: a folder's entries one page at a time, with the links to open a path elsewhere."
+    },
+    {
+      "name": "versions",
+      "description": "Supported contract versions. Unauthenticated and unversioned, so a client can call it before pinning a version."
+    }
+  ]
+}
