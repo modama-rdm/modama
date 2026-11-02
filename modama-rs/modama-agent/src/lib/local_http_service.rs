@@ -99,11 +99,20 @@ struct CreateSessionForm {
 }
 
 #[derive(Serialize)]
+struct OtherMountView {
+    project: String,
+    session: String,
+    created_by: Option<String>,
+    mount_path: String,
+}
+
+#[derive(Serialize)]
 struct ForegroundView {
     kind: &'static str,
     project: Option<String>,
     session: Option<String>,
     message: Option<String>,
+    created_by: Option<String>,
     close_href: Option<SafeLocalUrl>,
     refresh_status: bool,
 }
@@ -116,6 +125,7 @@ impl ForegroundView {
                 project: None,
                 session: None,
                 message: None,
+                created_by: None,
                 close_href: None,
                 refresh_status: false,
             },
@@ -124,12 +134,14 @@ impl ForegroundView {
                 project,
                 session,
                 message,
+                created_by,
                 ..
             } => Self {
                 kind: "unavailable",
                 project: Some(project.clone()),
                 session: Some(session.clone()),
                 message: Some(message.clone()),
+                created_by: created_by.clone(),
                 close_href: Some(SafeLocalUrl::close_ingest(share_id)),
                 refresh_status: true,
             },
@@ -137,12 +149,14 @@ impl ForegroundView {
                 share_id,
                 project,
                 session,
+                created_by,
                 ..
             } => Self {
                 kind: "open",
                 project: Some(project.clone()),
                 session: Some(session.clone()),
                 message: None,
+                created_by: created_by.clone(),
                 close_href: Some(SafeLocalUrl::close_ingest(share_id)),
                 refresh_status: false,
             },
@@ -558,8 +572,19 @@ async fn serve_index_page(
     let mut tracker = SessionTracker::new(session);
     let (identity, connected_agents) = local_snapshot(&agent_state).await;
     let scope = agent_state.resolve_scope(conn).await?;
-    let foreground = agent_state.state.lock().await.foreground_for(scope)?;
-    let start_allowed = foreground == APICurrentForegroundShare::None;
+    let (foreground, other_mounts) = {
+        let state = agent_state.state.lock().await;
+        (state.foreground_for(scope)?, state.other_mounts_for(scope))
+    };
+    let other_mounts = other_mounts
+        .into_iter()
+        .map(|mount| OtherMountView {
+            project: mount.project,
+            session: mount.session,
+            created_by: mount.created_by,
+            mount_path: mount.mount_path,
+        })
+        .collect::<Vec<_>>();
     let mgmt = agent_state.mgmt().await?;
     let username = tracker.take(mgmt.signed_in_user(tracker.session()).await?);
     // the management API lists every project; offer the user's own
@@ -569,7 +594,7 @@ async fn serve_index_page(
         .into_iter()
         .filter(|project| project.members.contains(&username) || project.owner == username)
         .map(|project| LinkItem {
-            href: start_allowed.then(|| SafeLocalUrl::start_project(&project.name)),
+            href: Some(SafeLocalUrl::start_project(&project.name)),
             name: project.name,
         })
         .collect::<Vec<_>>();
@@ -585,8 +610,8 @@ async fn serve_index_page(
             username,
             connected_agents,
             foreground,
+            other_mounts,
             projects,
-            start_allowed,
         },
     )?))
 }
@@ -615,15 +640,6 @@ async fn start_ingest_step1(
     State(agent_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    if desired_foreground(&agent_state).await.is_some() {
-        return message_page(
-            &agent_state.jinja_env,
-            StatusCode::CONFLICT,
-            "Ingest already active",
-            "Close the current ingest before opening another one.",
-        );
-    }
-
     let mut tracker = SessionTracker::new(session);
     let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
     let session_date = today();
@@ -645,15 +661,6 @@ async fn create_session(
     CallerSession(session): CallerSession,
     Form(form): Form<CreateSessionForm>,
 ) -> Result<Response, LocalAPIError> {
-    if desired_foreground(&agent_state).await.is_some() {
-        return message_page(
-            &agent_state.jinja_env,
-            StatusCode::CONFLICT,
-            "Ingest already active",
-            "Close the current ingest before creating another session.",
-        );
-    }
-
     let mut tracker = SessionTracker::new(session);
     let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
 
@@ -671,15 +678,6 @@ async fn create_session(
             )?));
         }
     };
-
-    if desired_foreground(&agent_state).await.is_some() {
-        return message_page(
-            &agent_state.jinja_env,
-            StatusCode::CONFLICT,
-            "Ingest already active",
-            "Close the current ingest before creating another session.",
-        );
-    }
 
     let created = agent_state
         .mgmt()
@@ -713,15 +711,6 @@ async fn start_ingest_step2(
     State(agent_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    if desired_foreground(&agent_state).await.is_some() {
-        return message_page(
-            &agent_state.jinja_env,
-            StatusCode::CONFLICT,
-            "Ingest already active",
-            "Close the current ingest before opening another one.",
-        );
-    }
-
     let mut tracker = SessionTracker::new(session);
     let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
     if !session_names.contains(&session_name) {
@@ -733,12 +722,34 @@ async fn start_ingest_step2(
         )?));
     }
 
-    let res_name = match &agent_state.state.lock().await.config.identity {
-        MTLSIdentity::Anonymous { hostname } => hostname.clone(),
+    let (res_name, instrument) = match &agent_state.state.lock().await.config.identity {
+        MTLSIdentity::Anonymous { hostname } => (hostname.clone(), "this instrument".to_owned()),
         MTLSIdentity::AgentId {
             agent_name: _,
             resource_name,
-        } => resource_name.clone(),
+        } => (resource_name.clone(), resource_name.clone()),
+    };
+    // starting doesn't close the open share: say what happens to it
+    let current = match desired_foreground(&agent_state).await {
+        Some(share) => {
+            let (project, session) = project_and_session(&share.dest_path)?;
+            let own = match &share.created_by {
+                Some(created_by) => {
+                    let mgmt = agent_state.mgmt().await?;
+                    *created_by == tracker.take(mgmt.signed_in_user(tracker.session()).await?)
+                }
+                // smbdrop didn't record it: say it stays open, rather than guess
+                None => true,
+            };
+            Some(context! {
+                project,
+                session,
+                created_by => share.created_by,
+                own,
+                close_href => SafeLocalUrl::close_ingest(&share.share_id),
+            })
+        }
+        None => None,
     };
     let action = SafeLocalUrl::start_session(&project_name, &session_name);
     Ok(tracker.respond(render_html(
@@ -750,6 +761,8 @@ async fn start_ingest_step2(
             project => project_name,
             session => session_name,
             resource => res_name,
+            instrument,
+            current,
             action,
         },
     )?))
@@ -760,15 +773,6 @@ async fn start_ingest_step3(
     State(agent_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    if desired_foreground(&agent_state).await.is_some() {
-        return message_page(
-            &agent_state.jinja_env,
-            StatusCode::CONFLICT,
-            "Ingest already active",
-            "Close the current ingest before opening another one.",
-        );
-    }
-
     let mut tracker = SessionTracker::new(session);
     let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
     if !session_names.contains(&session_name) {
@@ -778,15 +782,6 @@ async fn start_ingest_step3(
             "Session not found",
             "The selected session does not exist in this project.",
         )?));
-    }
-
-    if desired_foreground(&agent_state).await.is_some() {
-        return message_page(
-            &agent_state.jinja_env,
-            StatusCode::CONFLICT,
-            "Ingest already active",
-            "Close the current ingest before opening another one.",
-        );
     }
 
     let sign_response = Arc::clone(&agent_state.token_provider)
@@ -1658,7 +1653,7 @@ mod tests {
             session: "test-session".to_owned(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
             message: "Waiting for the session helper to mount the share.".to_owned(),
-            created_by: None,
+            created_by: Some("alice".to_owned()),
         };
 
         {
@@ -1685,8 +1680,7 @@ mod tests {
             assert!(rendered.contains("to refresh the status."));
             // an unavailable ingest can still be closed, e.g. when no helper is running:
             assert!(rendered.contains("href=\"/close-ingest/share%2D123/\""));
-            assert!(rendered.contains("Close the current ingest"));
-            assert!(!rendered.contains("href=\"/start-ingest/"));
+            assert!(rendered.contains("Started by: alice"));
         }
     }
 
@@ -1715,7 +1709,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn index_offers_close_for_an_open_foreground_ingest() {
+    async fn index_offers_close_and_starting_another_while_an_ingest_is_open() {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "share-123").await;
         let mut server = mgmt_api_server(&test_setup).await;
@@ -1738,7 +1732,8 @@ mod tests {
 
         assert!(body.contains("Status: open"));
         assert!(body.contains("href=\"/close-ingest/share%2D123/\""));
-        assert!(!body.contains("href=\"/start-ingest/"));
+        // another ingest can be started while this one is open
+        assert!(body.contains("href=\"/start-ingest/the%2Dproject/\""));
         assert!(!body.contains("Reload this page"));
         assert!(!body.contains("secret-password"));
     }
@@ -1870,9 +1865,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_foreground_ingest_prevents_creating_a_session() {
+    async fn a_session_can_be_created_while_an_ingest_is_open() {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "current-share").await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &[]).await;
+        server
+            .mock("POST", "/mgmt-api/projects/the-project/sessions")
+            .with_status(201)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"name": "new-session", "immutable": false, "ctime": 1.0, "mtime": 1.0}"#)
+            .create_async()
+            .await;
 
         let resp = test_setup
             .app
@@ -1884,7 +1888,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     }
 
     #[tokio::test]
@@ -2020,9 +2024,113 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_foreground_ingest_prevents_starting_another() {
+    async fn index_lists_the_other_mounted_shares() {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "current-share").await;
+        {
+            let mut state = test_setup.shared_state.lock().await;
+            let older = MessageShare {
+                share_name: "share-older".to_owned(),
+                dest_path: "/adhoc/the-project/older-session/".to_owned(),
+                created_by: Some("testuser".to_owned()),
+                ..foreground_share("older-share")
+            };
+            let desired = &mut state.remote_info.as_mut().unwrap().desired_shares;
+            desired.shares = vec![older, foreground_share("current-share")];
+            let helper = state.session_helpers.get_mut(&TEST_SCOPE).unwrap();
+            helper.mounted_shares.push(MountedShare {
+                share_name: "share-older".to_owned(),
+                mount_path: Some(PathBuf::from("/mnt/older")),
+            });
+        }
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("GET", "/mgmt-api/projects")
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"projects": []}"#)
+            .create_async()
+            .await;
+
+        let resp = test_setup
+            .app
+            .oneshot(page_request("GET", "/", None))
+            .await
+            .unwrap();
+        let body = body_text(resp).await;
+        assert!(body.contains("Also mounted on this computer"));
+        assert!(
+            body.contains("the-project / older-session, started by testuser: &#x2f;mnt&#x2f;older")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_start_confirmation_says_what_happens_to_the_open_ingest() {
+        // the user's own open ingest stays open
+        let test_setup = TestSetup::start().await;
+        set_open_foreground(&test_setup, "current-share").await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["test-session"]).await;
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "GET",
+                "/start-ingest/the-project/test-session/",
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_text(resp).await;
+        assert!(body.contains("Session test-session in project the-project is open"));
+        assert!(body.contains("href=\"/close-ingest/current%2Dshare/\""));
+
+        // someone else's is detached from this resource
+        let test_setup = TestSetup::start().await;
+        test_setup
+            .set_foreground(
+                MessageShare {
+                    created_by: Some("other.user".to_owned()),
+                    ..foreground_share("current-share")
+                },
+                Some("/mnt/ingest"),
+            )
+            .await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["test-session"]).await;
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "GET",
+                "/start-ingest/the-project/test-session/",
+                None,
+            ))
+            .await
+            .unwrap();
+        let body = body_text(resp).await;
+        assert!(body.contains("was started by other.user"));
+        assert!(body.contains("detaches it from res; it stays open for other.user"));
+        assert!(!body.contains("href=\"/close-ingest/"));
+    }
+
+    #[tokio::test]
+    async fn an_ingest_can_be_opened_while_another_is_open() {
+        let test_setup = TestSetup::start().await;
+        set_open_foreground(&test_setup, "current-share").await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["test-session"]).await;
+        let open = server
+            .mock("POST", "/mgmt-api/ingest-shares")
+            .with_status(201)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"share_id": "new-share", "share_name": "share-new", "project": "the-project",
+                    "session": "test-session", "dest_path": "/adhoc/the-project/test-session/",
+                    "created_timestamp": 0, "username": "u", "password": "p", "uid": 1001,
+                    "gid": 1001, "resource": "res", "created_by": "testuser",
+                    "smb_host": "host", "workgroup": "W"}"#,
+            )
+            .create_async()
+            .await;
 
         let resp = test_setup
             .app
@@ -2034,8 +2142,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), StatusCode::CONFLICT);
-        assert!(body_text(resp).await.contains("Close the current ingest"));
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        open.assert_async().await;
     }
 
     #[tokio::test]

@@ -3,7 +3,10 @@ use std::{collections::HashMap, sync::Arc};
 use log::{info, warn};
 use modama_common::{
     agent::AgentId,
-    foreground::{ShareDestinationError, agent_mount_status, foreground_projection},
+    foreground::{
+        OtherMount, ShareDestinationError, agent_mount_status, foreground_projection,
+        other_mounted_shares,
+    },
     internal_api_types::{SessionHelperState, Shares},
     local_api_messages::APICurrentForegroundShare,
     messages::{AgentMountStatus, AgentMountStatusEntry, Share},
@@ -247,6 +250,16 @@ impl AgentState {
             .keys()
             .map(|scope| self.session_helpers.get(scope));
         Some(agent_mount_status(&desired, helpers))
+    }
+
+    /// The desired shares besides the foreground one that `scope`'s session helper has mounted
+    pub fn other_mounts_for(&self, scope: HelperScope) -> Vec<OtherMount> {
+        let (Some(remote), Some(helper)) =
+            (self.remote_info.as_ref(), self.session_helpers.get(&scope))
+        else {
+            return Vec::new();
+        };
+        other_mounted_shares(&remote.shares(), helper)
     }
 
     pub async fn new(config: &AgentConfig) -> Arc<Mutex<Self>> {

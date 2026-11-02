@@ -2,6 +2,13 @@
 {% block body %}
 <h1>Open ingest?</h1>
 <p>Project: {{ project }}<br>Session: {{ session }}<br>Resource: {{ resource }}</p>
+{% if current %}
+{% if current.own %}
+<p>Session {{ current.session }} in project {{ current.project }} is open, and stays open next to the new one. If you don't need it anymore, <a href="{{ current.close_href }}">close it</a> first.</p>
+{% else %}
+<p>Session {{ current.session }} in project {{ current.project }} was started by {{ current.created_by }}. Opening this ingest detaches it from {{ instrument }}; it stays open for {{ current.created_by }}.</p>
+{% endif %}
+{% endif %}
 <form action="{{ action }}" method="post">
 <p><input type="submit" value="Open ingest"></p>
 </form>

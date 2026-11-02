@@ -14,12 +14,15 @@
 <p>No ingest is open.</p>
 {% else %}
 <p>Status: {{ foreground.kind }}.</p>
-<p>Project: {{ foreground.project }}<br>Session: {{ foreground.session }}</p>
+<p>Project: {{ foreground.project }}<br>Session: {{ foreground.session }}{% if foreground.created_by %}<br>Started by: {{ foreground.created_by }}{% endif %}</p>
 {% if foreground.message %}<p>{{ foreground.message }}</p>{% endif %}
 {% if foreground.refresh_status %}<p><a href="/">Reload this page</a> to refresh the status.</p>{% endif %}
 {% if foreground.close_href %}<p><a href="{{ foreground.close_href }}">Close this ingest</a></p>{% endif %}
 {% endif %}
-{% if start_allowed %}<h2>Select a project to start an ingest</h2>{% else %}<h2>Projects</h2>{% endif %}
+{% if other_mounts %}
+<h2>Also mounted on this computer</h2>
+<ul>{% for mount in other_mounts %}<li>{{ mount.project }} / {{ mount.session }}{% if mount.created_by %}, started by {{ mount.created_by }}{% endif %}: {{ mount.mount_path }}</li>{% endfor %}</ul>
+{% endif %}
+<h2>Select a project to start an ingest</h2>
 {% if projects %}<ul>{% for project in projects %}<li>{% if project.href %}<a href="{{ project.href }}">{{ project.name }}</a>{% else %}{{ project.name }}{% endif %}</li>{% endfor %}</ul>{% else %}<p>No accessible projects.</p>{% endif %}
-{% if not start_allowed %}<p>Close the current ingest before opening another one.</p>{% endif %}
 {% endblock %}
