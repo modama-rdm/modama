@@ -521,6 +521,7 @@ mod tests {
             project: "project".to_owned(),
             session: "session".to_owned(),
             mount_path: None,
+            created_by: None,
         }
     }
 
@@ -610,6 +611,7 @@ mod tests {
                 project: "project".to_string(),
                 session: "session".to_string(),
                 mount_path: None,
+                created_by: None,
             });
 
         app.handle_action(Action::LogoutSuccess);
@@ -655,6 +657,7 @@ mod tests {
                 project: "project".to_string(),
                 session: "session".to_string(),
                 mount_path: None,
+                created_by: None,
             });
 
         let operation_id = OperationId::next();
@@ -680,6 +683,7 @@ mod tests {
             project: "project".to_owned(),
             session: "session".to_owned(),
             mount_path: Some("/mnt/session".to_owned()),
+            created_by: None,
         };
 
         app.handle_action(Action::Connected {
@@ -703,6 +707,7 @@ mod tests {
             share_id: "share".to_owned(),
             project: "project".to_owned(),
             session: "session".to_owned(),
+            created_by: None,
         };
         let operation_id = OperationId::next();
         app.handle_action(Action::StartRequested {
@@ -741,6 +746,7 @@ mod tests {
                 project: "project".to_owned(),
                 session: "session".to_owned(),
                 mount_path: Some("/mnt/session".to_owned()),
+                created_by: None,
             });
 
         app.handle_action(Action::ForegroundChanged(
@@ -779,6 +785,7 @@ mod tests {
                 share_id: "share".to_owned(),
                 project: "project".to_owned(),
                 session: "session".to_owned(),
+                created_by: None,
             },
         });
         app.handle_action(Action::ForegroundChanged(
@@ -805,6 +812,7 @@ mod tests {
             project: "project".to_owned(),
             session: "session".to_owned(),
             mount_path: Some("/mnt/session".to_owned()),
+            created_by: None,
         };
         app.app_state.foreground = crate::state::ForegroundSession::Mounted(session.clone());
         let operation_id = OperationId::next();
@@ -831,12 +839,14 @@ mod tests {
             share_id: "share".to_owned(),
             project: "project".to_owned(),
             session: "session".to_owned(),
+            created_by: None,
         };
         let mounted = crate::state::ActiveSession {
             share_id: pending.share_id.clone(),
             project: pending.project.clone(),
             session: pending.session.clone(),
             mount_path: Some("/mnt/session".to_owned()),
+            created_by: None,
         };
         let operation_id = OperationId::next();
         app.handle_action(Action::StartRequested {

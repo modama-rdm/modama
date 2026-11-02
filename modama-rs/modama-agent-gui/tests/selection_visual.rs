@@ -1089,6 +1089,7 @@ fn session_selection_snapshots() {
                     share_id: "starting-share".to_owned(),
                     project: "Project Alpha".to_string(),
                     session: SESSIONS[1].to_string(),
+                    created_by: None,
                 })
             },
             ctx,
@@ -1119,6 +1120,7 @@ fn session_choices_are_disabled_while_starting() {
                     share_id: "starting-share".to_owned(),
                     project: "Project Alpha".to_string(),
                     session: SESSIONS[1].to_string(),
+                    created_by: None,
                 })
             },
             ctx,
@@ -1287,6 +1289,7 @@ fn successful_session_creation_returns_to_overview_while_waiting_for_the_agent()
                 share_id: "created-share".to_owned(),
                 project: "Project Alpha".to_owned(),
                 session: "2026-07-30-new-run".to_owned(),
+                created_by: None,
             }),
         };
     }

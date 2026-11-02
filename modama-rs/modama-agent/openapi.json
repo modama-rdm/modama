@@ -645,6 +645,13 @@
               "type"
             ],
             "properties": {
+              "created_by": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Login name of the user who started the share; null for shares from an smbdrop\nthat didn't record it yet"
+              },
               "dest_path": {
                 "type": "string",
                 "description": "The path in the data management that is exported with this Share."
@@ -685,6 +692,13 @@
               "type"
             ],
             "properties": {
+              "created_by": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Login name of the user who started the share; null for shares from an smbdrop\nthat didn't record it yet"
+              },
               "dest_path": {
                 "type": "string",
                 "description": "The path in the data management that is exported with this Share"

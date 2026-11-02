@@ -1658,6 +1658,7 @@ mod tests {
             session: "test-session".to_owned(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
             message: "Waiting for the session helper to mount the share.".to_owned(),
+            created_by: None,
         };
 
         {

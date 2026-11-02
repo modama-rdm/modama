@@ -152,6 +152,7 @@ impl HttpAgentService {
                         share_id: share.share_id,
                         project: share.project,
                         session: share.session,
+                        created_by: share.created_by.flatten(),
                     },
                     share.message,
                 )
@@ -163,6 +164,7 @@ impl HttpAgentService {
                     project: share.project,
                     session: share.session,
                     mount_path: Some(share.mount_path),
+                    created_by: share.created_by.flatten(),
                 })
             }
         })
@@ -180,11 +182,13 @@ impl From<modama_common::local_api_messages::APICurrentForegroundShare> for Fore
                 session,
                 dest_path: _,
                 message,
+                created_by,
             } => ForegroundSession::Mounting(
                 PendingSession {
                     share_id,
                     project,
                     session,
+                    created_by,
                 },
                 message,
             ),
@@ -194,11 +198,13 @@ impl From<modama_common::local_api_messages::APICurrentForegroundShare> for Fore
                 session,
                 dest_path: _,
                 mount_path,
+                created_by,
             } => ForegroundSession::Mounted(ActiveSession {
                 share_id,
                 project,
                 session,
                 mount_path: Some(mount_path),
+                created_by,
             }),
         }
     }
@@ -353,6 +359,7 @@ impl AgentService for HttpAgentService {
             share_id: response.share_id,
             project: response.project,
             session: response.session,
+            created_by: None,
         })
     }
 
@@ -503,12 +510,14 @@ impl AgentService for StubAgentService {
             share_id: format!("stub-{project}-{session}"),
             project: project.to_owned(),
             session: session.to_owned(),
+            created_by: None,
         };
         let active = ActiveSession {
             share_id: pending.share_id.clone(),
             project: pending.project.clone(),
             session: pending.session.clone(),
             mount_path: Some(format!("/todo/{project}/{session}/")),
+            created_by: None,
         };
         self.state
             .lock()
@@ -676,6 +685,7 @@ mod tests {
                     share_id: "share".to_owned(),
                     project: "project".to_owned(),
                     session: "session".to_owned(),
+                    created_by: None,
                 },
                 "no helper".to_owned()
             )
@@ -705,6 +715,7 @@ mod tests {
                 project: "project".to_owned(),
                 session: "session".to_owned(),
                 mount_path: Some("/mnt/session".to_owned()),
+                created_by: None,
             })
         );
         mock.assert();

@@ -4,6 +4,8 @@ pub struct ActiveSession {
     pub session: String,
     pub project: String,
     pub mount_path: Option<String>,
+    /// Who started the share; None if smbdrop didn't record it
+    pub created_by: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -11,6 +13,8 @@ pub struct PendingSession {
     pub share_id: String,
     pub session: String,
     pub project: String,
+    /// Who started the share; None if smbdrop didn't record it, or not known yet
+    pub created_by: Option<String>,
 }
 
 impl PendingSession {
@@ -274,6 +278,7 @@ mod tests {
             share_id: share_id.to_owned(),
             project: "project".to_owned(),
             session: "session".to_owned(),
+            created_by: None,
         }
     }
 
@@ -283,6 +288,7 @@ mod tests {
             project: "project".to_owned(),
             session: "session".to_owned(),
             mount_path: None,
+            created_by: None,
         })
     }
 

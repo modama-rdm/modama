@@ -57,6 +57,7 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
                 mount_path: Some(
                     "/mnt/modama/representative-project/2026-07-29-ingest".to_string(),
                 ),
+                created_by: None,
             });
         }
         app
@@ -100,6 +101,7 @@ fn overview_snapshots() {
             share_id: "mounting-share".to_owned(),
             project: "representative-project".to_owned(),
             session: "2026-07-29-ingest".to_owned(),
+            created_by: None,
         },
         "Waiting for the session helper to mount the share.".to_owned(),
     );
@@ -113,6 +115,7 @@ fn overview_snapshots() {
             share_id: "mounting-share".to_owned(),
             project: "representative-project".to_owned(),
             session: "2026-07-29-ingest".to_owned(),
+            created_by: None,
         },
         "another user's drive is still connected; close their files or release it".to_owned(),
     );

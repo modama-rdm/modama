@@ -429,6 +429,7 @@ mod tests {
                     project: "project".to_owned(),
                     session: "a".to_owned(),
                     mount_path: Some("/mnt/a".to_owned()),
+                    created_by: None,
                 })
             ))
         );

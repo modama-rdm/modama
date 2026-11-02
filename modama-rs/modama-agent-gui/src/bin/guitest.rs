@@ -86,6 +86,7 @@ impl Cli {
                 mount_path: Some(format!("/todo/{}/{}/", self.project, self.session)),
                 project: self.project,
                 session: self.session,
+                created_by: None,
             });
             app.page = Page::Overview(PageOverview::new());
         }
@@ -212,6 +213,7 @@ mod tests {
                 project: "Test Project".to_owned(),
                 session: "Test Session".to_owned(),
                 mount_path: Some("/todo/Test Project/Test Session/".to_owned()),
+                created_by: None,
             })
         );
         Ok(())

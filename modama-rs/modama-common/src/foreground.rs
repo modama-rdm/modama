@@ -56,6 +56,7 @@ pub fn foreground_projection(
         session: session.clone(),
         dest_path: desired.dest_path.clone(),
         message,
+        created_by: desired.created_by.clone(),
     };
 
     let Some(helper) = helper else {
@@ -76,6 +77,7 @@ pub fn foreground_projection(
                 session,
                 dest_path: desired.dest_path.clone(),
                 mount_path: mount_path.to_owned(),
+                created_by: desired.created_by.clone(),
             },
             None => {
                 let lossy = mount_path.to_string_lossy();
@@ -94,6 +96,56 @@ pub fn foreground_projection(
         .find(|error| error.share_id == desired.share_id)
         .map_or_else(|| WAITING_MESSAGE.to_owned(), |error| error.message.clone());
     Ok(unavailable(message))
+}
+
+/// A desired share other than the foreground one that the caller's session helper has mounted
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OtherMount {
+    pub share_id: String,
+    pub project: String,
+    pub session: String,
+    pub created_by: Option<String>,
+    pub mount_path: String,
+}
+
+/// The desired shares besides the foreground one that are mounted in the caller's session,
+/// in the order of the desired state (oldest first). On Linux, a user's earlier shares on this
+/// resource stay mounted next to the newest one.
+pub fn other_mounted_shares(desired: &Shares, helper: &SessionHelperState) -> Vec<OtherMount> {
+    desired
+        .shares
+        .iter()
+        .filter(|share| desired.foreground_share_id.as_ref() != Some(&share.share_id))
+        .filter_map(|share| {
+            // as in `foreground_projection`, mounts are identified by share name
+            let mount_path = helper
+                .mounted_shares
+                .iter()
+                .filter(|mounted| mounted.share_name == share.share_name)
+                .find_map(|mounted| mounted.mount_path.as_ref())?;
+            let Some(mount_path) = mount_path.to_str() else {
+                warn!(
+                    "Mount path {} contains invalid unicode, not listing it",
+                    mount_path.to_string_lossy()
+                );
+                return None;
+            };
+            let (project, session) = match project_and_session(&share.dest_path) {
+                Ok(names) => names,
+                Err(error) => {
+                    warn!("not listing mounted share {}: {error}", share.share_id);
+                    return None;
+                }
+            };
+            Some(OtherMount {
+                share_id: share.share_id.clone(),
+                project,
+                session,
+                created_by: share.created_by.clone(),
+                mount_path: mount_path.to_owned(),
+            })
+        })
+        .collect()
 }
 
 /// The desired foreground share; the stream only carries its ID
@@ -204,9 +256,9 @@ mod tests {
     };
 
     use super::{
-        NO_HELPER_MESSAGE, ShareDestinationError, WAITING_MESSAGE, actual_differs_from_desired,
-        agent_mount_status, foreground_projection, foreground_share, hand_off_blocked,
-        project_and_session, scope_mount_status,
+        NO_HELPER_MESSAGE, OtherMount, ShareDestinationError, WAITING_MESSAGE,
+        actual_differs_from_desired, agent_mount_status, foreground_projection, foreground_share,
+        hand_off_blocked, other_mounted_shares, project_and_session, scope_mount_status,
     };
 
     fn share(id: &str) -> Share {
@@ -279,6 +331,7 @@ mod tests {
             session: "session".to_owned(),
             dest_path: "/project/session".to_owned(),
             message: message.to_owned(),
+            created_by: None,
         }
     }
 
@@ -309,8 +362,76 @@ mod tests {
                 session: "session".to_owned(),
                 dest_path: "/project/session".to_owned(),
                 mount_path: "/mnt/session".to_owned(),
+                created_by: None,
             })
         );
+    }
+
+    #[test]
+    fn the_projection_says_who_started_the_share() {
+        let desired = Share {
+            created_by: Some("alice".to_owned()),
+            ..share("foreground")
+        };
+        let mounted = helper(&[("share", Some("/mnt/session"))], &[]);
+        for helper in [None, Some(&mounted)] {
+            let created_by = match foreground_projection(Some(&desired), helper) {
+                Ok(APICurrentForegroundShare::Mounted { created_by, .. })
+                | Ok(APICurrentForegroundShare::Unavailable { created_by, .. }) => created_by,
+                other => panic!("unexpected: {other:?}"),
+            };
+            assert_eq!(created_by.as_deref(), Some("alice"));
+        }
+    }
+
+    fn named_share(id: &str, share_name: &str, session: &str) -> Share {
+        Share {
+            share_name: share_name.to_owned(),
+            dest_path: format!("/project/{session}"),
+            created_by: Some("alice".to_owned()),
+            ..share(id)
+        }
+    }
+
+    #[test]
+    fn other_mounted_shares_are_the_mounted_non_foreground_ones() {
+        let desired = Shares {
+            foreground_share_id: Some("new".to_owned()),
+            shares: vec![
+                named_share("old", "share-old", "first"),
+                named_share("unmounted", "share-unmounted", "second"),
+                named_share("new", "share-new", "third"),
+            ],
+        };
+        let helper = helper(
+            &[
+                ("share-old", Some("/mnt/first")),
+                ("share-unmounted", None),
+                ("share-new", Some("/mnt/third")),
+                ("share-not-desired", Some("/mnt/stale")),
+            ],
+            &[],
+        );
+        assert_eq!(
+            other_mounted_shares(&desired, &helper),
+            vec![OtherMount {
+                share_id: "old".to_owned(),
+                project: "project".to_owned(),
+                session: "first".to_owned(),
+                created_by: Some("alice".to_owned()),
+                mount_path: "/mnt/first".to_owned(),
+            }]
+        );
+    }
+
+    #[test]
+    fn without_a_foreground_share_every_mounted_share_is_listed() {
+        let desired = Shares {
+            foreground_share_id: None,
+            shares: vec![named_share("a", "share-a", "first")],
+        };
+        let helper = helper(&[("share-a", Some("/mnt/first"))], &[]);
+        assert_eq!(other_mounted_shares(&desired, &helper).len(), 1);
     }
 
     #[test]

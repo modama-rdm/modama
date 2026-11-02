@@ -39,6 +39,10 @@ pub enum APICurrentForegroundShare {
 
         /// Why the share is unavailable, written for the person running the client.
         message: String,
+
+        /// Login name of the user who started the share; null for shares from an smbdrop
+        /// that didn't record it yet
+        created_by: Option<String>,
     },
 
     /// The foreground share is mounted; write here.
@@ -57,6 +61,10 @@ pub enum APICurrentForegroundShare {
 
         /// Where the share is mounted on the local system
         mount_path: String,
+
+        /// Login name of the user who started the share; null for shares from an smbdrop
+        /// that didn't record it yet
+        created_by: Option<String>,
     },
 }
 
