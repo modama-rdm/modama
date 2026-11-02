@@ -28,6 +28,9 @@ pub struct AgentClient {
     inner: GeneratedClient,
 }
 
+// The wrappers pass the generated client's `ApiOpError` through unchanged; it's large because it
+// carries the response, and boxing it would only add a layer around every call site.
+#[allow(clippy::result_large_err)]
 impl AgentClient {
     /// `base_url` may end in `/` (as `Url::as_str()` always does): the generated client appends
     /// paths that start with `/`, so trailing slashes are dropped here.
