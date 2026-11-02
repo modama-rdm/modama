@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Sign in</h1>
+<p>Sign in with your data management account.</p>
+{% if error %}<p><strong>{{ error }}</strong></p>{% endif %}
+<form action="/login/" method="post">
+<input type="hidden" name="next" value="{{ next }}">
+<p><label>Username<br><input type="text" name="username" value="{{ username }}"></label></p>
+<p><label>Password<br><input type="password" name="password"></label></p>
+<p><input type="submit" value="Sign in"></p>
+</form>
+{% endblock %}

@@ -2,15 +2,11 @@
 //! Targets especially older browsers (Internet Explorer, ancient Firefox)
 use axum::{
     Router,
-    extract::{ConnectInfo, Form, Path, State},
+    extract::{ConnectInfo, Form, Path, Query, State},
     http::{StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
-};
-use axum_extra::{
-    TypedHeader,
-    headers::{Authorization, authorization::Basic},
-    typed_header::TypedHeaderRejection,
 };
 use axum_macros::debug_handler;
 use log::error;
@@ -19,7 +15,7 @@ use modama_common::{
     foreground::project_and_session,
     local_api_messages::APICurrentForegroundShare,
     messages::Share,
-    mgmt_client::{MgmtClient, MgmtError},
+    mgmt_client::MgmtError,
     tokens::{TokenError, TokenProvider},
 };
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -35,7 +31,10 @@ use crate::{
     config::{ConfigError, MTLSIdentity},
     events_api::add_internal_api,
     http_api::add_api_routes,
-    local_session::expired_session_cookie,
+    local_session::{
+        CallerSession, MaybeCallerSession, SessionTracker, expired_session_cookie,
+        with_refreshed_session,
+    },
     mgmt_api::{MgmtApi, MgmtApiConnection, MgmtApiError},
 };
 
@@ -60,6 +59,9 @@ fn create_env() -> Environment<'static> {
         )),
         "message.html" => Ok(Some(
             include_str!("templates/local_http/message.html").to_owned(),
+        )),
+        "login.html" => Ok(Some(
+            include_str!("templates/local_http/login.html").to_owned(),
         )),
         _ => Ok(None),
     });
@@ -293,7 +295,7 @@ fn validate_session_name(input: &str) -> Result<String, &'static str> {
     }
 }
 
-async fn local_snapshot(agent_state: &ApiState) -> (url::Url, String, Vec<String>) {
+async fn local_snapshot(agent_state: &ApiState) -> (String, Vec<String>) {
     let state = agent_state.state.lock().await;
     let (identity, resource_name) = match &state.config.identity {
         MTLSIdentity::Anonymous { hostname } => {
@@ -319,7 +321,7 @@ async fn local_snapshot(agent_state: &ApiState) -> (url::Url, String, Vec<String
                 .collect()
         })
         .unwrap_or_default();
-    (state.config.mgmt_api_url.clone(), identity, agents)
+    (identity, agents)
 }
 
 /// The desired foreground share; mounted or not, this is what the user can close, and what
@@ -386,9 +388,6 @@ pub enum LocalAPIError {
     #[error("token error: {0}")]
     Token(#[from] TokenError),
 
-    #[error("authentication failed")]
-    Auth,
-
     #[error("not signed in")]
     NoSession,
 
@@ -429,9 +428,10 @@ impl IntoResponse for LocalAPIError {
                 )
                     .into_response()
             }
-            LocalAPIError::BackendAPI(MgmtError::Unauthorized) | LocalAPIError::Auth => (
+            LocalAPIError::BackendAPI(MgmtError::Unauthorized) => (
                 StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Basic realm=modama-agent")],
+                [(header::CONTENT_TYPE, "text/plain")],
+                "not signed in",
             )
                 .into_response(),
             LocalAPIError::NoSession | LocalAPIError::Mgmt(MgmtApiError::Unauthorized) => (
@@ -564,41 +564,26 @@ impl IntoResponse for LocalAPIError {
     }
 }
 
-pub async fn get_auth(
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
-) -> Result<Authorization<Basic>, LocalAPIError> {
-    match auth {
-        Ok(TypedHeader(auth)) => Ok(auth),
-        Err(e) => {
-            error!("error extracting authorization header: {e}");
-            Err(LocalAPIError::Auth)
-        }
-    }
-}
-
 #[debug_handler]
 async fn serve_index_page(
     State(agent_state): State<ApiState>,
     ConnectInfo(conn): ConnectInfo<ConnInfo>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-    let (mgmt_api_url, identity, connected_agents) = local_snapshot(&agent_state).await;
+    let mut tracker = SessionTracker::new(session);
+    let (identity, connected_agents) = local_snapshot(&agent_state).await;
     let scope = agent_state.resolve_scope(conn).await?;
     let foreground = agent_state.state.lock().await.foreground_for(scope)?;
     let start_allowed = foreground == APICurrentForegroundShare::None;
-    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
-    let projects = c
-        .list_projects()
-        .await?
+    let mgmt = agent_state.mgmt().await?;
+    let username = tracker.take(mgmt.signed_in_user(tracker.session()).await?);
+    // the management API lists every project; offer the user's own
+    let projects = tracker
+        .take(mgmt.projects(tracker.session()).await?)
         .projects
         .into_iter()
         .filter(|project| {
-            project
-                .members
-                .iter()
-                .any(|member| member == auth.username())
-                || project.owner == auth.username()
+            project.members.contains(&username) || project.owner == username
         })
         .map(|project| LinkItem {
             href: start_allowed.then(|| SafeLocalUrl::start_project(&project.name)),
@@ -607,28 +592,46 @@ async fn serve_index_page(
         .collect::<Vec<_>>();
     let foreground = ForegroundView::new(&foreground);
 
-    render_html(
+    Ok(tracker.respond(render_html(
         &agent_state.jinja_env,
         "index.html",
         StatusCode::OK,
         context! {
             title => "modama agent",
             identity,
+            username,
             connected_agents,
             foreground,
             projects,
             start_allowed,
         },
-    )
+    )?))
+}
+
+/// The session names of a project
+async fn session_names(
+    agent_state: &ApiState,
+    tracker: &mut SessionTracker,
+    project_name: &str,
+) -> Result<Vec<String>, LocalAPIError> {
+    let details = agent_state
+        .mgmt()
+        .await?
+        .project(tracker.session(), project_name)
+        .await?;
+    Ok(tracker
+        .take(details)
+        .sessions
+        .into_iter()
+        .map(|session| session.name)
+        .collect())
 }
 
 async fn start_ingest_step1(
     Path(project_name): Path<String>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-
     if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
@@ -638,21 +641,11 @@ async fn start_ingest_step1(
         );
     }
 
-    let c = {
-        let state = agent_state.state.lock().await;
-        MgmtClient::new(&state.config.mgmt_api_url, auth.username(), auth.password())?
-    };
-
-    let details = c.project_details(&project_name).await?;
-    let session_names = details
-        .datasets
-        .into_iter()
-        .map(|session| session.name)
-        .collect::<Vec<_>>();
-
+    let mut tracker = SessionTracker::new(session);
+    let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
     let session_date = today();
     let default_session_name = session_name_prefix(session_date);
-    render_session_list(
+    Ok(tracker.respond(render_session_list(
         &agent_state,
         StatusCode::OK,
         &project_name,
@@ -660,17 +653,15 @@ async fn start_ingest_step1(
         None,
         &default_session_name,
         session_date,
-    )
+    )?))
 }
 
 async fn create_session(
     Path(project_name): Path<String>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    CallerSession(session): CallerSession,
     Form(form): Form<CreateSessionForm>,
 ) -> Result<Response, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-
     if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
@@ -680,19 +671,13 @@ async fn create_session(
         );
     }
 
-    let mgmt_api_url = agent_state.state.lock().await.config.mgmt_api_url.clone();
-    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
-    let details = c.project_details(&project_name).await?;
-    let session_names = details
-        .datasets
-        .into_iter()
-        .map(|session| session.name)
-        .collect::<Vec<_>>();
+    let mut tracker = SessionTracker::new(session);
+    let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
 
     let session_name = match validate_session_name(&form.session_name) {
         Ok(session_name) => session_name,
         Err(message) => {
-            return render_session_list(
+            return Ok(tracker.respond(render_session_list(
                 &agent_state,
                 StatusCode::BAD_REQUEST,
                 &project_name,
@@ -700,7 +685,7 @@ async fn create_session(
                 Some(message),
                 &form.session_name,
                 today(),
-            );
+            )?));
         }
     };
 
@@ -713,13 +698,17 @@ async fn create_session(
         );
     }
 
-    if let Err(error) = c
-        .create_dataset(&project_name, &session_name, auth.username())
-        .await
-    {
-        if let MgmtError::Backend { message, .. } = error {
+    let created = agent_state
+        .mgmt()
+        .await?
+        .create_session(tracker.session(), &project_name, &session_name)
+        .await;
+    match created {
+        Ok(created) => tracker.take(created),
+        // the management API refused the name, or the session exists already
+        Err(MgmtApiError::Backend { status, message }) if (400..500).contains(&status) => {
             let message = format!("Could not create the session: {message}");
-            return render_session_list(
+            return Ok(tracker.respond(render_session_list(
                 &agent_state,
                 StatusCode::BAD_REQUEST,
                 &project_name,
@@ -727,22 +716,20 @@ async fn create_session(
                 Some(&message),
                 &session_name,
                 today(),
-            );
+            )?));
         }
-        return Err(error.into());
+        Err(error) => return Err(error.into()),
     }
 
     let confirmation_url = SafeLocalUrl::start_session(&project_name, &session_name);
-    Ok(Redirect::to(confirmation_url.as_str()).into_response())
+    Ok(tracker.respond(Redirect::to(confirmation_url.as_str())))
 }
 
 async fn start_ingest_step2(
     Path((project_name, session_name)): Path<(String, String)>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-
     if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
@@ -752,18 +739,15 @@ async fn start_ingest_step2(
         );
     }
 
-    let (mgmt_api_url, _, _) = local_snapshot(&agent_state).await;
-    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
-
-    let details = c.project_details(&project_name).await?;
-
-    if !details.datasets.iter().any(|d| d.name == session_name) {
-        return message_page(
+    let mut tracker = SessionTracker::new(session);
+    let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
+    if !session_names.contains(&session_name) {
+        return Ok(tracker.respond(message_page(
             &agent_state.jinja_env,
             StatusCode::NOT_FOUND,
             "Session not found",
             "The selected session does not exist in this project.",
-        );
+        )?));
     }
 
     let res_name = match &agent_state.state.lock().await.config.identity {
@@ -774,7 +758,7 @@ async fn start_ingest_step2(
         } => resource_name.clone(),
     };
     let action = SafeLocalUrl::start_session(&project_name, &session_name);
-    render_html(
+    Ok(tracker.respond(render_html(
         &agent_state.jinja_env,
         "start_confirm.html",
         StatusCode::OK,
@@ -785,16 +769,14 @@ async fn start_ingest_step2(
             resource => res_name,
             action,
         },
-    )
+    )?))
 }
 
 async fn start_ingest_step3(
     Path((project_name, session_name)): Path<(String, String)>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let auth = get_auth(auth).await?;
-
     if desired_foreground(&agent_state).await.is_some() {
         return message_page(
             &agent_state.jinja_env,
@@ -804,18 +786,15 @@ async fn start_ingest_step3(
         );
     }
 
-    let mgmt_api_url = agent_state.state.lock().await.config.mgmt_api_url.clone();
-    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
-
-    let details = c.project_details(&project_name).await?;
-
-    if !details.datasets.iter().any(|d| d.name == session_name) {
-        return message_page(
+    let mut tracker = SessionTracker::new(session);
+    let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
+    if !session_names.contains(&session_name) {
+        return Ok(tracker.respond(message_page(
             &agent_state.jinja_env,
             StatusCode::NOT_FOUND,
             "Session not found",
             "The selected session does not exist in this project.",
-        );
+        )?));
     }
 
     if desired_foreground(&agent_state).await.is_some() {
@@ -827,28 +806,34 @@ async fn start_ingest_step3(
         );
     }
 
-    let sign_response = agent_state.token_provider.fetch_token().await?;
-    c.create_share(
-        &project_name,
-        &session_name,
-        &sign_response.resource,
-        &sign_response.token,
-    )
-    .await?;
+    let sign_response = Arc::clone(&agent_state.token_provider)
+        .fetch_token()
+        .await?;
+    let opened = agent_state
+        .mgmt()
+        .await?
+        .open_ingest_share(
+            tracker.session(),
+            &project_name,
+            &session_name,
+            &sign_response.resource,
+            &sign_response.token,
+        )
+        .await?;
+    tracker.take(opened);
 
     // there's a good chance the ingest share is available within 300ms; with this delay
     // the user doesn't have to refresh the overview page (hopefully in most cases!)
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    Ok(Redirect::to("/").into_response())
+    Ok(tracker.respond(Redirect::to("/")))
 }
 
 async fn close_ingest_confirmation(
     Path(share_id): Path<String>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    _session: CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let _auth = get_auth(auth).await?;
     let Some(foreground) = desired_foreground(&agent_state)
         .await
         .filter(|share| share.share_id == share_id)
@@ -879,9 +864,8 @@ async fn close_ingest_confirmation(
 async fn close_ingest(
     Path(share_id): Path<String>,
     State(agent_state): State<ApiState>,
-    auth: Result<TypedHeader<Authorization<Basic>>, TypedHeaderRejection>,
+    CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let auth = get_auth(auth).await?;
     if desired_foreground(&agent_state)
         .await
         .is_none_or(|share| share.share_id != share_id)
@@ -894,11 +878,139 @@ async fn close_ingest(
         );
     }
 
-    let mgmt_api_url = agent_state.state.lock().await.config.mgmt_api_url.clone();
-    let c = MgmtClient::new(&mgmt_api_url, auth.username(), auth.password())?;
-    c.delete_share(&share_id).await?;
+    let mut tracker = SessionTracker::new(session);
+    let closed = agent_state
+        .mgmt()
+        .await?
+        .close_ingest_share(tracker.session(), &share_id)
+        .await?;
+    tracker.take(closed);
+    Ok(tracker.respond(Redirect::to("/")))
+}
 
-    Ok(Redirect::to("/").into_response())
+#[derive(Deserialize)]
+struct LoginQuery {
+    next: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct LoginForm {
+    username: String,
+    password: String,
+    next: Option<String>,
+}
+
+/// Where to go after signing in: a path on this server, or the overview. Anything else (another
+/// origin, odd characters) could make the login an open redirect, so it's dropped.
+fn local_next(next: Option<&str>) -> &str {
+    next.filter(|next| {
+        next.starts_with('/')
+            && !next.starts_with("//")
+            && next.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(
+                        byte,
+                        b'/' | b'-' | b'_' | b'.' | b'~' | b'%' | b'?' | b'=' | b'&'
+                    )
+            })
+    })
+    .unwrap_or("/")
+}
+
+fn login_page(
+    agent_state: &ApiState,
+    status: StatusCode,
+    next: &str,
+    username: &str,
+    error: Option<&str>,
+) -> Result<Response, LocalAPIError> {
+    render_html(
+        &agent_state.jinja_env,
+        "login.html",
+        status,
+        context! { title => "Sign in", next, username, error },
+    )
+}
+
+async fn show_login(
+    State(agent_state): State<ApiState>,
+    Query(query): Query<LoginQuery>,
+) -> Result<Response, LocalAPIError> {
+    login_page(
+        &agent_state,
+        StatusCode::OK,
+        local_next(query.next.as_deref()),
+        "",
+        None,
+    )
+}
+
+async fn login(
+    State(agent_state): State<ApiState>,
+    Form(form): Form<LoginForm>,
+) -> Result<Response, LocalAPIError> {
+    let next = local_next(form.next.as_deref());
+    match agent_state
+        .mgmt()
+        .await?
+        .login(&form.username, &form.password)
+        .await
+    {
+        Ok((_username, session)) => Ok(with_refreshed_session(Some(session), Redirect::to(next))),
+        Err(MgmtApiError::Unauthorized) => login_page(
+            &agent_state,
+            StatusCode::UNAUTHORIZED,
+            next,
+            &form.username,
+            Some("Wrong username or password."),
+        ),
+        Err(error) => Err(error.into()),
+    }
+}
+
+async fn logout(
+    State(agent_state): State<ApiState>,
+    MaybeCallerSession(session): MaybeCallerSession,
+) -> Response {
+    if let Some(session) = session {
+        let result = match agent_state.mgmt().await {
+            Ok(mgmt) => mgmt.logout(&session).await.map_err(LocalAPIError::from),
+            Err(error) => Err(error),
+        };
+        // signed out here either way; the management API's cookie just expires
+        if let Err(error) = result {
+            log::warn!("signing out at the management API failed: {error}");
+        }
+    }
+    (
+        [(header::SET_COOKIE, expired_session_cookie())],
+        Redirect::to("/login/"),
+    )
+        .into_response()
+}
+
+/// On the pages, "not signed in" (no cookie, or the management API ended the session) leads to
+/// the login page, which comes back here afterwards
+async fn redirect_unauthorized_to_login(request: axum::extract::Request, next: Next) -> Response {
+    let target = request
+        .uri()
+        .path_and_query()
+        .map_or_else(|| "/".to_owned(), |target| target.as_str().to_owned());
+    let response = next.run(request).await;
+    if response.status() != StatusCode::UNAUTHORIZED {
+        return response;
+    }
+    let location = format!(
+        "/login/?next={}",
+        utf8_percent_encode(local_next(Some(&target)), NON_ALPHANUMERIC)
+    );
+    let mut redirect = Redirect::to(&location).into_response();
+    for cookie in response.headers().get_all(header::SET_COOKIE) {
+        redirect
+            .headers_mut()
+            .append(header::SET_COOKIE, cookie.clone());
+    }
+    redirect
 }
 
 pub async fn serve_local_web_api(
@@ -944,7 +1056,10 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
             post(start_ingest_step3),
         )
         .route("/close-ingest/{share_id}/", get(close_ingest_confirmation))
-        .route("/close-ingest/{share_id}/", post(close_ingest));
+        .route("/close-ingest/{share_id}/", post(close_ingest))
+        .route_layer(middleware::from_fn(redirect_unauthorized_to_login))
+        .route("/login/", get(show_login).post(login))
+        .route("/logout/", post(logout));
 
     let router = add_internal_api(router)?;
 
@@ -960,10 +1075,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use modama_common::internal_api_types::{MountedShare, SessionHelperState};
-    use modama_common::messages::{self, Share as MessageShare};
-    use modama_common::mgmt_client::{
-        AdhocProject, DataInProject, ListProjectsResponse, ProjectDetailsResponse,
-    };
+    use modama_common::messages::Share as MessageShare;
     use modama_common::tokens::{BoxFutureToken, TokenSignResponse};
     use rustls::ClientConfig;
     use serde_json::Value;
@@ -1156,7 +1268,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            // past the CSRF check; without a session, on to the login page
+            assert_eq!(response.status(), StatusCode::SEE_OTHER);
         }
     }
 
@@ -1173,32 +1286,57 @@ mod tests {
 
         let response = test_setup.app.oneshot(request).await.unwrap();
 
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
     }
 
-    fn project_details(session_names: &[&str]) -> ProjectDetailsResponse {
-        ProjectDetailsResponse {
-            errno: 0,
-            project: AdhocProject {
-                relpath: "the-project".to_owned(),
-                name: "the-project".to_owned(),
-                owner: "testuser".to_owned(),
-                members: vec!["testuser".to_owned()],
-                ctime: 0.0,
-                mtime: 0.0,
-                gid: 1001,
-                usage_bytes: None,
-            },
-            datasets: session_names
-                .iter()
-                .map(|name| DataInProject {
-                    name: (*name).to_owned(),
-                    immutable: false,
-                    ctime: 0.0,
-                    mtime: 0.0,
-                })
-                .collect(),
+    /// A project as mgmtinterface-api lists it
+    fn project_json(name: &str, owner: &str, members: &[&str]) -> Value {
+        serde_json::json!({
+            "relpath": format!("adhoc/{name}"), "name": name, "owner": owner,
+            "members": members, "ctime": 0.0, "mtime": 0.0, "gid": 1001, "usage_bytes": null,
+        })
+    }
+
+    /// `the-project` with these sessions, as mgmtinterface-api answers `GET projects/{p}`
+    fn project_details_json(session_names: &[&str]) -> String {
+        let mut details = project_json("the-project", "testuser", &["testuser"]);
+        details["sessions"] = session_names
+            .iter()
+            .map(|name| {
+                serde_json::json!({"name": name, "immutable": false, "ctime": 0.0, "mtime": 0.0})
+            })
+            .collect();
+        details.to_string()
+    }
+
+    async fn mock_project_details(server: &mut mockito::ServerGuard, session_names: &[&str]) {
+        server
+            .mock("GET", "/mgmt-api/projects/the-project")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_header("content-type", "application/json")
+            .with_body(project_details_json(session_names))
+            .create_async()
+            .await;
+    }
+
+    /// A signed-in request for an HTML page
+    fn page_request(method: &str, uri: &str, form: Option<&str>) -> Request<Body> {
+        let request = Request::builder()
+            .uri(uri)
+            .method(method)
+            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION));
+        match form {
+            Some(form) => request
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(form.to_owned())),
+            None => request.body(Body::empty()),
         }
+        .unwrap()
+    }
+
+    async fn body_text(resp: axum::response::Response) -> String {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).unwrap()
     }
 
     #[tokio::test]
@@ -1417,54 +1555,39 @@ mod tests {
     #[tokio::test]
     async fn test_index_page_shows_connected_agents_and_projects() {
         let test_setup = TestSetup::start().await;
-
-        let list_projects_resp: ListProjectsResponse = ListProjectsResponse {
-            errno: 0,
-            projects: vec![AdhocProject {
-                relpath: "the-project".to_owned(),
-                name: "the-project".to_owned(),
-                owner: "testuser".to_owned(),
-                members: vec!["testuser".to_owned()],
-                ctime: 0.0,
-                mtime: 0.0,
-                gid: 1001,
-                usage_bytes: Some(42),
-            }],
-        };
-
-        let mut server = mockito::Server::new_async().await;
+        let mut server = mgmt_api_server(&test_setup).await;
         server
-            .mock("GET", "/api/project/")
-            .with_status(200)
+            .mock("GET", "/mgmt-api/projects")
+            .match_header("cookie", UPSTREAM_SESSION)
             .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&list_projects_resp).unwrap())
+            .with_body(
+                serde_json::json!({"projects": [
+                    project_json("the-project", "testuser", &["testuser"]),
+                    project_json("not-mine", "someone", &["else"]),
+                ]})
+                .to_string(),
+            )
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
-
-        // Build request to index with Basic auth for user 'testuser'
-        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
-        let req = Request::builder()
-            .uri("/")
-            .method("GET")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request("GET", "/", None))
+            .await
             .unwrap();
-
-        let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(
             resp.headers().get(header::CONTENT_TYPE).unwrap(),
             "text/html; charset=utf-8"
         );
 
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
+        let body_str = body_text(resp).await;
         assert!(body_str.contains("x-modama-agent:&#x2f;&#x2f;res#agent"));
         assert!(body_str.contains("agent-name"));
+        assert!(body_str.contains("Signed in as testuser."));
+        assert!(body_str.contains("<form action=\"/logout/\" method=\"post\">"));
         assert!(body_str.contains("the-project"));
+        assert!(!body_str.contains("not-mine"));
         assert!(body_str.contains("Select a project to start an ingest"));
         assert!(body_str.contains("href=\"/start-ingest/the%2Dproject/\""));
         assert!(!body_str.contains("<script"));
@@ -1503,6 +1626,7 @@ mod tests {
             include_str!("templates/local_http/start_confirm.html"),
             include_str!("templates/local_http/close_confirm.html"),
             include_str!("templates/local_http/message.html"),
+            include_str!("templates/local_http/login.html"),
         ] {
             assert!(!template.contains("|safe"));
         }
@@ -1516,52 +1640,6 @@ mod tests {
         assert_eq!(template_value.as_str(), Some(url.as_str()));
         assert!(url.as_str().starts_with("/start-ingest/"));
         assert!(!url.as_str().contains(['\"', '<', '>', '&', ':']));
-    }
-
-    #[tokio::test]
-    async fn index_offers_close_for_an_open_foreground_ingest() {
-        let test_setup = TestSetup::start().await;
-        set_open_foreground(&test_setup, "share-123").await;
-
-        let projects = ListProjectsResponse {
-            errno: 0,
-            projects: vec![AdhocProject {
-                relpath: "the-project".to_owned(),
-                name: "the-project".to_owned(),
-                owner: "testuser".to_owned(),
-                members: vec![],
-                ctime: 0.0,
-                mtime: 0.0,
-                gid: 1001,
-                usage_bytes: None,
-            }],
-        };
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/api/project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&projects).unwrap())
-            .create_async()
-            .await;
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
-
-        let req = Request::builder()
-            .uri("/")
-            .method("GET")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
-            .unwrap();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        let body = String::from_utf8_lossy(&body);
-
-        assert!(body.contains("Status: open"));
-        assert!(body.contains("href=\"/close-ingest/share%2D123/\""));
-        assert!(!body.contains("href=\"/start-ingest/"));
-        assert!(!body.contains("Reload this page"));
-        assert!(!body.contains("secret-password"));
     }
 
     #[test]
@@ -1603,90 +1681,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_ingest_step1() {
-        let test_setup = TestSetup::start().await;
-
-        let proj = AdhocProject {
-            relpath: "the-project".to_owned(),
-            name: "the-project".to_owned(),
-            owner: "testuser".to_owned(),
-            members: vec!["testuser".to_owned()],
-            ctime: 0.0,
-            mtime: 0.0,
-            gid: 1001,
-            usage_bytes: Some(42),
-        };
-
-        let list_projects_resp: ListProjectsResponse = ListProjectsResponse {
-            errno: 0,
-            projects: vec![proj.clone()],
-        };
-
-        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
-            errno: 0,
-            project: proj.clone(),
-            datasets: vec![DataInProject {
-                name: "test-session".to_owned(),
-                immutable: false,
-                ctime: 0.0,
-                mtime: 0.0,
-            }],
-        };
-
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/api/project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&list_projects_resp).unwrap())
-            .create_async()
-            .await;
-
-        server
-            .mock("GET", "/api/project/the-project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&project_details_resp).unwrap())
-            .create_async()
-            .await;
-
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
-
-        // Build request to index with Basic auth for user 'testuser'
-        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/")
-            .method("GET")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
-            .unwrap();
-
-        let date_before_request = today();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
-        let date_after_request = today();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
-
-        assert!(body_str.contains("test-session"));
-        assert!(body_str.contains("Select an existing session to start an ingest"));
-        assert!(body_str.contains("href=\"/start-ingest/the%2Dproject/test%2Dsession/\""));
-        assert!(body_str.contains("Create a new session"));
-        assert!(body_str.contains("<form action=\"/start-ingest/the%2Dproject/\" method=\"post\""));
-        assert!(body_str.contains("name=\"session_name\""));
-        assert!(
-            [date_before_request, date_after_request]
-                .into_iter()
-                .any(|date| {
-                    body_str.contains(&format!("value=\"{}\"", session_name_prefix(date)))
-                        && body_str.contains(&session_name_example(date))
-                })
-        );
-    }
-
     #[test]
     fn validates_new_session_names() {
         assert_eq!(
@@ -1712,39 +1706,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn index_offers_close_for_an_open_foreground_ingest() {
+        let test_setup = TestSetup::start().await;
+        set_open_foreground(&test_setup, "share-123").await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("GET", "/mgmt-api/projects")
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({"projects": [project_json("the-project", "testuser", &[])]})
+                    .to_string(),
+            )
+            .create_async()
+            .await;
+
+        let resp = test_setup
+            .app
+            .oneshot(page_request("GET", "/", None))
+            .await
+            .unwrap();
+        let body = body_text(resp).await;
+
+        assert!(body.contains("Status: open"));
+        assert!(body.contains("href=\"/close-ingest/share%2D123/\""));
+        assert!(!body.contains("href=\"/start-ingest/"));
+        assert!(!body.contains("Reload this page"));
+        assert!(!body.contains("secret-password"));
+    }
+
+    #[tokio::test]
+    async fn test_ingest_step1() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["test-session"]).await;
+
+        let date_before_request = today();
+        let resp = test_setup
+            .app
+            .oneshot(page_request("GET", "/start-ingest/the-project/", None))
+            .await
+            .unwrap();
+        let date_after_request = today();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body_str = body_text(resp).await;
+        assert!(body_str.contains("test-session"));
+        assert!(body_str.contains("Select an existing session to start an ingest"));
+        assert!(body_str.contains("href=\"/start-ingest/the%2Dproject/test%2Dsession/\""));
+        assert!(body_str.contains("Create a new session"));
+        assert!(body_str.contains("<form action=\"/start-ingest/the%2Dproject/\" method=\"post\""));
+        assert!(body_str.contains("name=\"session_name\""));
+        assert!(
+            [date_before_request, date_after_request]
+                .into_iter()
+                .any(|date| {
+                    body_str.contains(&format!("value=\"{}\"", session_name_prefix(date)))
+                        && body_str.contains(&session_name_example(date))
+                })
+        );
+    }
+
+    #[tokio::test]
     async fn create_session_redirects_to_start_confirmation() {
         let test_setup = TestSetup::start().await;
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/api/project/the-project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&project_details(&["existing"])).unwrap())
-            .create_async()
-            .await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["existing"]).await;
         let create = server
-            .mock("POST", "/api/project/the-project/dataset/")
-            .match_header("authorization", "Basic dGVzdHVzZXI6cGFzcw==")
-            .match_body(mockito::Matcher::Json(serde_json::json!({
-                "name": "new-session",
-                "owner": "testuser",
-            })))
-            .with_status(200)
+            .mock("POST", "/mgmt-api/projects/the-project/sessions")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({"name": "new-session"}),
+            ))
+            .with_status(201)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"errno":0,"message":null}"#)
+            .with_body(r#"{"name": "new-session", "immutable": false, "ctime": 1.0, "mtime": 1.0}"#)
             .create_async()
             .await;
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
 
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from("session_name=++new-session++"))
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "POST",
+                "/start-ingest/the-project/",
+                Some("session_name=++new-session++"),
+            ))
+            .await
             .unwrap();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         assert_eq!(
@@ -1757,34 +1804,26 @@ mod tests {
     #[tokio::test]
     async fn invalid_new_session_name_redisplays_the_form_without_creating() {
         let test_setup = TestSetup::start().await;
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/api/project/the-project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&project_details(&["existing"])).unwrap())
-            .create_async()
-            .await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["existing"]).await;
         let create = server
-            .mock("POST", "/api/project/the-project/dataset/")
+            .mock("POST", "/mgmt-api/projects/the-project/sessions")
             .expect(0)
             .create_async()
             .await;
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
 
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from("session_name=bad%2Fname"))
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "POST",
+                "/start-ingest/the-project/",
+                Some("session_name=bad%2Fname"),
+            ))
+            .await
             .unwrap();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        let body = String::from_utf8_lossy(&body);
+        let body = body_text(resp).await;
         assert!(body.contains("Session name cannot contain a slash"));
         assert!(body.contains("value=\"bad&#x2f;name\""));
         assert!(body.contains("existing"));
@@ -1794,36 +1833,28 @@ mod tests {
     #[tokio::test]
     async fn session_creation_rejection_is_escaped_and_shown_inline() {
         let test_setup = TestSetup::start().await;
-        let mut server = mockito::Server::new_async().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &[]).await;
         server
-            .mock("GET", "/api/project/the-project/")
-            .with_status(200)
+            .mock("POST", "/mgmt-api/projects/the-project/sessions")
+            .with_status(409)
             .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&project_details(&[])).unwrap())
+            .with_body(r#"{"code": "session_exists", "message": "session <exists>"}"#)
             .create_async()
             .await;
-        server
-            .mock("POST", "/api/project/the-project/dataset/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{"errno":17,"message":"session <exists>"}"#)
-            .create_async()
-            .await;
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
 
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from("session_name=new-session"))
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "POST",
+                "/start-ingest/the-project/",
+                Some("session_name=new-session"),
+            ))
+            .await
             .unwrap();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        let body = String::from_utf8_lossy(&body);
+        let body = body_text(resp).await;
         assert!(body.contains("Could not create the session: session &lt;exists&gt;"));
         assert!(!body.contains("session <exists>"));
         assert!(body.contains("value=\"new-session\""));
@@ -1834,14 +1865,15 @@ mod tests {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "current-share").await;
 
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from("session_name=new-session"))
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "POST",
+                "/start-ingest/the-project/",
+                Some("session_name=new-session"),
+            ))
+            .await
             .unwrap();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
@@ -1849,133 +1881,39 @@ mod tests {
     #[tokio::test]
     async fn test_ingest_step2_invalid_session_name() {
         let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["test-session"]).await;
 
-        let proj = AdhocProject {
-            relpath: "the-project".to_owned(),
-            name: "the-project".to_owned(),
-            owner: "testuser".to_owned(),
-            members: vec!["testuser".to_owned()],
-            ctime: 0.0,
-            mtime: 0.0,
-            gid: 1001,
-            usage_bytes: Some(42),
-        };
-
-        let list_projects_resp: ListProjectsResponse = ListProjectsResponse {
-            errno: 0,
-            projects: vec![proj.clone()],
-        };
-
-        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
-            errno: 0,
-            project: proj.clone(),
-            datasets: vec![DataInProject {
-                name: "test-session".to_owned(),
-                immutable: false,
-                ctime: 0.0,
-                mtime: 0.0,
-            }],
-        };
-
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/api/project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&list_projects_resp).unwrap())
-            .create_async()
-            .await;
-
-        server
-            .mock("GET", "/api/project/the-project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&project_details_resp).unwrap())
-            .create_async()
-            .await;
-
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
-
-        // Build request to index with Basic auth for user 'testuser'
-        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/invalid-session/")
-            .method("GET")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "GET",
+                "/start-ingest/the-project/invalid-session/",
+                None,
+            ))
+            .await
             .unwrap();
-
-        let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
     async fn test_ingest_step2_valid() {
         let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["test-session"]).await;
 
-        let proj = AdhocProject {
-            relpath: "the-project".to_owned(),
-            name: "the-project".to_owned(),
-            owner: "testuser".to_owned(),
-            members: vec!["testuser".to_owned()],
-            ctime: 0.0,
-            mtime: 0.0,
-            gid: 1001,
-            usage_bytes: Some(42),
-        };
-
-        let list_projects_resp: ListProjectsResponse = ListProjectsResponse {
-            errno: 0,
-            projects: vec![proj.clone()],
-        };
-
-        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
-            errno: 0,
-            project: proj.clone(),
-            datasets: vec![DataInProject {
-                name: "test-session".to_owned(),
-                immutable: false,
-                ctime: 0.0,
-                mtime: 0.0,
-            }],
-        };
-
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/api/project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&list_projects_resp).unwrap())
-            .create_async()
-            .await;
-
-        server
-            .mock("GET", "/api/project/the-project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&project_details_resp).unwrap())
-            .create_async()
-            .await;
-
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
-
-        // Build request to index with Basic auth for user 'testuser'
-        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/test-session/")
-            .method("GET")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "GET",
+                "/start-ingest/the-project/test-session/",
+                None,
+            ))
+            .await
             .unwrap();
-
-        let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        let body_str = String::from_utf8(bytes.to_vec()).unwrap();
-
+        let body_str = body_text(resp).await;
         assert!(body_str.contains(
             "<form action=\"/start-ingest/the%2Dproject/test%2Dsession/\" method=\"post\""
         ));
@@ -1987,105 +1925,63 @@ mod tests {
     #[tokio::test]
     async fn test_ingest_step2_invalid_project_name() {
         let test_setup = TestSetup::start().await;
-
-        let mut server = mockito::Server::new_async().await;
-        // explicit 404 response for the invalid project name
+        let mut server = mgmt_api_server(&test_setup).await;
         let mock = server
-            .mock("GET", "/api/project/invalid-project/")
+            .mock("GET", "/mgmt-api/projects/invalid-project")
             .with_status(404)
-            .with_header("content-type", "text/plain")
-            .with_body("not found")
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"code": "project_not_found", "message": "No such project."}"#)
             .create_async()
             .await;
 
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
-
-        // Build request to index with Basic auth for user 'testuser'
-        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
-        let req = Request::builder()
-            .uri("/start-ingest/invalid-project/test-session/")
-            .method("GET")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "GET",
+                "/start-ingest/invalid-project/test-session/",
+                None,
+            ))
+            .await
             .unwrap();
-
-        let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-
         mock.assert_async().await;
     }
 
     #[tokio::test]
     async fn test_ingest_step3() {
         let test_setup = TestSetup::start().await;
-
-        let proj = AdhocProject {
-            relpath: "the-project".to_owned(),
-            name: "the-project".to_owned(),
-            owner: "testuser".to_owned(),
-            members: vec!["testuser".to_owned()],
-            ctime: 0.0,
-            mtime: 0.0,
-            gid: 1001,
-            usage_bytes: Some(42),
-        };
-
-        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
-            errno: 0,
-            project: proj.clone(),
-            datasets: vec![DataInProject {
-                name: "test-session".to_owned(),
-                immutable: false,
-                ctime: 0.0,
-                mtime: 0.0,
-            }],
-        };
-
-        let mut server = mockito::Server::new_async().await;
-        let mock_details = server
-            .mock("GET", "/api/project/the-project/")
-            .with_status(200)
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["test-session"]).await;
+        let open = server
+            .mock("POST", "/mgmt-api/ingest-shares")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("x-agent-token", "dummy-token")
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "project": "the-project", "session": "test-session", "resource": "resource",
+            })))
+            .with_status(201)
             .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&project_details_resp).unwrap())
+            .with_body(
+                r#"{"share_id": "share-123", "share_name": "share-123",
+                    "project": "the-project", "session": "test-session",
+                    "dest_path": "/adhoc/the-project/test-session/", "created_timestamp": 0,
+                    "username": "share-user", "password": "share-pass", "uid": 1001,
+                    "gid": 1001, "resource": "res", "created_by": "testuser",
+                    "smb_host": "host", "workgroup": "W"}"#,
+            )
             .create_async()
             .await;
 
-        let share_response = messages::Share {
-            resource: Some("res".to_owned()),
-            share_id: "share-123".to_owned(),
-            share_name: "share-123".to_owned(),
-            dest_path: "/adhoc/the-project/test-session/".to_owned(),
-            created_timestamp: 0,
-            username: "share-user".to_owned(),
-            password: "share-pass".to_owned(),
-            uid: 1001,
-            gid: 1001,
-            created_by: None,
-        };
-
-        let mock_create_share = server
-            .mock("POST", "/api/share/")
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&share_response).unwrap())
-            .create_async()
-            .await;
-
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
-
-        // Build request to index with Basic auth for user 'testuser'
-        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/test-session/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "POST",
+                "/start-ingest/the-project/test-session/",
+                None,
+            ))
+            .await
             .unwrap();
-
-        let resp = test_setup.app.oneshot(req).await.unwrap();
-        mock_details.assert_async().await;
-        mock_create_share.assert_async().await;
+        open.assert_async().await;
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/");
     }
@@ -2093,74 +1989,24 @@ mod tests {
     #[tokio::test]
     async fn test_ingest_step3_invalid_session_name() {
         let test_setup = TestSetup::start().await;
-
-        let proj = AdhocProject {
-            relpath: "the-project".to_owned(),
-            name: "the-project".to_owned(),
-            owner: "testuser".to_owned(),
-            members: vec!["testuser".to_owned()],
-            ctime: 0.0,
-            mtime: 0.0,
-            gid: 1001,
-            usage_bytes: Some(42),
-        };
-
-        let project_details_resp: ProjectDetailsResponse = ProjectDetailsResponse {
-            errno: 0,
-            project: proj.clone(),
-            datasets: vec![DataInProject {
-                name: "test-session".to_owned(),
-                immutable: false,
-                ctime: 0.0,
-                mtime: 0.0,
-            }],
-        };
-
-        let mut server = mockito::Server::new_async().await;
-        let mock_details = server
-            .mock("GET", "/api/project/the-project/")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&project_details_resp).unwrap())
+        let mut server = mgmt_api_server(&test_setup).await;
+        mock_project_details(&mut server, &["test-session"]).await;
+        let open = server
+            .mock("POST", "/mgmt-api/ingest-shares")
+            .expect(0)
             .create_async()
             .await;
 
-        let share_response = messages::Share {
-            resource: Some("res".to_owned()),
-            share_id: "share-123".to_owned(),
-            share_name: "share-123".to_owned(),
-            dest_path: "/adhoc/the-project/test-session/".to_owned(),
-            created_timestamp: 0,
-            username: "share-user".to_owned(),
-            password: "share-pass".to_owned(),
-            uid: 1001,
-            gid: 1001,
-            created_by: None,
-        };
-
-        let mock_create_share = server
-            .mock("POST", "/api/share/")
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&share_response).unwrap())
-            .expect_at_most(0)
-            .create_async()
-            .await;
-
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
-
-        // Build request to index with Basic auth for user 'testuser'
-        // Precomputed base64 for "testuser:pass" is dGVzdHVzZXI6cGFzcw==
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/invalid-session/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "POST",
+                "/start-ingest/the-project/invalid-session/",
+                None,
+            ))
+            .await
             .unwrap();
-
-        let resp = test_setup.app.oneshot(req).await.unwrap();
-        mock_details.assert_async().await;
-        mock_create_share.assert_async().await;
+        open.assert_async().await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
@@ -2169,58 +2015,50 @@ mod tests {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "current-share").await;
 
-        let req = Request::builder()
-            .uri("/start-ingest/the-project/test-session/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "POST",
+                "/start-ingest/the-project/test-session/",
+                None,
+            ))
+            .await
             .unwrap();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::CONFLICT);
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        assert!(String::from_utf8_lossy(&body).contains("Close the current ingest"));
+        assert!(body_text(resp).await.contains("Close the current ingest"));
     }
 
     #[tokio::test]
     async fn close_ingest_requires_confirmation_and_redirects_after_deletion() {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "share-123").await;
-
-        let mut server = mockito::Server::new_async().await;
+        let mut server = mgmt_api_server(&test_setup).await;
         let delete = server
-            .mock("DELETE", "/api/share/share-123/")
-            .match_header("authorization", "Basic dGVzdHVzZXI6cGFzcw==")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(r#"{"status":"ok"}"#)
+            .mock("DELETE", "/mgmt-api/ingest-shares/share-123")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_status(204)
             .create_async()
             .await;
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
 
-        let req = Request::builder()
-            .uri("/close-ingest/share-123/")
-            .method("GET")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .clone()
+            .oneshot(page_request("GET", "/close-ingest/share-123/", None))
+            .await
             .unwrap();
-        let resp = test_setup.app.clone().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        let body = String::from_utf8_lossy(&body);
+        let body = body_text(resp).await;
         assert!(body.contains("Project: the-project"));
         assert!(body.contains("Session: test-session"));
         assert!(body.contains("<form action=\"/close-ingest/share%2D123/\" method=\"post\""));
         assert!(!body.contains("secret-password"));
 
-        let req = Request::builder()
-            .uri("/close-ingest/share-123/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request("POST", "/close-ingest/share-123/", None))
+            .await
             .unwrap();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/");
         delete.assert_async().await;
@@ -2231,15 +2069,182 @@ mod tests {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "current-share").await;
 
-        let req = Request::builder()
-            .uri("/close-ingest/stale-share/")
-            .method("POST")
-            .header(header::AUTHORIZATION, "Basic dGVzdHVzZXI6cGFzcw==")
-            .body(Body::empty())
+        let resp = test_setup
+            .app
+            .oneshot(page_request("POST", "/close-ingest/stale-share/", None))
+            .await
             .unwrap();
-        let resp = test_setup.app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn pages_without_a_session_lead_to_the_login_page_and_back() {
+        let test_setup = TestSetup::start().await;
+        let req = Request::builder()
+            .uri("/start-ingest/the-project/")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/login/?next=%2Fstart%2Dingest%2Fthe%2Dproject%2F"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_page_whose_session_ended_upstream_leads_to_the_login_page() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("GET", "/mgmt-api/projects/the-project")
+            .with_status(401)
+            .with_body(r#"{"code": "not_authenticated", "message": "Please sign in."}"#)
+            .create_async()
+            .await;
+
+        let resp = test_setup
+            .app
+            .oneshot(page_request("GET", "/start-ingest/the-project/", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert!(
+            resp.headers()
+                .get(header::LOCATION)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("/login/?next=")
+        );
+        assert!(set_cookies(&resp)[0].contains("Max-Age=0"));
+    }
+
+    #[tokio::test]
+    async fn the_login_form_signs_in_and_returns_to_the_page() {
+        let test_setup = TestSetup::start().await;
+        let resp = test_setup
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/login/?next=%2Fstart%2Dingest%2Fthe%2Dproject%2F")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_text(resp).await;
+        assert!(body.contains("<form action=\"/login/\" method=\"post\">"));
+        assert!(body.contains("value=\"&#x2f;start-ingest&#x2f;the-project&#x2f;\""));
+
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("POST", "/mgmt-api/auth/login")
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "username": "testuser", "password": "p&ss",
+            })))
+            .with_header(
+                "set-cookie",
+                "modama_session=abc; HttpOnly; Path=/; SameSite=lax",
+            )
+            .with_body(r#"{"username": "testuser", "persistent": false}"#)
+            .create_async()
+            .await;
+        let resp = test_setup
+            .app
+            .oneshot(
+                Request::builder()
+                    .uri("/login/")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "username=testuser&password=p%26ss&next=%2Fstart-ingest%2Fthe-project%2F",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/start-ingest/the-project/"
+        );
+        assert!(set_cookies(&resp)[0].starts_with(&signed_in_cookie(UPSTREAM_SESSION)));
+    }
+
+    #[tokio::test]
+    async fn a_wrong_password_shows_the_form_again() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("POST", "/mgmt-api/auth/login")
+            .with_status(401)
+            .with_body(r#"{"code": "bad_credentials", "message": "Wrong username or password."}"#)
+            .create_async()
+            .await;
+        let resp = test_setup
+            .app
+            .oneshot(
+                Request::builder()
+                    .uri("/login/")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("username=te%3Cst&password=wrong&next=%2F"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(set_cookies(&resp).is_empty());
+        let body = body_text(resp).await;
+        assert!(body.contains("Wrong username or password."));
+        assert!(body.contains("value=\"te&lt;st\""));
+    }
+
+    #[test]
+    fn only_local_paths_are_followed_after_login() {
+        assert_eq!(
+            local_next(Some("/start-ingest/p%2Dq/")),
+            "/start-ingest/p%2Dq/"
+        );
+        for foreign in [
+            "https://attacker.example/",
+            "//attacker.example/",
+            "/\\attacker.example",
+            "start-ingest/",
+            "/a b",
+            "/\"><script>",
+        ] {
+            assert_eq!(local_next(Some(foreign)), "/", "{foreign}");
+        }
+        assert_eq!(local_next(None), "/");
+    }
+
+    #[tokio::test]
+    async fn signing_out_removes_the_session_and_shows_the_login_page() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        let logout = server
+            .mock("POST", "/mgmt-api/auth/logout")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_status(204)
+            .create_async()
+            .await;
+
+        let resp = test_setup
+            .app
+            .oneshot(page_request("POST", "/logout/", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/login/");
+        assert!(set_cookies(&resp)[0].contains("Max-Age=0"));
+        logout.assert_async().await;
     }
 
     const UPSTREAM_SESSION: &str = "modama_session=abc";
@@ -2255,6 +2260,13 @@ mod tests {
         server
             .mock("GET", "/mgmt-api/versions")
             .with_body(r#"{"supported": [1], "latest": 1, "deprecated": []}"#)
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/mgmt-api/auth/session")
+            .match_header("cookie", UPSTREAM_SESSION)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"username": "testuser", "persistent": false}"#)
             .create_async()
             .await;
         test_setup.shared_state.lock().await.config.mgmt_api_url =

@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block body %}
 <h1>modama agent</h1>
+<form action="/logout/" method="post">
+<p>Signed in as {{ username }}. <input type="submit" value="Sign out"></p>
+</form>
 <p>This agent: {{ identity }}</p>
 {% if connected_agents %}
 <h2>Connected agents at this resource</h2>

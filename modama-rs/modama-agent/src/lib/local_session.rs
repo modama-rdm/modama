@@ -15,7 +15,10 @@ use axum::{
 };
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
-use crate::{local_http_service::LocalAPIError, mgmt_api::UpstreamSession};
+use crate::{
+    local_http_service::LocalAPIError,
+    mgmt_api::{Authed, UpstreamSession},
+};
 
 pub const SESSION_COOKIE: &str = "modama_agent_session";
 
@@ -84,6 +87,39 @@ pub fn with_refreshed_session(
             .append(header::SET_COOKIE, session_cookie(&session));
     }
     response
+}
+
+/// The caller's session across several management API calls for one response: later calls
+/// use a re-issued session, and the response stores it
+pub struct SessionTracker {
+    current: UpstreamSession,
+    reissued: bool,
+}
+
+impl SessionTracker {
+    pub fn new(session: UpstreamSession) -> Self {
+        Self {
+            current: session,
+            reissued: false,
+        }
+    }
+
+    pub fn session(&self) -> &UpstreamSession {
+        &self.current
+    }
+
+    /// The value of an authenticated call, noting a re-issued session
+    pub fn take<T>(&mut self, authed: Authed<T>) -> T {
+        if let Some(session) = authed.refreshed {
+            self.current = session;
+            self.reissued = true;
+        }
+        authed.value
+    }
+
+    pub fn respond(self, response: impl IntoResponse) -> Response {
+        with_refreshed_session(self.reissued.then_some(self.current), response)
+    }
 }
 
 #[cfg(test)]

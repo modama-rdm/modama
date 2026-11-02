@@ -313,6 +313,19 @@ impl MgmtApiConnection {
             .await
     }
 
+    /// Who `session` belongs to
+    pub async fn signed_in_user(
+        &self,
+        session: &UpstreamSession,
+    ) -> Result<Authed<String>, MgmtApiError> {
+        let (client, jar) = http_client(&self.base, Some(session))?;
+        let result = client
+            .read_session_mgmt_api_auth_session_get(API_VERSION)
+            .await
+            .map(|info| info.username);
+        self.authed(session, &jar, result).await
+    }
+
     pub async fn projects(
         &self,
         session: &UpstreamSession,
