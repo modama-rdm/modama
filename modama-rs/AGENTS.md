@@ -12,6 +12,10 @@ by this, so it's a safe default.
 
 Fixing clippy errors is mandatory.
 
+Start integration test files (`tests/*.rs`, including the visual tests) with
+`#![cfg(test)]`: otherwise clippy doesn't count their helper functions as test
+code, and `allow-unwrap-in-tests` doesn't apply to them.
+
 ## Visual tests for GUI development
 
 Run visual tests via `just`; otherwise, required workaround(s) for issues
