@@ -31,7 +31,12 @@ fn main() {
     let design_path = manifest_dir.join("../../mgmtinterface-new/DESIGN.md");
     println!("cargo:rerun-if-changed={}", design_path.display());
 
-    generate_api_client(&manifest_dir);
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set by Cargo"));
+    openapi_codegen::generate_api_client(
+        &manifest_dir.join("../modama-agent/openapi.json"),
+        &out_dir,
+    )
+    .expect("failed to generate the agent API client");
 
     let source = fs::read_to_string(&design_path).expect("failed to read DESIGN.md");
     let front_matter =
@@ -44,63 +49,8 @@ fn main() {
     };
 
     let generated = generate_styles(&design).expect("failed to generate design styles");
-    let output_path = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set by Cargo"))
-        .join("design_styles.rs");
+    let output_path = out_dir.join("design_styles.rs");
     fs::write(&output_path, generated).expect("failed to write generated design styles");
-}
-
-fn generate_api_client(manifest_dir: &std::path::Path) {
-    use openapi_to_rust::{CodeGenerator, GeneratorConfig, SchemaAnalyzer};
-
-    let schema_path = manifest_dir.join("../modama-agent/openapi.json");
-    println!("cargo:rerun-if-changed={}", schema_path.display());
-
-    let source = fs::read_to_string(&schema_path).expect("failed to read OpenAPI schema");
-    let schema: serde_json::Value =
-        serde_json::from_str(&source).expect("failed to parse OpenAPI schema");
-
-    let mut analyzer = SchemaAnalyzer::new(schema).expect("failed to initialize schema analyzer");
-    let mut analysis = analyzer
-        .analyze()
-        .expect("failed to analyze OpenAPI schema");
-    let generator = CodeGenerator::new(GeneratorConfig {
-        enable_async_client: true,
-        enable_sse_client: false,
-        tracing_enabled: false,
-        ..GeneratorConfig::default()
-    });
-    let generated = generator
-        .generate_all(&mut analysis)
-        .expect("failed to generate API client");
-
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set by Cargo"))
-        .join("generated");
-    fs::create_dir_all(&out_dir).expect("failed to create generated API client directory");
-
-    for file in generated.files {
-        let output_path = out_dir.join(&file.path);
-        if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent).expect("failed to create generated API client subdirectory");
-        }
-        let content = strip_leading_comments_and_attrs(&file.content);
-        fs::write(&output_path, content).expect("failed to write generated API client file");
-    }
-}
-
-fn strip_leading_comments_and_attrs(content: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut first_code_line = 0;
-
-    while first_code_line < lines.len() {
-        let trimmed = lines[first_code_line].trim();
-        if trimmed.starts_with("//!") || trimmed.starts_with("#![") || trimmed.is_empty() {
-            first_code_line += 1;
-        } else {
-            break;
-        }
-    }
-
-    lines[first_code_line..].join("\n")
 }
 
 fn extract_front_matter(source: &str) -> Result<Option<&str>, String> {

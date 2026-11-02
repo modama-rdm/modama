@@ -8,6 +8,7 @@ members = [
     "version-range",
     "versions-macro",
     "versioned",
+    "openapi-codegen",
 ]
 package.edition = "2024"
 # 1.94 matches the pinned win7 nightly (nightly-2025-12-11);
