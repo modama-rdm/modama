@@ -35,6 +35,7 @@ fn main() {
     openapi_codegen::generate_api_client(
         &manifest_dir.join("../modama-agent/openapi.json"),
         &out_dir,
+        None,
     )
     .expect("failed to generate the agent API client");
 

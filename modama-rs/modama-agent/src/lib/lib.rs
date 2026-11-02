@@ -9,6 +9,7 @@ pub mod local_net_common;
 pub mod local_net_token_provider;
 pub mod local_net_token_proxy;
 pub mod message_loop;
+pub mod mgmt_api;
 pub mod mgmt_api_client;
 pub mod runtime;
 #[cfg(windows)]

@@ -13,13 +13,25 @@ use openapi_to_rust::{
 
 /// Generate the client for the OpenAPI document at `schema_path` into `<out_dir>/generated/`,
 /// and tell Cargo to rerun the build script when the document changes.
-pub fn generate_api_client(schema_path: &Path, out_dir: &Path) -> Result<(), String> {
+///
+/// With `strip_path_prefix`, that prefix is removed from every path in the document, and the
+/// client's base URL has to supply it instead. This is for an API whose mount point can move,
+/// like mgmtinterface-api (`/mgmt-api` now, `/api` later). A path without the prefix is an
+/// error.
+pub fn generate_api_client(
+    schema_path: &Path,
+    out_dir: &Path,
+    strip_path_prefix: Option<&str>,
+) -> Result<(), String> {
     println!("cargo:rerun-if-changed={}", schema_path.display());
 
     let source = fs::read_to_string(schema_path)
         .map_err(|error| format!("failed to read {}: {error}", schema_path.display()))?;
-    let schema: serde_json::Value = serde_json::from_str(&source)
+    let mut schema: serde_json::Value = serde_json::from_str(&source)
         .map_err(|error| format!("failed to parse {}: {error}", schema_path.display()))?;
+    if let Some(prefix) = strip_path_prefix {
+        strip_paths(&mut schema, prefix)?;
+    }
 
     // Timestamps stay strings: nothing reads them yet, and this avoids a chrono dependency in
     // the generated code. The analyzer and the generator each need the mapping.
@@ -57,6 +69,22 @@ pub fn generate_api_client(schema_path: &Path, out_dir: &Path) -> Result<(), Str
     Ok(())
 }
 
+fn strip_paths(schema: &mut serde_json::Value, prefix: &str) -> Result<(), String> {
+    let paths = schema
+        .get_mut("paths")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or("the OpenAPI document has no paths")?;
+    let stripped = std::mem::take(paths)
+        .into_iter()
+        .map(|(path, item)| match path.strip_prefix(prefix) {
+            Some(rest) if rest.starts_with('/') => Ok((rest.to_owned(), item)),
+            _ => Err(format!("path {path} doesn't start with {prefix}/")),
+        })
+        .collect::<Result<serde_json::Map<_, _>, _>>()?;
+    *paths = stripped;
+    Ok(())
+}
+
 /// `include!` can't take inner doc comments or inner attributes, so drop the leading ones
 fn strip_leading_comments_and_attrs(content: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
@@ -72,7 +100,27 @@ fn strip_leading_comments_and_attrs(content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_leading_comments_and_attrs;
+    use super::{strip_leading_comments_and_attrs, strip_paths};
+
+    #[test]
+    fn strips_the_prefix_from_every_path() {
+        let mut schema = serde_json::json!({
+            "paths": {"/mgmt-api/projects": {"get": {}}, "/mgmt-api/versions": {}}
+        });
+        strip_paths(&mut schema, "/mgmt-api").unwrap();
+        assert_eq!(
+            schema,
+            serde_json::json!({"paths": {"/projects": {"get": {}}, "/versions": {}}})
+        );
+    }
+
+    #[test]
+    fn a_path_outside_the_prefix_is_an_error() {
+        for path in ["/other/projects", "/mgmt-apiary"] {
+            let mut schema = serde_json::json!({"paths": {path: {}}});
+            assert!(strip_paths(&mut schema, "/mgmt-api").is_err(), "{path}");
+        }
+    }
 
     #[test]
     fn strips_inner_docs_and_attributes_up_to_the_first_code_line() {

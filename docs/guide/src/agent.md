@@ -180,6 +180,11 @@ private_key = """
 """
 ```
 
+`mgmt_api_url` names the server of the management web interface, not the API itself: the
+agent looks for the API below it, at `/api/` first and then at `/mgmt-api/`, and uses the
+first one that supports its API version. A URL that already points at the API works as well.
+The log says which one was found.
+
 Tip: ensure newlines at the beginning and end of the multi-line certificates and keys,
 otherwise you may get a `KeyMismatch` error!
 

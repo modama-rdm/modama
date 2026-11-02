@@ -8,6 +8,7 @@ fn main() {
     openapi_codegen::generate_api_client(
         &manifest_dir.join("../../python/mgmtinterface-api/openapi.json"),
         &out_dir,
+        Some("/mgmt-api"),
     )
     .expect("failed to generate the mgmtinterface-api client");
 }
