@@ -546,9 +546,7 @@ async fn serve_index_page(
         .take(mgmt.projects(tracker.session()).await?)
         .projects
         .into_iter()
-        .filter(|project| {
-            project.members.contains(&username) || project.owner == username
-        })
+        .filter(|project| project.members.contains(&username) || project.owner == username)
         .map(|project| LinkItem {
             href: start_allowed.then(|| SafeLocalUrl::start_project(&project.name)),
             name: project.name,
