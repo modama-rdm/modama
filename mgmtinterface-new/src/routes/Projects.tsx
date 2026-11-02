@@ -79,7 +79,10 @@ function ProjectsSection({
                         <SortHeader label="Last modified" column="mtime" sort={sort} onSort={onSort} className={thClass}/>
                     </tr>
                     </thead>
-                    <tbody>
+                    {/* A sort moves the rows of all three tables (#222). Kept out of the
+                        browser's scroll anchoring, or a row of the table above, anchored at
+                        the top of the window, drags the page along to its new place. */}
+                    <tbody className="[overflow-anchor:none]">
                     {projects.map((p) => (
                         <tr
                             key={p.name}
