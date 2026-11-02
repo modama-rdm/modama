@@ -119,6 +119,7 @@ mod tests {
                 password: "share-pass".to_owned(),
                 uid: 1001,
                 gid: 1001,
+                created_by: None,
             }]
             .iter(),
         )

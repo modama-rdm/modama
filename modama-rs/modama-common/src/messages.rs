@@ -37,6 +37,11 @@ pub struct Share {
 
     /// the underlying unix group for which the share is created
     pub gid: u32,
+
+    /// Login name of the user who created the share; None for shares created before smbdrop
+    /// recorded it
+    #[serde(default)]
+    pub created_by: Option<String>,
 }
 
 impl Share {
@@ -61,6 +66,7 @@ impl std::fmt::Debug for Share {
             .field("password", &"[REDACTED]")
             .field("uid", &self.uid)
             .field("gid", &self.gid)
+            .field("created_by", &self.created_by)
             .finish()
     }
 }
@@ -85,4 +91,41 @@ pub enum EventChannelRequests {
 #[serde(tag = "type")]
 pub enum EventChannelInitialMessages {
     Login { token: String, version: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Share;
+    use crate::requests::CreateShareRequest;
+
+    /// Shares persisted by an smbdrop that didn't record the creator yet
+    #[test]
+    fn share_without_created_by_deserializes() {
+        let share: Share = serde_json::from_value(serde_json::json!({
+            "resource": "holo",
+            "share_id": "b4fdcdf6-e870-4ac5-9942-78463f051c5c",
+            "share_name": "share-b4fdcdf6",
+            "dest_path": "/adhoc/project/session",
+            "created_timestamp": 0,
+            "username": "shareb4fdcdf6",
+            "password": "secret",
+            "uid": 1001,
+            "gid": 1001,
+        }))
+        .unwrap();
+        assert_eq!(share.created_by, None);
+    }
+
+    /// Requests from callers that don't send the creator yet
+    #[test]
+    fn create_request_without_created_by_deserializes() {
+        let request: CreateShareRequest = serde_json::from_value(serde_json::json!({
+            "dest_path": "/adhoc/project/session",
+            "resource": null,
+            "uid": 1001,
+            "gid": 1001,
+        }))
+        .unwrap();
+        assert_eq!(request.created_by, None);
+    }
 }

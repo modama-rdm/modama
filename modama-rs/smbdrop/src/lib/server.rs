@@ -193,7 +193,13 @@ async fn create_share<U: UserProvider, M: MountBackend, P: ProcessManager>(
     info!("creating share from request {request:?}");
     let share = state
         .share_manager
-        .create_share(&dest_path, request.uid, request.gid, request.resource)
+        .create_share(
+            &dest_path,
+            request.uid,
+            request.gid,
+            request.resource,
+            request.created_by,
+        )
         .await?;
 
     if let Err(readiness) = state.readiness.wait_until_ready(share.clone()).await {
@@ -301,6 +307,7 @@ mod tests {
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
         let mut url = api_base_url.clone();
         url.set_path("/share/");
@@ -373,6 +380,7 @@ mod tests {
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
+            created_by: Some("alice".to_owned()),
         };
 
         let mut url = api_base_url.clone();
@@ -414,6 +422,7 @@ mod tests {
                 assert_eq!(share.gid, 1001);
                 assert_eq!(share.resource.unwrap().as_str(), "holo");
                 assert_eq!(share.dest_path, dest_path.to_string_lossy());
+                assert_eq!(share.created_by.as_deref(), Some("alice"));
                 share_clone
             }
         };
@@ -499,6 +508,7 @@ mod tests {
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
 
         let mut url = api_base_url.clone();
@@ -556,6 +566,7 @@ mod tests {
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
 
         let mut url = api_base_url.clone();
@@ -699,6 +710,7 @@ mod tests {
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
         let mut url = api_base_url.clone();
         url.set_path("/share/");
@@ -896,6 +908,7 @@ mod tests {
             // this uid exists, but there's an additional one in the users key of the config:
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
         state.add_share(share.clone()).await.unwrap();
         state
@@ -1044,6 +1057,7 @@ mod tests {
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
 
         let mut url = api_base_url.clone();

@@ -35,6 +35,7 @@ fn share(id: &str, name: &str, password: &str) -> Share {
         password: password.to_owned(),
         uid: 1000,
         gid: 1000,
+        created_by: None,
     }
 }
 

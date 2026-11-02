@@ -842,6 +842,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         uid: u32,
         gid: u32,
         resource: Option<String>,
+        created_by: Option<String>,
     ) -> Result<Share, ShareError> {
         // before touching the config, try to heal any inconsistencies:
         self.try_heal().await?;
@@ -889,6 +890,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| ShareError::ClockIssues)?
                 .as_secs(),
+            created_by,
         };
 
         // before writing the config, run the pre-flight checks (without immutability)
@@ -1246,6 +1248,7 @@ mod tests {
                 password: "share-pass".to_owned(),
                 uid: 1001,
                 gid: 1001,
+                created_by: None,
             };
             state.add_share(share.clone()).await.unwrap();
             state
@@ -1278,6 +1281,7 @@ mod tests {
                 password: "share-pass".to_owned(),
                 uid: 1002, // XXX uid mismatch
                 gid: 1002,
+                created_by: None,
             };
             state.add_share(share.clone()).await.unwrap();
             state
@@ -1310,6 +1314,7 @@ mod tests {
                 password: "share-pass".to_owned(),
                 uid: 1001,
                 gid: 1001,
+                created_by: None,
             };
             state.add_share(share.clone()).await.unwrap();
             // uid mismatch here:
@@ -1344,6 +1349,7 @@ mod tests {
                 password: "share-pass".to_owned(),
                 uid: 1001,
                 gid: 1001,
+                created_by: None,
             };
             state.add_share(share.clone()).await.unwrap();
 
@@ -1357,6 +1363,7 @@ mod tests {
                 password: "share-pass".to_owned(),
                 uid: 1002,
                 gid: 1002,
+                created_by: None,
             };
             state.add_share(share.clone()).await.unwrap();
 
@@ -1397,6 +1404,7 @@ mod tests {
             password: "share-pass".to_owned(),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
 
         // adding a share without a user:
@@ -1449,6 +1457,7 @@ mod tests {
             password: "share-pass".to_owned(),
             uid,
             gid: uid,
+            created_by: None,
         }
     }
 
@@ -1498,8 +1507,15 @@ mod tests {
         )
         .await;
         share_manager.start().await.unwrap();
-        let create =
-            |uid: u32| share_manager.create_share(&dest_path, uid, uid, Some("holo".to_owned()));
+        let create = |uid: u32| {
+            share_manager.create_share(
+                &dest_path,
+                uid,
+                uid,
+                Some("holo".to_owned()),
+                Some(format!("user{uid}")),
+            )
+        };
 
         let first = create(1001).await.unwrap();
         let second = create(1002).await.unwrap();
@@ -1602,6 +1618,7 @@ mod tests {
                 // this uid exists, but there's an additional one in the users key of the config:
                 uid: 1001,
                 gid: 1001,
+                created_by: None,
             };
             state.add_share(share.clone()).await.unwrap();
             state
@@ -1694,6 +1711,7 @@ mod tests {
             password: "share-pass".to_owned(),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
 
         state.add_share(share.clone()).await.unwrap();

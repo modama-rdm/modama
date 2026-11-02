@@ -929,6 +929,7 @@ mod test {
             password: "testpasswod".to_owned(),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
 
         state

@@ -1036,6 +1036,7 @@ mod tests {
             password: "secret-password".to_owned(),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         }
     }
 
@@ -1154,6 +1155,7 @@ mod tests {
             password: "p".to_string(),
             uid: 1000,
             gid: 1000,
+            created_by: None,
         };
         test_setup.set_foreground(share, Some("/mnt/point")).await;
         let req = Request::builder()
@@ -1258,6 +1260,7 @@ mod tests {
             password: "secret".to_owned(),
             uid: 1000,
             gid: 1000,
+            created_by: None,
         };
         test_setup.set_foreground(share, Some("/mnt/share")).await;
         let req = Request::builder()
@@ -1994,6 +1997,7 @@ mod tests {
             password: "share-pass".to_owned(),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
 
         let mock_create_share = server
@@ -2067,6 +2071,7 @@ mod tests {
             password: "share-pass".to_owned(),
             uid: 1001,
             gid: 1001,
+            created_by: None,
         };
 
         let mock_create_share = server
@@ -2287,6 +2292,7 @@ mod tests {
             password: "temporary-secret".to_owned(),
             uid: 1000,
             gid: 1000,
+            created_by: None,
         };
         let mut server = mockito::Server::new_async().await;
         server

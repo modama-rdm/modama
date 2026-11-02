@@ -6,4 +6,8 @@ pub struct CreateShareRequest {
     pub resource: Option<String>,
     pub uid: u32,
     pub gid: u32,
+
+    /// Login name of the user who asked for the share
+    #[serde(default)]
+    pub created_by: Option<String>,
 }
