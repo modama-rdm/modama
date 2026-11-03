@@ -1,8 +1,10 @@
 import {screen, within} from '@testing-library/react'
 import {describe, expect, it} from 'vitest'
+import type {BrowseEntry, BrowseV2} from '../../api/types'
 import {installApiMock, type ApiHandler} from '../api-mock'
 import {renderApp, signIn} from '../render'
 import {baseWorld} from '../world'
+import {FIXTURE_BROWSE} from '../fixtures/browse'
 import {FIXTURE_DATASETS, FIXTURE_PROJECT} from '../fixtures/project'
 
 /**
@@ -15,7 +17,8 @@ import {FIXTURE_DATASETS, FIXTURE_PROJECT} from '../fixtures/project'
  * Who may change one is the file system's call: the API writes README.md as
  * the signed-in user, so only whoever wrote it first may change it.
  *
- * A session's whole description opens in a dialog from its row.
+ * A session's whole description opens in a dialog from its row. The data
+ * browser renders a project's or a session's above the files in its folder.
  */
 describe('journey: descriptions', () => {
     const name = FIXTURE_PROJECT.name
@@ -336,6 +339,101 @@ describe('journey: descriptions', () => {
             renderApp({route: `/projects/${name}/sessions/nope/description`})
 
             expect(await screen.findByText('No such session')).toBeInTheDocument()
+        })
+    })
+
+    describe('data browser', () => {
+        const projectFolder = `/${FIXTURE_PROJECT.relpath}`
+        const sessionFolder = `${projectFolder}/${session.name}`
+        const entry = (folder: string, entryName: string, isdir: boolean): BrowseEntry => ({
+            name: entryName,
+            path: `${folder}/${entryName}`,
+            isdir,
+            mtime: 1,
+            size: isdir ? null : 64,
+            access: {},
+        })
+        const listingOf = (folder: string, entries: BrowseEntry[]): BrowseV2 => ({
+            ...FIXTURE_BROWSE,
+            path: folder,
+            name: folder.split('/').pop()!,
+            project: name,
+            entries,
+            total: entries.length,
+            next_cursor: null,
+        })
+        const listing = (folder: string, entries: BrowseEntry[]): ApiHandler => ({
+            method: 'GET',
+            path: '/mgmt-api/browse',
+            respond: () => ({body: listingOf(folder, entries)}),
+        })
+        const browse = (folder: string) => `/browse?path=${encodeURIComponent(folder)}`
+
+        it("renders a session folder's README.md above the listing, with Edit for a member", async () => {
+            signIn('user2')
+            installApiMock([
+                listing(sessionFolder, [entry(sessionFolder, 'raw', true), entry(sessionFolder, 'README.md', false)]),
+                ...baseWorld(),
+            ])
+            const {user} = renderApp({route: browse(sessionFolder)})
+
+            expect(await screen.findByRole('heading', {level: 3, name: 'First light'})).toBeInTheDocument()
+            expect(screen.getByText('Alignment of the new detector after the service visit.')).toBeInTheDocument()
+
+            await user.click(screen.getByRole('button', {name: 'Edit'}))
+            expect(await screen.findByRole('heading', {name: 'Session description'})).toBeInTheDocument()
+        })
+
+        it("renders a project folder's README.md, without Edit for someone outside the project", async () => {
+            signIn(outsider)
+            installApiMock([
+                listing(projectFolder, [entry(projectFolder, session.name, true), entry(projectFolder, 'README.md', false)]),
+                ...baseWorld(),
+            ])
+            renderApp({route: browse(projectFolder)})
+
+            expect(await screen.findByRole('heading', {level: 3, name: 'Data management dogfooding'}))
+                .toBeInTheDocument()
+            expect(screen.queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
+        })
+
+        it('shows one README.md at a time while moving between folders that have one', async () => {
+            signIn('user2')
+            const folders: Record<string, BrowseEntry[]> = {
+                [projectFolder]: [entry(projectFolder, session.name, true), entry(projectFolder, 'README.md', false)],
+                [sessionFolder]: [entry(sessionFolder, 'raw', true), entry(sessionFolder, 'README.md', false)],
+            }
+            installApiMock([
+                {
+                    method: 'GET',
+                    path: '/mgmt-api/browse',
+                    respond: ({params}) => ({body: listingOf(params.get('path')!, folders[params.get('path')!])}),
+                },
+                ...baseWorld(),
+            ])
+            const {user} = renderApp({route: browse(projectFolder)})
+            await screen.findByRole('heading', {level: 3, name: 'Data management dogfooding'})
+
+            await user.click(screen.getByRole('link', {name: session.name}))
+            expect(await screen.findByRole('heading', {level: 3, name: 'First light'})).toBeInTheDocument()
+            expect(screen.getAllByRole('heading', {name: 'README.md'})).toHaveLength(1)
+            expect(screen.queryByRole('heading', {name: 'Data management dogfooding'})).not.toBeInTheDocument()
+
+            await user.click(screen.getByRole('link', {name: '..'}))
+            expect(await screen.findByRole('heading', {level: 3, name: 'Data management dogfooding'}))
+                .toBeInTheDocument()
+            expect(screen.getAllByRole('heading', {name: 'README.md'})).toHaveLength(1)
+            expect(screen.queryByRole('heading', {name: 'First light'})).not.toBeInTheDocument()
+        })
+
+        it('looks nothing up for a folder without README.md', async () => {
+            signIn('user2')
+            const recorder = installApiMock([listing(sessionFolder, [entry(sessionFolder, 'raw', true)]), ...baseWorld()])
+            renderApp({route: browse(sessionFolder)})
+
+            expect(await screen.findByText('raw')).toBeInTheDocument()
+            expect(recorder.matching('GET', `/mgmt-api/projects/${name}`)).toHaveLength(0)
+            expect(screen.queryByText('README.md')).not.toBeInTheDocument()
         })
     })
 

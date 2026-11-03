@@ -1,17 +1,18 @@
-import {Fragment, useId, useLayoutEffect, useRef, useState} from 'react'
-import {Link, useLoaderData, useNavigate} from 'react-router-dom'
+import {Fragment, Suspense, useId, useLayoutEffect, useRef, useState} from 'react'
+import {Await, Link, useLoaderData, useNavigate} from 'react-router-dom'
 import {Unauthorized} from '../api/errors'
 import {apiFetchV2} from '../api/clientV2'
 import type {BrowseAccess, BrowseEntry, BrowseV2} from '../api/types'
 import {CopyButton, CopyField} from '../components/CopyField'
+import {RenderedDescription} from '../components/RenderedDescription'
 import {useCopy} from '../hooks/useCopy'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
-import {CheckCircleIcon, ChevronDownIcon, FileIcon, FolderIcon} from '../components/ui/icons'
+import {CheckCircleIcon, ChevronDownIcon, FileIcon, FolderIcon, PencilIcon} from '../components/ui/icons'
 import {formatBytes, formatDateTime} from '../lib/format'
 import {parentOf, pathPyramid} from '../lib/paths'
 import {browsePath, browseUrl} from '../lib/quotePath'
-import {browseRequest, type BrowseLoaderData} from './browse.loader'
+import {browseRequest, type BrowseLoaderData, type FolderReadme} from './browse.loader'
 
 /** Bytes as the API reports them, human-readably; "—" for a folder. */
 function formatSize(size: number | null): string {
@@ -606,6 +607,49 @@ function FolderListing({
     )
 }
 
+/**
+ * A project's or a session's README.md, rendered above its folder's listing,
+ * as GitLab shows one. A long one scrolls inside the card, so the listing
+ * stays near the top.
+ */
+function FolderReadmeCard({readme}: { readme: FolderReadme }) {
+    const navigate = useNavigate()
+    const {editTo} = readme
+    return (
+        <Card className="mb-3.5 px-5 py-4">
+            <div className="mb-2 flex items-center justify-between gap-4">
+                <h2 className="flex items-center gap-1.5 font-mono text-xs font-semibold text-fg-subtle">
+                    <FileIcon className="h-3.5 w-3.5"/>
+                    README.md
+                </h2>
+                {editTo && (
+                    <Button
+                        variant="secondary"
+                        onClick={() => navigate(editTo)}
+                        className="px-3 py-1.5 text-xs"
+                    >
+                        <PencilIcon className="h-3.5 w-3.5"/>
+                        Edit
+                    </Button>
+                )}
+            </div>
+            <div className="max-h-96 overflow-y-auto">
+                <RenderedDescription text={readme.text}/>
+            </div>
+        </Card>
+    )
+}
+
+function ReadmeSkeleton() {
+    const bar = 'animate-pulse rounded bg-surface-muted'
+    return (
+        <Card className="mb-3.5 px-5 py-4">
+            <div className={`${bar} mb-3 h-4 w-24`}/>
+            <div className={`${bar} h-12 w-full`}/>
+        </Card>
+    )
+}
+
 /** A path that could not be opened: no such path (404), or a folder this user
  *  may not read (403). The breadcrumb above it is the way back up. */
 function BrowseError({status, message}: { status: number; message: string }) {
@@ -639,6 +683,18 @@ export function Browse() {
         <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
             <Breadcrumb path={result.path}/>
             <ResourceBar info={result} onOpenApp={rememberApp}/>
+
+            {data.readme && (
+                // Keyed by path, so another folder starts over with the
+                // skeleton rather than showing this one's README meanwhile;
+                // prefixed, since FolderListing below is keyed by the path too
+                // and two siblings with one key get duplicated.
+                <Suspense key={`readme:${result.path}`} fallback={<ReadmeSkeleton/>}>
+                    <Await resolve={data.readme}>
+                        {(readme: FolderReadme | null) => readme && <FolderReadmeCard readme={readme}/>}
+                    </Await>
+                </Suspense>
+            )}
 
             {result.isdir && (result.entries.length > 0 || parent !== null) && (
                 <FolderListing
