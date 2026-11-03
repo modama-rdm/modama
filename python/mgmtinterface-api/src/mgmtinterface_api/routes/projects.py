@@ -55,8 +55,7 @@ class Project(BaseModel):
     description: str | None = Field(
         default=None,
         description=(
-            "The text of the project folder's `README.md`, or null when there "
-            "is none."
+            "The text of the project folder's `README.md`, or null when there is none."
         ),
     )
 
