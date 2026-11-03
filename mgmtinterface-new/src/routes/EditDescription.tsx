@@ -6,6 +6,7 @@ import {
     useAsyncError,
     useAsyncValue,
     useLoaderData,
+    useLocation,
     useNavigate,
 } from 'react-router-dom'
 import {Unauthorized} from '../api/errors'
@@ -22,7 +23,7 @@ import {AlertTriangleIcon} from '../components/ui/icons'
 import {Textarea} from '../components/ui/Textarea'
 import {useToast} from '../components/ui/toast-context'
 import {descriptionPath} from '../lib/projectsUtil'
-import type {EditDescriptionLoaderData} from './editDescription.loader'
+import type {EditDescriptionLoaderData, UnsavedDescription} from './editDescription.loader'
 
 function Notice({title, detail, backTo}: { title: string; detail: string; backTo: string }) {
     return (
@@ -42,11 +43,13 @@ function DescriptionForm() {
     const project = useAsyncValue() as ProjectDetailsV2
     const navigate = useNavigate()
     const {notify} = useToast()
+    // Set by a create form when the folder was made but README.md was not.
+    const unsaved = useLocation().state as UnsavedDescription | null
 
     const target = session === null ? null : project.sessions.find((s) => s.name === session)
     const current = (session === null ? project.description : target?.description) ?? ''
-    const [text, setText] = useState(current)
-    const [error, setError] = useState('')
+    const [text, setText] = useState(unsaved?.text ?? current)
+    const [error, setError] = useState(unsaved?.error ?? '')
     const [submitting, setSubmitting] = useState(false)
 
     const backTo = `/projects/${project.name}`

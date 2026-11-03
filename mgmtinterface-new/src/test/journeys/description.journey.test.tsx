@@ -323,6 +323,92 @@ describe('journey: descriptions', () => {
                 .toEqual({name: 'run 1', description: 'Titan, 300 kV'})
         })
 
+        it('goes on to the description, text kept, when the project was made but README.md was not', async () => {
+            signIn('user1')
+            const created = {...FIXTURE_PROJECT, name: 'ghost_imaging_2026', members: ['user1'], description: null}
+            const createdPut = `/mgmt-api/projects/${created.name}/description`
+            const recorder = installApiMock([
+                {
+                    method: 'GET',
+                    path: `/mgmt-api/projects/${created.name}`,
+                    respond: () => ({body: {...created, usage_bytes: null, sessions: []}}),
+                },
+                {
+                    method: 'GET',
+                    path: `/mgmt-api/projects/${created.name}/usage`,
+                    respond: () => ({body: {usage_bytes: 0}}),
+                },
+                ...baseWorld(),
+                {
+                    method: 'POST',
+                    path: '/mgmt-api/projects',
+                    respond: () => ({
+                        status: 502,
+                        body: {
+                            code: 'description_not_saved',
+                            message: `The project '${created.name}' was created, but its description could not be saved. Please add it again on the project page.`,
+                        },
+                    }),
+                },
+                echoPut(createdPut, created),
+            ])
+            const {user} = renderApp({route: '/projects/new'})
+
+            await user.type(await screen.findByLabelText(/project name/i), created.name)
+            await user.type(screen.getByLabelText(/description/i), 'Ni nanowires')
+            await user.click(screen.getByRole('button', {name: /create project/i}))
+
+            // Not the create form again, which would now answer "already exists".
+            expect(await screen.findByRole('heading', {name: 'Project description'})).toBeInTheDocument()
+            expect(screen.getByText(
+                `Project "${created.name}" was created, but its description could not be saved. Please save it again.`,
+            )).toBeInTheDocument()
+            expect(screen.getByLabelText('Description')).toHaveValue('Ni nanowires')
+
+            await user.click(screen.getByRole('button', {name: 'Save Description'}))
+
+            expect(await screen.findByText('Description saved.')).toBeInTheDocument()
+            expect(recorder.matching('PUT', createdPut)[0].body).toEqual({description: 'Ni nanowires'})
+        })
+
+        it('does the same for a session', async () => {
+            signIn('user1')
+            const created = {name: 'run 1', immutable: false, ctime: 1, mtime: 1, description: null}
+            installApiMock([
+                {
+                    method: 'GET',
+                    path: `/mgmt-api/projects/${name}`,
+                    respond: () => ({
+                        body: {...FIXTURE_PROJECT, usage_bytes: null, sessions: [...FIXTURE_DATASETS, created]},
+                    }),
+                },
+                ...baseWorld(),
+                {
+                    method: 'POST',
+                    path: `/mgmt-api/projects/${name}/sessions`,
+                    respond: () => ({
+                        status: 502,
+                        body: {
+                            code: 'description_not_saved',
+                            message: "The session 'run 1' was created, but its description could not be saved. Please add it again on the project page.",
+                        },
+                    }),
+                },
+            ])
+            const {user} = renderApp({route: `/projects/${name}/sessions/new`})
+
+            const input = await screen.findByLabelText('Session name')
+            await user.clear(input)
+            await user.type(input, 'run 1')
+            await user.type(screen.getByLabelText(/description/i), 'Titan, 300 kV')
+            await user.click(screen.getByRole('button', {name: /create session/i}))
+
+            expect(await screen.findByRole('heading', {name: 'Session description'})).toBeInTheDocument()
+            expect(screen.getByText(/Session "run 1" was created, but its description could not be saved/))
+                .toBeInTheDocument()
+            expect(screen.getByLabelText('Description')).toHaveValue('Titan, 300 kV')
+        })
+
         it('refuses a session named README.md before asking the API', async () => {
             signIn('user1')
             const recorder = installApiMock(baseWorld())

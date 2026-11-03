@@ -117,7 +117,7 @@ export async function apiRequestV2<T>(
         clearSession()
         throw new Unauthorized(error.message)
     }
-    throw new ApiError(res.status, error.message)
+    throw new ApiError(res.status, error.message, error.code)
 }
 
 /** `apiRequestV2` for callers that only need the body. */

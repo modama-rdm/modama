@@ -1,6 +1,6 @@
 import {useState, type FormEvent} from 'react'
 import {Link, useLoaderData, useNavigate} from 'react-router-dom'
-import {Unauthorized} from '../api/errors'
+import {ApiError, Unauthorized} from '../api/errors'
 import {apiRequestV2} from '../api/clientV2'
 import {DESCRIPTION_MAX_LENGTH, type CreateProjectRequestV2, type SerializedProject} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
@@ -11,6 +11,8 @@ import {Input} from '../components/ui/Input'
 import {Textarea} from '../components/ui/Textarea'
 import {AlertTriangleIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
+import {descriptionPath} from '../lib/projectsUtil'
+import type {UnsavedDescription} from './editDescription.loader'
 import type {NewProjectLoaderData} from './newProject.loader'
 
 /**
@@ -80,6 +82,17 @@ export function NewProject() {
         } catch (err) {
             if (err instanceof Unauthorized) {
                 navigate('/login?next=/projects/new')
+                return
+            }
+            if (err instanceof ApiError && err.code === 'description_not_saved') {
+                // The project is there, only its README.md is not. Go on to
+                // its description with the text kept, rather than stay on a
+                // form that would now answer "already exists".
+                const state: UnsavedDescription = {
+                    text: description.trim(),
+                    error: `Project "${trimmed}" was created, but its description could not be saved. Please save it again.`,
+                }
+                navigate(descriptionPath(trimmed), {state})
                 return
             }
             setError(err instanceof Error ? err.message : 'Could not create the project.')

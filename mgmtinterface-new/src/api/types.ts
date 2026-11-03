@@ -80,7 +80,8 @@ export interface CreateProjectRequestV2 {
     members: string[]
     /**
      * Saved as `README.md` in the new folder. Left out when blank; the server
-     * treats blank as absent anyway. Up to 10 000 characters.
+     * treats blank as absent anyway. Up to 10 000 characters. When the folder
+     * is made but the file is not, the answer is `502 description_not_saved`.
      */
     description?: string
 }

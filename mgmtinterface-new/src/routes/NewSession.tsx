@@ -1,6 +1,6 @@
 import {useState, type FormEvent} from 'react'
 import {Link, useNavigate, useParams} from 'react-router-dom'
-import {Unauthorized} from '../api/errors'
+import {ApiError, Unauthorized} from '../api/errors'
 import {apiRequestV2} from '../api/clientV2'
 import {DESCRIPTION_MAX_LENGTH, type CreateSessionRequestV2, type SessionV2} from '../api/types'
 import {Breadcrumbs} from '../components/Breadcrumbs'
@@ -11,6 +11,8 @@ import {Textarea} from '../components/ui/Textarea'
 import {AlertTriangleIcon, InfoIcon} from '../components/ui/icons'
 import {useToast} from '../components/ui/toast-context'
 import {sessionNamePrefix} from '../lib/format'
+import {descriptionPath} from '../lib/projectsUtil'
+import type {UnsavedDescription} from './editDescription.loader'
 
 export function NewSession() {
     const {name = ''} = useParams()
@@ -66,6 +68,16 @@ export function NewSession() {
         } catch (err) {
             if (err instanceof Unauthorized) {
                 navigate(`/login?next=/projects/${name}/sessions/new`)
+                return
+            }
+            if (err instanceof ApiError && err.code === 'description_not_saved') {
+                // As for a new project: the session is there, its README.md
+                // is not. Carry the text over to its description.
+                const state: UnsavedDescription = {
+                    text: description.trim(),
+                    error: `Session "${trimmed}" was created, but its description could not be saved. Please save it again.`,
+                }
+                navigate(descriptionPath(name, trimmed), {state})
                 return
             }
             setError(err instanceof Error ? err.message : 'Could not create the session.')

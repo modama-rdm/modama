@@ -16,6 +16,16 @@ export interface EditDescriptionLoaderData {
     details: Promise<ProjectDetailsV2>
 }
 
+/**
+ * Router state from a create form whose project or session was made but whose
+ * description was not (`502 description_not_saved`): the text the user typed,
+ * to save again, and why it is shown.
+ */
+export interface UnsavedDescription {
+    text: string
+    error: string
+}
+
 /** Streams the project details for editing a project's or a session's description. */
 export function editDescriptionLoader({params}: LoaderFunctionArgs): EditDescriptionLoaderData {
     const name = params.name ?? ''

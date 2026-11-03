@@ -6,11 +6,14 @@
 
 export class ApiError extends Error {
     readonly status: number
+    /** The API's stable error `code`, for screens that branch on one. */
+    readonly code: string
 
-    constructor(status: number, message: string) {
+    constructor(status: number, message: string, code = 'unexpected_error') {
         super(message)
         this.name = 'ApiError'
         this.status = status
+        this.code = code
     }
 }
 

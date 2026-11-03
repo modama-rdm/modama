@@ -154,4 +154,15 @@ describe('apiFetchV2', () => {
             ApiError,
         )
     })
+
+    it("carries the API's code, for screens that branch on it", async () => {
+        mockFetchOnce(
+            {code: 'description_not_saved', message: 'The project was created, but…'},
+            {status: 502},
+        )
+        await expect(apiFetchV2('/projects', {method: 'POST'})).rejects.toMatchObject({
+            status: 502,
+            code: 'description_not_saved',
+        })
+    })
 })
