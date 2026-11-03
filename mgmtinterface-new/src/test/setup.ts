@@ -30,6 +30,24 @@ if (!window.localStorage) {
 }
 
 /**
+ * Give `<dialog>` its methods. jsdom has the element but not `showModal()` or
+ * `close()`, which `components/ui/Dialog.tsx` opens and closes it with. The
+ * shim does what the journeys can see: the `open` attribute, and the `close`
+ * event that tells the dialog's owner to unmount it. The browser's own parts
+ * (inert page, focus, Escape) are not reproduced.
+ */
+if (!HTMLDialogElement.prototype.showModal) {
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+        this.setAttribute('open', '')
+    }
+    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+        if (!this.open) return
+        this.removeAttribute('open')
+        this.dispatchEvent(new Event('close'))
+    }
+}
+
+/**
  * Replace `Request` with a minimal shim for every client-side navigation.
  *
  * Vitest's jsdom environment ends up with Node's real, strict `Request` class

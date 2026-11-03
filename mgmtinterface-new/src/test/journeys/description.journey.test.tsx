@@ -14,6 +14,8 @@ import {FIXTURE_DATASETS, FIXTURE_PROJECT} from '../fixtures/project'
  *
  * Who may change one is the file system's call: the API writes README.md as
  * the signed-in user, so only whoever wrote it first may change it.
+ *
+ * A session's whole description opens in a dialog from its row.
  */
 describe('journey: descriptions', () => {
     const name = FIXTURE_PROJECT.name
@@ -239,12 +241,19 @@ describe('journey: descriptions', () => {
             expect(within(rows[0]).getByText(session.name)).toBeInTheDocument()
         })
 
-        it("edits a session's description from its row", async () => {
+        it("shows a session's whole description in a dialog, and edits it from there", async () => {
             signIn('user2')
             const recorder = installApiMock([...baseWorld(), echoPut(sessionPut, session)])
             const {user} = renderApp({route: `/projects/${name}`})
 
-            await user.click(await screen.findByRole('link', {name: `Edit the description of ${session.name}`}))
+            await user.click(await screen.findByRole('button', {name: `Show the description of ${session.name}`}))
+            const dialog = screen.getByRole('dialog', {name: session.name})
+            // Rendered, `#` shifted down as on the project page.
+            expect(await within(dialog).findByRole('heading', {level: 3, name: 'First light'})).toBeInTheDocument()
+            expect(within(dialog).getByText('Alignment of the new detector after the service visit.'))
+                .toBeInTheDocument()
+
+            await user.click(within(dialog).getByRole('button', {name: 'Edit'}))
             expect(await screen.findByRole('heading', {name: 'Session description'})).toBeInTheDocument()
             const field = screen.getByLabelText('Description')
             expect(field).toHaveValue(session.description)
@@ -256,6 +265,69 @@ describe('journey: descriptions', () => {
             expect(await screen.findByText('Description saved.')).toBeInTheDocument()
             // The session name travels URL-encoded in the path.
             expect(recorder.matching('PUT', sessionPut)[0].body).toEqual({description: 'Alignment only'})
+        })
+
+        it('closes the dialog, which has no Edit for someone outside the project', async () => {
+            signIn(outsider)
+            installApiMock(baseWorld())
+            const {user} = renderApp({route: `/projects/${name}`})
+
+            await user.click(await screen.findByRole('button', {name: `Show the description of ${session.name}`}))
+            const dialog = screen.getByRole('dialog', {name: session.name})
+            expect(within(dialog).queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
+
+            await user.click(within(dialog).getByRole('button', {name: 'Close'}))
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        })
+
+        it('closes the dialog on a click on the backdrop, but not after selecting text in it', async () => {
+            signIn('user2')
+            installApiMock(baseWorld())
+            const {user} = renderApp({route: `/projects/${name}`})
+
+            await user.click(await screen.findByRole('button', {name: `Show the description of ${session.name}`}))
+            const dialog = screen.getByRole('dialog', {name: session.name})
+            const text = await within(dialog).findByText('Alignment of the new detector after the service visit.')
+
+            // Pressed in the text, let go over the backdrop: a selection.
+            await user.pointer([
+                {keys: '[MouseLeft>]', target: text},
+                {target: dialog},
+                {keys: '[/MouseLeft]', target: dialog},
+            ])
+            expect(screen.getByRole('dialog', {name: session.name})).toBeInTheDocument()
+
+            // The dialog element itself is the backdrop: the panel fills it.
+            await user.click(dialog)
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        })
+
+        it('offers a member to add one under the name, with nothing next to the name itself', async () => {
+            signIn('user2')
+            installApiMock(baseWorld())
+            const {user} = renderApp({route: `/projects/${name}`})
+            await screen.findByRole('heading', {level: 1, name})
+
+            // Nothing beside a name that could read as "rename this session".
+            for (const row of within(screen.getByRole('table')).getAllByRole('row').slice(1)) {
+                const nameLine = within(row).getAllByRole('cell')[0].firstElementChild as HTMLElement
+                expect(within(nameLine).queryByRole('link')).toBeNull()
+                expect(within(nameLine).queryByRole('button')).toBeNull()
+            }
+
+            await user.click(screen.getByRole('link', {name: 'Add a description to demo session'}))
+
+            expect(await screen.findByRole('heading', {name: 'Session description'})).toBeInTheDocument()
+            expect(screen.getByLabelText('Description')).toHaveValue('')
+        })
+
+        it('offers no way to add one to someone outside the project', async () => {
+            signIn(outsider)
+            installApiMock(baseWorld())
+            renderApp({route: `/projects/${name}`})
+            await screen.findByRole('heading', {level: 1, name})
+
+            expect(screen.queryByRole('link', {name: /add a description to/i})).not.toBeInTheDocument()
         })
 
         it('says so for a session that is not there', async () => {

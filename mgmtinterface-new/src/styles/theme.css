@@ -39,6 +39,9 @@
 
     /* Focus ring (used by inputs/buttons) */
     --ring: rgb(37 99 235 / 0.12);
+
+    /* Dims the page behind a dialog */
+    --scrim: rgb(15 23 42 / 0.45);
 }
 
 .dark {
@@ -62,6 +65,8 @@
     --warning: #f59e0b;
 
     --ring: rgb(59 130 246 / 0.24);
+
+    --scrim: rgb(2 6 23 / 0.7);
 }
 
 @theme inline {
@@ -84,6 +89,7 @@
     --color-danger-hover: var(--danger-hover);
     --color-success: var(--success);
     --color-warning: var(--warning);
+    --color-scrim: var(--scrim);
 
     --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;

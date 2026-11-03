@@ -1,4 +1,4 @@
-import {lazy, Suspense, useState, type ReactNode} from 'react'
+import {Suspense, useState, type ReactNode} from 'react'
 import {
     Await,
     Link,
@@ -18,11 +18,14 @@ import type {
 import {Breadcrumbs} from '../components/Breadcrumbs'
 import {CopyButton} from '../components/CopyField'
 import {DescriptionDigest} from '../components/DescriptionDigest'
+import {RenderedDescription} from '../components/RenderedDescription'
 import {Avatar} from '../components/ui/Avatar'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
+import {Dialog} from '../components/ui/Dialog'
 import {
     CheckCircleIcon,
+    EyeIcon,
     FolderIcon,
     PencilIcon,
     PlusIcon,
@@ -73,12 +76,6 @@ function StatusBadges({dataset, shared}: { dataset: SerializedDataset; shared: b
 const thClass =
     'px-5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-fg-faint'
 
-// The Markdown renderer is about a third of the app's size, and only a project
-// page with a description needs it, so it loads on first use.
-const Markdown = lazy(() =>
-    import('../components/Markdown').then((module) => ({default: module.Markdown})),
-)
-
 /**
  * The project's description, rendered from Markdown, with a way to edit it for
  * the owner and the members; whether the file system lets them is up to who
@@ -124,16 +121,7 @@ function ProjectDescription({
                     </Button>
                 )}
             </div>
-            {/* The text as it is until the renderer has loaded. */}
-            <Suspense
-                fallback={
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg wrap-anywhere">
-                        {project.description}
-                    </p>
-                }
-            >
-                <Markdown>{project.description}</Markdown>
-            </Suspense>
+            <RenderedDescription text={project.description}/>
         </Card>
     )
 }
@@ -228,6 +216,8 @@ function SessionsTable({
     canMutate: boolean
 }) {
     const navigate = useNavigate()
+    /** The session whose description is open in the dialog. */
+    const [shown, setShown] = useState<SerializedDataset | null>(null)
     // Only Browse in every row (not a member, or every session sealed and not
     // shared) needs a much narrower actions column.
     const moreThanBrowse =
@@ -261,21 +251,36 @@ function SessionsTable({
                         >
                             <td className="px-5 py-3.5">
                                 {/* The name first: the journeys read it off the
-                                    cell's first element. */}
+                                    cell's first element. Nothing next to it, so
+                                    nothing looks like it renames the session:
+                                    the description's actions sit on its line. */}
                                 <div className="font-mono text-sm font-semibold text-fg wrap-anywhere">
                                     {d.name}
-                                    {canMutate && (
+                                </div>
+                                {d.description ? (
+                                    <DescriptionDigest description={d.description}>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShown(d)}
+                                            aria-label={`Show the description of ${d.name}`}
+                                            title="Show the description"
+                                            className="inline-flex shrink-0 rounded p-0.5 text-fg-faint hover:bg-surface-muted hover:text-primary"
+                                        >
+                                            <EyeIcon className="h-3.5 w-3.5"/>
+                                        </button>
+                                    </DescriptionDigest>
+                                ) : (
+                                    canMutate && (
                                         <Link
                                             to={descriptionPath(project.name, d.name)}
-                                            aria-label={`Edit the description of ${d.name}`}
-                                            title={d.description ? 'Edit description' : 'Add a description'}
-                                            className="ml-1.5 inline-flex rounded p-0.5 align-[-2px] text-fg-faint hover:bg-surface-muted hover:text-primary"
+                                            aria-label={`Add a description to ${d.name}`}
+                                            className="mt-0.5 inline-flex items-center gap-1 text-xs text-fg-faint hover:text-primary"
                                         >
-                                            <PencilIcon className="h-3.5 w-3.5"/>
+                                            <PlusIcon className="h-3 w-3"/>
+                                            Add description
                                         </Link>
-                                    )}
-                                </div>
-                                <DescriptionDigest description={d.description}/>
+                                    )
+                                )}
                             </td>
                             <td className="whitespace-nowrap px-5 py-3.5 text-sm text-fg-muted">
                                 {formatDateTime(d.mtime)}
@@ -334,6 +339,27 @@ function SessionsTable({
                 })}
                 </tbody>
             </table>
+            {shown?.description && (
+                <Dialog
+                    title={<span className="font-mono">{shown.name}</span>}
+                    subtitle="README.md in the session folder"
+                    actions={
+                        canMutate && (
+                            <Button
+                                variant="secondary"
+                                onClick={() => navigate(descriptionPath(project.name, shown.name))}
+                                className="px-3 py-1.5 text-xs"
+                            >
+                                <PencilIcon className="h-3.5 w-3.5"/>
+                                Edit
+                            </Button>
+                        )
+                    }
+                    onClose={() => setShown(null)}
+                >
+                    <RenderedDescription text={shown.description}/>
+                </Dialog>
+            )}
         </Card>
     )
 }
