@@ -285,6 +285,9 @@ impl AgentGuiApp {
             Action::OtherMountsChanged(other_mounts) => {
                 self.app_state.observe_other_mounts(other_mounts);
             }
+            Action::ConnectedAgentsChanged(connected_agents) => {
+                self.app_state.connected_agents = connected_agents;
+            }
             Action::ConnectionDropped => {
                 self.app_state.connection_dropped = true;
             }
@@ -407,6 +410,9 @@ impl AgentGuiApp {
                 }
                 Ok(ForegroundMonitorUpdate::OtherMountsChanged(other_mounts)) => {
                     self.handle_action(Action::OtherMountsChanged(other_mounts));
+                }
+                Ok(ForegroundMonitorUpdate::ConnectedAgentsChanged(connected_agents)) => {
+                    self.handle_action(Action::ConnectedAgentsChanged(connected_agents));
                 }
                 Ok(ForegroundMonitorUpdate::ConnectionDropped) => {
                     self.handle_action(Action::ConnectionDropped);

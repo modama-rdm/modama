@@ -133,6 +133,9 @@ pub struct AgentAppState {
     /// Shares besides the foreground one that are mounted for this user (several on Linux)
     pub other_mounts: Vec<ActiveSession>,
 
+    /// The agents connected at this agent's resource; None while the agent doesn't know them
+    pub connected_agents: Option<modama_common::internal_api_types::ConnectedAgents>,
+
     session_operations: SessionOperations,
 
     /// Agent mTLS identity, should be set once we are connected

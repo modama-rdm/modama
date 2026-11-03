@@ -8,7 +8,7 @@ use eframe::egui;
 use futures_util::{SinkExt as _, StreamExt as _};
 use modama_common::{
     foreground::{foreground_projection, foreground_share, hand_off_blocked, other_mounted_shares},
-    internal_api_types::{ToAgentFromGui, ToSessionGui},
+    internal_api_types::{ConnectedAgents, ToAgentFromGui, ToSessionGui},
 };
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -24,6 +24,8 @@ pub enum ForegroundMonitorUpdate {
     ForegroundChanged(ForegroundSession),
     /// The desired shares besides the foreground one that are mounted for this user
     OtherMountsChanged(Vec<ActiveSession>),
+    /// The agents connected at this agent's resource; None while the agent doesn't know them
+    ConnectedAgentsChanged(Option<ConnectedAgents>),
     ConnectionDropped,
     ConnectionRestored,
     /// Whether a previous user's drive blocks the hand-off, so the GUI can offer to release it
@@ -77,6 +79,7 @@ impl Updates {
 struct MonitorState {
     last: ForegroundSession,
     last_other_mounts: Vec<ActiveSession>,
+    last_connected_agents: Option<ConnectedAgents>,
     /// Only Windows mappings block each other, so only there is a release offered
     offer_force_release: bool,
     hand_off_blocked: bool,
@@ -128,6 +131,15 @@ impl MonitorState {
         if other_mounts != self.last_other_mounts {
             self.last_other_mounts = other_mounts.clone();
             if !updates.send(ForegroundMonitorUpdate::OtherMountsChanged(other_mounts)) {
+                return false;
+            }
+        }
+
+        if message.connected_agents != self.last_connected_agents {
+            self.last_connected_agents = message.connected_agents.clone();
+            if !updates.send(ForegroundMonitorUpdate::ConnectedAgentsChanged(
+                message.connected_agents.clone(),
+            )) {
                 return false;
             }
         }
@@ -255,6 +267,7 @@ impl ForegroundMonitor {
         let state = MonitorState {
             last: initial,
             last_other_mounts: Vec::new(),
+            last_connected_agents: None,
             offer_force_release,
             hand_off_blocked: false,
             connection_dropped: false,
@@ -320,7 +333,9 @@ mod tests {
     };
 
     use modama_common::{
-        internal_api_types::{MountedShare, SessionHelperState, ShareError, Shares},
+        internal_api_types::{
+            ConnectedAgent, MountedShare, SessionHelperState, ShareError, Shares,
+        },
         messages::Share,
     };
     use tokio::net::{TcpListener, TcpStream};
@@ -427,6 +442,7 @@ mod tests {
                 foreground_share_id: Some(id.to_owned()),
                 shares: vec![share(id)],
             }),
+            connected_agents: None,
         }
     }
 
@@ -490,6 +506,7 @@ mod tests {
                 foreground_share_id: Some("new".to_owned()),
                 shares: vec![share("old"), share("new")],
             }),
+            connected_agents: None,
         }
     }
 
@@ -522,6 +539,44 @@ mod tests {
         );
 
         send(&mut agent, &two_mounted()).await;
+        assert_eq!(setup.next_update(SHORT).await, None);
+    }
+
+    #[tokio::test]
+    async fn connected_agents_are_forwarded_once_per_change() {
+        let setup = Setup::start().await;
+        let mut agent = setup.accept().await;
+
+        send(&mut agent, &mounted("a")).await;
+        assert!(matches!(
+            setup.next_update(LONG).await,
+            Some(ForegroundMonitorUpdate::ForegroundChanged(_))
+        ));
+
+        let agents = ConnectedAgents {
+            resource: "Holo".to_owned(),
+            own: ConnectedAgent {
+                name: "k2".to_owned(),
+                verified: true,
+                status: None,
+            },
+            others: vec![ConnectedAgent {
+                name: "detector".to_owned(),
+                verified: true,
+                status: None,
+            }],
+        };
+        let mut with_agents = mounted("a");
+        with_agents.connected_agents = Some(agents.clone());
+        send(&mut agent, &with_agents).await;
+        assert_eq!(
+            setup.next_update(LONG).await,
+            Some(ForegroundMonitorUpdate::ConnectedAgentsChanged(Some(
+                agents
+            )))
+        );
+
+        send(&mut agent, &with_agents).await;
         assert_eq!(setup.next_update(SHORT).await, None);
     }
 
@@ -589,6 +644,7 @@ mod tests {
         let no_helper = ToSessionGui {
             session_helper: None,
             desired_shares: None,
+            connected_agents: None,
         };
 
         send(&mut agent, &no_helper).await;

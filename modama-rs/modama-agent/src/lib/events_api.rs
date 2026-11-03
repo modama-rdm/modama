@@ -13,8 +13,8 @@ use axum::{
 use hyper::StatusCode;
 use log::{debug, error, warn};
 use modama_common::internal_api_types::{
-    SessionHelperConfig, SessionHelperState, Shares, ToAgent, ToAgentFromGui, ToSessionGui,
-    ToSessionHelper,
+    ConnectedAgents, SessionHelperConfig, SessionHelperState, Shares, ToAgent, ToAgentFromGui,
+    ToSessionGui, ToSessionHelper,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
@@ -238,6 +238,7 @@ async fn send_update_to_gui(
     socket: &mut WebSocket,
     remote_info: Option<RemoteInfo>,
     session_helper: Option<SessionHelperState>,
+    connected_agents: Option<ConnectedAgents>,
 ) -> Result<(), EventAPIError> {
     let msg = match update {
         StateUpdateToSession::DesiredState {
@@ -249,6 +250,7 @@ async fn send_update_to_gui(
                 foreground_share_id,
                 shares,
             }),
+            connected_agents,
         },
         StateUpdateToSession::MountUpdate {
             scope,
@@ -261,6 +263,7 @@ async fn send_update_to_gui(
             ToSessionGui {
                 session_helper,
                 desired_shares: desired_shares(remote_info.as_ref()),
+                connected_agents,
             }
         }
         StateUpdateToSession::ForceRelease { .. } => return Ok(()),
@@ -274,7 +277,7 @@ async fn handle_gui_websocket(
     mut socket: WebSocket,
     scope: HelperScope,
 ) -> Result<(), EventAPIError> {
-    let (mut rx, tx, remote_info, session_helper) = {
+    let (mut rx, tx, remote_info, session_helper, connected_agents) = {
         let agent_state = state.lock().await;
         let receiver = agent_state.desired_state_channel.subscribe();
         let session_helper = agent_state.session_helpers.get(&scope).cloned();
@@ -284,6 +287,7 @@ async fn handle_gui_websocket(
             agent_state.desired_state_channel.clone(),
             agent_state.remote_info.clone(),
             session_helper,
+            agent_state.connected_agents_here(),
         )
     };
 
@@ -293,6 +297,7 @@ async fn handle_gui_websocket(
         &ToSessionGui {
             session_helper,
             desired_shares: desired_shares(remote_info.as_ref()),
+            connected_agents,
         },
     )
     .await?;
@@ -301,11 +306,17 @@ async fn handle_gui_websocket(
         select! {
             state_update = recv_handle_lagging(&mut rx) => {
                 let update = state_update?;
-                let (remote_info, session_helper) = {
+                // smbdrop sends a share list update whenever an agent connects or disconnects,
+                // so the connected agents come along with those
+                let (remote_info, session_helper, connected_agents) = {
                     let agent_state = state.lock().await;
-                    (agent_state.remote_info.clone(), agent_state.session_helpers.get(&scope).cloned())
-                 };
-                send_update_to_gui(update, scope, &mut socket, remote_info, session_helper).await?;
+                    (
+                        agent_state.remote_info.clone(),
+                        agent_state.session_helpers.get(&scope).cloned(),
+                        agent_state.connected_agents_here(),
+                    )
+                };
+                send_update_to_gui(update, scope, &mut socket, remote_info, session_helper, connected_agents).await?;
             }
             message = recv_obj::<serde_json::Value>(&mut socket) => {
                 // malformed JSON ends the connection; a well-formed message we don't know is

@@ -1,3 +1,5 @@
+use modama_common::internal_api_types::ConnectedAgents;
+
 use crate::state::{
     ActiveSession, AgentIdentity, ForegroundSession, OperationId, PendingSession, SignedIn,
 };
@@ -67,6 +69,7 @@ pub enum Action {
     },
     ForegroundChanged(ForegroundSession),
     OtherMountsChanged(Vec<ActiveSession>),
+    ConnectedAgentsChanged(Option<ConnectedAgents>),
     ConnectionDropped,
     ConnectionRestored,
     HandOffBlocked(bool),

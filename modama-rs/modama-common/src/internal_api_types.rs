@@ -85,6 +85,10 @@ pub struct ToSessionGui {
     /// haven't received any shares yet (meaning: no reconciliation should be
     /// happening in that case!)
     pub desired_shares: Option<Shares>,
+
+    /// The agents connected at this agent's resource; None while that's not known yet
+    #[serde(default)]
+    pub connected_agents: Option<ConnectedAgents>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
