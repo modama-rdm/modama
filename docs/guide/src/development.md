@@ -20,12 +20,21 @@ no secrets, no access to the production LDAP.
 ```
 git clone --recursive gitlab@iffgit.fz-juelich.de:weber/data-management-system.git
 cd data-management-system/deploy
-docker compose up -d
+./uptest.sh
+./runtest.sh
 ```
 
+`uptest.sh` is to the test deployment what `upprod.sh` is to production: it runs
+`docker compose up -d`, waits until the services are healthy and Nextcloud has installed
+itself, and then applies the Nextcloud configuration (LDAP, external storage) with
+`applyconfig.py`, which Nextcloud's own start does not. `runtest.sh` then
+[checks](#checking-the-deployment) that everything works. Arguments of `uptest.sh` go to
+`docker compose up`, for example `./uptest.sh --build` to rebuild images.
+
 The first start builds all images, including the Rust service `smbdrop` and a
-patched PHP for Nextcloud, which takes a good while. Later starts take seconds. Once
-`docker compose ps` shows the containers as running, and `smbdrop` and
+patched PHP for Nextcloud, which takes a good while. Later starts take seconds. Plain
+`docker compose up -d` works too, it just leaves out the Nextcloud configuration. Once
+`docker compose ps` shows the containers as running, and `ldap`, `smbdrop` and
 `mgmtinterface-api` as `healthy`, these are available:
 
 | URL                                   | What                                                   |
@@ -40,13 +49,10 @@ patched PHP for Nextcloud, which takes a good while. Later starts take seconds. 
 
 All ports are only reachable from the machine itself.
 
-`docker compose down` stops everything and keeps the state, so the next `up` continues
-where you left off. To start from scratch:
-
-```
-docker compose down --volumes
-docker compose run --rm testenv-init clean
-```
+`./downtest.sh` stops everything and keeps the state, so the next `uptest.sh` continues
+where you left off. To start from scratch, use `./downtest.sh --reset`. It deletes the
+state, the volumes of the directory server and the CA, which belong together:
+Nextcloud remembers the users of the directory by ID, and a new directory has new IDs.
 
 ### What `docker compose up` sets up
 
@@ -85,7 +91,7 @@ through `sssd` and PAM, with the group `iff` as the condition for access.
 | `mallory` | `testpassword` | `outsiders` | exists, but is denied access by `sssd`, as an account outside `iff` is in production |
 
 These accounts are defined in `ldap/test-data.ldif`; edit it to add users. The directory
-is loaded when its volume is created, so changes need `docker compose down --volumes`.
+is loaded when its volume is created, so changes need `./downtest.sh --reset`.
 `ldapbind` (password `bind-test-password`) is the read-only account that `sssd` and
 Nextcloud search with. The server is only reachable from the other containers; to look at
 it, run `ldapsearch` in the container, for example
@@ -99,16 +105,11 @@ docker compose exec permissions getent passwd alice
 docker compose exec permissions getent group iff
 ```
 
-Nextcloud is not configured automatically: it comes up with its administrator `root`
-(password `secret`) and the LDAP settings are not applied. Once it has installed itself
-(`http://localhost:1890/nextcloud/status.php` says `"installed":true`), run
-
-```
-docker compose exec nextcloud python3 /applyconfig.py
-```
-
-This sets up the LDAP connection and the external storage `ER-C-Data`, as in production,
-and disables `root`. Then `alice` can log in at <http://localhost:1890/nextcloud/>. Her
+Nextcloud itself comes up with only its administrator `root` (password `secret`).
+`uptest.sh` sets up the LDAP connection and the external storage `ER-C-Data`, as in
+production, with `applyconfig.py`; that also disables `root`. (With plain
+`docker compose up`, run `docker compose exec nextcloud python3 /applyconfig.py` once
+Nextcloud has installed itself.) Then `alice` can log in at <http://localhost:1890/nextcloud/>. Her
 Nextcloud user name is not `alice` but the `entryUUID` of her entry, as in production;
 `docker compose exec nextcloud sudo -u www-data php /var/www/html/occ user:list` shows
 the names, which WebDAV URLs need (`/nextcloud/remote.php/dav/files/<name>/`).
@@ -129,8 +130,31 @@ directory. Put it in `deploy/.env` to make it stick. The folder needs `sssd.conf
 [Nextcloud](#nextcloud)), and `mgmt_secret.py` and `externalstorage_pw`, as in production.
 A CA in `CA/` is used as it is; if there is none, one is created for `smbdrop`. The test
 directory still starts, but nothing uses it. The data of the test deployment is
-the same either way, so after a switch `docker compose down --volumes` avoids Nextcloud
+the same either way, so after a switch `./downtest.sh --reset` avoids Nextcloud
 users of the other directory.
+
+### Checking the deployment
+
+`./runtest.sh` checks the running deployment and prints a line per check, `PASS` or `FAIL`
+with the reason. It exits with 1 if any check failed, so it can be used in scripts. It
+checks that
+
+* all services run, the ones with a health check are healthy, and `testenv-init`
+  succeeded and finds everything in place if run again,
+* the web endpoints answer as expected (management interfaces and API, `smbdrop`,
+  landing page, Nextcloud, WebDAV gateway),
+* the certificate of `smbdrop` is issued by the test CA for its name, and not trusted
+  otherwise,
+* the directory has `memberOf`, does not give out passwords and needs a bind,
+* the test users and the group `iff` are known to `permissions` and the WebDAV gateway,
+  and log in: right password, wrong password, and `mallory` who is outside `iff`,
+* `alice` logs in to Nextcloud and reaches `ER-C-Data` through the gateway, which uses
+  every part of the chain from Nextcloud to the directory.
+
+If `sssd` is set up for another directory (`MODAMA_SECRETS_DIR`, see below), the checks of
+the test users are skipped. The checks are plain shell functions in `runtest.sh`, run with
+`check "what" command...`; when you add a service or a feature, add a check next to the
+existing ones. Check that it can fail, too: stop a service and run the script.
 
 ### If something does not start
 

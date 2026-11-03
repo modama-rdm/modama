@@ -41,7 +41,7 @@ services:
   ldap:
     # Directory with a few test users instead of the production LDAP; testconf/secrets/
     # points sssd and Nextcloud at it. Only reachable from the other containers. Its
-    # data lives in a volume and is reset by `docker compose down --volumes`.
+    # data lives in a volume and is reset by `./downtest.sh --reset`.
     hostname: ldap
     build: ./ldap
     image: iffregistry.fz-juelich.de/weber/data-management-system/ldap-test:latest
