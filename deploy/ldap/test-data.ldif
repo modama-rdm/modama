@@ -1,0 +1,107 @@
+# Test data: same tree as the production directory (FreeIPA). All passwords are test
+# values; this server is only reachable inside the compose network.
+dn: dc=iff,dc=kfa-juelich,dc=de
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+dc: iff
+o: Test directory
+
+dn: cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: organizationalRole
+cn: accounts
+
+dn: cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: organizationalRole
+cn: users
+
+dn: cn=groups,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: organizationalRole
+cn: groups
+
+dn: cn=etc,dc=iff,dc=kfa-juelich,dc=de
+objectClass: organizationalRole
+cn: etc
+
+dn: cn=sysaccounts,cn=etc,dc=iff,dc=kfa-juelich,dc=de
+objectClass: organizationalRole
+cn: sysaccounts
+
+# Read-only account for sssd and Nextcloud
+dn: uid=ldapbind,cn=sysaccounts,cn=etc,dc=iff,dc=kfa-juelich,dc=de
+objectClass: account
+objectClass: simpleSecurityObject
+uid: ldapbind
+userPassword: bind-test-password
+
+dn: uid=alice,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: alice
+cn: Alice Anderson
+givenName: Alice
+sn: Anderson
+mail: alice@example.invalid
+uidNumber: 10001
+gidNumber: 10000
+homeDirectory: /home/alice
+loginShell: /bin/bash
+userPassword: testpassword
+
+dn: uid=bob,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: bob
+cn: Bob Brown
+givenName: Bob
+sn: Brown
+mail: bob@example.invalid
+uidNumber: 10002
+gidNumber: 10000
+homeDirectory: /home/bob
+loginShell: /bin/bash
+userPassword: testpassword
+
+dn: uid=carol,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: carol
+cn: Carol Clark
+givenName: Carol
+sn: Clark
+mail: carol@example.invalid
+uidNumber: 10003
+gidNumber: 10000
+homeDirectory: /home/carol
+loginShell: /bin/bash
+userPassword: testpassword
+
+dn: uid=mallory,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: mallory
+cn: Mallory Miller
+givenName: Mallory
+sn: Miller
+mail: mallory@example.invalid
+uidNumber: 10004
+gidNumber: 10100
+homeDirectory: /home/mallory
+loginShell: /bin/bash
+userPassword: testpassword
+
+dn: cn=iff,cn=groups,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: groupOfNames
+objectClass: posixGroup
+cn: iff
+gidNumber: 10000
+member: uid=alice,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+member: uid=bob,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+member: uid=carol,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+
+dn: cn=outsiders,cn=groups,cn=accounts,dc=iff,dc=kfa-juelich,dc=de
+objectClass: groupOfNames
+objectClass: posixGroup
+cn: outsiders
+gidNumber: 10100
+member: uid=mallory,cn=users,cn=accounts,dc=iff,dc=kfa-juelich,dc=de

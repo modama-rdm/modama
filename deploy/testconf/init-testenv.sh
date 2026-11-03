@@ -2,7 +2,7 @@
 # Prepare what a test deployment needs before its services can start:
 #
 #   * the state folders in testfolder/ with the ownership the services expect
-#   * the mTLS certificate authority and the certificate of the smbdrop server
+#   * the mTLS certificate authority and the certificates of the smbdrop and ldap servers
 #
 # Usage:  init-testenv.sh [init|clean]
 #
@@ -64,12 +64,18 @@ init_ca() {
         echo "initializing CA in $CA_PATH"
         ca --ca-path "$CA_PATH" --insecure-no-password initialize-ca
     fi
-    # smbdrop expects a server called smbdrop; the name is also the hostname
-    # that clients check against the certificate
-    if [ ! -e "$CA_PATH/servers/smbdrop/smbdrop.chain.pem" ]; then
-        echo "enrolling server smbdrop"
-        ca --ca-path "$CA_PATH" --insecure-no-password enroll-server smbdrop smbdrop
-    fi
+    # smbdrop expects a server called smbdrop. The name is also the hostname
+    # that clients check against the certificate; the same goes for the test
+    # directory server, called ldap.
+    # A CA that is not ours (KEEP_CA) gets nothing for the test directory.
+    servers="smbdrop"
+    [ -n "${KEEP_CA:-}" ] || servers="smbdrop ldap"
+    for server in $servers; do
+        if [ ! -e "$CA_PATH/servers/$server/$server.chain.pem" ]; then
+            echo "enrolling server $server"
+            ca --ca-path "$CA_PATH" --insecure-no-password enroll-server "$server" "$server"
+        fi
+    done
     # The services run as different users, and the public part is public
     chmod -R go+rX "$CA_PATH/ca/pub"
 }

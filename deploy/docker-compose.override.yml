@@ -38,6 +38,20 @@ services:
       - "./testconf/init-testenv.sh:/init-testenv.sh:ro"
       - "./testfolder:/testfolder"
       - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA:/ca"
+  ldap:
+    # Directory with a few test users instead of the production LDAP; testconf/secrets/
+    # points sssd and Nextcloud at it. Only reachable from the other containers. Its
+    # data lives in a volume and is reset by `docker compose down --volumes`.
+    hostname: ldap
+    build: ./ldap
+    image: iffregistry.fz-juelich.de/weber/data-management-system/ldap-test:latest
+    restart: always
+    volumes:
+      - "ldapdata:/var/lib/ldap"
+      # certificate for StartTLS, issued by the test CA
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA/ca/pub/:/certs/ca/pub/:ro"
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA/servers/ldap/:/certs/server/:ro"
+    depends_on: *after-init
   db:
     depends_on: *after-init
     volumes:
@@ -60,9 +74,6 @@ services:
     depends_on:
       testenv-init:
         condition: service_completed_successfully
-      # in the base file; only there when the ldap profile is on
-      sssd:
-        required: false
     volumes:
       # Data directory to export
       - "./testfolder/data/:/var/wsgidav-root"
@@ -82,9 +93,6 @@ services:
     depends_on:
       testenv-init:
         condition: service_completed_successfully
-      # in the base file; only there when the ldap profile is on
-      sssd:
-        required: false
     restart: no
     volumes:
       - "./testfolder/data:/data"
@@ -163,12 +171,21 @@ services:
       /venv/bin/uvicorn mgmtinterface_api.main:app --reload
       --host 0.0.0.0 --port 8000
   sssd:
-    # Without LDAP, sssd has nothing to serve; the test users are local accounts of the
-    # permissions and webdav-backend containers. For real LDAP settings, run with
-    # COMPOSE_PROFILES=ldap and MODAMA_SECRETS_DIR as above.
-    profiles: ["ldap"]
-    volumes:
-      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/sssd.conf:/etc/sssd/sssd.conf"
+    depends_on:
+      ldap:
+        # sssd goes offline for a while if it asks before the directory is loaded
+        condition: service_healthy
+    # sssd only accepts a config file that belongs to root and is not readable by others,
+    # which a file of the checkout never is: use a copy
+    volumes: !override
+      - "ssspipes:/var/lib/sss/pipes/"
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/sssd.conf:/sssd.conf.in:ro"
+      # to trust the test directory; the config file says where
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA/ca/pub/:/certs/ca/pub/:ro"
+    command:
+      - "/bin/sh"
+      - "-c"
+      - "install -m 600 -o root -g root /sssd.conf.in /etc/sssd/sssd.conf && exec /usr/sbin/sssd --interactive"
   mgmtinterface-proxy:
     volumes:
       - type: bind
@@ -178,3 +195,6 @@ services:
       # Match X-Forwarded-Port in testconf/mgmtinterface-proxy.nginx.conf
       # so that Flask knows its external port for absoute links
       - "127.0.0.1:5001:80"
+
+volumes:
+  ldapdata:
