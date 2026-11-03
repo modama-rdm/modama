@@ -1,9 +1,15 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request, Response, status
-from permissions_client.schema import DESCRIPTION_MAX_LENGTH
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
+from ..descriptions import (
+    DESCRIPTION_MAX_LENGTH,
+    change_description,
+    describe_new,
+    normalize_description,
+    session_folder,
+)
 from ..errors import APIError, error_responses
 from ..permissions import (
     Rejected,
@@ -13,7 +19,7 @@ from ..permissions import (
     require_project,
     require_session,
     seal_session,
-    set_session_description,
+    session_not_found,
 )
 from ..security import (
     AUTH_ERROR_RESPONSES,
@@ -43,18 +49,6 @@ SessionName = Annotated[
         )
     ),
 ]
-
-
-def normalize_description(text: str | None) -> str | None:
-    """
-    Line ends as LF, surrounding whitespace dropped, blank as None: the same
-    rule the permissions service applies, so that what the API sends is what
-    ends up in the file.
-    """
-    if text is None:
-        return None
-    text = text.replace("\r\n", "\n").strip()
-    return text or None
 
 
 # The optional description on the create requests (#112).
@@ -156,6 +150,10 @@ class CreateSessionRequest(BaseModel):
                 ),
                 403: "The signed-in user is neither owner nor member of the project.",
                 404: "There is no project of that name.",
+                502: (
+                    "`description_not_saved`: the session was created, but its "
+                    "description could not be written."
+                ),
             }
         ),
     },
@@ -177,7 +175,8 @@ def add_session(
     it is; the one in the request is not applied (see `PUT .../description`).
 
     A `description` is saved as `README.md` in the session folder, next to
-    `raw/`, owned by the signed-in user.
+    `raw/`, owned by the signed-in user. It is written over WebDAV once the
+    folder exists; if that fails, the session stays and the answer is a 502.
     """
     settings = settings_of(request)
     username = session["username"]
@@ -191,9 +190,7 @@ def add_session(
         return Session(**existing)
 
     try:
-        create_session(
-            settings, project, body.name, username, description=body.description
-        )
+        create_session(settings, project, body.name, username)
     except Rejected as rejected:
         # A concurrent request may have created it between the check above and
         # the `mkdir`; that is the retry this endpoint is meant to absorb, not
@@ -204,8 +201,17 @@ def add_session(
         response.status_code = status.HTTP_200_OK
         return Session(**existing)
 
+    if body.description is not None:
+        describe_new(
+            settings,
+            username,
+            session_folder(details["project"]["relpath"], body.name),
+            body.description,
+            what=f"session {body.name!r}",
+        )
+
     # The service answers the create with nothing but `errno`; the timestamps
-    # come from reading the project back.
+    # and the description come from reading the project back.
     created = find_session(require_project(settings, project), body.name)
     if created is None:
         raise APIError(
@@ -284,11 +290,16 @@ def seal(
         **error_responses(
             {
                 400: (
-                    "The permissions service refused the change. `message` says "
-                    "why, for example a `README.md` that is not a regular file."
+                    "`README.md` is there, but not as a plain file (a folder or "
+                    "a FIFO), so it is left alone."
                 ),
-                403: "The signed-in user is neither owner nor member of the project.",
+                403: (
+                    "The signed-in user is neither owner nor member of the "
+                    "project (`not_a_member`), or the file system does not let "
+                    "them change `README.md` (`no_access`)."
+                ),
                 404: "There is no such project, or no such session in it.",
+                502: "The file server did not answer.",
             }
         ),
     },
@@ -303,11 +314,14 @@ def set_description(
     """
     Write the session's description to `README.md` in its folder, next to
     `raw/`, or remove the file when the description is empty. Sealing covers
-    only `raw/`, so a sealed session can still be described.
+    only `raw/`, so a sealed session can still be described, for example once
+    the data is in.
 
-    An existing file is rewritten in place and keeps its owner; a new one
-    belongs to whoever created the session folder. Owner or member only, like
-    sealing. Sending the same text again changes nothing.
+    The file is written over WebDAV as the signed-in user, so the file system
+    decides, as it does over SMB: a new file belongs to whoever writes it, and
+    only they can change it afterwards. Removing it takes the file's owner or
+    the owner of the session folder. Sending the same text again changes
+    nothing.
     """
     settings = settings_of(request)
     username = signed_in["username"]
@@ -316,13 +330,17 @@ def set_description(
     require_member(details, username)
     require_session(details, session)
 
-    try:
-        set_session_description(settings, project, session, body.description, username)
-    except Rejected as rejected:
-        raise APIError(400, "description_rejected", rejected.message) from rejected
+    change_description(
+        settings,
+        username,
+        session_folder(details["project"]["relpath"], session),
+        body.description or None,
+        what=f"session {session!r}",
+        missing=session_not_found(project, session),
+    )
 
-    # The service answers with nothing but `errno`; the session comes from
-    # reading the project back.
+    # The session, with the description as the permissions service reads it,
+    # comes from reading the project back.
     updated = find_session(require_project(settings, project), session)
     if updated is None:
         raise APIError(

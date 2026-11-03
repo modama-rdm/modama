@@ -86,8 +86,10 @@ share is gone.
 
 A project or session description is the text of a `README.md` in its folder,
 `null` when there is none. It can be given on create and changed with
-`PUT .../description` by the owner and the members; an empty text removes the
-file. People can also edit the file directly; whatever it says is shown.
+`PUT .../description`; an empty text removes the file. The file is written over
+WebDAV as the signed-in user, so the file system decides who may change it:
+whoever created it. People can also edit the file directly; whatever it says is
+shown.
 
 ### Slow calls
 

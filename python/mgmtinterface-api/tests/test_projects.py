@@ -4,6 +4,9 @@ from conftest import api_client, signed_in_client
 from fastapi.testclient import TestClient
 from mgmtinterface_api import API_PREFIX, create_app
 from mgmtinterface_api.config import Settings
+from mgmtinterface_api.descriptions import NotAPlainFile
+from mgmtinterface_api.errors import APIError
+from mgmtinterface_api.webdav import NoAccess, NotFound
 from permissions_client import PermissionsClient
 
 PROJECTS = f"{API_PREFIX}/projects"
@@ -121,25 +124,22 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     A permissions service with one existing project (`FIXTURE`, owned by
     user1). Creating any other name succeeds; creating the existing name is
     refused the way the real service refuses it.
+
+    README.md writes, which go over WebDAV, are recorded in `writes` as
+    `(user, folder, text)`, text None for a removal, and fail with
+    `write_error` when it is set. A write to the fixture's folder shows in the
+    project read back, as the permissions service would read the file.
     """
     state: dict = {
         "create_calls": [],
-        # The description of each create call, in the same order.
-        "descriptions": [],
         "reject": None,
-        "describe_calls": [],
-        "describe_reject": None,
+        "writes": [],
+        "write_error": None,
+        "description": None,
     }
 
-    def create_project(
-        self: PermissionsClient,
-        name: str,
-        owner: str,
-        members,
-        description: str | None = None,
-    ):
+    def create_project(self: PermissionsClient, name: str, owner: str, members):
         state["create_calls"].append((name, owner, list(members)))
-        state["descriptions"].append(description)
         if state["reject"] is not None:
             return {"errno": 1, "message": state["reject"]}
         if name == FIXTURE["name"]:
@@ -148,28 +148,31 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
         project["owner"] = owner
         project["members"] = [owner, *members]
         project["usage_bytes"] = 0
-        project["description"] = description
         return {"errno": 0, "project": project}
-
-    def set_project_description(
-        self: PermissionsClient, projectname: str, description: str, user: str
-    ):
-        state["describe_calls"].append((projectname, description, user))
-        if state["describe_reject"] is not None:
-            return {"errno": 1, "message": state["describe_reject"]}
-        # The service answers with the project as `serialize(fast=True)` has it.
-        return {"errno": 0, "project": {**FIXTURE, "description": description or None}}
 
     def projectdetails(self: PermissionsClient, projectname: str, fast: bool = False):
         assert fast, "only the usage endpoint may ask for the slow variant"
         if projectname != FIXTURE["name"]:
             return {"errno": 1, "message": f'"{projectname}" is not an ad-hoc project.'}
-        return {"errno": 0, "project": FIXTURE, "datasets": [dict(s) for s in SESSIONS]}
+        return {
+            "errno": 0,
+            "project": {**FIXTURE, "description": state["description"]},
+            "datasets": [dict(s) for s in SESSIONS],
+        }
+
+    def write_description(
+        settings: Settings, username: str, folder: str, text: str | None
+    ):
+        state["writes"].append((username, folder, text))
+        if state["write_error"] is not None:
+            raise state["write_error"]
+        if folder == "/" + FIXTURE["relpath"]:
+            state["description"] = text
 
     monkeypatch.setattr(PermissionsClient, "create_project", create_project)
     monkeypatch.setattr(PermissionsClient, "projectdetails", projectdetails)
     monkeypatch.setattr(
-        PermissionsClient, "set_project_description", set_project_description
+        "mgmtinterface_api.descriptions.write_description", write_description
     )
     return state
 
@@ -309,7 +312,7 @@ def test_create_reports_an_unreachable_permissions_service(
 # --- Descriptions on create (#112) ---------------------------------------------
 
 
-def test_a_description_is_passed_on_normalized_and_returned(
+def test_a_description_is_written_normalized_as_the_owner(
     settings: Settings, backend: dict
 ):
     client = signed_in_client(create_app(settings), settings, "user1")
@@ -318,29 +321,28 @@ def test_a_description_is_passed_on_normalized_and_returned(
         json={"name": NEW_NAME, "description": "  Ni nanowires\r\n\r\n- Feb 2026  \n"},
     )
     assert response.status_code == 201
-    # LF line ends and no surrounding whitespace, as the service stores it.
-    assert backend["descriptions"] == ["Ni nanowires\n\n- Feb 2026"]
+    # LF line ends and no surrounding whitespace, into the new folder, after
+    # the permissions service created it.
+    assert backend["writes"] == [
+        ("user1", f"/adhoc/{NEW_NAME}", "Ni nanowires\n\n- Feb 2026")
+    ]
     assert response.json()["description"] == "Ni nanowires\n\n- Feb 2026"
 
 
-def test_without_a_description_the_service_gets_none(settings: Settings, backend: dict):
-    client = signed_in_client(create_app(settings), settings, "user1")
-    response = client.post(PROJECTS, json={"name": NEW_NAME})
-    assert response.status_code == 201
-    assert backend["descriptions"] == [None]
-    assert response.json()["description"] is None
-
-
-@pytest.mark.parametrize("blank", ["", "   ", "\r\n\n\t"])
-def test_a_blank_description_is_no_description(
-    settings: Settings, backend: dict, blank: str
+@pytest.mark.parametrize("blank", [None, "", "   ", "\r\n\n\t"])
+def test_without_a_description_no_file_is_written(
+    settings: Settings, backend: dict, blank: str | None
 ):
     client = signed_in_client(create_app(settings), settings, "user1")
-    assert (
-        client.post(PROJECTS, json={"name": NEW_NAME, "description": blank}).status_code
-        == 201
+    body = (
+        {"name": NEW_NAME}
+        if blank is None
+        else {"name": NEW_NAME, "description": blank}
     )
-    assert backend["descriptions"] == [None]
+    response = client.post(PROJECTS, json=body)
+    assert response.status_code == 201
+    assert backend["writes"] == []
+    assert response.json()["description"] is None
 
 
 def test_a_description_of_ten_thousand_characters_is_accepted(
@@ -350,7 +352,7 @@ def test_a_description_of_ten_thousand_characters_is_accepted(
     text = "ä" * 10_000
     response = client.post(PROJECTS, json={"name": NEW_NAME, "description": text})
     assert response.status_code == 201
-    assert backend["descriptions"] == [text]
+    assert backend["writes"] == [("user1", f"/adhoc/{NEW_NAME}", text)]
 
 
 def test_a_longer_description_is_rejected_before_any_call(
@@ -362,6 +364,7 @@ def test_a_longer_description_is_rejected_before_any_call(
     )
     assert response.status_code == 422
     assert backend["create_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_repeating_a_create_does_not_apply_the_description(
@@ -375,7 +378,29 @@ def test_repeating_a_create_does_not_apply_the_description(
     )
     assert response.status_code == 200
     assert response.json()["description"] is None
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        NoAccess("/adhoc/x/README.md"),
+        NotAPlainFile("/adhoc/x/README.md"),
+        NotFound("/adhoc/x"),
+        APIError(502, "files_unavailable", "The file server is unavailable."),
+    ],
+)
+def test_a_description_that_cannot_be_written_leaves_the_project(
+    settings: Settings, backend: dict, error: Exception
+):
+    backend["write_error"] = error
+    client = signed_in_client(create_app(settings), settings, "user1")
+    response = client.post(PROJECTS, json={"name": NEW_NAME, "description": "x"})
+    assert response.status_code == 502
+    assert response.json()["code"] == "description_not_saved"
+    assert NEW_NAME in response.json()["message"]
+    # Created, and not taken back: a retry gets it with a 200.
+    assert backend["create_calls"] == [(NEW_NAME, "user1", [])]
 
 
 def test_a_service_without_descriptions_reads_as_none(
@@ -526,25 +551,27 @@ DESCRIPTION = f"{DETAILS}/description"
 
 
 @pytest.mark.parametrize("user", [FIXTURE["owner"], "user2"])
-def test_owner_and_members_set_the_description(
+def test_owner_and_members_may_try_to_set_the_description(
     settings: Settings, backend: dict, user: str
 ):
+    # Whether the file system lets them is the WebDAV server's answer.
     client = signed_in_client(create_app(settings), settings, user)
     response = client.put(DESCRIPTION, json={"description": "  Ni nanowires\r\n"})
     assert response.status_code == 200
+    # Read back from the permissions service.
     assert response.json()["description"] == "Ni nanowires"
     assert response.json()["name"] == FIXTURE["name"]
-    assert backend["describe_calls"] == [(FIXTURE["name"], "Ni nanowires", user)]
+    assert backend["writes"] == [(user, "/adhoc/datamanagement", "Ni nanowires")]
 
 
 @pytest.mark.parametrize("blank", ["", "  \r\n "])
 def test_an_empty_description_removes_it(settings: Settings, backend: dict, blank: str):
+    backend["description"] = "old"
     client = signed_in_client(create_app(settings), settings, "user1")
     response = client.put(DESCRIPTION, json={"description": blank})
     assert response.status_code == 200
     assert response.json()["description"] is None
-    # The service is told to remove the file with an empty text.
-    assert backend["describe_calls"] == [(FIXTURE["name"], "", "user1")]
+    assert backend["writes"] == [("user1", "/adhoc/datamanagement", None)]
 
 
 def test_setting_the_description_does_not_report_a_size(
@@ -561,7 +588,7 @@ def test_others_may_not_set_the_description(settings: Settings, backend: dict):
     response = outsider.put(DESCRIPTION, json={"description": "mine now"})
     assert response.status_code == 403
     assert response.json()["code"] == "not_a_member"
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_description_of_an_unknown_project_is_a_404(settings: Settings, backend: dict):
@@ -569,23 +596,30 @@ def test_description_of_an_unknown_project_is_a_404(settings: Settings, backend:
     response = client.put(f"{PROJECTS}/nope/description", json={"description": "x"})
     assert response.status_code == 404
     assert response.json()["code"] == "project_not_found"
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
-def test_a_description_refusal_is_reported_with_the_services_message(
-    settings: Settings, backend: dict
+@pytest.mark.parametrize(
+    ("error", "status", "code"),
+    [
+        # The file is someone else's.
+        (NoAccess("/adhoc/datamanagement/README.md"), 403, "no_access"),
+        (NotAPlainFile("/adhoc/datamanagement/README.md"), 400, "description_rejected"),
+        # The folder went away after the project was looked up.
+        (NotFound("/adhoc/datamanagement"), 404, "project_not_found"),
+        (APIError(502, "files_unavailable", "down"), 502, "files_unavailable"),
+    ],
+)
+def test_a_refused_write_is_reported(
+    settings: Settings, backend: dict, error: Exception, status: int, code: str
 ):
-    backend["describe_reject"] = (
-        "/data/adhoc/datamanagement/README.md is not a regular file, so it is "
-        "left alone."
-    )
-    client = signed_in_client(create_app(settings), settings, "user1")
+    backend["write_error"] = error
+    client = signed_in_client(create_app(settings), settings, "user2")
     response = client.put(DESCRIPTION, json={"description": "x"})
-    assert response.status_code == 400
-    assert response.json() == {
-        "code": "description_rejected",
-        "message": backend["describe_reject"],
-    }
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    if code != "files_unavailable":
+        assert "'datamanagement'" in response.json()["message"]
 
 
 @pytest.mark.parametrize(
@@ -596,7 +630,7 @@ def test_a_malformed_description_is_rejected_before_any_call(
 ):
     client = signed_in_client(create_app(settings), settings, "user1")
     assert client.put(DESCRIPTION, json=body).status_code == 422
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_setting_the_description_requires_a_session(settings: Settings, backend: dict):
@@ -604,7 +638,7 @@ def test_setting_the_description_requires_a_session(settings: Settings, backend:
         DESCRIPTION, json={"description": "x"}
     )
     assert response.status_code == 401
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_setting_the_description_is_covered_by_the_origin_check(
@@ -618,7 +652,7 @@ def test_setting_the_description_is_covered_by_the_origin_check(
     )
     assert response.status_code == 403
     assert response.json()["code"] == "bad_origin"
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_setting_the_description_reports_an_unreachable_permissions_service(
@@ -627,8 +661,9 @@ def test_setting_the_description_reports_an_unreachable_permissions_service(
     def unreachable(self: PermissionsClient, *args, **kwargs):
         raise requests.ConnectionError("permissions service is down")
 
-    monkeypatch.setattr(PermissionsClient, "set_project_description", unreachable)
+    monkeypatch.setattr(PermissionsClient, "projectdetails", unreachable)
     client = signed_in_client(create_app(settings), settings, "user1")
     response = client.put(DESCRIPTION, json={"description": "x"})
     assert response.status_code == 502
     assert response.json()["code"] == "permissions_unavailable"
+    assert backend["writes"] == []

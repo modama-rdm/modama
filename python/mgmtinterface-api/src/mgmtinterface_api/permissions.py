@@ -169,30 +169,27 @@ def find_session(
     return None
 
 
+def session_not_found(project: str, name: str) -> APIError:
+    return APIError(
+        404,
+        "session_not_found",
+        f"There is no session named {name!r} in project {project!r}.",
+    )
+
+
 def require_session(details: ProjectDetailsResponse, name: str) -> SerializedDataset:
     """`find_session`, with a 404 instead of None."""
     session = find_session(details, name)
     if session is None:
-        raise APIError(
-            404,
-            "session_not_found",
-            f"There is no session named {name!r} in project "
-            f"{details['project']['name']!r}.",
-        )
+        raise session_not_found(details["project"]["name"], name)
     return session
 
 
 def create_project(
-    settings: Settings,
-    name: str,
-    owner: str,
-    members: Iterable[str],
-    description: str | None = None,
+    settings: Settings, name: str, owner: str, members: Iterable[str]
 ) -> SerializedProject:
     try:
-        result = make_client(settings).create_project(
-            name, owner, members, description=description
-        )
+        result = make_client(settings).create_project(name, owner, members)
     except requests.RequestException as exc:
         raise _unavailable() from exc
     if result.get("errno") != 0:
@@ -200,23 +197,14 @@ def create_project(
     return result["project"]
 
 
-def create_session(
-    settings: Settings,
-    project: str,
-    name: str,
-    user: str,
-    description: str | None = None,
-) -> None:
+def create_session(settings: Settings, project: str, name: str, user: str) -> None:
     """
     Create a session folder (a dataset, in the permissions service's terms) as
     `user`. The service does the `mkdir` as that Unix user, so the file system
-    enforces membership; a refusal comes back as a message from `mkdir`. With
-    a description, the service also writes the folder's `README.md`.
+    enforces membership; a refusal comes back as a message from `mkdir`.
     """
     try:
-        result = make_client(settings).create_dataset(
-            project, name, user, description=description
-        )
+        result = make_client(settings).create_dataset(project, name, user)
     except requests.RequestException as exc:
         raise _unavailable() from exc
     if result.get("errno") != 0:
@@ -236,39 +224,6 @@ def seal_session(settings: Settings, project: str, name: str, user: str) -> None
         raise _unavailable() from exc
     if result.get("errno") != 0:
         raise Rejected(str(result.get("message", "The session was not sealed.")))
-
-
-def set_project_description(
-    settings: Settings, project: str, description: str, user: str
-) -> SerializedProject:
-    """
-    Write the project's `README.md`, as `user`; an empty description removes
-    it. The service checks that `user` is the owner or a member and that the
-    file, if there is one, is a regular file. Returns the project afterwards.
-    """
-    try:
-        result = make_client(settings).set_project_description(
-            project, description, user
-        )
-    except requests.RequestException as exc:
-        raise _unavailable() from exc
-    if result.get("errno") != 0:
-        raise Rejected(str(result.get("message", "The description was not changed.")))
-    return result["project"]
-
-
-def set_session_description(
-    settings: Settings, project: str, name: str, description: str, user: str
-) -> None:
-    """Like `set_project_description`, for a session. Answers nothing."""
-    try:
-        result = make_client(settings).set_dataset_description(
-            project, name, description, user
-        )
-    except requests.RequestException as exc:
-        raise _unavailable() from exc
-    if result.get("errno") != 0:
-        raise Rejected(str(result.get("message", "The description was not changed.")))
 
 
 def add_members(

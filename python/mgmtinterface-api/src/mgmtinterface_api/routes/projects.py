@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 
+from ..descriptions import change_description, describe_new, project_folder
 from ..errors import APIError, error_responses
 from ..permissions import (
     Rejected,
@@ -16,7 +17,6 @@ from ..permissions import (
     require_member,
     require_owner,
     require_project,
-    set_project_description,
 )
 from ..security import (
     AUTH_ERROR_RESPONSES,
@@ -160,6 +160,10 @@ def read_projects(
                     "an account that may not create projects."
                 ),
                 409: "A project of that name exists and belongs to someone else.",
+                502: (
+                    "`description_not_saved`: the project was created, but its "
+                    "description could not be written."
+                ),
             }
         ),
     },
@@ -180,7 +184,8 @@ def add_project(
     description is a separate operation.
 
     A `description` is saved as `README.md` in the project folder, owned by
-    the signed-in user.
+    the signed-in user. It is written over WebDAV once the folder exists; if
+    that fails, the project stays and the answer is a 502.
     """
     settings = settings_of(request)
     username = session["username"]
@@ -189,13 +194,7 @@ def add_project(
     members = [m for m in dict.fromkeys(body.members) if m != username]
 
     try:
-        created = create_project(
-            settings,
-            body.name,
-            owner=username,
-            members=members,
-            description=body.description,
-        )
+        created = create_project(settings, body.name, owner=username, members=members)
     except Rejected as rejected:
         # Create first, look second: looking first would leave a window in
         # which two concurrent requests both see nothing and one of them fails
@@ -212,6 +211,17 @@ def add_project(
             ) from rejected
         response.status_code = status.HTTP_200_OK
         return Project(**existing["project"])
+
+    if body.description is not None:
+        describe_new(
+            settings,
+            username,
+            project_folder(created["relpath"]),
+            body.description,
+            what=f"project {body.name!r}",
+        )
+        # What the service would read back: the text is normalized already.
+        created = {**created, "description": body.description}
 
     # The service fills `usage_bytes` on a create (a `du` of an empty folder)
     # but not on the lookup above, and both outcomes of this endpoint should
@@ -361,11 +371,16 @@ def set_members(
         **error_responses(
             {
                 400: (
-                    "The permissions service refused the change. `message` says "
-                    "why, for example a `README.md` that is not a regular file."
+                    "`README.md` is there, but not as a plain file (a folder or "
+                    "a FIFO), so it is left alone."
                 ),
-                403: "The signed-in user is neither owner nor member of the project.",
+                403: (
+                    "The signed-in user is neither owner nor member of the "
+                    "project (`not_a_member`), or the file system does not let "
+                    "them change `README.md` (`no_access`)."
+                ),
                 404: "There is no project of that name.",
+                502: "The file server did not answer.",
             }
         ),
     },
@@ -380,9 +395,10 @@ def set_description(
     Write the project's description to `README.md` in the project folder, or
     remove the file when the description is empty.
 
-    An existing file is rewritten in place and keeps its owner; a new one
-    belongs to the project's owner. The owner and the members may change it,
-    like they may seal sessions. Sending the same text again changes nothing.
+    The file is written over WebDAV as the signed-in user, so the file system
+    decides, as it does over SMB: a new file belongs to whoever writes it, and
+    only they can change it afterwards. Removing it takes the file's owner or
+    the project's owner. Sending the same text again changes nothing.
     """
     settings = settings_of(request)
     username = session["username"]
@@ -390,10 +406,16 @@ def set_description(
     details = require_project(settings, project)
     require_member(details, username)
 
-    try:
-        updated = set_project_description(settings, project, body.description, username)
-    except Rejected as rejected:
-        raise APIError(400, "description_rejected", rejected.message) from rejected
+    change_description(
+        settings,
+        username,
+        project_folder(details["project"]["relpath"]),
+        body.description or None,
+        what=f"project {project!r}",
+        missing=project_not_found(project),
+    )
 
-    # Null, as everywhere but `GET .../usage`.
+    # Read back, so that the description is what the permissions service
+    # reads from the file. Null, as everywhere but `GET .../usage`.
+    updated = require_project(settings, project)["project"]
     return Project(**{**updated, "usage_bytes": None})

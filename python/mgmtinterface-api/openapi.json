@@ -3,7 +3,7 @@
   "info": {
     "title": "modama API",
     "summary": "Management interface API for the ER-C data management system.",
-    "description": "The API behind the new management interface. The legacy `/api/` endpoints are\na separate API, which stays frozen for existing clients.\n\n### Versioning\n\nEvery request must state the contract version it was written against, as a bare\ninteger in the `X-Modama-API-Version` header. There is no default: a request\nwithout the header is rejected, so a deploy cannot silently move an installed\nclient onto a newer contract. Currently supported: 1.\n\nThe resolved version is echoed on the response, together with\n`X-Modama-API-Versions-Supported`. A deprecated version is announced with\n`Deprecation` and `Sunset` headers before it is switched off. `GET /versions`\nlists the same information and can be called before pinning a version.\n\n### Errors\n\nErrors use HTTP status codes with a body of `{\"code\", \"message\"}`. Clients\ncan branch on `code`, which is stable; `message` is meant for display. The one\nexception is HTTP 422, which carries FastAPI's own field-level `detail` list for\na malformed request body.\n\n### Authentication\n\n`POST /auth/login` sets an `HttpOnly` session cookie, which the browser sends\nback automatically. A session ends after a period of inactivity and after an\nabsolute limit; `\"persistent\": true` on login drops the idle timeout in exchange\nfor a longer absolute limit (\"keep me logged in\"). State-changing requests are\nalso checked against the request `Origin`. Endpoints that need a session are\nmarked with a lock below.\n\n### Creating things\n\nThe `POST` endpoints that create a project, a session or an ingest share are\nidempotent: the first request answers `201` with the new resource, and a repeat\nof the same request answers `200` with the existing one instead of an error. A\nclient that lost a response to a flaky network can therefore simply send the\nrequest again. The only conflict (`409`) is a project of the same name that\nbelongs to someone else.\n\n### Changing things\n\n`PUT /projects/{project}/members` takes the complete member list wanted,\nnot operations; the API works out what to add and remove, so a retry is safe.\nSealing a session that is sealed already answers `200` with the session as it\nis. `DELETE /ingest-shares/{share_id}` answers `204`, and `404` once the\nshare is gone.\n\nA project or session description is the text of a `README.md` in its folder,\n`null` when there is none. It can be given on create and changed with\n`PUT .../description` by the owner and the members; an empty text removes the\nfile. People can also edit the file directly; whatever it says is shown.\n\n### Slow calls\n\n`GET /projects/{project}/usage` runs `du` over the project and can take a\nminute on a large one. Nothing else waits for it: the project details answer\nwith `usage_bytes` null.\n\n### Browsing\n\n`GET /browse?path=…` lists a folder of the data tree one page at a time:\n`entries` holds up to `limit` of them (200 by default, 1000 at most), folders\nfirst and then by name, and `next_cursor` fetches the page after it, until it\nis null. The cursor marks the last entry seen rather than an offset, so an\nentry added or removed while paging neither repeats nor hides another. The\nlisting is made as the signed-in user and shows what that user may see.",
+    "description": "The API behind the new management interface. The legacy `/api/` endpoints are\na separate API, which stays frozen for existing clients.\n\n### Versioning\n\nEvery request must state the contract version it was written against, as a bare\ninteger in the `X-Modama-API-Version` header. There is no default: a request\nwithout the header is rejected, so a deploy cannot silently move an installed\nclient onto a newer contract. Currently supported: 1.\n\nThe resolved version is echoed on the response, together with\n`X-Modama-API-Versions-Supported`. A deprecated version is announced with\n`Deprecation` and `Sunset` headers before it is switched off. `GET /versions`\nlists the same information and can be called before pinning a version.\n\n### Errors\n\nErrors use HTTP status codes with a body of `{\"code\", \"message\"}`. Clients\ncan branch on `code`, which is stable; `message` is meant for display. The one\nexception is HTTP 422, which carries FastAPI's own field-level `detail` list for\na malformed request body.\n\n### Authentication\n\n`POST /auth/login` sets an `HttpOnly` session cookie, which the browser sends\nback automatically. A session ends after a period of inactivity and after an\nabsolute limit; `\"persistent\": true` on login drops the idle timeout in exchange\nfor a longer absolute limit (\"keep me logged in\"). State-changing requests are\nalso checked against the request `Origin`. Endpoints that need a session are\nmarked with a lock below.\n\n### Creating things\n\nThe `POST` endpoints that create a project, a session or an ingest share are\nidempotent: the first request answers `201` with the new resource, and a repeat\nof the same request answers `200` with the existing one instead of an error. A\nclient that lost a response to a flaky network can therefore simply send the\nrequest again. The only conflict (`409`) is a project of the same name that\nbelongs to someone else.\n\n### Changing things\n\n`PUT /projects/{project}/members` takes the complete member list wanted,\nnot operations; the API works out what to add and remove, so a retry is safe.\nSealing a session that is sealed already answers `200` with the session as it\nis. `DELETE /ingest-shares/{share_id}` answers `204`, and `404` once the\nshare is gone.\n\nA project or session description is the text of a `README.md` in its folder,\n`null` when there is none. It can be given on create and changed with\n`PUT .../description`; an empty text removes the file. The file is written over\nWebDAV as the signed-in user, so the file system decides who may change it:\nwhoever created it. People can also edit the file directly; whatever it says is\nshown.\n\n### Slow calls\n\n`GET /projects/{project}/usage` runs `du` over the project and can take a\nminute on a large one. Nothing else waits for it: the project details answer\nwith `usage_bytes` null.\n\n### Browsing\n\n`GET /browse?path=…` lists a folder of the data tree one page at a time:\n`entries` holds up to `limit` of them (200 by default, 1000 at most), folders\nfirst and then by name, and `next_cursor` fetches the page after it, until it\nis null. The cursor marks the last entry seen rather than an offset, so an\nentry added or removed while paging neither repeats nor hides another. The\nlisting is made as the signed-in user and shows what that user may see.",
     "version": "1"
   },
   "paths": {
@@ -315,7 +315,7 @@
           "projects"
         ],
         "summary": "Create a project, or return it if it already exists",
-        "description": "Create an ad-hoc project owned by the signed-in user.\n\nIdempotent: sending the same request again answers 200 with the existing\nproject instead of an error, so a client that lost the first response can\nsimply retry. Only a project that belongs to someone else is a conflict.\nThe existing project is returned as it is; changing its members or its\ndescription is a separate operation.\n\nA `description` is saved as `README.md` in the project folder, owned by\nthe signed-in user.",
+        "description": "Create an ad-hoc project owned by the signed-in user.\n\nIdempotent: sending the same request again answers 200 with the existing\nproject instead of an error, so a client that lost the first response can\nsimply retry. Only a project that belongs to someone else is a conflict.\nThe existing project is returned as it is; changing its members or its\ndescription is a separate operation.\n\nA `description` is saved as `README.md` in the project folder, owned by\nthe signed-in user. It is written over WebDAV once the folder exists; if\nthat fails, the project stays and the answer is a 502.",
         "operationId": "add_project_mgmt_api_projects_post",
         "security": [
           {
@@ -401,6 +401,16 @@
           },
           "409": {
             "description": "A project of that name exists and belongs to someone else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`description_not_saved`: the project was created, but its description could not be written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -730,7 +740,7 @@
           "projects"
         ],
         "summary": "Set or remove the description of a project",
-        "description": "Write the project's description to `README.md` in the project folder, or\nremove the file when the description is empty.\n\nAn existing file is rewritten in place and keeps its owner; a new one\nbelongs to the project's owner. The owner and the members may change it,\nlike they may seal sessions. Sending the same text again changes nothing.",
+        "description": "Write the project's description to `README.md` in the project folder, or\nremove the file when the description is empty.\n\nThe file is written over WebDAV as the signed-in user, so the file system\ndecides, as it does over SMB: a new file belongs to whoever writes it, and\nonly they can change it afterwards. Removing it takes the file's owner or\nthe project's owner. Sending the same text again changes nothing.",
         "operationId": "set_description_mgmt_api_projects__project__description_put",
         "security": [
           {
@@ -786,7 +796,7 @@
             }
           },
           "400": {
-            "description": "The permissions service refused the change. `message` says why, for example a `README.md` that is not a regular file.",
+            "description": "`README.md` is there, but not as a plain file (a folder or a FIFO), so it is left alone.",
             "content": {
               "application/json": {
                 "schema": {
@@ -806,7 +816,7 @@
             }
           },
           "403": {
-            "description": "The signed-in user is neither owner nor member of the project.",
+            "description": "The signed-in user is neither owner nor member of the project (`not_a_member`), or the file system does not let them change `README.md` (`no_access`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -817,6 +827,16 @@
           },
           "404": {
             "description": "There is no project of that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The file server did not answer.",
             "content": {
               "application/json": {
                 "schema": {
@@ -917,7 +937,7 @@
           "sessions"
         ],
         "summary": "Create a session in a project, or return it if it already exists",
-        "description": "Create a session folder in a project, as the signed-in user.\n\nIdempotent: a session that already exists is answered with 200 and its\ncurrent state instead of an error, so a client that lost the first\nresponse can simply retry. A session has no owner of its own; any member\nof the project gets the existing one back. Its description is returned as\nit is; the one in the request is not applied (see `PUT .../description`).\n\nA `description` is saved as `README.md` in the session folder, next to\n`raw/`, owned by the signed-in user.",
+        "description": "Create a session folder in a project, as the signed-in user.\n\nIdempotent: a session that already exists is answered with 200 and its\ncurrent state instead of an error, so a client that lost the first\nresponse can simply retry. A session has no owner of its own; any member\nof the project gets the existing one back. Its description is returned as\nit is; the one in the request is not applied (see `PUT .../description`).\n\nA `description` is saved as `README.md` in the session folder, next to\n`raw/`, owned by the signed-in user. It is written over WebDAV once the\nfolder exists; if that fails, the session stays and the answer is a 502.",
         "operationId": "add_session_mgmt_api_projects__project__sessions_post",
         "security": [
           {
@@ -1014,6 +1034,16 @@
           },
           "404": {
             "description": "There is no project of that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`description_not_saved`: the session was created, but its description could not be written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1156,7 +1186,7 @@
           "sessions"
         ],
         "summary": "Set or remove the description of a session",
-        "description": "Write the session's description to `README.md` in its folder, next to\n`raw/`, or remove the file when the description is empty. Sealing covers\nonly `raw/`, so a sealed session can still be described.\n\nAn existing file is rewritten in place and keeps its owner; a new one\nbelongs to whoever created the session folder. Owner or member only, like\nsealing. Sending the same text again changes nothing.",
+        "description": "Write the session's description to `README.md` in its folder, next to\n`raw/`, or remove the file when the description is empty. Sealing covers\nonly `raw/`, so a sealed session can still be described, for example once\nthe data is in.\n\nThe file is written over WebDAV as the signed-in user, so the file system\ndecides, as it does over SMB: a new file belongs to whoever writes it, and\nonly they can change it afterwards. Removing it takes the file's owner or\nthe owner of the session folder. Sending the same text again changes\nnothing.",
         "operationId": "set_description_mgmt_api_projects__project__sessions__session__description_put",
         "security": [
           {
@@ -1223,7 +1253,7 @@
             }
           },
           "400": {
-            "description": "The permissions service refused the change. `message` says why, for example a `README.md` that is not a regular file.",
+            "description": "`README.md` is there, but not as a plain file (a folder or a FIFO), so it is left alone.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1243,7 +1273,7 @@
             }
           },
           "403": {
-            "description": "The signed-in user is neither owner nor member of the project.",
+            "description": "The signed-in user is neither owner nor member of the project (`not_a_member`), or the file system does not let them change `README.md` (`no_access`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1254,6 +1284,16 @@
           },
           "404": {
             "description": "There is no such project, or no such session in it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The file server did not answer.",
             "content": {
               "application/json": {
                 "schema": {

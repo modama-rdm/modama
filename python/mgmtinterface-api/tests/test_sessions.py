@@ -6,6 +6,9 @@ from conftest import api_client, signed_in_client
 from fastapi.testclient import TestClient
 from mgmtinterface_api import API_PREFIX, create_app
 from mgmtinterface_api.config import Settings
+from mgmtinterface_api.descriptions import NotAPlainFile
+from mgmtinterface_api.errors import APIError
+from mgmtinterface_api.webdav import NoAccess, NotFound
 from permissions_client import PermissionsClient
 
 PROJECT = {
@@ -54,6 +57,11 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     session. Creating a session appends it, unless `reject` is set, in which
     case the service answers the way it does when `mkdir` fails. Sealing
     flips `immutable`, unless `seal_reject` is set.
+
+    README.md writes, which go over WebDAV, are recorded in `writes` as
+    `(user, folder, text)`, text None for a removal, and fail with
+    `write_error` when it is set. A write shows in the session read back, as
+    the permissions service would read the file.
     """
     state: dict = {
         "datasets": [dict(EXISTING), dict(OPEN)],
@@ -61,10 +69,8 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
         "reject": None,
         "seal_calls": [],
         "seal_reject": None,
-        # The description of each create call, in the same order.
-        "descriptions": [],
-        "describe_calls": [],
-        "describe_reject": None,
+        "writes": [],
+        "write_error": None,
     }
 
     def projectdetails(self: PermissionsClient, projectname: str, fast: bool = False):
@@ -77,15 +83,8 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
             "datasets": [dict(d) for d in state["datasets"]],
         }
 
-    def create_dataset(
-        self: PermissionsClient,
-        projectname: str,
-        name: str,
-        user: str,
-        description: str | None = None,
-    ):
+    def create_dataset(self: PermissionsClient, projectname: str, name: str, user: str):
         state["create_calls"].append((projectname, name, user))
-        state["descriptions"].append(description)
         if state["reject"] is not None:
             return {"errno": 1, "message": state["reject"]}
         state["datasets"].append(
@@ -94,25 +93,20 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
                 "immutable": False,
                 "ctime": 1.0,
                 "mtime": 2.0,
-                "description": description,
+                "description": None,
             }
         )
         return {"errno": 0}
 
-    def set_dataset_description(
-        self: PermissionsClient,
-        projectname: str,
-        name: str,
-        description: str,
-        user: str,
+    def write_description(
+        settings: Settings, username: str, folder: str, text: str | None
     ):
-        state["describe_calls"].append((projectname, name, description, user))
-        if state["describe_reject"] is not None:
-            return {"errno": 1, "message": state["describe_reject"]}
+        state["writes"].append((username, folder, text))
+        if state["write_error"] is not None:
+            raise state["write_error"]
         for dataset in state["datasets"]:
-            if dataset["name"] == name:
-                dataset["description"] = description or None
-        return {"errno": 0}
+            if folder == f"/{PROJECT['relpath']}/{dataset['name']}":
+                dataset["description"] = text
 
     def seal_dataset(self: PermissionsClient, projectname: str, name: str, user: str):
         state["seal_calls"].append((projectname, name, user))
@@ -128,7 +122,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(PermissionsClient, "create_dataset", create_dataset)
     monkeypatch.setattr(PermissionsClient, "seal_dataset", seal_dataset)
     monkeypatch.setattr(
-        PermissionsClient, "set_dataset_description", set_dataset_description
+        "mgmtinterface_api.descriptions.write_description", write_description
     )
     return state
 
@@ -274,14 +268,17 @@ def test_create_reports_an_unreachable_permissions_service(
 # --- Descriptions on create (#112) ---------------------------------------------
 
 
-def test_a_description_is_passed_on_normalized_and_returned(
+def test_a_description_is_written_normalized_as_the_signed_in_user(
     member: TestClient, backend: dict
 ):
     response = member.post(
         SESSIONS, json={"name": "run 2", "description": "\n# Run 2\r\nTitan, 300 kV \n"}
     )
     assert response.status_code == 201
-    assert backend["descriptions"] == ["# Run 2\nTitan, 300 kV"]
+    # Into the new folder, after the permissions service created it.
+    assert backend["writes"] == [
+        ("user2", "/adhoc/datamanagement/run 2", "# Run 2\nTitan, 300 kV")
+    ]
     # Read back from the project, as the timestamps are.
     assert response.json()["description"] == "# Run 2\nTitan, 300 kV"
 
@@ -289,12 +286,12 @@ def test_a_description_is_passed_on_normalized_and_returned(
 @pytest.mark.parametrize(
     "body", [{"name": "run 2"}, {"name": "run 2", "description": " "}]
 )
-def test_without_a_description_the_service_gets_none(
+def test_without_a_description_no_file_is_written(
     member: TestClient, backend: dict, body: dict
 ):
     response = member.post(SESSIONS, json=body)
     assert response.status_code == 201
-    assert backend["descriptions"] == [None]
+    assert backend["writes"] == []
     assert response.json()["description"] is None
 
 
@@ -304,6 +301,20 @@ def test_a_longer_description_is_rejected_before_any_call(
     response = member.post(SESSIONS, json={"name": "run", "description": "a" * 10_001})
     assert response.status_code == 422
     assert backend["create_calls"] == []
+    assert backend["writes"] == []
+
+
+def test_a_description_that_cannot_be_written_leaves_the_session(
+    member: TestClient, backend: dict
+):
+    backend["write_error"] = APIError(502, "files_unavailable", "down")
+    response = member.post(SESSIONS, json={"name": "run 2", "description": "x"})
+    assert response.status_code == 502
+    assert response.json()["code"] == "description_not_saved"
+    assert "'run 2'" in response.json()["message"]
+    # Created, and not taken back: a retry gets it with a 200.
+    assert backend["create_calls"] == [(PROJECT["name"], "run 2", "user2")]
+    assert member.post(SESSIONS, json={"name": "run 2"}).status_code == 200
 
 
 @pytest.mark.parametrize("name", ["README.md", "readme.md", "ReadMe.MD"])
@@ -323,7 +334,7 @@ def test_repeating_a_create_does_not_apply_the_description(
     )
     assert response.status_code == 200
     assert response.json()["description"] == EXISTING["description"]
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 # --- POST /projects/{project}/sessions/{session}/seal -------------------------
@@ -421,9 +432,10 @@ def test_seal_reports_an_unreachable_permissions_service(
 
 
 @pytest.mark.parametrize("user", [PROJECT["owner"], "user2"])
-def test_owner_and_members_set_a_session_description(
+def test_owner_and_members_may_try_to_set_a_session_description(
     settings: Settings, backend: dict, user: str
 ):
+    # Whether the file system lets them is the WebDAV server's answer.
     client = signed_in_client(create_app(settings), settings, user)
     response = client.put(
         description_url(OPEN["name"]), json={"description": " First run\r\n"}
@@ -431,25 +443,30 @@ def test_owner_and_members_set_a_session_description(
     assert response.status_code == 200
     # Read back from the project; the name travels URL-encoded and arrives as typed.
     assert response.json() == {**OPEN, "description": "First run"}
-    assert backend["describe_calls"] == [
-        (PROJECT["name"], OPEN["name"], "First run", user)
+    assert backend["writes"] == [
+        (user, f"/adhoc/datamanagement/{OPEN['name']}", "First run")
     ]
 
 
 def test_a_sealed_session_can_be_described(member: TestClient, backend: dict):
-    # Sealing covers `raw/` only; the README sits next to it.
+    # Sealing covers `raw/` only; the README sits next to it, and is often
+    # written once the data is in.
     response = member.put(description_url(EXISTING["name"]), json={"description": "x"})
     assert response.status_code == 200
     assert response.json()["immutable"] is True
     assert response.json()["description"] == "x"
+    assert backend["writes"] == [
+        ("user2", f"/adhoc/datamanagement/{EXISTING['name']}", "x")
+    ]
 
 
 def test_an_empty_session_description_removes_it(member: TestClient, backend: dict):
-    response = member.put(description_url(EXISTING["name"]), json={"description": ""})
+    backend["datasets"][1]["description"] = "old"
+    response = member.put(description_url(OPEN["name"]), json={"description": ""})
     assert response.status_code == 200
     assert response.json()["description"] is None
-    assert backend["describe_calls"] == [
-        (PROJECT["name"], EXISTING["name"], "", "user2")
+    assert backend["writes"] == [
+        ("user2", f"/adhoc/datamanagement/{OPEN['name']}", None)
     ]
 
 
@@ -458,7 +475,7 @@ def test_others_may_not_set_a_session_description(settings: Settings, backend: d
     response = outsider.put(description_url(OPEN["name"]), json={"description": "x"})
     assert response.status_code == 403
     assert response.json()["code"] == "not_a_member"
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_description_of_a_session_in_an_unknown_project_is_a_404(
@@ -475,19 +492,29 @@ def test_description_of_an_unknown_session_is_a_404(member: TestClient, backend:
     response = member.put(description_url("nope"), json={"description": "x"})
     assert response.status_code == 404
     assert response.json()["code"] == "session_not_found"
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
-def test_a_session_description_refusal_is_reported_with_the_services_message(
-    member: TestClient, backend: dict
+@pytest.mark.parametrize(
+    ("error", "status", "code"),
+    [
+        # The file is someone else's.
+        (NoAccess("README.md"), 403, "no_access"),
+        (NotAPlainFile("README.md"), 400, "description_rejected"),
+        # The folder went away after the project was looked up.
+        (NotFound("folder"), 404, "session_not_found"),
+        (APIError(502, "files_unavailable", "down"), 502, "files_unavailable"),
+    ],
+)
+def test_a_refused_session_write_is_reported(
+    member: TestClient, backend: dict, error: Exception, status: int, code: str
 ):
-    backend["describe_reject"] = "README.md is not a regular file, so it is left alone."
+    backend["write_error"] = error
     response = member.put(description_url(OPEN["name"]), json={"description": "x"})
-    assert response.status_code == 400
-    assert response.json() == {
-        "code": "description_rejected",
-        "message": "README.md is not a regular file, so it is left alone.",
-    }
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    if code != "files_unavailable":
+        assert repr(OPEN["name"]) in response.json()["message"]
 
 
 def test_a_malformed_session_description_is_rejected_before_any_call(
@@ -497,7 +524,7 @@ def test_a_malformed_session_description_is_rejected_before_any_call(
         description_url(OPEN["name"]), json={"description": "a" * 10_001}
     )
     assert response.status_code == 422
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_session_description_requires_a_session_cookie(
@@ -507,7 +534,7 @@ def test_session_description_requires_a_session_cookie(
         description_url(OPEN["name"]), json={"description": "x"}
     )
     assert response.status_code == 401
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_session_description_is_covered_by_the_origin_check(
@@ -520,7 +547,7 @@ def test_session_description_is_covered_by_the_origin_check(
     )
     assert response.status_code == 403
     assert response.json()["code"] == "bad_origin"
-    assert backend["describe_calls"] == []
+    assert backend["writes"] == []
 
 
 def test_session_description_reports_an_unreachable_permissions_service(
@@ -529,7 +556,8 @@ def test_session_description_reports_an_unreachable_permissions_service(
     def unreachable(self: PermissionsClient, *args, **kwargs):
         raise requests.ConnectionError("permissions service is down")
 
-    monkeypatch.setattr(PermissionsClient, "set_dataset_description", unreachable)
+    monkeypatch.setattr(PermissionsClient, "projectdetails", unreachable)
     response = member.put(description_url(OPEN["name"]), json={"description": "x"})
     assert response.status_code == 502
     assert response.json()["code"] == "permissions_unavailable"
+    assert backend["writes"] == []

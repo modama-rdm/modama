@@ -318,26 +318,35 @@ have as members.
 A project or session can carry a description (#112): the text of a `README.md`
 in the project folder, or in the session folder next to `raw/`. Every project
 and session in a response has `description`, `null` when there is no file. The
-API has no `/data` mount, so the permissions service writes and reads the file.
+permissions service reads the file for its listings; the API writes it over
+WebDAV as the signed-in user, like any other file a person edits, so the file
+system decides who may change it.
 
 - `POST /projects` and `POST /projects/{project}/sessions` take an optional
   `description`, up to 10 000 characters. Line ends become LF and surrounding
-  whitespace is dropped; blank is the same as absent and writes no file. A
-  repeated create answers with the existing resource and does not apply it.
+  whitespace is dropped; blank is the same as absent and writes no file. The
+  file is written once the folder exists; if that fails, the project or session
+  stays and the answer is `502 description_not_saved`. A repeated create
+  answers with the existing resource and does not apply it.
 - `PUT /projects/{project}/description` and
   `PUT /projects/{project}/sessions/{session}/description` take
   `{"description": "..."}` and answer with the project or session. An empty
-  text removes the file. The owner and the members may change it, like they
-  may seal sessions (`403 not_a_member` otherwise); a refusal by the service
-  is `400 description_rejected`.
-- A new file belongs to the project owner or to whoever created the session,
-  mode 0644, no ACL entries; an existing one is rewritten in place and keeps
-  its owner. Sealing covers `raw/` only, so a sealed session's description can
-  still change.
+  text removes the file. Non-members get `403 not_a_member` before anything is
+  written.
+- Who may change the file is the file system's call. A new file belongs to
+  whoever writes it, and the watchdog leaves it writable by them alone, so only
+  they can change it later (`403 no_access` for anyone else). The sticky bit on
+  the folder lets the file's owner and the folder's owner remove it. Sealing
+  covers `raw/` only, so a sealed session's description can still change, and
+  one can be written once the data is in.
 - People can edit the file over SMB or WebDAV; whatever it says is the
   description. The service reads at most 64 KiB of it, and anything that is
-  not a regular file with a single link (a symlink, a FIFO, a hard link)
-  reads as no description and is not written through.
+  not a regular file with a single link (a symlink, a FIFO, a hard link) reads
+  as no description. The API does not write or remove a `README.md` that is a
+  folder or a FIFO (`400 description_rejected`); writing to a FIFO would block
+  the WebDAV server. That server refuses any path through a symlink, so a
+  symlinked `README.md` is never written through: an empty text leaves it
+  alone, and a write fails in the server (`502`).
 - A session cannot be named `README.md`.
 
 ## Browsing
