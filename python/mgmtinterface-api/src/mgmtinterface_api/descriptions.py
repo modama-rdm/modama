@@ -30,8 +30,7 @@ from .webdav import NoAccess, NotAFile, NotFound, delete_file, list_path, put_fi
 README_NAME = "README.md"
 
 #: In characters, which is what JSON schema's `maxLength` counts. The
-#: permissions service reads back at most 64 KiB of the file, which covers
-#: 10 000 characters of any UTF-8.
+#: permissions service reads back at most 65 536 characters of the file.
 DESCRIPTION_MAX_LENGTH = 10_000
 
 

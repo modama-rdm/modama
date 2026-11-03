@@ -131,8 +131,9 @@ def check_valid_dataset(name: str):
 # nobody can link a file they could not read and write already.
 
 README_NAME = "README.md"
-# The API accepts 10 000 characters, at most 40 000 bytes of UTF-8.
-README_MAX_BYTES = 64 * 1024
+# The API accepts 10 000 characters; a file written by hand may be longer, and
+# is cut off here, because every listing reads every README.
+README_MAX_CHARS = 64 * 1024
 
 _OPEN_EXISTING = os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC
 
@@ -141,8 +142,8 @@ def read_readme(folder: str) -> str | None:
     """
     The description kept in `folder`, or None if there is none.
 
-    Reads at most :data:`README_MAX_BYTES`. Anything but a regular file, and
-    any error on the way, reads as no description.
+    Reads at most :data:`README_MAX_CHARS` characters. Anything but a regular
+    file, and any error on the way, reads as no description.
     """
     path = os.path.join(folder, README_NAME)
     try:
@@ -152,19 +153,13 @@ def read_readme(folder: str) -> str | None:
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        chunks: list[bytes] = []
-        remaining = README_MAX_BYTES
-        while remaining > 0:
-            chunk = os.read(fd, remaining)
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
+        # `closefd=False`: the `finally` closes the descriptor on every path.
+        with open(fd, encoding="utf-8", errors="replace", closefd=False) as f:
+            text = f.read(README_MAX_CHARS).rstrip()
     except OSError:
         return None
     finally:
         os.close(fd)
-    text = b"".join(chunks).decode("utf-8", errors="replace").rstrip()
     return text or None
 
 
@@ -812,9 +807,18 @@ if __name__ == "__main__":
         ],
         check=True,
     )
+    # A long one is cut off after README_MAX_CHARS characters, not in the
+    # middle of one.
+    myproj.add_dataset("long", "testdieter")
+    write_as(
+        "testdieter",
+        os.path.join(myproj.path, "long", README_NAME),
+        "ä" * (README_MAX_CHARS + 10),
+    )
     described = {d.name: d.description for d in myproj.datasets}
     assert described["fifo"] is None and described["link"] is None
     assert described["hardlink"] == "linked text"
+    assert described["long"] == "ä" * README_MAX_CHARS
 
     # A dataset may not take the project README's name.
     try:

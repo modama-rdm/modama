@@ -340,7 +340,7 @@ system decides who may change it.
   covers `raw/` only, so a sealed session's description can still change, and
   one can be written once the data is in.
 - People can edit the file over SMB or WebDAV; whatever it says is the
-  description. The service reads at most 64 KiB of it; anything
+  description. The service reads at most 65 536 characters of it; anything
   that is not a regular file (a symlink, a FIFO) reads as no description, and a
   hard link is read like any file. The API does not write or remove a
   `README.md` that is a folder or a FIFO (`400 description_rejected`); writing
