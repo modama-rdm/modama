@@ -2,8 +2,8 @@ import ReactMarkdown, {type Components} from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 /**
- * Element styles for a rendered description (#112). No typography plugin: the
- * few elements a README uses are styled here, in the app's tokens.
+ * Element styles for a rendered description. No typography plugin: the few
+ * elements a README uses are styled here, in the app's tokens.
  *
  * Headings are shifted down (`#` becomes an `<h3>`), so a description never
  * competes with the page's own `<h1>`. Images are shown as links instead of

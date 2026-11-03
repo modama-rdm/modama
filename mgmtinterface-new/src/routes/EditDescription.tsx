@@ -185,7 +185,7 @@ function FormError({next}: { next: string }) {
     )
 }
 
-/** Edit a project's or a session's description (#112). */
+/** Edit a project's or a session's description. */
 export function EditDescription() {
     const {name, session, details} = useLoaderData() as EditDescriptionLoaderData
 

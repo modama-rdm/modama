@@ -53,7 +53,7 @@ export function groupProjects(
 
 /**
  * The projects matching `query` (#113): every word of it somewhere in the name,
- * the owner or the description (#112), in any order, case and separators aside
+ * the owner or the description, in any order, case and separators aside
  * (`lib/search.ts`). An
  * empty query returns all. The result comes best match first, but the screen
  * groups and column-sorts it afterwards, and that sort is total (ties fall
@@ -192,7 +192,7 @@ export function availableMembers(
         .sort((a, b) => a.localeCompare(b))
 }
 
-/** Where a project's or a session's description is edited (#112). */
+/** Where a project's or a session's description is edited. */
 export function descriptionPath(project: string, session?: string): string {
     const base = `/projects/${encodeURIComponent(project)}`
     return session === undefined

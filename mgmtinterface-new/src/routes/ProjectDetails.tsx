@@ -74,14 +74,14 @@ const thClass =
     'px-5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-fg-faint'
 
 // The Markdown renderer is about a third of the app's size, and only a project
-// page with a description needs it, so it loads on first use (#112).
+// page with a description needs it, so it loads on first use.
 const Markdown = lazy(() =>
     import('../components/Markdown').then((module) => ({default: module.Markdown})),
 )
 
 /**
- * The project's description (#112), rendered from Markdown, with a way to edit
- * it for the owner and the members. Without one, they get a link to add it;
+ * The project's description, rendered from Markdown, with a way to edit it for
+ * the owner and the members. Without one, they get a link to add it;
  * everyone else sees nothing.
  */
 function ProjectDescription({

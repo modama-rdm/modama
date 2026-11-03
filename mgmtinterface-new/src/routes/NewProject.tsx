@@ -60,7 +60,7 @@ export function NewProject() {
         try {
             // The signed-in session is the owner; the new API takes no `owner`.
             const body: CreateProjectRequestV2 = {name: trimmed, members}
-            // Blank is no description (#112); leave the field out rather than
+            // Blank is no description; leave the field out rather than
             // send whitespace for the server to drop.
             if (description.trim()) body.description = description.trim()
             const {status, body: project} = await apiRequestV2<SerializedProject>(

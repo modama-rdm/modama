@@ -16,7 +16,7 @@ export interface EditDescriptionLoaderData {
     details: Promise<ProjectDetailsV2>
 }
 
-/** Streams the project details for editing a project's or a session's description (#112). */
+/** Streams the project details for editing a project's or a session's description. */
 export function editDescriptionLoader({params}: LoaderFunctionArgs): EditDescriptionLoaderData {
     const name = params.name ?? ''
     return {

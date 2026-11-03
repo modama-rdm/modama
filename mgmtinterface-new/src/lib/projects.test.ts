@@ -383,7 +383,7 @@ describe('memberChanges', () => {
     })
 })
 
-describe('descriptions (#112)', () => {
+describe('descriptions', () => {
     const described = (name: string, description: string | null | undefined): SerializedProject => ({
         ...p(name, 'weber', [], 1),
         description,

@@ -48,7 +48,7 @@ export function NewSession() {
         try {
             // The signed-in session is the owner; the new API takes no `owner`.
             const body: CreateSessionRequestV2 = {name: trimmed}
-            // Blank is no description (#112): leave the field out.
+            // Blank is no description: leave the field out.
             if (description.trim()) body.description = description.trim()
             const {status, body: created} = await apiRequestV2<SessionV2>(
                 `/projects/${encodeURIComponent(name)}/sessions`,

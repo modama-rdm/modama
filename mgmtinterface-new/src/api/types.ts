@@ -22,8 +22,8 @@ export interface SerializedProject {
     usage_bytes: number | null
     /**
      * The text of `README.md` in the project folder, or null when there is
-     * none (#112). Markdown, as people write it. Absent from an API older
-     * than #112.
+     * none. Markdown, as people write it. Absent from an API that predates
+     * descriptions.
      */
     description?: string | null
 }
@@ -34,7 +34,7 @@ export interface SerializedDataset {
     immutable: boolean
     ctime: number
     mtime: number
-    /** The text of `README.md` in the session folder, next to `raw/`, or null (#112). */
+    /** The text of `README.md` in the session folder, next to `raw/`, or null. */
     description?: string | null
 }
 
@@ -79,8 +79,8 @@ export interface CreateProjectRequestV2 {
     name: string
     members: string[]
     /**
-     * Saved as `README.md` in the new folder (#112). Left out when blank; the
-     * server treats blank as absent anyway. Up to 10 000 characters.
+     * Saved as `README.md` in the new folder. Left out when blank; the server
+     * treats blank as absent anyway. Up to 10 000 characters.
      */
     description?: string
 }
@@ -104,8 +104,8 @@ export interface CreateSessionRequestV2 {
 
 /**
  * `PUT /mgmt-api/projects/<name>/description` and
- * `PUT /mgmt-api/projects/<name>/sessions/<session>/description` (#112): the
- * new text of the folder's `README.md`; an empty text removes the file. The
+ * `PUT /mgmt-api/projects/<name>/sessions/<session>/description`: the new
+ * text of the folder's `README.md`; an empty text removes the file. The
  * owner and the members may change it. Answers the project or the session.
  */
 export interface SetDescriptionRequestV2 {

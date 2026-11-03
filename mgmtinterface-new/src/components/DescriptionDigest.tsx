@@ -1,7 +1,7 @@
 import {descriptionDigest} from '../lib/format'
 
 /**
- * A description's first line under a name in a list row (#112), cut to one
+ * A description's first line under a name in a list row, cut to one
  * line, with the whole text on hover. Nothing when there is no description.
  * The hover is the native `title`, like every other hover in the app.
  */

@@ -26,7 +26,7 @@ describe('journey: sorting the sessions table', () => {
         return app
     }
     // The session name is the first line of the first cell; a description's
-    // first line may follow it (#112).
+    // first line may follow it.
     const sessionNames = () =>
         within(screen.getByRole('table')).getAllByRole('row').slice(1)
             .map(row => within(row).getAllByRole('cell')[0].firstElementChild?.textContent)

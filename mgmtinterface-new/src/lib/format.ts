@@ -56,7 +56,7 @@ const LEADING_MARKDOWN = /^(?:#{1,6}(?:\s+|$)|>\s*|[-*+](?:\s+|$)|\d+[.)](?:\s+|
 const RULE = /^([-*_])(?:\s*\1){2,}$/
 
 /**
- * What a list shows of a description (#112): its first non-blank line, without
+ * What a list shows of a description: its first non-blank line, without
  * the Markdown that opens it, or null when there is nothing to show. The rest
  * is the caller's to cut short (CSS `truncate`) and to offer in full on hover.
  */

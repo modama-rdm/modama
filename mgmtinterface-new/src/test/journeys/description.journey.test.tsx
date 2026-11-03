@@ -6,10 +6,10 @@ import {baseWorld} from '../world'
 import {FIXTURE_DATASETS, FIXTURE_PROJECT} from '../fixtures/project'
 
 /**
- * #112 — descriptions, kept as README.md in the project or session folder.
- * The lists show the first line with the whole text on hover, the project page
- * renders the project's as Markdown, the search covers them, and the owner and
- * the members change them on their own screen. The texts are the hand-written
+ * Descriptions, kept as README.md in the project or session folder. The lists
+ * show the first line with the whole text on hover, the project page renders
+ * the project's as Markdown, the search covers them, and the owner and the
+ * members change them on their own screen. The texts are the hand-written
  * ones in the fixtures (see `fixtures/README.md`).
  */
 describe('journey: descriptions', () => {
