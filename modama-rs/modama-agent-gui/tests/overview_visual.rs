@@ -3,13 +3,16 @@ use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
-    guide_screenshots::VIEWPORT,
+    guide_screenshots::{VIEWPORT, representative_connected_agents},
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
     state::{
         ActiveSession, AgentIdentity, ForegroundSession, OperationId, PendingSession, SignedIn,
     },
     styles,
+};
+use modama_common::{
+    internal_api_types::ConnectedAgent as ConnectedAgentEntry, messages::AgentMountStatus,
 };
 use std::sync::{Arc, Barrier};
 
@@ -48,6 +51,11 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
 
         let mut app = AgentGuiApp::new();
         app.page = Page::Overview(PageOverview::new());
+        app.app_state.connected_agents = Some(representative_connected_agents(&[
+            "detector-pc",
+            "k2-gpu",
+            "tem-camera",
+        ]));
         if logged_in {
             app.app_state.signed_in = Some(SignedIn {
                 username: "representative.user".to_string(),
@@ -715,4 +723,112 @@ fn other_mounts_snapshots() {
     closing.run_steps(1);
     closing.snapshot("overview_other_mount_closing");
     results.extend_harness(&mut closing);
+}
+
+#[test]
+fn connected_agents_snapshots() {
+    let mut results = SnapshotResults::new();
+
+    // more agents than the list shows: it scrolls on its own
+    let mut scrolled = overview_harness(false, true);
+    scrolled.state_mut().app_state.connected_agents = Some(representative_connected_agents(&[
+        "detector-pc",
+        "eels-spectrometer",
+        "k2-gpu",
+        "merlin-detector",
+        "plasma-cleaner",
+        "stage-controller",
+        "tem-camera",
+        "tomography-pc",
+    ]));
+    scrolled.run_steps(1);
+    let list = scrolled.get_by_label("tomography-pc").rect();
+    scrolled.event(egui::Event::PointerMoved(egui::pos2(
+        list.center().x,
+        scrolled.get_by_label("detector-pc").rect().center().y,
+    )));
+    scrolled.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -2000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::default(),
+    });
+    // scrolling is animated
+    scrolled.run_steps(30);
+    // the page itself didn't scroll
+    assert!(scrolled.query_by_label("Start Session").is_some());
+    scrolled.snapshot("overview_connected_agents_scrolled");
+    results.extend_harness(&mut scrolled);
+
+    // one agent per mount status, scrolled to the last one, the pointer on its (unknown) ring
+    let mut statuses = overview_harness(false, true);
+    statuses.state_mut().app_state.connected_agents = Some(representative_connected_agents(&[
+        "detector-pc",
+        "k2-gpu",
+        "merlin-detector",
+        "tem-camera",
+    ]));
+    statuses.run_steps(1);
+    let list = statuses.get_by_label("detector-pc").rect();
+    statuses.event(egui::Event::PointerMoved(list.center()));
+    statuses.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -2000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::default(),
+    });
+    // scrolling is animated
+    statuses.run_steps(30);
+    let name = statuses.get_by_label("tem-camera").rect();
+    let spacing = statuses.ctx.global_style().spacing.item_spacing.x;
+    let dot_radius = styles::components::connected_agent_dot::size::EGUI_POINTS / 2.0;
+    statuses.event(egui::Event::PointerMoved(egui::pos2(
+        name.left() - spacing - dot_radius,
+        name.center().y,
+    )));
+    // tooltips show after a delay
+    statuses.run_steps(60);
+    assert!(statuses.query_by_label("status unknown").is_some());
+    statuses.snapshot("overview_connected_agents_statuses");
+    results.extend_harness(&mut statuses);
+
+    let mut alone = overview_harness(false, true);
+    alone.state_mut().app_state.connected_agents = Some(representative_connected_agents(&[]));
+    alone.run_steps(1);
+    assert!(
+        alone
+            .query_by_label("No other agents are connected.")
+            .is_some()
+    );
+    alone.snapshot("overview_connected_agents_alone");
+    results.extend_harness(&mut alone);
+
+    // an anonymous agent: its own row has no lock; it lists the agents of the resource it
+    // inherited from its token
+    let mut anonymous = overview_harness(false, true);
+    let mut agents = representative_connected_agents(&["detector-pc", "k2"]);
+    agents.own = ConnectedAgentEntry {
+        name: "workstation".to_owned(),
+        verified: false,
+        status: Some(AgentMountStatus::Idle),
+    };
+    anonymous.state_mut().app_state.connected_agents = Some(agents);
+    // two frames: in the first, egui's debug build flags the own row's tag, whose ID changed
+    // with the row's contents
+    anonymous.run_steps(2);
+    anonymous.snapshot("overview_connected_agents_anonymous");
+    results.extend_harness(&mut anonymous);
+}
+
+#[test]
+fn connected_agents_are_shown_even_before_they_are_known() {
+    let mut harness = overview_harness(false, true);
+    harness.state_mut().app_state.connected_agents = None;
+    harness.run_steps(1);
+    assert!(harness.query_by_label("Connected agents").is_some());
+    assert!(
+        harness
+            .query_by_label("Not connected to the server yet.")
+            .is_some()
+    );
 }

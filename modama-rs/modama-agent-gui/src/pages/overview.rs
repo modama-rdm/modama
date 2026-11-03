@@ -1,4 +1,8 @@
 use eframe::egui::{self, Label, RichText};
+use modama_common::{
+    internal_api_types::{ConnectedAgent, ConnectedAgents},
+    messages::AgentMountStatus,
+};
 use std::sync::Arc;
 
 use crate::{
@@ -214,10 +218,13 @@ impl PageOverview {
             } else if matches!(app_state.foreground, ForegroundSession::None) {
                 self.drop_foreground_close_confirmation();
                 start_clicked = self.show_create_section(ui);
+                show_connected_agents(ui, app_state.connected_agents.as_ref());
             } else {
                 let mut columns = Columns::new(ui);
                 action = self.show_foreground_section(columns.first(), app_state);
-                start_clicked = self.show_create_section(columns.second(ui));
+                let second = columns.second(ui);
+                start_clicked = self.show_create_section(second);
+                show_connected_agents(second, app_state.connected_agents.as_ref());
                 columns.finish(ui);
             }
         });
@@ -785,6 +792,157 @@ impl Columns {
     }
 }
 
+/// The agents connected at this agent's resource, below the start action; the list scrolls on
+/// its own once it is longer than a few rows
+fn show_connected_agents(ui: &mut egui::Ui, connected_agents: Option<&ConnectedAgents>) {
+    /// The list shows this many rows before it scrolls
+    const VISIBLE_ROWS: f32 = 4.0;
+    let row_height = styles::components::connected_agent_row::height::EGUI_POINTS;
+
+    ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+    ui.separator();
+    ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+
+    let Some(agents) = connected_agents else {
+        card_heading(ui, "Connected agents");
+        card_description(ui, "Not connected to the server yet.");
+        return;
+    };
+    card_heading(ui, &format!("Connected agents at {}", agents.resource));
+    ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(
+            styles::components::standard_border::width::EGUI_POINTS,
+            styles::color::outline::VALUE.resolve(ui.visuals()),
+        ))
+        .corner_radius(styles::radius(styles::rounded::lg::EGUI_POINTS))
+        .inner_margin(egui::Margin::symmetric(
+            styles::spacing::field_label_gap::EGUI_POINTS as i8 * 2,
+            styles::spacing::field_label_gap::EGUI_POINTS as i8,
+        ))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            styles::scrollbar_scope(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("connected-agents")
+                    .max_height(VISIBLE_ROWS * row_height)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        // each row in its own ID scope: rows with and without a lock would
+                        // otherwise hand out the same automatic IDs
+                        ui.push_id("own", |ui| {
+                            connected_agent_row(ui, &agents.own, true, row_height);
+                        });
+                        for (index, agent) in agents.others.iter().enumerate() {
+                            ui.push_id(index, |ui| {
+                                connected_agent_row(ui, agent, false, row_height);
+                            });
+                        }
+                    });
+            });
+        });
+    if agents.others.is_empty() {
+        ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
+        card_description(ui, "No other agents are connected.");
+    }
+}
+
+/// `● name 🔒 … this agent`: the dot says connected, the lock that the identity is verified
+/// How a connected agent's mount status shows as the dot in front of its name
+#[derive(Debug, PartialEq)]
+struct StatusDot {
+    color: styles::ThemeColor,
+    /// A ring for an unknown status
+    filled: bool,
+    /// The dot's hover text; the HTML pages use the same words
+    label: &'static str,
+}
+
+fn status_dot(status: Option<AgentMountStatus>) -> StatusDot {
+    let (color, filled, label) = match status {
+        Some(AgentMountStatus::Idle) => (styles::color::tertiary::VALUE, true, "idle"),
+        Some(AgentMountStatus::Reconciling) => (styles::color::primary::VALUE, true, "reconciling"),
+        Some(AgentMountStatus::LeftoverWork) => (
+            styles::color::secondary::VALUE,
+            true,
+            "reconciled, with work left over",
+        ),
+        Some(AgentMountStatus::NoHelper) => (
+            styles::color::outline_variant::VALUE,
+            true,
+            "no session helper",
+        ),
+        Some(AgentMountStatus::Unknown) | None => (
+            styles::color::outline_variant::VALUE,
+            false,
+            "status unknown",
+        ),
+    };
+    StatusDot {
+        color,
+        filled,
+        label,
+    }
+}
+
+fn connected_agent_row(ui: &mut egui::Ui, agent: &ConnectedAgent, own: bool, height: f32) {
+    let width = ui.available_width();
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_size(egui::vec2(width, height));
+            let dot_size = styles::components::connected_agent_dot::size::EGUI_POINTS;
+            let (dot, response) =
+                ui.allocate_exact_size(egui::vec2(dot_size, dot_size), egui::Sense::hover());
+            let StatusDot {
+                color,
+                filled,
+                label,
+            } = status_dot(agent.status);
+            let color = color.resolve(ui.visuals());
+            if filled {
+                ui.painter()
+                    .circle_filled(dot.center(), dot_size / 2.0, color);
+            } else {
+                let width = styles::components::standard_border::width::EGUI_POINTS;
+                ui.painter().circle_stroke(
+                    dot.center(),
+                    (dot_size - width) / 2.0,
+                    egui::Stroke::new(width, color),
+                );
+            }
+            response.on_hover_text(label);
+            ui.add(
+                Label::new(
+                    RichText::new(&agent.name).font(styles::typography::mono_medium::font_id()),
+                )
+                .truncate(),
+            );
+            if agent.verified {
+                ui.add(Label::new(
+                    // phosphor's glyphs are in the proportional family
+                    RichText::new(egui_phosphor::regular::LOCK_SIMPLE)
+                        .font(egui::FontId::proportional(
+                            styles::typography::supporting_text::font_id().size,
+                        ))
+                        .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+                ))
+                .on_hover_text("Identity verified");
+            }
+            if own {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add(Label::new(
+                        RichText::new("this agent")
+                            .font(styles::typography::supporting_text::font_id())
+                            .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+                    ));
+                });
+            }
+        },
+    );
+}
+
 fn card_heading(ui: &mut egui::Ui, text: &str) {
     ui.add(Label::new(
         RichText::new(text).font(styles::typography::section_heading::font_id()),
@@ -834,6 +992,30 @@ fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_mount_status_has_its_own_dot() {
+        let statuses = [
+            Some(AgentMountStatus::Idle),
+            Some(AgentMountStatus::Reconciling),
+            Some(AgentMountStatus::LeftoverWork),
+            Some(AgentMountStatus::NoHelper),
+            None,
+        ];
+        let dots: Vec<StatusDot> = statuses.into_iter().map(status_dot).collect();
+        for (i, a) in dots.iter().enumerate() {
+            for b in &dots[i + 1..] {
+                assert!((a.color, a.filled) != (b.color, b.filled), "{a:?} vs {b:?}");
+                assert_ne!(a.label, b.label);
+            }
+        }
+        // only the unknown status is a ring
+        assert_eq!(dots.iter().filter(|dot| !dot.filled).count(), 1, "{dots:?}");
+        assert_eq!(
+            status_dot(Some(AgentMountStatus::Unknown)),
+            status_dot(None)
+        );
+    }
 
     fn alice() -> SignedIn {
         SignedIn {

@@ -5,6 +5,10 @@ use time::{Date, Month};
 
 use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
+use modama_common::{
+    internal_api_types::{ConnectedAgent as ConnectedAgentEntry, ConnectedAgents},
+    messages::AgentMountStatus,
+};
 
 use crate::{
     app::AgentGuiApp,
@@ -78,6 +82,40 @@ fn seed_identity(app: &mut AgentGuiApp) {
         agent_name: "k2".to_owned(),
         resource_name: "Holo".to_owned(),
     });
+    app.app_state.connected_agents = Some(representative_connected_agents(&[
+        "detector-pc",
+        "k2-gpu",
+        "tem-camera",
+    ]));
+}
+
+/// The agents at Holo as seen by its agent `k2`, with `others` connected besides it. `k2` is
+/// idle; the others take turns through the other mount statuses, so four of them show all five.
+pub fn representative_connected_agents(others: &[&str]) -> ConnectedAgents {
+    const STATUSES: [Option<AgentMountStatus>; 5] = [
+        Some(AgentMountStatus::Reconciling),
+        Some(AgentMountStatus::LeftoverWork),
+        Some(AgentMountStatus::NoHelper),
+        None,
+        Some(AgentMountStatus::Idle),
+    ];
+    ConnectedAgents {
+        resource: "Holo".to_owned(),
+        own: ConnectedAgentEntry {
+            name: "k2".to_owned(),
+            verified: true,
+            status: Some(AgentMountStatus::Idle),
+        },
+        others: others
+            .iter()
+            .zip(STATUSES.iter().cycle())
+            .map(|(name, status)| ConnectedAgentEntry {
+                name: (*name).to_owned(),
+                verified: true,
+                status: *status,
+            })
+            .collect(),
+    }
 }
 
 fn seed_logged_in(app: &mut AgentGuiApp) {

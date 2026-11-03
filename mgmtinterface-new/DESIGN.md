@@ -156,6 +156,10 @@ components:
     width: 172px
   session-row:
     height: 48px
+  connected-agent-row:
+    height: 32px
+  connected-agent-dot:
+    size: 8px
   login-card:
     width: 400px
   dialog:
