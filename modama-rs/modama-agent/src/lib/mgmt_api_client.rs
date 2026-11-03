@@ -11,6 +11,11 @@ pub mod generated {
         include!(concat!(env!("OUT_DIR"), "/generated/client.rs"));
     }
 
+    pub mod info {
+        include!(concat!(env!("OUT_DIR"), "/generated/info.rs"));
+    }
+
     pub use client::*;
+    pub use info::*;
     pub use types::*;
 }

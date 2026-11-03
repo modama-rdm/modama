@@ -8,7 +8,12 @@ pub mod generated {
         include!(concat!(env!("OUT_DIR"), "/generated/client.rs"));
     }
 
+    pub mod info {
+        include!(concat!(env!("OUT_DIR"), "/generated/info.rs"));
+    }
+
     pub use client::*;
+    pub use info::*;
     pub use types::*;
 }
 
@@ -19,7 +24,7 @@ use std::sync::Arc;
 
 use reqwest::cookie::Jar;
 
-pub const API_VERSION: &str = "1.0.0";
+pub use generated::info::API_VERSION;
 
 /// Typed client for the local modama-agent API. It keeps the agent's session cookie in memory,
 /// like a browser does; a new client starts signed out.

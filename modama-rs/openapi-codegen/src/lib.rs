@@ -2,7 +2,8 @@
 //! the GUI's client for the agent's local API, and the agent's client for mgmtinterface-api.
 //!
 //! The generated files land in `<out_dir>/generated/` (`client.rs`, `types.rs`, ...), to be
-//! pulled in with `include!`.
+//! pulled in with `include!`. `info.rs` holds `API_VERSION`, the document's `info.version`, so a
+//! client sends the version its types were generated for.
 
 use std::{fs, path::Path};
 
@@ -32,6 +33,7 @@ pub fn generate_api_client(
     if let Some(prefix) = strip_path_prefix {
         strip_paths(&mut schema, prefix)?;
     }
+    let version = api_version(&schema)?;
 
     // Timestamps stay strings: nothing reads them yet, and this avoids a chrono dependency in
     // the generated code. The analyzer and the generator each need the mapping.
@@ -56,6 +58,17 @@ pub fn generate_api_client(
         .map_err(|error| format!("failed to generate API client: {error}"))?;
 
     let out_dir = out_dir.join("generated");
+    fs::create_dir_all(&out_dir)
+        .map_err(|error| format!("failed to create {}: {error}", out_dir.display()))?;
+    let info_path = out_dir.join("info.rs");
+    fs::write(
+        &info_path,
+        format!(
+            "/// The API version the client was generated for (`info.version` of the document)\n\
+             pub const API_VERSION: &str = {version:?};\n"
+        ),
+    )
+    .map_err(|error| format!("failed to write {}: {error}", info_path.display()))?;
     for file in generated.files {
         let output_path = out_dir.join(&file.path);
         if let Some(parent) = output_path.parent() {
@@ -67,6 +80,14 @@ pub fn generate_api_client(
             .map_err(|error| format!("failed to write {}: {error}", output_path.display()))?;
     }
     Ok(())
+}
+
+fn api_version(schema: &serde_json::Value) -> Result<String, String> {
+    schema
+        .pointer("/info/version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "the OpenAPI document has no info.version string".to_owned())
 }
 
 fn strip_paths(schema: &mut serde_json::Value, prefix: &str) -> Result<(), String> {
@@ -100,7 +121,20 @@ fn strip_leading_comments_and_attrs(content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_leading_comments_and_attrs, strip_paths};
+    use super::{api_version, strip_leading_comments_and_attrs, strip_paths};
+
+    #[test]
+    fn the_api_version_comes_from_info_version() {
+        let schema = serde_json::json!({"info": {"title": "t", "version": "1"}});
+        assert_eq!(api_version(&schema).unwrap(), "1");
+        for schema in [
+            serde_json::json!({"info": {"title": "t"}}),
+            serde_json::json!({"info": {"version": 1}}),
+            serde_json::json!({}),
+        ] {
+            assert!(api_version(&schema).is_err(), "{schema}");
+        }
+    }
 
     #[test]
     fn strips_the_prefix_from_every_path() {

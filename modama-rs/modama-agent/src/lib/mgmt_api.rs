@@ -16,13 +16,13 @@ use tokio::sync::Mutex;
 use url::Url;
 
 use crate::mgmt_api_client::generated::{
-    ApiOpError, CreateIngestShareRequest, CreateSessionRequest, HttpClient, IngestShare,
-    LoginRequest, ProjectDetails, ProjectList,
+    ApiOpError, CreateIngestShareRequest, CreateSessionRequest, ErrorResponse, HttpClient,
+    IngestShare, LoginRequest, ProjectDetails, ProjectList,
 };
 
-/// The contract version (`X-Modama-API-Version`) this agent is built against
-pub const API_VERSION: &str = "1";
-const API_VERSION_NUMBER: i64 = 1;
+/// The contract version (`X-Modama-API-Version`) this agent is built against: `info.version` of
+/// the committed `openapi.json`, so it always matches the generated types
+pub use crate::mgmt_api_client::generated::API_VERSION;
 
 /// Where mgmtinterface-api may be mounted below `mgmt_api_url`, in order of preference: `/api`
 /// once it has replaced the legacy Flask API there, `/mgmt-api` until then, and the configured
@@ -161,7 +161,12 @@ async fn discover(server: &Url) -> Result<Url, MgmtApiError> {
             .read_versions_mgmt_api_versions_get()
             .await
         {
-            Ok(versions) if versions.supported.contains(&API_VERSION_NUMBER) => {
+            Ok(versions)
+                if versions
+                    .supported
+                    .iter()
+                    .any(|version| version.to_string() == API_VERSION) =>
+            {
                 info!("management API found at {base}");
                 return Ok(base);
             }
@@ -219,19 +224,13 @@ fn session_in(jar: &Jar, base: &Url) -> Option<UpstreamSession> {
         .map(|cookies| UpstreamSession(cookies.to_owned()))
 }
 
-/// The API's error body (`{code, message}`), or FastAPI's own for a missing route
-#[derive(serde::Deserialize)]
-struct ErrorBody {
-    code: String,
-    message: String,
-}
-
 fn map_error<E: std::fmt::Debug>(error: ApiOpError<E>) -> MgmtApiError {
     let error = match error {
         ApiOpError::Transport(error) => return MgmtApiError::Unreachable(error.to_string()),
         ApiOpError::Api(error) => error,
     };
-    let body = serde_json::from_str::<ErrorBody>(&error.body).ok();
+    // the API's error body; FastAPI's own 404 for a missing route doesn't parse as one
+    let body = serde_json::from_str::<ErrorResponse>(&error.body).ok();
     match (error.status, body) {
         (200..=299, _) => MgmtApiError::InvalidResponse(
             error
@@ -239,10 +238,10 @@ fn map_error<E: std::fmt::Debug>(error: ApiOpError<E>) -> MgmtApiError {
                 .unwrap_or_else(|| "unexpected response".to_owned()),
         ),
         (401, _) => MgmtApiError::Unauthorized,
-        (403, Some(ErrorBody { code, message })) => MgmtApiError::Forbidden { code, message },
-        (404, Some(ErrorBody { code, message })) => MgmtApiError::Missing { code, message },
+        (403, Some(ErrorResponse { code, message })) => MgmtApiError::Forbidden { code, message },
+        (404, Some(ErrorResponse { code, message })) => MgmtApiError::Missing { code, message },
         (404, None) => MgmtApiError::NoRoute,
-        (status, Some(ErrorBody { message, .. })) => MgmtApiError::Backend { status, message },
+        (status, Some(ErrorResponse { message, .. })) => MgmtApiError::Backend { status, message },
         (status, None) => MgmtApiError::Backend {
             status,
             message: error.body,
@@ -282,7 +281,8 @@ impl MgmtApiConnection {
         Ok(Authed { value, refreshed })
     }
 
-    /// Open a session (a normal one: agents run on shared computers, so no "keep me logged in")
+    /// Open a session (a normal one: agents run on shared computers, so no "keep me logged in").
+    /// `persistent` is sent explicitly rather than left to the server's default.
     pub async fn login(
         &self,
         username: &str,
@@ -292,7 +292,7 @@ impl MgmtApiConnection {
         let request = LoginRequest {
             username: username.to_owned(),
             password: password.to_owned(),
-            persistent: None,
+            persistent: Some(false),
         };
         let info = self
             .finish(
@@ -408,7 +408,13 @@ mod tests {
     use mockito::{Matcher, Server, ServerGuard};
     use url::Url;
 
-    use super::{MgmtApi, MgmtApiError, UpstreamSession};
+    use super::{API_VERSION, MgmtApi, MgmtApiError, UpstreamSession};
+
+    #[test]
+    fn the_api_version_is_a_bare_integer() {
+        // the contract: `X-Modama-API-Version` is a bare integer, and `/versions` lists integers
+        assert!(API_VERSION.parse::<i64>().is_ok(), "{API_VERSION}");
+    }
 
     const VERSIONS: &str = r#"{"supported": [1], "latest": 1, "deprecated": []}"#;
     const SESSION: &str = "modama_session=abc";
@@ -527,10 +533,11 @@ mod tests {
         let login = server
             .mock("POST", "/mgmt-api/auth/login")
             .match_header("x-modama-api-version", "1")
-            // no "persistent": agents run on shared computers
+            // never persistent: agents run on shared computers
             .match_body(Matcher::Json(serde_json::json!({
                 "username": "alice",
                 "password": "secret",
+                "persistent": false,
             })))
             .with_header(
                 "set-cookie",
