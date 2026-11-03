@@ -1,0 +1,22 @@
+name: er-c-data
+# Test deployment inside WSL2 (NAT networking), with modama-agent and
+# modama-agent-gui running on the Windows host. Use on top of
+# docker-compose.override.yml, see upwsl.sh.
+#
+# Ports the agent needs are published on all WSL addresses instead of only
+# 127.0.0.1. With NAT networking these are only reachable from the Windows
+# host, not from the rest of the network.
+#
+# SMB has to be on port 445: Windows can't mount SMB from other ports, and
+# the Windows SMB server already holds 445 on the host's own addresses.
+services:
+  smbdrop:
+    ports: !override
+      - "445:445"               # smb
+      - "127.0.0.1:1446:445"    # smb, as in docker-compose.override.yml
+      - "127.0.0.1:5051:5051"   # unauthenticated smbdrop API (http)
+      - "5052:5052"             # events API (wss)
+      - "5053:5053"             # token API (https)
+  mgmtinterface-proxy:
+    ports: !override
+      - "5001:80"               # management API for the agent
