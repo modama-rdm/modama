@@ -145,9 +145,14 @@ impl PageOverview {
         _frame: &mut eframe::Frame,
         app_state: &AgentAppState,
     ) -> Action {
-        let pending_start = app_state.pending_start();
         page_heading(ui, "Overview");
-        ui.add_space(styles::content_card_top_margin_adjustment());
+        // the scroll area clips at its edges: inside it, the first card's border and the last
+        // card's shadow need room; the top room comes out of the gap above, so the cards stay
+        // where they were before they scrolled
+        let top_room = styles::components::standard_border::width::EGUI_POINTS;
+        let bottom_room = styles::components::card_shadow_offset_y::size::EGUI_POINTS
+            + styles::components::card_shadow_blur::size::EGUI_POINTS;
+        ui.add_space((styles::content_card_top_margin_adjustment() - top_room).max(0.0));
 
         // the user asked to close their previous share once the new one has started
         if let Some((signed_in, previous)) = self.close_previous.take() {
@@ -155,6 +160,35 @@ impl PageOverview {
             return self.start_close(signed_in, previous, ui.ctx().clone());
         }
 
+        // the cards scroll below the fixed heading: with several shares they are taller than
+        // the window
+        let action = styles::scrollbar_scope(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("overview-cards")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add_space(top_room);
+                    let action = self.show_cards(ui, app_state);
+                    ui.add_space(bottom_room);
+                    action
+                })
+                .inner
+        })
+        .inner;
+        if action != Action::None {
+            return action;
+        }
+
+        if self.start_dialog_open {
+            return self.show_start_dialog(ui, app_state);
+        }
+
+        Action::None
+    }
+
+    /// The session card (or the one being prepared), the other mounts and the create card
+    fn show_cards(&mut self, ui: &mut egui::Ui, app_state: &AgentAppState) -> Action {
+        let pending_start = app_state.pending_start();
         if let Some(session) = pending_start {
             self.drop_foreground_close_confirmation();
             // a share being started has no creator on record yet; it's the user
@@ -179,10 +213,6 @@ impl PageOverview {
             if self.show_create_card(ui) {
                 return self.start_clicked(app_state);
             }
-        }
-
-        if self.start_dialog_open {
-            return self.show_start_dialog(ui, app_state);
         }
 
         Action::None

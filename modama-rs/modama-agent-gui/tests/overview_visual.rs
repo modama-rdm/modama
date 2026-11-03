@@ -663,6 +663,22 @@ fn other_mounts_snapshots() {
     confirm.snapshot("overview_other_mount_close_confirmation");
     results.extend_harness(&mut confirm);
 
+    // the cards are taller than the window: they scroll below the heading
+    let mut scrolled = overview_harness(false, true);
+    with_other_mounts(&mut scrolled);
+    scrolled.event(egui::Event::PointerMoved(egui::pos2(500.0, 400.0)));
+    scrolled.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -2000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::default(),
+    });
+    // scrolling is animated
+    scrolled.run_steps(30);
+    assert!(scrolled.query_by_label("Start Session").is_some());
+    scrolled.snapshot("overview_other_mounts_scrolled");
+    results.extend_harness(&mut scrolled);
+
     let mut closing = overview_harness(false, true);
     with_other_mounts(&mut closing);
     closing
