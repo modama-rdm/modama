@@ -1,6 +1,7 @@
 agent_gui_package := "modama-agent-gui"
 snapshot_dir := "modama-agent-gui/tests/snapshots"
 guide_image_dir := "../docs/guide/src/user/images/agent"
+review_dir := snapshot_dir + "/review"
 design_spec := "../mgmtinterface-new/DESIGN.md"
 win7_toolchain := "nightly-2025-12-11"
 xwin_cache := justfile_directory() + "/.xwin-cache"
@@ -64,8 +65,33 @@ update-openapi:
 # (fixed in vulkan sdk v1.4.345; should be in Debian forky)
 # 1338b8ee2ad29446297e7368370eecabd4890bec
 # Run egui_kittest visual regression tests.
+# Differences end up in {{ review_dir }} (see review-snapshots).
 visual-tests:
+    #!/usr/bin/env bash
+    set -uo pipefail
     WGPU_DEBUG=0 cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast
+    status=$?
+    just review-snapshots
+    exit $status
+
+# Gather each differing snapshot (A.png, A.new.png, A.diff.png, A.old.png) into {{ review_dir }}.
+review-snapshots:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf -- "{{ review_dir }}"
+    shopt -s nullglob
+    found=0
+    for new in {{ snapshot_dir }}/*.new.png {{ guide_image_dir }}/*.new.png; do
+        mkdir -p "{{ review_dir }}"
+        base="${new%.new.png}"
+        for file in "$base.png" "$base.new.png" "$base.diff.png" "$base.old.png"; do
+            if [ -e "$file" ]; then cp -- "$file" "{{ review_dir }}/"; fi
+        done
+        found=$((found + 1))
+    done
+    if [ "$found" -gt 0 ]; then
+        echo "$found differing snapshot(s) gathered in {{ review_dir }}"
+    fi
 
 # Regenerate and compress the screenshots embedded in the user guide.
 guide-screenshots:
@@ -88,6 +114,7 @@ update-snapshots:
 # Remove generated visual-test review artifacts.
 clean:
     find {{ snapshot_dir }} {{ guide_image_dir }} -maxdepth 1 -type f \( -name '*.new.png' -o -name '*.diff.png' -o -name '*.old.png' \) -delete
+    rm -rf -- {{ review_dir }}
 
 # Install the pinned nightly and components required by the Tier 3 target.
 win7-install-toolchain:

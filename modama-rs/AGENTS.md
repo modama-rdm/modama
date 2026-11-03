@@ -24,6 +24,9 @@ Do **not** speculatively run with `--test-threads=1`.
 
 If at the end of a turn visual differences remain, do not clean them away,
 rather keep them around for inspection and eventual acceptance.
+`just visual-tests` gathers them (`A.png`, `A.new.png`, `A.diff.png`) in
+`modama-agent-gui/tests/snapshots/review/`; point the user there
+(`just review-snapshots` regathers them).
 
 In general, updating GUI snapshots should only be done after manual
 inspection of the differences.

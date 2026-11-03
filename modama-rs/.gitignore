@@ -9,3 +9,4 @@ test-env/report-target
 test-env/certs
 test-env/cargo-cache/
 .xwin-cache/
+modama-agent-gui/tests/snapshots/review/
