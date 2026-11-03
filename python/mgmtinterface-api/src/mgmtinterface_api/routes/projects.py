@@ -56,7 +56,7 @@ class Project(BaseModel):
         default=None,
         description=(
             "The text of the project folder's `README.md`, or null when there "
-            "is none (#112)."
+            "is none."
         ),
     )
 

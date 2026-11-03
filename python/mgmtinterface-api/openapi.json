@@ -2509,7 +2509,7 @@
               }
             ],
             "title": "Description",
-            "description": "The text of the project folder's `README.md`, or null when there is none (#112)."
+            "description": "The text of the project folder's `README.md`, or null when there is none."
           }
         },
         "type": "object",
@@ -2580,7 +2580,7 @@
               }
             ],
             "title": "Description",
-            "description": "The text of the project folder's `README.md`, or null when there is none (#112)."
+            "description": "The text of the project folder's `README.md`, or null when there is none."
           },
           "sessions": {
             "items": {
