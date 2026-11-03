@@ -13,10 +13,7 @@ RUN sed -i \
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
-    apt-get -y update && apt-get -y upgrade
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    apt-get -y update && apt-get -y upgrade && \
     apt-get ${aptopts} install iputils-ping procps cron sudo python3
 
 # PHP: rebuild the interpreter with the PHP security team's minimal backport for
