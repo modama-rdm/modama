@@ -13,6 +13,7 @@ use log::error;
 use minijinja::{AutoEscape, Environment, Value, context};
 use modama_common::{
     foreground::project_and_session,
+    internal_api_types::{ConnectedAgent, ConnectedAgents},
     local_api_messages::APICurrentForegroundShare,
     messages::{AgentMountStatus, Share},
     tokens::{TokenError, TokenProvider},
@@ -69,11 +70,40 @@ fn create_env() -> Environment<'static> {
     env
 }
 
+/// The agents connected at the resource of our token, for the HTML pages
+#[derive(Serialize)]
+struct ConnectedAgentsView {
+    resource: String,
+    own: ConnectedAgentView,
+    others: Vec<ConnectedAgentView>,
+}
+
+impl From<ConnectedAgents> for ConnectedAgentsView {
+    fn from(agents: ConnectedAgents) -> Self {
+        Self {
+            resource: agents.resource,
+            own: agents.own.into(),
+            others: agents.others.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 /// A connected agent at our resource, with the mount status it reported
 #[derive(Serialize)]
 struct ConnectedAgentView {
     name: String,
+    verified: bool,
     status: &'static str,
+}
+
+impl From<ConnectedAgent> for ConnectedAgentView {
+    fn from(agent: ConnectedAgent) -> Self {
+        Self {
+            name: agent.name,
+            verified: agent.verified,
+            status: mount_status_label(agent.status),
+        }
+    }
 }
 
 /// How the HTML pages show a mount status; `?` if the agent didn't report one
@@ -326,36 +356,17 @@ fn validate_session_name(input: &str) -> Result<String, &'static str> {
     }
 }
 
-async fn local_snapshot(agent_state: &ApiState) -> (String, Vec<ConnectedAgentView>) {
+/// This agent's identity, and the agents connected at the resource of its token
+async fn local_snapshot(agent_state: &ApiState) -> (String, Option<ConnectedAgentsView>) {
     let state = agent_state.state.lock().await;
-    let (identity, resource_name) = match &state.config.identity {
-        MTLSIdentity::Anonymous { hostname } => {
-            (format!("Anonymous running on {hostname}"), hostname.clone())
-        }
+    let identity = match &state.config.identity {
+        MTLSIdentity::Anonymous { hostname } => format!("Anonymous running on {hostname}"),
         MTLSIdentity::AgentId {
             agent_name,
             resource_name,
-        } => (
-            format!("{agent_name} at {resource_name}"),
-            resource_name.clone(),
-        ),
+        } => format!("{agent_name} at {resource_name}"),
     };
-    let agents = state
-        .remote_info
-        .as_ref()
-        .map(|remote| {
-            remote
-                .connected_agents
-                .iter()
-                .filter(|agent| agent.resource == resource_name)
-                .map(|agent| ConnectedAgentView {
-                    name: agent.san_encoded.clone(),
-                    status: mount_status_label(remote.mount_status_of(agent)),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    (identity, agents)
+    (identity, state.connected_agents_here().map(Into::into))
 }
 
 /// The desired foreground share; mounted or not, this is what the user can close, and what
@@ -723,6 +734,8 @@ async fn start_ingest_step2(
     }
 
     let (res_name, instrument) = match &agent_state.state.lock().await.config.identity {
+        // TODO: name the resource an anonymous agent inherits from its token
+        // (`AgentState::token_identity`), like the connected agents on the index page
         MTLSIdentity::Anonymous { hostname } => (hostname.clone(), "this instrument".to_owned()),
         MTLSIdentity::AgentId {
             agent_name: _,
@@ -1126,6 +1139,11 @@ mod tests {
             };
             let shared_state = crate::agent_state::AgentState::new(&cfg).await;
             shared_state.lock().await.remote_info = Some(RemoteInfo::default());
+            shared_state.lock().await.token_identity = Some(modama_common::agent::AgentId {
+                resource: "res".to_string(),
+                agent: "agent-name".to_string(),
+                san_encoded: "x-modama-agent://res#agent-name".to_string(),
+            });
 
             {
                 let mut state = shared_state.lock().await;
@@ -1581,12 +1599,18 @@ mod tests {
         );
 
         let body_str = body_text(resp).await;
+        assert!(body_str.contains("<h2>Connected agents at res</h2>"));
         assert!(
             body_str
-                .contains("x-modama-agent:&#x2f;&#x2f;res#agent: reconciled, with work left over")
+                .contains("<li>agent-name (this agent, identity verified): no session helper</li>")
         );
-        assert!(body_str.contains("x-modama-agent:&#x2f;&#x2f;res#old-agent: ?"));
-        assert!(body_str.contains("agent-name"));
+        // one agent reported its status, the other one didn't
+        assert!(
+            body_str
+                .contains("<li>agent (identity verified): reconciled, with work left over</li>")
+        );
+        assert!(body_str.contains("<li>old-agent (identity verified): ?</li>"));
+        assert!(!body_str.contains("No other agents are connected."));
         assert!(body_str.contains("Signed in as testuser."));
         assert!(body_str.contains("<form action=\"/logout/\" method=\"post\">"));
         assert!(body_str.contains("the-project"));
@@ -1600,6 +1624,68 @@ mod tests {
         assert!(body_str.contains("background-color: #ffffff;"));
         assert!(body_str.contains("color: #0f172a;"));
         assert!(body_str.contains("max-width: 50em;"));
+    }
+
+    /// The index page as `testuser`, with no projects
+    async fn index_page(test_setup: TestSetup) -> String {
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("GET", "/mgmt-api/projects")
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::json!({"projects": []}).to_string())
+            .create_async()
+            .await;
+        let resp = test_setup
+            .app
+            .oneshot(page_request("GET", "/", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        body_text(resp).await
+    }
+
+    #[tokio::test]
+    async fn index_page_says_when_no_other_agents_are_connected() {
+        let test_setup = TestSetup::start().await;
+        test_setup
+            .shared_state
+            .lock()
+            .await
+            .remote_info
+            .as_mut()
+            .unwrap()
+            .connected_agents
+            .clear();
+        let body_str = index_page(test_setup).await;
+        assert!(
+            body_str
+                .contains("<li>agent-name (this agent, identity verified): no session helper</li>")
+        );
+        assert!(body_str.contains("No other agents are connected."));
+    }
+
+    #[tokio::test]
+    async fn index_page_says_when_the_connected_agents_are_unknown() {
+        let test_setup = TestSetup::start().await;
+        test_setup.shared_state.lock().await.token_identity = None;
+        let body_str = index_page(test_setup).await;
+        assert!(body_str.contains("<h2>Connected agents</h2>"));
+        assert!(body_str.contains("Not connected to the server yet."));
+    }
+
+    #[tokio::test]
+    async fn an_anonymous_agent_lists_the_agents_at_the_resource_of_its_token() {
+        let test_setup = TestSetup::start().await;
+        test_setup.shared_state.lock().await.config.identity = MTLSIdentity::Anonymous {
+            hostname: "workstation".to_owned(),
+        };
+        let body_str = index_page(test_setup).await;
+        assert!(body_str.contains("<h2>Connected agents at res</h2>"));
+        assert!(body_str.contains("<li>workstation (this agent): no session helper</li>"));
+        assert!(
+            body_str
+                .contains("<li>agent (identity verified): reconciled, with work left over</li>")
+        );
     }
 
     #[test]

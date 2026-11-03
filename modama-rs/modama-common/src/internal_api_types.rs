@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::messages::AgentMountStatus;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionHelperConfig {
     pub smb_hostname: String,
@@ -45,6 +47,30 @@ pub enum ToAgentFromGui {
     /// Force the release of mounts that are no longer desired (another user's drive that blocks
     /// the hand-off), in the GUI's own scope
     ForceRelease,
+}
+
+/// The agents connected to smbdrop at this agent's resource
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConnectedAgents {
+    /// The resource of the token this agent connected with: its own, or for an anonymous agent,
+    /// that of the agent it borrowed its token from
+    pub resource: String,
+    /// This agent; listed even before smbdrop reports it
+    pub own: ConnectedAgent,
+    /// The other agents connected at `resource`, sorted by name
+    pub others: Vec<ConnectedAgent>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConnectedAgent {
+    /// The agent name; the hostname for an anonymous agent
+    pub name: String,
+    /// The identity is verified by a client certificate. smbdrop only knows certified agents
+    /// so far; anonymous ones connect with the identity they borrowed a token from.
+    pub verified: bool,
+    /// The mount status it reported; None if it didn't (yet), or reports none at all
+    #[serde(default)]
+    pub status: Option<AgentMountStatus>,
 }
 
 /// Desired state and the session helper's report, for the GUI's own scope. The agent determines

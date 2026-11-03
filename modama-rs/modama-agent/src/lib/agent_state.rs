@@ -7,13 +7,17 @@ use modama_common::{
         OtherMount, ShareDestinationError, agent_mount_status, foreground_projection,
         other_mounted_shares,
     },
-    internal_api_types::{SessionHelperState, Shares},
+    internal_api_types::{ConnectedAgent, ConnectedAgents, SessionHelperState, Shares},
     local_api_messages::APICurrentForegroundShare,
     messages::{AgentMountStatus, AgentMountStatusEntry, Share},
 };
 use tokio::sync::{Mutex, Notify, broadcast, mpsc};
 
-use crate::{caller_scope::HelperScope, config::AgentConfig, events_api::SessionBeginEnd};
+use crate::{
+    caller_scope::HelperScope,
+    config::{AgentConfig, MTLSIdentity},
+    events_api::SessionBeginEnd,
+};
 
 #[derive(Debug, Default)]
 pub enum ConnectionState {
@@ -165,6 +169,10 @@ pub struct AgentState {
     /// Info we received over the event channel; None if we haven't received any yet
     pub remote_info: Option<RemoteInfo>,
 
+    /// The identity of the token of the current event channel connection: our own, or for an
+    /// anonymous agent, that of the agent it borrowed the token from. None while not connected.
+    pub token_identity: Option<AgentId>,
+
     /// Runtime configuration
     pub config: AgentConfig,
 
@@ -262,6 +270,17 @@ impl AgentState {
         other_mounted_shares(&remote.shares(), helper)
     }
 
+    /// The agents connected at the resource of our token; None until we are connected and
+    /// smbdrop has told us
+    pub fn connected_agents_here(&self) -> Option<ConnectedAgents> {
+        connected_agents_at(
+            &self.config.identity,
+            self.token_identity.as_ref(),
+            self.remote_info.as_ref(),
+            self.mount_status(),
+        )
+    }
+
     pub async fn new(config: &AgentConfig) -> Arc<Mutex<Self>> {
         let config = config.clone();
         let (tx, _rx) = broadcast::channel(16);
@@ -271,6 +290,7 @@ impl AgentState {
         let state = Arc::new(Mutex::new(Self {
             connection: Default::default(),
             remote_info: None,
+            token_identity: None,
             config,
             desired_state_channel: tx,
             session_helpers: Default::default(),
@@ -283,5 +303,155 @@ impl AgentState {
         let _join_handle = tokio::spawn(session_bookkeeper(Arc::clone(&state), sess_rx));
 
         state
+    }
+}
+
+/// The agents in `remote` at the resource of `token_identity`, with this agent (`identity`, with
+/// `own_status`) on its own
+fn connected_agents_at(
+    identity: &MTLSIdentity,
+    token_identity: Option<&AgentId>,
+    remote: Option<&RemoteInfo>,
+    own_status: Option<AgentMountStatus>,
+) -> Option<ConnectedAgents> {
+    let resource = &token_identity?.resource;
+    let remote = remote?;
+    let own = match identity {
+        MTLSIdentity::AgentId { agent_name, .. } => ConnectedAgent {
+            name: agent_name.clone(),
+            verified: true,
+            status: own_status,
+        },
+        MTLSIdentity::Anonymous { hostname } => ConnectedAgent {
+            name: hostname.clone(),
+            verified: false,
+            status: own_status,
+        },
+    };
+    let mut others: Vec<ConnectedAgent> = remote
+        .connected_agents
+        .iter()
+        .filter(|agent| &agent.resource == resource)
+        // a certified agent is in the list itself; an anonymous one isn't, it connects with the
+        // identity it borrowed its token from
+        .filter(|agent| !(own.verified && agent.agent == own.name))
+        .map(|agent| ConnectedAgent {
+            name: agent.agent.clone(),
+            verified: true,
+            status: remote.mount_status_of(agent),
+        })
+        .collect();
+    others.sort_by(|a, b| a.name.cmp(&b.name));
+    others.dedup();
+    Some(ConnectedAgents {
+        resource: resource.clone(),
+        own,
+        others,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent(resource: &str, name: &str) -> AgentId {
+        AgentId {
+            resource: resource.to_owned(),
+            agent: name.to_owned(),
+            san_encoded: format!("x-modama-agent://{resource}#{name}"),
+        }
+    }
+
+    fn verified(name: &str) -> ConnectedAgent {
+        ConnectedAgent {
+            name: name.to_owned(),
+            verified: true,
+            status: None,
+        }
+    }
+
+    fn remote(connected: &[AgentId]) -> RemoteInfo {
+        RemoteInfo {
+            connected_agents: connected.to_vec(),
+            ..RemoteInfo::default()
+        }
+    }
+
+    fn certified() -> MTLSIdentity {
+        MTLSIdentity::AgentId {
+            agent_name: "k2".to_owned(),
+            resource_name: "Holo".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_certified_agent_lists_the_others_at_its_resource() {
+        let connected = [
+            agent("Holo", "tem-camera"),
+            agent("Other", "elsewhere"),
+            agent("Holo", "k2"),
+            agent("Holo", "detector"),
+        ];
+        let agents = connected_agents_at(
+            &certified(),
+            Some(&agent("Holo", "k2")),
+            Some(&remote(&connected)),
+            None,
+        )
+        .unwrap();
+        assert_eq!(agents.resource, "Holo");
+        assert_eq!(agents.own, verified("k2"));
+        assert_eq!(
+            agents.others,
+            vec![verified("detector"), verified("tem-camera")]
+        );
+    }
+
+    #[test]
+    fn a_certified_agent_alone_has_no_others() {
+        let connected = [agent("Holo", "k2")];
+        let agents = connected_agents_at(
+            &certified(),
+            Some(&agent("Holo", "k2")),
+            Some(&remote(&connected)),
+            None,
+        )
+        .unwrap();
+        assert!(agents.others.is_empty());
+    }
+
+    #[test]
+    fn an_anonymous_agent_inherits_the_resource_of_its_token() {
+        let anonymous = MTLSIdentity::Anonymous {
+            hostname: "workstation".to_owned(),
+        };
+        let connected = [agent("Holo", "k2"), agent("Other", "elsewhere")];
+        let agents = connected_agents_at(
+            &anonymous,
+            Some(&agent("Holo", "k2")),
+            Some(&remote(&connected)),
+            None,
+        )
+        .unwrap();
+        assert_eq!(agents.resource, "Holo");
+        assert_eq!(
+            agents.own,
+            ConnectedAgent {
+                name: "workstation".to_owned(),
+                verified: false,
+                status: None,
+            }
+        );
+        // the agent it borrowed the token from is one of the others
+        assert_eq!(agents.others, vec![verified("k2")]);
+    }
+
+    #[test]
+    fn unknown_until_connected_and_told() {
+        let connected = [agent("Holo", "k2")];
+        assert!(connected_agents_at(&certified(), None, Some(&remote(&connected)), None).is_none());
+        assert!(
+            connected_agents_at(&certified(), Some(&agent("Holo", "k2")), None, None).is_none()
+        );
     }
 }

@@ -4,6 +4,7 @@ use anyhow::{Context, Result as AnyResult};
 use futures_util::{Sink, SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
+    agent::AgentId,
     messages::{
         AgentMountStatus, EVENT_CHANNEL_PROTOCOL, EventChannelInitialMessages, EventChannelMessage,
         EventChannelRequests, Share,
@@ -159,7 +160,11 @@ pub async fn message_loop(
     };
 
     loop {
-        state.lock().await.connection = ConnectionState::Connecting;
+        {
+            let mut state = state.lock().await;
+            state.connection = ConnectionState::Connecting;
+            state.token_identity = None;
+        }
         let (conn, _response) = match connect_async_tls_with_config(
             &config.events_api_url.to_string(),
             None,
@@ -191,6 +196,11 @@ pub async fn message_loop(
                 continue;
             }
         };
+        let token_identity = AgentId {
+            resource: token.resource,
+            agent: token.agent_name,
+            san_encoded: token.agent_uri,
+        };
         let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login {
             token: token.token,
             version: modama_git_version().to_owned(),
@@ -216,7 +226,11 @@ pub async fn message_loop(
             continue;
         }
 
-        state.lock().await.connection = ConnectionState::Connected;
+        {
+            let mut state = state.lock().await;
+            state.connection = ConnectionState::Connected;
+            state.token_identity = Some(token_identity);
+        }
         let mut reporter = StatusReporter::default();
         loop {
             tokio::select! {

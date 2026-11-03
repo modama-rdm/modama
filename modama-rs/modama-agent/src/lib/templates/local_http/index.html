@@ -6,8 +6,12 @@
 </form>
 <p>This agent: {{ identity }}</p>
 {% if connected_agents %}
-<h2>Connected agents at this resource</h2>
-<ul>{% for agent in connected_agents %}<li>{{ agent.name }}: {{ agent.status }}</li>{% endfor %}</ul>
+<h2>Connected agents at {{ connected_agents.resource }}</h2>
+<ul><li>{{ connected_agents.own.name }} (this agent{% if connected_agents.own.verified %}, identity verified{% endif %}): {{ connected_agents.own.status }}</li>{% for agent in connected_agents.others %}<li>{{ agent.name }}{% if agent.verified %} (identity verified){% endif %}: {{ agent.status }}</li>{% endfor %}</ul>
+{% if not connected_agents.others %}<p>No other agents are connected.</p>{% endif %}
+{% else %}
+<h2>Connected agents</h2>
+<p>Not connected to the server yet.</p>
 {% endif %}
 <h2>Foreground ingest</h2>
 {% if foreground.kind == "none" %}
