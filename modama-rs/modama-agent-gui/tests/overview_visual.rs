@@ -93,6 +93,24 @@ fn overview_snapshots() {
     logged_in_dark.snapshot("overview_logged_in_dark");
     results.extend_harness(&mut logged_in_dark);
 
+    // long mount paths wrap, preferably after a slash
+    let mut long_path = overview_harness(false, true);
+    if let ForegroundSession::Mounted(session) = &mut long_path.state_mut().app_state.foreground {
+        session.mount_path = Some(
+            "/run/user/1000/gvfs/smb-share:server=modama-storage.example.org,share=representative-project-2026-07-29-ingest/incoming/detector-frames".to_owned(),
+        );
+    }
+    long_path.run_steps(1);
+    long_path.snapshot("overview_long_mount_path");
+    results.extend_harness(&mut long_path);
+
+    // too narrow for the session and the start action side by side: one above the other
+    let mut narrow = overview_harness(false, true);
+    narrow.set_size(egui::vec2(520.0, VIEWPORT.y));
+    narrow.run_steps(3);
+    narrow.snapshot("overview_narrow");
+    results.extend_harness(&mut narrow);
+
     let mut logged_out = overview_harness(false, false);
     logged_out.snapshot("overview_logged_out");
     results.extend_harness(&mut logged_out);
@@ -665,7 +683,12 @@ fn other_mounts_snapshots() {
 
     // the cards are taller than the window: they scroll below the heading
     let mut scrolled = overview_harness(false, true);
-    with_other_mounts(&mut scrolled);
+    scrolled.state_mut().app_state.observe_other_mounts(
+        (21..=28)
+            .map(|day| other_mount(&format!("share-{day}"), &format!("2026-07-{day}-ingest")))
+            .collect(),
+    );
+    scrolled.run_steps(1);
     scrolled.event(egui::Event::PointerMoved(egui::pos2(500.0, 400.0)));
     scrolled.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
@@ -675,7 +698,11 @@ fn other_mounts_snapshots() {
     });
     // scrolling is animated
     scrolled.run_steps(30);
-    assert!(scrolled.query_by_label("Start Session").is_some());
+    assert!(
+        scrolled
+            .query_by_label("representative-project / 2026-07-28-ingest · representative.user")
+            .is_some()
+    );
     scrolled.snapshot("overview_other_mounts_scrolled");
     results.extend_harness(&mut scrolled);
 

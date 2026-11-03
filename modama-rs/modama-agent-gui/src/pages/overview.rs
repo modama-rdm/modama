@@ -146,12 +146,9 @@ impl PageOverview {
         app_state: &AgentAppState,
     ) -> Action {
         page_heading(ui, "Overview");
-        // the scroll area clips at its edges: inside it, the first card's border and the last
-        // card's shadow need room; the top room comes out of the gap above, so the cards stay
-        // where they were before they scrolled
+        // the scroll area clips at its edges: inside it, the first card's border needs room;
+        // that room comes out of the gap above, so the cards stay where they were before
         let top_room = styles::components::standard_border::width::EGUI_POINTS;
-        let bottom_room = styles::components::card_shadow_offset_y::size::EGUI_POINTS
-            + styles::components::card_shadow_blur::size::EGUI_POINTS;
         ui.add_space((styles::content_card_top_margin_adjustment() - top_room).max(0.0));
 
         // the user asked to close their previous share once the new one has started
@@ -161,20 +158,33 @@ impl PageOverview {
         }
 
         // the cards scroll below the fixed heading: with several shares they are taller than
-        // the window
-        let action = styles::scrollbar_scope(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("overview-cards")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.add_space(top_room);
-                    let action = self.show_cards(ui, app_state);
-                    ui.add_space(bottom_room);
-                    action
+        // the window. The scroll area runs over the shell's right and bottom margins up to the
+        // window's edges, so its bar sits next to the cards and nothing is cut off above the
+        // window's bottom edge; the margins come back as space around the cards
+        let content_width = ui.available_width();
+        let mut scroll_rect = ui.available_rect_before_wrap();
+        // the item spacing before it is part of the margin too
+        let bottom_room =
+            (ui.clip_rect().max.y - scroll_rect.max.y - ui.spacing().item_spacing.y).max(0.0);
+        scroll_rect.max = ui.clip_rect().max;
+        let action = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(scroll_rect), |ui| {
+                styles::scrollbar_scope(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("overview-cards")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_max_width(content_width);
+                            ui.add_space(top_room);
+                            let action = self.show_cards(ui, app_state);
+                            ui.add_space(bottom_room);
+                            action
+                        })
+                        .inner
                 })
                 .inner
-        })
-        .inner;
+            })
+            .inner;
         if action != Action::None {
             return action;
         }
@@ -186,49 +196,52 @@ impl PageOverview {
         Action::None
     }
 
-    /// The session card (or the one being prepared), the other mounts and the create card
+    /// The session card, with the start action next to the session, and the other mounts
     fn show_cards(&mut self, ui: &mut egui::Ui, app_state: &AgentAppState) -> Action {
         let pending_start = app_state.pending_start();
-        if let Some(session) = pending_start {
-            self.drop_foreground_close_confirmation();
-            // a share being started has no creator on record yet; it's the user
-            let started_by = session.created_by.as_deref().or(app_state
-                .signed_in
-                .as_ref()
-                .map(|signed_in| signed_in.username.as_str()));
-            self.show_mounting_session_card(ui, session, started_by, "Waiting for agent…", false);
-            let action = self.show_other_mounts(ui, app_state);
-            if action != Action::None {
-                return action;
+        let mut action = Action::None;
+        let mut start_clicked = false;
+        styles::content_card_frame(ui.visuals()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if let Some(session) = pending_start {
+                self.drop_foreground_close_confirmation();
+                // a share being started has no creator on record yet; it's the user
+                let started_by = session.created_by.as_deref().or(app_state
+                    .signed_in
+                    .as_ref()
+                    .map(|signed_in| signed_in.username.as_str()));
+                self.show_mounting_session(ui, session, started_by, "Waiting for agent…", false);
+            } else if matches!(app_state.foreground, ForegroundSession::None) {
+                self.drop_foreground_close_confirmation();
+                start_clicked = self.show_create_section(ui);
+            } else {
+                let mut columns = Columns::new(ui);
+                action = self.show_foreground_section(columns.first(), app_state);
+                start_clicked = self.show_create_section(columns.second(ui));
+                columns.finish(ui);
             }
-        } else {
-            let action = self.show_foreground_card(ui, app_state);
-            if action != Action::None {
-                return action;
-            }
-            let action = self.show_other_mounts(ui, app_state);
-            if action != Action::None {
-                return action;
-            }
-            if self.show_create_card(ui) {
-                return self.start_clicked(app_state);
-            }
+        });
+        if action != Action::None {
+            return action;
         }
-
+        let action = self.show_other_mounts(ui, app_state);
+        if action != Action::None {
+            return action;
+        }
+        if start_clicked {
+            return self.start_clicked(app_state);
+        }
         Action::None
     }
 
-    /// The card of the foreground share, if there is one
-    fn show_foreground_card(&mut self, ui: &mut egui::Ui, app_state: &AgentAppState) -> Action {
+    /// The foreground share's half of the session card
+    fn show_foreground_section(&mut self, ui: &mut egui::Ui, app_state: &AgentAppState) -> Action {
         let pending_close = app_state.pending_close();
         let signed_in = &app_state.signed_in;
         match &app_state.foreground {
             ForegroundSession::Mounted(session) => {
-                let close_clicked = self.show_active_session_card(
-                    ui,
-                    session,
-                    pending_close == Some(&session.share_id),
-                );
+                let close_clicked =
+                    self.show_active_session(ui, session, pending_close == Some(&session.share_id));
                 if close_clicked {
                     if signed_in.is_some() {
                         self.open_close_confirmation();
@@ -259,7 +272,7 @@ impl PageOverview {
             ForegroundSession::Mounting(session, message) => {
                 self.drop_foreground_close_confirmation();
                 let started_by = session.created_by.as_deref();
-                if self.show_mounting_session_card(
+                if self.show_mounting_session(
                     ui,
                     session,
                     started_by,
@@ -269,9 +282,7 @@ impl PageOverview {
                     return Action::ForceRelease;
                 }
             }
-            ForegroundSession::None => {
-                self.drop_foreground_close_confirmation();
-            }
+            ForegroundSession::None => {}
         }
         Action::None
     }
@@ -417,29 +428,24 @@ impl PageOverview {
         }
     }
 
-    fn show_create_card(&mut self, ui: &mut egui::Ui) -> bool {
-        styles::content_card_frame(ui.visuals())
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                card_heading(ui, "Start an ingest session");
-                card_description(
-                    ui,
-                    "Choose a project and session to open an ingest share for incoming data on \
-                     this agent.",
-                );
-                ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-                let response = ui.add(primary_button("Start Session", ui));
-                if self.focus_on_entry && response.enabled() {
-                    response.request_focus();
-                    self.focus_on_entry = false;
-                }
-                response.clicked()
-            })
-            .inner
+    fn show_create_section(&mut self, ui: &mut egui::Ui) -> bool {
+        card_heading(ui, "Start an ingest session");
+        card_description(
+            ui,
+            "Choose a project and session to open an ingest share for incoming data on this \
+             agent.",
+        );
+        ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+        let response = ui.add(primary_button("Start Session", ui));
+        if self.focus_on_entry && response.enabled() {
+            response.request_focus();
+            self.focus_on_entry = false;
+        }
+        response.clicked()
     }
 
     /// True if the user asked to release the previous user's drive (offered if `blocked`)
-    fn show_mounting_session_card(
+    fn show_mounting_session(
         &mut self,
         ui: &mut egui::Ui,
         session: &PendingSession,
@@ -447,88 +453,77 @@ impl PageOverview {
         status: &str,
         blocked: bool,
     ) -> bool {
-        styles::content_card_frame(ui.visuals())
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                card_heading(ui, "Preparing ingest session");
-                session_detail(ui, "Project", &session.project);
-                session_detail(ui, "Session", &session.session);
-                if let Some(started_by) = started_by {
-                    session_detail(ui, "Started by", started_by);
-                }
-                ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    card_description(ui, status);
-                });
-                if blocked {
-                    ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-                    ui.add(danger_outline_button(
-                        "Disconnect previous user's drive",
-                        ui,
-                    ))
-                    .clicked()
-                } else {
-                    false
-                }
-            })
-            .inner
+        card_heading(ui, "Preparing ingest session");
+        session_detail(ui, "Project", &session.project);
+        session_detail(ui, "Session", &session.session);
+        if let Some(started_by) = started_by {
+            session_detail(ui, "Started by", started_by);
+        }
+        ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+        ui.horizontal(|ui| {
+            ui.spinner();
+            card_description(ui, status);
+        });
+        if blocked {
+            ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+            ui.add(danger_outline_button(
+                "Disconnect previous user's drive",
+                ui,
+            ))
+            .clicked()
+        } else {
+            false
+        }
     }
 
-    fn show_active_session_card(
+    fn show_active_session(
         &mut self,
         ui: &mut egui::Ui,
         session: &ActiveSession,
         awaiting_close: bool,
     ) -> bool {
         let is_closing = self.close_task.is_pending() || awaiting_close;
-        styles::content_card_frame(ui.visuals())
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
+        card_heading(ui, "Active ingest session");
+        session_detail(ui, "Project", &session.project);
+        session_detail(ui, "Session", &session.session);
+        if let Some(started_by) = &session.created_by {
+            session_detail(ui, "Started by", started_by);
+        }
+        session_detail(
+            ui,
+            "Mount path on this agent",
+            session
+                .mount_path
+                .as_deref()
+                .unwrap_or("Not available on this agent"),
+        );
 
-                card_heading(ui, "Active ingest session");
-                session_detail(ui, "Project", &session.project);
-                session_detail(ui, "Session", &session.session);
-                if let Some(started_by) = &session.created_by {
-                    session_detail(ui, "Started by", started_by);
-                }
-                session_detail(
-                    ui,
-                    "Mount path on this agent",
-                    session
-                        .mount_path
-                        .as_deref()
-                        .unwrap_or("Not available on this agent"),
-                );
+        ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+        ui.separator();
+        ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
 
-                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-                ui.separator();
-                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-
-                card_heading(ui, "Close the ingest session");
-                card_description(
-                    ui,
-                    "Stop the ingest share when you are finished transferring data. Existing \
-                     project and session data will remain available.",
-                );
-                ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-                let response = if is_closing {
-                    loading_button(
-                        ui,
-                        "Closing…",
-                        egui::Vec2::ZERO,
-                        ButtonVariant::DangerOutline,
-                    )
-                } else {
-                    ui.add(danger_outline_button("Close Session", ui))
-                };
-                if self.focus_on_entry && response.enabled() {
-                    response.request_focus();
-                    self.focus_on_entry = false;
-                }
-                response.clicked()
-            })
-            .inner
+        card_heading(ui, "Close the ingest session");
+        card_description(
+            ui,
+            "Stop the ingest share when you are finished transferring data. Existing project \
+             and session data will remain available.",
+        );
+        ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
+        let response = if is_closing {
+            loading_button(
+                ui,
+                "Closing…",
+                egui::Vec2::ZERO,
+                ButtonVariant::DangerOutline,
+            )
+        } else {
+            ui.add(danger_outline_button("Close Session", ui))
+        };
+        if self.focus_on_entry && response.enabled() {
+            response.request_focus();
+            self.focus_on_entry = false;
+        }
+        response.clicked()
     }
 
     fn show_close_confirmation(
@@ -627,11 +622,16 @@ impl PageOverview {
                     });
                 });
                 if let Some(mount_path) = &mount.mount_path {
-                    ui.add(Label::new(
-                        RichText::new(mount_path)
-                            .font(styles::typography::mono_medium::font_id())
-                            .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),
-                    ));
+                    ui.add(
+                        Label::new(
+                            RichText::new(mount_path)
+                                .font(styles::typography::mono_medium::font_id())
+                                .color(
+                                    styles::color::on_surface_variant::VALUE.resolve(ui.visuals()),
+                                ),
+                        )
+                        .wrap(),
+                    );
                 }
             }
         });
@@ -707,6 +707,84 @@ impl PageOverview {
     }
 }
 
+/// Two halves of a card side by side, with a vertical bar in the gap between them; one above
+/// the other, with a horizontal bar, when the card is too narrow
+struct Columns {
+    first: egui::Ui,
+    second: Option<egui::Ui>,
+    column_width: f32,
+    side_by_side: bool,
+}
+
+impl Columns {
+    /// Below this width, each half would be too narrow for its texts
+    const MIN_SIDE_BY_SIDE_WIDTH: f32 = 560.0;
+
+    fn new(ui: &mut egui::Ui) -> Self {
+        let width = ui.available_width();
+        let side_by_side = width >= Self::MIN_SIDE_BY_SIDE_WIDTH;
+        let column_width = if side_by_side {
+            (width - Self::gap()) / 2.0
+        } else {
+            width
+        };
+        let first = Self::column(ui, ui.cursor().min, column_width);
+        Self {
+            first,
+            second: None,
+            column_width,
+            side_by_side,
+        }
+    }
+
+    /// The gap between the halves: the card's padding on each side of the bar
+    fn gap() -> f32 {
+        2.0 * styles::components::content_card_padding_x::padding::EGUI_POINTS
+    }
+
+    fn column(ui: &mut egui::Ui, top_left: egui::Pos2, width: f32) -> egui::Ui {
+        ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(
+                    top_left,
+                    egui::vec2(width, ui.available_height()),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        )
+    }
+
+    fn first(&mut self) -> &mut egui::Ui {
+        &mut self.first
+    }
+
+    /// Call once the first half is complete
+    fn second(&mut self, ui: &mut egui::Ui) -> &mut egui::Ui {
+        let first = self.first.min_rect();
+        let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+        let top_left = if self.side_by_side {
+            let left = first.left() + self.column_width + Self::gap();
+            ui.painter()
+                .vline(left - Self::gap() / 2.0, first.y_range(), stroke);
+            egui::pos2(left, first.top())
+        } else {
+            let gap = styles::spacing::form_field_gap::EGUI_POINTS;
+            let bar_y = first.bottom() + gap;
+            ui.painter().hline(first.x_range(), bar_y, stroke);
+            egui::pos2(first.left(), bar_y + gap)
+        };
+        self.second
+            .insert(Self::column(ui, top_left, self.column_width))
+    }
+
+    fn finish(self, ui: &mut egui::Ui) {
+        let mut rect = self.first.min_rect();
+        if let Some(second) = &self.second {
+            rect = rect.union(second.min_rect());
+        }
+        ui.allocate_rect(rect, egui::Sense::hover());
+    }
+}
+
 fn card_heading(ui: &mut egui::Ui, text: &str) {
     ui.add(Label::new(
         RichText::new(text).font(styles::typography::section_heading::font_id()),
@@ -714,11 +792,15 @@ fn card_heading(ui: &mut egui::Ui, text: &str) {
 }
 
 fn card_description(ui: &mut egui::Ui, text: &str) {
-    ui.add(Label::new(
-        RichText::new(text)
-            .font(styles::typography::body::font_id())
-            .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),
-    ));
+    // wraps also next to a spinner, in a horizontal layout
+    ui.add(
+        Label::new(
+            RichText::new(text)
+                .font(styles::typography::body::font_id())
+                .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),
+        )
+        .wrap(),
+    );
 }
 
 /// A small text button for a secondary action next to an item, like closing one of several
@@ -742,9 +824,11 @@ fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
             .font(styles::typography::supporting_text::font_id())
             .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
     ));
-    ui.add(Label::new(
-        RichText::new(value).font(styles::typography::mono_medium::font_id()),
-    ));
+    // long values (mount paths) wrap; egui breaks them at a dash or other punctuation before
+    // breaking anywhere, and copying the label still gives the unbroken value
+    ui.add(
+        Label::new(RichText::new(value).font(styles::typography::mono_medium::font_id())).wrap(),
+    );
 }
 
 #[cfg(test)]
