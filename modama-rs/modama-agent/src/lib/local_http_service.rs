@@ -2122,7 +2122,7 @@ mod tests {
         server
             .mock("POST", "/mgmt-api/auth/login")
             .match_body(mockito::Matcher::Json(serde_json::json!({
-                "username": "testuser", "password": "p&ss",
+                "username": "testuser", "password": "p&ss", "persistent": false,
             })))
             .with_header(
                 "set-cookie",
@@ -2294,7 +2294,7 @@ mod tests {
             .mock("POST", "/mgmt-api/auth/login")
             // a normal session, not "keep me logged in": agents run on shared computers
             .match_body(mockito::Matcher::Json(serde_json::json!({
-                "username": "testuser", "password": "pass",
+                "username": "testuser", "password": "pass", "persistent": false,
             })))
             .with_header(
                 "set-cookie",
