@@ -15,3 +15,5 @@ AGENTS.md
 frontend_auth_spike.md
 /.claude
 cargo-git
+/deploy/testconf/secrets/CA/
+/deploy/.env

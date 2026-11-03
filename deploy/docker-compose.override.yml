@@ -1,32 +1,73 @@
 name: er-c-data
+
+# Test deployment, the default for `docker compose up` in this folder.
+#
+# `testenv-init` prepares the state folders in testfolder/ and the CA, see
+# testconf/init-testenv.sh; the services that use them wait for it. The remaining
+# secrets are throwaway test values in testconf/secrets/, which has the layout of
+# /var/local/data-mgmt/. To use the site-specific files there instead (real LDAP
+# settings, see docs/guide/src/development.md), set MODAMA_SECRETS_DIR=/var/local/data-mgmt
+#
+# Folders that testenv-init creates are mounted with the short syntax below: Docker
+# creates all containers before testenv-init has run, and only the short syntax
+# creates a missing host folder. A missing host *file* is an error, which is why the
+# files in testconf/secrets/ are committed.
+x-after-init: &after-init
+  testenv-init:
+    condition: service_completed_successfully
+
 services:
+  testenv-init:
+    # The CA command line tool, which this script needs besides bash; same image as
+    # `deploy/ca.sh` runs
+    build:
+      context: ../modama-rs/
+      dockerfile: Dockerfile-ca-cli
+    image: iffregistry.fz-juelich.de/weber/data-management-system/ca:latest
+    entrypoint: ["/bin/bash", "/init-testenv.sh"]
+    command: ["init"]
+    restart: "no"
+    cap_add:
+      - LINUX_IMMUTABLE  # to remove the data folder again, `clean`
+    environment:
+      - TESTFOLDER=/testfolder
+      - CA_PATH=/ca
+      # the CA of a real site must survive `clean`
+      - KEEP_CA=${MODAMA_SECRETS_DIR:+1}
+    volumes:
+      - "./testconf/init-testenv.sh:/init-testenv.sh:ro"
+      - "./testfolder:/testfolder"
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA:/ca"
   db:
+    depends_on: *after-init
     volumes:
-      - type: bind
-        source: "./testfolder/postgres"
-        target: "/var/lib/postgresql/data"
+      - "./testfolder/postgres:/var/lib/postgresql/data"
   nextcloud:
+    depends_on: *after-init
     volumes:
-      - type: bind
-        source: "./testfolder/nextcloud-html"
-        target: "/var/www/html"
-      - type: bind
-        source: "./testfolder/nextcloud-data"
-        target: "/var/local/nextclouddata"
+      - "./testfolder/nextcloud-html:/var/www/html"
+      - "./testfolder/nextcloud-data:/var/local/nextclouddata"
       - type: bind
         source: "./testconf/nextcloud-site-config.json"
         target: "/nextcloud-site-config.json"
       - type: bind
-        source: "/var/local/data-mgmt/nextcloud-config-secret.json"
+        source: "${MODAMA_SECRETS_DIR:-./testconf/secrets}/nextcloud-config-secret.json"
         target: "/nextcloud-config-secret.json"
       - type: bind
-        source: "/var/local/data-mgmt/externalstorage_pw"
+        source: "${MODAMA_SECRETS_DIR:-./testconf/secrets}/externalstorage_pw"
         target: "/externalstorage_pw"
   webdav-backend:
+    depends_on:
+      testenv-init:
+        condition: service_completed_successfully
+      # in the base file; only there when the ldap profile is on
+      sssd:
+        required: false
     volumes:
       # Data directory to export
       - "./testfolder/data/:/var/wsgidav-root"
   webdav:
+    depends_on: *after-init
     volumes:
       # Data directory to export
       - "./testfolder/data/:/data/"
@@ -38,11 +79,15 @@ services:
     ports:
       - "127.0.0.1:1890:80"
   permissions:
+    depends_on:
+      testenv-init:
+        condition: service_completed_successfully
+      # in the base file; only there when the ldap profile is on
+      sssd:
+        required: false
     restart: no
     volumes:
-      - type: bind
-        source: "./testfolder/data"
-        target: "/data"
+      - "./testfolder/data:/data"
       - type: bind
         source: "../python/permissions"
         target: "/code/permissions"
@@ -55,18 +100,16 @@ services:
     # Might be related to https://sourceware.org/bugzilla/show_bug.cgi?id=21032
     command: /venv/bin/flask run --without-threads --debug --port 5050 --host 0.0.0.0
   watchdog:
+    depends_on: *after-init
     volumes:
-      - type: bind
-        source: "./testfolder/data"
-        target: "/data"
+      - "./testfolder/data:/data"
   smbdrop:
+    depends_on: *after-init
     volumes:
-      - type: bind
-        source: "./testfolder/data"
-        target: "/data"
-      - type: bind
-        source: "./testfolder/etc/smbdrop"
-        target: "/etc/smbdrop"
+      - "./testfolder/data:/data"
+      - "./testfolder/etc/smbdrop:/etc/smbdrop"
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA/ca/pub/:/certs/ca/pub/"
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA/servers/:/certs/servers/"
     ports:
       - "127.0.0.1:1446:445"   # smb
       # - "127.0.0.1:445:445"
@@ -74,6 +117,7 @@ services:
       - "127.0.0.1:5052:5052"  # events API (ws)
       - "127.0.0.1:5053:5053"  # token API (https)
   mgmtinterface:
+    depends_on: *after-init
     volumes:
       - type: bind
         source: "../python/mgmtinterface"
@@ -83,17 +127,24 @@ services:
         source: "./mgmtinterface/config-override.py"
         target: "/config.py"
         read_only: true
+      - type: bind
+        source: "${MODAMA_SECRETS_DIR:-./testconf/secrets}/mgmt_secret.py"
+        target: "/mgmt_secret.py"
+        read_only: true
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA/ca/pub/:/certs/ca/pub/:ro"
     environment:
       - FLASK_APP=mgmtinterface:app
     working_dir: /
     # command: gunicorn --bind 0.0.0.0:5000 mgmtinterface:app --log-level=debug
     command: /venv/bin/flask run --debug --port 5000 --host 0.0.0.0
   mgmtinterface-api:
+    depends_on: *after-init
     volumes:
       - type: bind
         source: "../python/mgmtinterface-api"
         target: "/code/mgmtinterface-api"
         read_only: true
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/CA/ca/pub/:/certs/ca/pub/:ro"
     working_dir: /code/mgmtinterface-api
     environment:
       # Dev-only: the test VM is plain http, so a Secure cookie would never come
@@ -111,6 +162,13 @@ services:
     command: >
       /venv/bin/uvicorn mgmtinterface_api.main:app --reload
       --host 0.0.0.0 --port 8000
+  sssd:
+    # Without LDAP, sssd has nothing to serve; the test users are local accounts of the
+    # permissions and webdav-backend containers. For real LDAP settings, run with
+    # COMPOSE_PROFILES=ldap and MODAMA_SECRETS_DIR as above.
+    profiles: ["ldap"]
+    volumes:
+      - "${MODAMA_SECRETS_DIR:-./testconf/secrets}/sssd.conf:/etc/sssd/sssd.conf"
   mgmtinterface-proxy:
     volumes:
       - type: bind

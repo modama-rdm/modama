@@ -32,15 +32,14 @@ the docker images using `docker compose`.
 
 Both a test and a production deployment are available. The configuration for the test deployment is defined by a combination of `docker-compose.yml` and `docker-compose.override.yml`, which is the default when using `docker compose up`. Test-specific configuration files except secrets are placed in `testconf/`.
 
-The test deployment uses files in the `testfolder/` directory. The necessary
-subfolders with correct ownership and permissions can be created by running
-`sudo ./preparefolders.sh` in that directory. It is available under
-http://localhost:1890/ and http://localhost:1890/. `sudo ./nukefolders.sh`
-removes the folders.
+The test deployment needs no preparation: `docker compose up` in `deploy/` creates the
+folders in `testfolder/` that hold its state, and a CA for it, by itself. It is available under
+http://localhost:1890/ (Nextcloud) and http://localhost:5001/ (management interface).
+See `docs/guide/src/development.md` for details and how to reset it.
 
 The configuration for production deployment is defined by a combination of `docker-compose.yml` and `docker-compose.prod.yml`. The commands to bring this up and down are contained in the `upprod.sh` and `downprod.sh` scripts. Production-specific configuration files except secrets are placed in `prodconf/`. The production configuration expects Nextcloud-specific data directories in `/var/local/data-mgmt/`. It also expects an NFS server exporting `/er-c-data` as a volume on localhost, as well as local access to the same data in `/er-c-data` for the management interface.
 
-Both test and production deployment expect files with site-specific secrets in `/var/local/data-mgmt/`.
+The production deployment expects files with site-specific secrets in `/var/local/data-mgmt/`. The test deployment uses throwaway values from `testconf/secrets/` instead, unless `MODAMA_SECRETS_DIR` points elsewhere.
 
 At the moment, the test and production deployment only differ in a number of volumes and ports, meaning the Docker images themselves are the same. If that should change, the build scripts should be adapted to that.
 
@@ -110,8 +109,9 @@ openssl rand -base64 48 > /var/local/data-mgmt/modama_session_secret
 
 ## mTLS CA setup
 
-Certificates and key material is stored in `/var/local/data-mgmt/CA/` for both
-production and testing setups, which has to be created on deployment. There is a
+Certificates and key material is stored in `/var/local/data-mgmt/CA/` in
+production, which has to be created on deployment. The test deployment creates its own CA
+automatically. There is a
 command-line tool to manage the certificates, which can be run via
 `deploy/ca.sh`. On initial deployment, run `deploy/ca.sh initialize-ca` to
 generate a key pair and the CA certificate. Using `deploy/ca.sh enroll-server`

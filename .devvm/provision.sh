@@ -7,3 +7,8 @@ set -euo pipefail
 # OpenSearch (warehouse) refuses to start on a Docker host below this
 echo 'vm.max_map_count = 262144' | sudo tee /etc/sysctl.d/90-opensearch.conf > /dev/null
 sudo sysctl -q --system
+
+# The git hook of this repository (.pre-commit-config.yaml: ruff) runs through
+# pre-commit. pipx puts it in ~/.local/bin, which the default Debian profile adds to
+# the PATH of login shells once the folder exists.
+pipx install pre-commit

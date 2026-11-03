@@ -5,3 +5,6 @@ deploy/testfolder
 mgmtinterface-new/node_modules
 mgmtinterface-new/dist
 mgmtinterface-new/dist-ssr
+
+# test CA: key material
+deploy/testconf/secrets/CA
