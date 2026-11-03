@@ -10,8 +10,6 @@ from permissions_client.schema import (
     CREATE_DATASET_REQUEST_SCHEMA,
     CREATE_PROJECT_REQUEST_SCHEMA,
     SEAL_DATASET_REQUEST_SCHEMA,
-    SET_DATASET_DESCRIPTION_REQUEST_SCHEMA,
-    SET_PROJECT_DESCRIPTION_REQUEST_SCHEMA,
     AuthenticateResponse,
     AuthenticateUserRequest,
     ChangeMembersRequest,
@@ -28,10 +26,6 @@ from permissions_client.schema import (
     ProjectDetailsResponse,
     SealDatasetRequest,
     SealDatasetResponse,
-    SetDatasetDescriptionRequest,
-    SetDatasetDescriptionResponse,
-    SetProjectDescriptionRequest,
-    SetProjectDescriptionResponse,
 )
 
 from permissions.api import AdhocProject, ValidationError, authenticate, list_users, uid
@@ -94,7 +88,6 @@ def create_project() -> CreateProjectResponse | GenericErrorResponse:
             owner=request_data["owner"],
             members=request_data["members"],
             adhoc_group=app.config["ADHOC_GROUP"],
-            description=request_data.get("description"),
         )
         return {
             "errno": 0,
@@ -104,9 +97,6 @@ def create_project() -> CreateProjectResponse | GenericErrorResponse:
         return {"errno": 1, "message": str(e)}
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
-    except OSError as e:
-        # A failed mkdir or README write; the folder has been taken back.
-        return {"errno": 1, "message": str(e)}
 
 
 @app.route("/project/", methods=["GET"])
@@ -155,21 +145,14 @@ def create_dataset(project_name: str) -> CreateDatasetResponse | GenericErrorRes
     try:
         jsonschema.validate(schema=CREATE_DATASET_REQUEST_SCHEMA, instance=request_data)
         p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
-        p.add_dataset(
-            name=request_data["name"],
-            user=request_data["owner"],
-            description=request_data.get("description"),
-        )
+        p.add_dataset(name=request_data["name"], user=request_data["owner"])
         return {"errno": 0}  # what should be returned here?
     except CalledProcessError as e:
         return {"errno": e.returncode, "message": e.stderr}
-    except (ValidationError, KeyError) as e:
+    except ValidationError as e:
         return {"errno": 1, "message": str(e)}
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
-    except OSError as e:
-        # The README write failed; the folders have been taken back.
-        return {"errno": 1, "message": str(e)}
 
 
 # NOTE: not using data set name in path, as it can contain slashes (right?) so
@@ -215,44 +198,3 @@ def change_project_members(
     except jsonschema.exceptions.ValidationError as e:
         raise InvalidAPIUsage(str(e))  # message can possibly be improved
     return {"errno": 0, "project": p.serialize()}
-
-
-@app.route("/project/<project_name>/description/", methods=["PUT"])
-def set_project_description(
-    project_name: str,
-) -> SetProjectDescriptionResponse | GenericErrorResponse:
-    """Write the project's README.md; an empty description removes it."""
-    request_data: SetProjectDescriptionRequest = request.json  # pyright: ignore[reportAssignmentType]
-    try:
-        jsonschema.validate(
-            schema=SET_PROJECT_DESCRIPTION_REQUEST_SCHEMA, instance=request_data
-        )
-        p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
-        p.set_description(request_data["description"], request_data["user"])
-    except (ValidationError, OSError) as e:
-        return {"errno": 1, "message": str(e)}
-    except jsonschema.exceptions.ValidationError as e:
-        raise InvalidAPIUsage(str(e))  # message can possibly be improved
-    return {"errno": 0, "project": p.serialize(fast=True)}
-
-
-# The dataset name travels in the body, like for sealing.
-@app.route("/project/<project_name>/dataset/description/", methods=["PUT"])
-def set_dataset_description(
-    project_name: str,
-) -> SetDatasetDescriptionResponse | GenericErrorResponse:
-    """Write a dataset's README.md; an empty description removes it."""
-    request_data: SetDatasetDescriptionRequest = request.json  # pyright: ignore[reportAssignmentType]
-    try:
-        jsonschema.validate(
-            schema=SET_DATASET_DESCRIPTION_REQUEST_SCHEMA, instance=request_data
-        )
-        p = AdhocProject(project_name, adhoc_group=app.config["ADHOC_GROUP"])
-        p.set_dataset_description(
-            request_data["name"], request_data["description"], request_data["user"]
-        )
-    except (ValidationError, OSError) as e:
-        return {"errno": 1, "message": str(e)}
-    except jsonschema.exceptions.ValidationError as e:
-        raise InvalidAPIUsage(str(e))  # message can possibly be improved
-    return {"errno": 0}

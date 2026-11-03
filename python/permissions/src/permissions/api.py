@@ -1,5 +1,3 @@
-import contextlib
-import errno
 import grp
 import os
 import pwd
@@ -120,38 +118,22 @@ def check_valid_dataset(name: str):
 # --- Descriptions (#112) -------------------------------------------------------
 #
 # A project or dataset folder can carry a README.md whose text is the folder's
-# description. The service writes it on request (create, or a later change) and
-# reads it back for every listing. People can also edit it over SMB or WebDAV;
-# whatever the file says is the description.
+# description. The service only reads it, for every listing. Writing it is not
+# the service's business: the API writes it over WebDAV as the signed-in user,
+# and people can edit it over SMB or WebDAV, so the file system decides who
+# may change it. Whatever the file says is the description.
 #
 # The service runs as root inside folders that members can write to, so the
 # file is never trusted to be what its name says: it is opened without
 # following symlinks and without blocking, and only a regular file with a
 # single link counts. A FIFO named README.md would otherwise hang every project
-# listing, and a hard link could show or overwrite another file.
+# listing, and a hard link could show another file.
 
 README_NAME = "README.md"
-# 10 000 characters (the request limit) are at most 40 000 bytes of UTF-8.
+# The API accepts 10 000 characters, at most 40 000 bytes of UTF-8.
 README_MAX_BYTES = 64 * 1024
-README_MODE = 0o644
 
 _OPEN_EXISTING = os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC
-
-
-def normalize_description(text: str | None) -> str | None:
-    """Line ends as LF, surrounding whitespace dropped; empty means none."""
-    if text is None:
-        return None
-    text = text.replace("\r\n", "\n").strip()
-    return text or None
-
-
-def _not_a_plain_file(path: str) -> ValidationError:
-    # A hard link is a regular file too, so the message names what is refused.
-    return ValidationError(
-        f"{path} is not a plain file (it is a symlink, a hard link, a FIFO or a "
-        "folder), so it is left alone."
-    )
 
 
 def read_readme(folder: str) -> str | None:
@@ -184,93 +166,6 @@ def read_readme(folder: str) -> str | None:
         os.close(fd)
     text = b"".join(chunks).decode("utf-8", errors="replace").rstrip()
     return text or None
-
-
-def _write_all(fd: int, data: bytes) -> None:
-    view = memoryview(data)
-    while view:
-        view = view[os.write(fd, view) :]
-
-
-def write_readme(
-    folder: str, text: str, uid: int, gid: int, *, exclusive: bool = False
-) -> None:
-    """
-    Write `text` (already normalized, not empty) to README.md in `folder`.
-
-    A new file belongs to `uid`:`gid`, mode 0644, with no ACL entries beyond
-    the mode: the state the watchdog leaves every new file in, set here
-    directly so that it does not depend on the watchdog having seen the file.
-    An existing file is rewritten in place and keeps its owner and mode.
-    With `exclusive`, an existing file is an error instead; the create paths
-    use that, because a fresh folder has none.
-
-    If the new file cannot be completed, it is removed again.
-    """
-    if os.path.realpath(folder) != folder:
-        raise ValidationError(
-            f"Real path and specified path of {folder} are different, "
-            "could be caused by symlink."
-        )
-    path = os.path.join(folder, README_NAME)
-    data = (text + "\n").encode("utf-8")
-    try:
-        fd = os.open(
-            path,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-            README_MODE,
-        )
-    except FileExistsError:
-        if exclusive:
-            raise ValidationError(f"{path} exists already.") from None
-        _rewrite_readme(path, data)
-        return
-    try:
-        try:
-            # The folder's default ACL was copied onto the new file; replace it
-            # with the plain mode before anything else.
-            posix1e.ACL(mode=README_MODE).applyto(fd)
-            os.fchown(fd, uid, gid)
-            os.fchmod(fd, README_MODE)  # the umask applied to the create
-            _write_all(fd, data)
-        finally:
-            os.close(fd)
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.unlink(path)
-        raise
-
-
-def _rewrite_readme(path: str, data: bytes) -> None:
-    try:
-        fd = os.open(path, os.O_WRONLY | _OPEN_EXISTING)
-    except OSError as e:
-        # ELOOP: a symlink. ENXIO: a FIFO nobody reads. EISDIR: a folder.
-        if e.errno in (errno.ELOOP, errno.ENXIO, errno.EISDIR):
-            raise _not_a_plain_file(path) from e
-        raise
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
-            raise _not_a_plain_file(path)
-        os.ftruncate(fd, 0)
-        _write_all(fd, data)
-    finally:
-        os.close(fd)
-
-
-def remove_readme(folder: str) -> None:
-    """Remove README.md from `folder`. No file is not an error."""
-    path = os.path.join(folder, README_NAME)
-    try:
-        st = os.lstat(path)
-    except FileNotFoundError:
-        return
-    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
-        raise _not_a_plain_file(path)
-    # Removes the name only, never what a symlink swapped in meanwhile points to.
-    with contextlib.suppress(FileNotFoundError):
-        os.unlink(path)
 
 
 def check_project_name_taken(name: str):
@@ -378,20 +273,13 @@ class AdhocProject:
 
     @classmethod
     def create(
-        cls,
-        name: str,
-        owner: str,
-        members: list[str],
-        adhoc_group: str | None = None,
-        description: str | None = None,
+        cls, name: str, owner: str, members: list[str], adhoc_group: str | None = None
     ):
         """
         Create a new ad-hoc project folder
 
         This creates an empty folder in the
         folder for ad-hoc projects after checking if boundary conditions are met.
-        With a `description`, the folder gets a README.md holding it, owned by
-        the owner (see :func:`write_readme`).
 
         The folder is owned by the specified owner and the group for ad-hoc projects.
         The owner and the members receive ACLs and default ACLs that allow creating
@@ -418,7 +306,6 @@ class AdhocProject:
             # between project name and group name, just
             # for "keeping order"
             raise ValidationError("Conflicts with existing group.")
-        description = normalize_description(description)
         folder = os.path.join(ADHOC_PATH, name)
         os.mkdir(folder)
         try:
@@ -442,22 +329,8 @@ class AdhocProject:
                 check=True,
             )
             project = cls(name, adhoc_group=adhoc_group)
-            # Before the members get write access, so nobody else can have put
-            # a file of that name there yet.
-            if description is not None:
-                write_readme(
-                    folder,
-                    description,
-                    pwd.getpwnam(owner).pw_uid,
-                    os.stat(folder).st_gid,
-                    exclusive=True,
-                )
             project.add_members(members + [owner], owner)
         except Exception:
-            # The README is the one file the service puts into a new project;
-            # it has to go before the folder can.
-            with contextlib.suppress(OSError):
-                os.unlink(os.path.join(folder, README_NAME))
             os.rmdir(folder)
             raise
         return project
@@ -476,15 +349,6 @@ class AdhocProject:
             return
         raise ValidationError(
             f'User "{username}" cannot seal dataset {dataset} in project {self.name}: Not an owner or member.'
-        )
-
-    def check_can_describe(self, username: str):
-        # The same rule as sealing: the owner and the members look after the
-        # project's datasets, so they may describe the project and them.
-        if self.owner == username or username in self.members:
-            return
-        raise ValidationError(
-            f'User "{username}" cannot change descriptions in project {self.name}: Not an owner or member.'
         )
 
     @staticmethod
@@ -728,20 +592,15 @@ class AdhocProject:
                 )
         return result
 
-    def add_dataset(self, name: str, user: str, description: str | None = None):
+    def add_dataset(self, name: str, user: str):
         """
         Permissions, ACLs etc will be set by default ACLs and the watchdog.
-
-        With a `description`, the dataset folder gets a README.md next to
-        `raw/`, owned by `user` (see :func:`write_readme`). Sealing makes only
-        `raw/` immutable, so the README stays editable.
         """
         check_valid_dataset(name)
         if name.lower() == README_NAME.lower():
             # It would collide with the project's own README.md.
             raise ValidationError(f'A dataset cannot be named "{name}".')
         check_can_create(user, self.adhoc_group)
-        description = normalize_description(description)
         target_base_path = os.path.join(self.path, name)
         target_raw_path = os.path.join(target_base_path, "raw")
         # Run as the specified user to make sure
@@ -754,56 +613,6 @@ class AdhocProject:
             check=True,
             text=True,
         )
-        if description is None:
-            return
-        # Written as root rather than with `sudo -u`: the mkdir above has just
-        # shown that `user` may write here, and an exclusive create refuses a
-        # file another member slipped in, where a shell redirect would follow
-        # a symlink.
-        try:
-            write_readme(
-                target_base_path,
-                description,
-                pwd.getpwnam(user).pw_uid,
-                os.stat(target_base_path).st_gid,
-                exclusive=True,
-            )
-        except Exception:
-            # Without the README the request failed, so take the folders back
-            # rather than leave a dataset the caller would take for an earlier
-            # one. `rmdir` only removes empty folders, so nothing written into
-            # `raw/` meanwhile is lost.
-            with contextlib.suppress(OSError):
-                os.rmdir(target_raw_path)
-                os.rmdir(target_base_path)
-            raise
-
-    def set_description(self, text: str, user: str) -> None:
-        """
-        Set the project's description to `text`; an empty text removes the
-        README.md. A new file belongs to the project's owner, an existing one
-        keeps its owner.
-        """
-        self.check_can_describe(user)
-        self._describe(self.path, text)
-
-    def set_dataset_description(self, name: str, text: str, user: str) -> None:
-        """Like :meth:`set_description`, for the dataset `name`."""
-        self.check_can_describe(user)
-        check_valid_dataset(name)
-        folder = os.path.join(self.path, name)
-        if not os.path.isdir(os.path.join(folder, "raw")):
-            raise ValidationError(f"There is no dataset {name} in project {self.name}.")
-        self._describe(folder, text)
-
-    @staticmethod
-    def _describe(folder: str, text: str) -> None:
-        normalized = normalize_description(text)
-        if normalized is None:
-            remove_readme(folder)
-            return
-        st = os.stat(folder)
-        write_readme(folder, normalized, st.st_uid, st.st_gid)
 
     def seal_dataset(self, name: str, user: str):
         """
@@ -903,10 +712,7 @@ if __name__ == "__main__":
     print(otherproj.owner)
 
     myproj = AdhocProject.create(
-        "pythoncreated",
-        "testdieter",
-        ["testalex", "testpenghan"],
-        description="  Holografie an Ni-Nanodrähten\r\n\r\n- second line\r\n  ",
+        "pythoncreated", "testdieter", ["testalex", "testpenghan"]
     )
     assert set(myproj.members) == {"testdieter", "testalex", "testpenghan"}
     myproj.add_members(["testjanghyun", "testthibaud"], "testdieter")
@@ -920,7 +726,7 @@ if __name__ == "__main__":
     }
     myproj.remove_members(["testpenghan", "testalex"], "testdieter")
     assert set(myproj.members) == {"testdieter", "testjanghyun", "testthibaud"}
-    myproj.add_dataset("helloworld", "testjanghyun", description="# Run 1\nalignment")
+    myproj.add_dataset("helloworld", "testjanghyun")
 
     print(AdhocProject.list_all())
     subprocess.run(
@@ -941,64 +747,39 @@ if __name__ == "__main__":
 
     # --- Descriptions (#112) ---------------------------------------------------
 
-    def acl_users(path: str) -> list[int]:
-        return [
-            entry.qualifier
-            for entry in posix1e.ACL(file=path)
-            if entry.tag_type is posix1e.ACL_USER
-        ]
+    # The API writes README.md over WebDAV as the signed-in user; a `tee` run
+    # as the user stands in for it here. Whatever the file says is the
+    # description, trailing whitespace dropped.
+    def write_as(user: str, path: str, text: str) -> None:
+        subprocess.run(
+            ["sudo", "-u", user, "tee", path],
+            input=text,
+            stdout=subprocess.DEVNULL,
+            check=True,
+            text=True,
+        )
 
-    project_readme = os.path.join(myproj.path, README_NAME)
-    with open(project_readme, "rb") as f:
-        assert f.read() == "Holografie an Ni-Nanodrähten\n\n- second line\n".encode()
-    st = os.stat(project_readme)
-    assert st.st_uid == pwd.getpwnam("testdieter").pw_uid
-    assert st.st_gid == grp.getgrnam(ADHOC_GROUP).gr_gid
-    assert stat.S_IMODE(st.st_mode) == README_MODE
-    assert acl_users(project_readme) == []
+    assert myproj.description is None
+    write_as(
+        "testdieter",
+        os.path.join(myproj.path, README_NAME),
+        "Holografie an Ni-Nanodrähten\n\n- second line\n\n",
+    )
     assert (
         myproj.serialize(fast=True)["description"]
         == "Holografie an Ni-Nanodrähten\n\n- second line"
     )
 
-    # A dataset README is the creator's, next to `raw/`, and stays writable
-    # after sealing, which only covers `raw/`.
-    session_readme = os.path.join(myproj.path, "helloworld", README_NAME)
-    st = os.stat(session_readme)
-    assert st.st_uid == pwd.getpwnam("testjanghyun").pw_uid
-    assert stat.S_IMODE(st.st_mode) == README_MODE
-    assert acl_users(session_readme) == []
-    assert myproj.datasets[0].description == "# Run 1\nalignment"
-    assert not is_immutable(session_readme)
-    subprocess.run(
-        ["sudo", "-u", "testjanghyun", "sh", "-c", f"echo more >> '{session_readme}'"],
-        check=True,
+    # A dataset README sits next to `raw/`.
+    write_as(
+        "testjanghyun",
+        os.path.join(myproj.path, "helloworld", README_NAME),
+        "# Run 1\nalignment\n",
     )
-    assert myproj.datasets[0].description == "# Run 1\nalignment\nmore"
-
-    # Members may change descriptions; rewriting keeps the owner and the inode.
-    inode = os.stat(session_readme).st_ino
-    myproj.set_dataset_description("helloworld", "rewritten", "testthibaud")
-    st = os.stat(session_readme)
-    assert (st.st_ino, st.st_uid) == (inode, pwd.getpwnam("testjanghyun").pw_uid)
-    assert myproj.datasets[0].description == "rewritten"
-    try:
-        myproj.set_description("not mine", "testalex")
-        raise AssertionError("a non-member changed a description")
-    except ValidationError:
-        pass
-    myproj.set_description("   ", "testthibaud")
-    assert not os.path.exists(project_readme)
-    assert myproj.description is None
-    myproj.set_description("back", "testdieter")
-    assert os.stat(project_readme).st_uid == pwd.getpwnam("testdieter").pw_uid
-
-    # No description, no file.
-    myproj.add_dataset("nodesc", "testdieter", description=" \n ")
-    assert not os.path.exists(os.path.join(myproj.path, "nodesc", README_NAME))
+    assert myproj.datasets[0].description == "# Run 1\nalignment"
 
     # Whatever a member puts in place of the file reads as no description,
-    # without blocking, and is not written through.
+    # without blocking.
     myproj.add_dataset("fifo", "testdieter")
     subprocess.run(
         ["sudo", "-u", "testdieter", "mkfifo", f"{myproj.path}/fifo/{README_NAME}"],
@@ -1019,12 +800,6 @@ if __name__ == "__main__":
     )
     described = {d.name: d.description for d in myproj.datasets}
     assert described["fifo"] is None and described["link"] is None
-    for name in ("fifo", "link"):
-        try:
-            myproj.set_dataset_description(name, "x", "testdieter")
-            raise AssertionError(f"wrote through a {name}")
-        except ValidationError:
-            pass
 
     # A dataset may not take the project README's name.
     try:
@@ -1032,12 +807,4 @@ if __name__ == "__main__":
         raise AssertionError("created a dataset named README.md")
     except ValidationError:
         pass
-
-    # A failed create leaves no folder behind, README or not. The unknown
-    # member fails in `add_members`, after the README was written.
-    with contextlib.suppress(KeyError):
-        AdhocProject.create(
-            "pythonfailed", "testdieter", ["nosuchuser"], description="gone again"
-        )
-    assert not os.path.exists(os.path.join(ADHOC_PATH, "pythonfailed"))
     print("Descriptions: all checks passed")

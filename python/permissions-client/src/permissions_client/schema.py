@@ -4,21 +4,6 @@ from typing_extensions import TypedDict
 
 ADHOC = "adhoc"
 
-# A description is free text kept as `README.md` in the project or session
-# folder (#112). The limit is in characters, which is what JSON schema's
-# `maxLength` counts; the service reads back at most 64 KiB of the file, which
-# covers 10 000 characters of any UTF-8.
-DESCRIPTION_MAX_LENGTH = 10_000
-
-_DESCRIPTION_PROPERTY = {
-    "type": "string",
-    "maxLength": DESCRIPTION_MAX_LENGTH,
-    "description": (
-        "Free text, saved as README.md in the folder. Surrounding whitespace is "
-        "dropped; an empty text means no file."
-    ),
-}
-
 
 class InvalidAPIUsage(Exception):
     """
@@ -90,7 +75,6 @@ CREATE_PROJECT_REQUEST_SCHEMA = {
             "uniqueItems": True,
             "description": "Usernames of the members of this ad-hoc group",
         },
-        "description": _DESCRIPTION_PROPERTY,
     },
     "required": ["name", "owner", "members"],
 }
@@ -100,7 +84,6 @@ class CreateProjectRequest(TypedDict):
     name: str
     owner: str
     members: list[str]
-    description: NotRequired[str]
 
 
 CREATE_DATASET_REQUEST_SCHEMA = {
@@ -118,7 +101,6 @@ CREATE_DATASET_REQUEST_SCHEMA = {
             "type": "string",
             "description": "Username of the owner of the dataset",
         },
-        "description": _DESCRIPTION_PROPERTY,
     },
     "required": ["name", "owner"],
 }
@@ -127,56 +109,6 @@ CREATE_DATASET_REQUEST_SCHEMA = {
 class CreateDatasetRequest(TypedDict):
     name: str
     owner: str
-    description: NotRequired[str]
-
-
-SET_PROJECT_DESCRIPTION_REQUEST_SCHEMA = {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "http://permissions.cloud-erc.fz-juelich.de/set-project-description-request.schema.json",
-    "title": "SetProjectDescriptionRequest",
-    "description": "The JSON payload for the PUT request to set a project's description",
-    "type": "object",
-    "properties": {
-        "description": _DESCRIPTION_PROPERTY,
-        "user": {
-            "type": "string",
-            "description": "Username of the requesting user",
-        },
-    },
-    "required": ["description", "user"],
-}
-
-
-class SetProjectDescriptionRequest(TypedDict):
-    description: str
-    user: str
-
-
-SET_DATASET_DESCRIPTION_REQUEST_SCHEMA = {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "http://permissions.cloud-erc.fz-juelich.de/set-dataset-description-request.schema.json",
-    "title": "SetDatasetDescriptionRequest",
-    "description": "The JSON payload for the PUT request to set a dataset's description",
-    "type": "object",
-    "properties": {
-        "name": {
-            "type": "string",
-            "description": "Name of the dataset",
-        },
-        "description": _DESCRIPTION_PROPERTY,
-        "user": {
-            "type": "string",
-            "description": "Username of the requesting user",
-        },
-    },
-    "required": ["name", "description", "user"],
-}
-
-
-class SetDatasetDescriptionRequest(TypedDict):
-    name: str
-    description: str
-    user: str
 
 
 SEAL_DATASET_REQUEST_SCHEMA = {
@@ -288,15 +220,6 @@ class SealDatasetResponse(TypedDict):
 
 
 class CreateDatasetResponse(TypedDict):
-    errno: Literal[0]
-
-
-class SetProjectDescriptionResponse(TypedDict):
-    errno: Literal[0]
-    project: SerializedProject
-
-
-class SetDatasetDescriptionResponse(TypedDict):
     errno: Literal[0]
 
 

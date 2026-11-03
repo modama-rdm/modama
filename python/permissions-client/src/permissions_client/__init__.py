@@ -17,8 +17,6 @@ from permissions_client.schema import (
     ListProjectsResponse,
     ProjectDetailsResponse,
     SealDatasetResponse,
-    SetDatasetDescriptionResponse,
-    SetProjectDescriptionResponse,
 )
 
 
@@ -82,20 +80,10 @@ class PermissionsClient:
         name: str,
         owner: str,
         members: Iterable[str],
-        description: str | None = None,
     ) -> CreateProjectResponse | GenericErrorResponse:
-        payload: dict[str, object] = {
-            "name": name,
-            "owner": owner,
-            "members": list(members),
-        }
-        # Only when given, so that the body stays what it was for callers that
-        # know nothing of descriptions.
-        if description is not None:
-            payload["description"] = description
         return requests.post(
             f"{self.base_url}/project/",
-            json=payload,
+            json={"name": name, "owner": owner, "members": list(members)},
             auth=self.auth,
         ).json()
 
@@ -114,17 +102,14 @@ class PermissionsClient:
         ).json()
 
     def create_dataset(
-        self, projectname: str, name: str, user: str, description: str | None = None
+        self, projectname: str, name: str, user: str
     ) -> CreateDatasetResponse | GenericErrorResponse:
-        payload: dict[str, object] = {
-            "name": name,
-            "owner": user,
-        }
-        if description is not None:
-            payload["description"] = description
         result = requests.post(
             f"{self.base_url}/project/{quote(projectname)}/dataset/",
-            json=payload,
+            json={
+                "name": name,
+                "owner": user,
+            },
             auth=self.auth,
         )
         # TODO percolate consistently through client
@@ -140,32 +125,5 @@ class PermissionsClient:
                 "name": name,
                 "user": user,
             },
-            auth=self.auth,
-        ).json()
-
-    def set_project_description(
-        self, projectname: str, description: str, user: str
-    ) -> SetProjectDescriptionResponse | GenericErrorResponse:
-        """
-        Write `description` to the project's README.md, as `user`. An empty
-        description removes the file.
-        """
-        return requests.put(
-            f"{self.base_url}/project/{quote(projectname)}/description/",
-            json={"description": description, "user": user},
-            auth=self.auth,
-        ).json()
-
-    def set_dataset_description(
-        self, projectname: str, name: str, description: str, user: str
-    ) -> SetDatasetDescriptionResponse | GenericErrorResponse:
-        """
-        Write `description` to the README.md of dataset `name`, as `user`. An
-        empty description removes the file. The dataset name travels in the
-        body, like for sealing.
-        """
-        return requests.put(
-            f"{self.base_url}/project/{quote(projectname)}/dataset/description/",
-            json={"name": name, "description": description, "user": user},
             auth=self.auth,
         ).json()
