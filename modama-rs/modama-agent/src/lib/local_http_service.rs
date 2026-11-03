@@ -863,11 +863,15 @@ struct LoginForm {
 }
 
 /// Where to go after signing in: a path on this server, or the overview. Anything else (another
-/// origin, odd characters) could make the login an open redirect, so it's dropped.
+/// origin, odd characters) could make the login an open redirect, so it's dropped. That includes
+/// `//` and dot segments anywhere: `/.//evil.example` stays on this host, but browsers normalize
+/// it to the path `//evil.example`, which a later redirect built from the path would send away.
 fn local_next(next: Option<&str>) -> &str {
     next.filter(|next| {
+        let path = next.split_once('?').map_or(*next, |(path, _query)| path);
         next.starts_with('/')
-            && !next.starts_with("//")
+            && !next.contains("//")
+            && !path.split('/').any(is_dot_segment)
             && next.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric()
                     || matches!(
@@ -877,6 +881,15 @@ fn local_next(next: Option<&str>) -> &str {
             })
     })
     .unwrap_or("/")
+}
+
+/// `.` or `..`, also percent-encoded: the WHATWG URL parser treats `%2e` like `.` here
+fn is_dot_segment(segment: &str) -> bool {
+    let segment = segment.to_ascii_lowercase();
+    matches!(
+        segment.as_str(),
+        "." | "%2e" | ".." | ".%2e" | "%2e." | "%2e%2e"
+    )
 }
 
 fn login_page(
@@ -1019,6 +1032,7 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
         )
         .route("/close-ingest/{share_id}/", get(close_ingest_confirmation))
         .route("/close-ingest/{share_id}/", post(close_ingest))
+        // all routes above this get redirected to login without a valid session:
         .route_layer(middleware::from_fn(redirect_unauthorized_to_login))
         .route("/login/", get(show_login).post(login))
         .route("/logout/", post(logout));
@@ -2181,8 +2195,22 @@ mod tests {
             "start-ingest/",
             "/a b",
             "/\"><script>",
+            "/\t/attacker.example",
+            "/a//b",
+            "/.//attacker.example",
+            "/%2e//attacker.example",
+            "/a/./b",
+            "/a/../b",
+            "/a/%2E%2e/b",
+            "/a/.%2e",
+            "/a/..?x=1",
         ] {
             assert_eq!(local_next(Some(foreign)), "/", "{foreign}");
+        }
+        // dots inside a segment, and dot segments in the query, are fine; an encoded line break
+        // stays literal in the Location header
+        for local in ["/a/.b/c..d/", "/a/?x=..&y=.", "/%0d%0aSet-Cookie=x"] {
+            assert_eq!(local_next(Some(local)), local);
         }
         assert_eq!(local_next(None), "/");
     }
