@@ -192,7 +192,7 @@ class SerializedProject(TypedDict):
     gid: int
     usage_bytes: int | None
     # The text of README.md in the project folder, or None. Absent from a
-    # service older than #112.
+    # service that predates descriptions.
     description: NotRequired[str | None]
 
 
@@ -229,7 +229,7 @@ class SerializedDataset(TypedDict):
     ctime: float
     mtime: float
     # The text of README.md in the dataset folder (next to `raw/`), or None.
-    # Absent from a service older than #112.
+    # Absent from a service that predates descriptions.
     description: NotRequired[str | None]
 
 

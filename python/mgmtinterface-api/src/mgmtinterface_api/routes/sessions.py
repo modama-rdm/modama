@@ -51,7 +51,7 @@ SessionName = Annotated[
 ]
 
 
-# The optional description on the create requests (#112).
+# The optional description on the create requests.
 Description = Annotated[
     str | None,
     Field(

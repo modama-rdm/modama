@@ -115,7 +115,7 @@ def check_valid_dataset(name: str):
         )
 
 
-# --- Descriptions (#112) -------------------------------------------------------
+# --- Descriptions --------------------------------------------------------------
 #
 # A project or dataset folder can carry a README.md whose text is the folder's
 # description. The service only reads it, for every listing. Writing it is not
@@ -745,7 +745,7 @@ if __name__ == "__main__":
     myproj.seal_dataset("helloworld", "testdieter")
     assert is_immutable("/data/adhoc/pythoncreated/helloworld/raw/image1.dm4")
 
-    # --- Descriptions (#112) ---------------------------------------------------
+    # --- Descriptions ----------------------------------------------------------
 
     # The API writes README.md over WebDAV as the signed-in user; a `tee` run
     # as the user stands in for it here. Whatever the file says is the

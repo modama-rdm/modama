@@ -1,6 +1,6 @@
 """
 Calls into the WebDAV server in front of the data tree: listing a path, for
-browsing, and writing or removing a single file, for descriptions (#112).
+browsing, and writing or removing a single file, for descriptions.
 
 One `PROPFIND` with `Depth: 1` answers everything the browse endpoint needs: the
 properties of the path itself and, for a folder, of each entry in it. The

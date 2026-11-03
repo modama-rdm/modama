@@ -265,7 +265,7 @@ def test_create_reports_an_unreachable_permissions_service(
     assert response.json()["code"] == "permissions_unavailable"
 
 
-# --- Descriptions on create (#112) ---------------------------------------------
+# --- Descriptions on create ----------------------------------------------------
 
 
 def test_a_description_is_written_normalized_as_the_signed_in_user(
@@ -428,7 +428,7 @@ def test_seal_reports_an_unreachable_permissions_service(
     assert response.json()["code"] == "permissions_unavailable"
 
 
-# --- PUT /projects/{project}/sessions/{session}/description (#112) ------------
+# --- PUT /projects/{project}/sessions/{session}/description -------------------
 
 
 @pytest.mark.parametrize("user", [PROJECT["owner"], "user2"])

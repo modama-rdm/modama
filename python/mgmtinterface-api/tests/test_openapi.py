@@ -221,8 +221,9 @@ def test_members_are_set_as_a_whole_list(schema: dict[str, Any]):
 
 def test_descriptions_are_optional_everywhere(schema: dict[str, Any]):
     """
-    #112 is additive: a nullable `description` on the project and the session
-    that a client may ignore, and an optional one on both create requests.
+    Descriptions are additive: a nullable `description` on the project and the
+    session that a client may ignore, and an optional one on both create
+    requests.
     """
     schemas = schema["components"]["schemas"]
     for name in ("Project", "Session", "CreateProjectRequest", "CreateSessionRequest"):

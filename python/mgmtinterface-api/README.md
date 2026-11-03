@@ -315,9 +315,9 @@ have as members.
 
 ### Descriptions
 
-A project or session can carry a description (#112): the text of a `README.md`
-in the project folder, or in the session folder next to `raw/`. Every project
-and session in a response has `description`, `null` when there is no file. The
+A project or session can carry a description: the text of a `README.md` in the
+project folder, or in the session folder next to `raw/`. Every project and
+session in a response has `description`, `null` when there is no file. The
 permissions service reads the file for its listings; the API writes it over
 WebDAV as the signed-in user, like any other file a person edits, so the file
 system decides who may change it.

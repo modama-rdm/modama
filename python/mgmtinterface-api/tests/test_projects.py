@@ -22,7 +22,7 @@ FIXTURE = {
     # Null in the list view; the permissions service only computes usage for a
     # single project.
     "usage_bytes": None,
-    # No README.md in the folder (#112).
+    # No README.md in the folder.
     "description": None,
 }
 
@@ -309,7 +309,7 @@ def test_create_reports_an_unreachable_permissions_service(
     assert response.json()["code"] == "permissions_unavailable"
 
 
-# --- Descriptions on create (#112) ---------------------------------------------
+# --- Descriptions on create ----------------------------------------------------
 
 
 def test_a_description_is_written_normalized_as_the_owner(
@@ -406,7 +406,7 @@ def test_a_description_that_cannot_be_written_leaves_the_project(
 def test_a_service_without_descriptions_reads_as_none(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ):
-    # A permissions service from before #112 sends no `description` at all.
+    # A permissions service that predates descriptions sends no `description`.
     old = {key: value for key, value in FIXTURE.items() if key != "description"}
     monkeypatch.setattr(
         PermissionsClient, "list_projects", lambda self: {"errno": 0, "projects": [old]}
@@ -545,7 +545,7 @@ def test_usage_reports_an_unreachable_permissions_service(
     assert client.get(USAGE).status_code == 502
 
 
-# --- PUT /projects/{project}/description (#112) -------------------------------
+# --- PUT /projects/{project}/description --------------------------------------
 
 DESCRIPTION = f"{DETAILS}/description"
 

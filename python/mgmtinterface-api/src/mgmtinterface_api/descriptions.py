@@ -1,5 +1,5 @@
 """
-Descriptions (#112): the text of a `README.md` in a project or session folder.
+Descriptions: the text of a `README.md` in a project or session folder.
 
 The permissions service reads the file, with every listing. Changes go through
 the WebDAV server as the signed-in user, the way a person edits any other

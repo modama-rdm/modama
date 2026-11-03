@@ -228,7 +228,7 @@ def test_anything_else_is_unavailable(
     assert excinfo.value.code == "files_unavailable"
 
 
-# --- put_file and delete_file (#112) -----------------------------------------
+# --- put_file and delete_file ------------------------------------------------
 #
 # The statuses are those of the suid wsgidav: a `PermissionError` anywhere is a
 # 403, a PUT into a missing folder a 409, a PUT onto a folder a 405, and a
