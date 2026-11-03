@@ -3,12 +3,12 @@ use std::{collections::HashMap, sync::Arc};
 use log::{info, warn};
 use modama_common::{
     agent::AgentId,
-    foreground::{ShareDestinationError, foreground_projection},
-    internal_api_types::SessionHelperState,
+    foreground::{ShareDestinationError, agent_mount_status, foreground_projection},
+    internal_api_types::{SessionHelperState, Shares},
     local_api_messages::APICurrentForegroundShare,
-    messages::Share,
+    messages::{AgentMountStatus, AgentMountStatusEntry, Share},
 };
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{Mutex, Notify, broadcast, mpsc};
 
 use crate::{caller_scope::HelperScope, config::AgentConfig, events_api::SessionBeginEnd};
 
@@ -83,6 +83,10 @@ where
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {
     pub connected_agents: Vec<AgentId>,
+
+    /// Mount status of the connected agents that reported one, including ourselves
+    pub agent_mount_status: Vec<AgentMountStatusEntry>,
+
     pub desired_shares: ShareState<Share>,
 }
 
@@ -90,8 +94,29 @@ impl RemoteInfo {
     pub fn new() -> Self {
         Self {
             connected_agents: Default::default(),
+            agent_mount_status: Default::default(),
             desired_shares: Default::default(),
         }
+    }
+
+    /// The desired shares, as sent to session helpers and GUIs
+    pub fn shares(&self) -> Shares {
+        Shares {
+            foreground_share_id: self
+                .desired_shares
+                .foreground_share
+                .as_ref()
+                .map(|s| s.share_id.clone()),
+            shares: self.desired_shares.shares.clone(),
+        }
+    }
+
+    /// The last mount status `agent` reported to smbdrop; None if it didn't (yet)
+    pub fn mount_status_of(&self, agent: &AgentId) -> Option<AgentMountStatus> {
+        self.agent_mount_status
+            .iter()
+            .find(|entry| &entry.agent == agent)
+            .map(|entry| entry.status)
     }
 }
 
@@ -142,6 +167,11 @@ pub struct AgentState {
 
     /// Broadcast channel to update GUI and session helpers
     pub desired_state_channel: broadcast::Sender<StateUpdateToSession>,
+
+    /// Notified when something `mount_status` depends on changed, apart from the desired state
+    /// (which the event channel loop, the one waiter, updates itself): a session helper
+    /// connected, reported, or went away
+    pub mount_status_inputs_changed: Arc<Notify>,
 }
 
 /// Cleanup task: when connections for a session_id drop to zero, clear the session state
@@ -158,6 +188,7 @@ async fn session_bookkeeper(
                     .entry(scope)
                     .and_modify(|c| *c += 1)
                     .or_insert(1);
+                state.mount_status_inputs_changed.notify_one();
             }
             Some(SessionBeginEnd::End { scope }) => {
                 let mut state = agent_state.lock().await;
@@ -182,6 +213,7 @@ async fn session_bookkeeper(
                     {
                         warn!("tried to send an update on current mounts but no one cared");
                     }
+                    state.mount_status_inputs_changed.notify_one();
                 }
             }
             None => {
@@ -206,6 +238,17 @@ impl AgentState {
         foreground_projection(desired, self.session_helpers.get(&scope))
     }
 
+    /// Our mount status, over all connected session helpers; None as long as we haven't heard
+    /// from smbdrop what should be mounted
+    pub fn mount_status(&self) -> Option<AgentMountStatus> {
+        let desired = self.remote_info.as_ref()?.shares();
+        let helpers = self
+            .session_connections
+            .keys()
+            .map(|scope| self.session_helpers.get(scope));
+        Some(agent_mount_status(&desired, helpers))
+    }
+
     pub async fn new(config: &AgentConfig) -> Arc<Mutex<Self>> {
         let config = config.clone();
         let (tx, _rx) = broadcast::channel(16);
@@ -220,6 +263,7 @@ impl AgentState {
             session_helpers: Default::default(),
             session_connections: Default::default(),
             session_channel_sender: sess_tx,
+            mount_status_inputs_changed: Default::default(),
         }));
 
         // FIXME: error handling for spawning, baby sitting to keep it alive?

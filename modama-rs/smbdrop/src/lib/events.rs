@@ -1,4 +1,10 @@
-use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    io,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use crate::{share_manager::SmbDropState, token_server::LocalTokenVerifier};
 use futures_util::{SinkExt, StreamExt};
@@ -6,7 +12,10 @@ use log::{debug, error, info, warn};
 use modama_common::{
     agent::{AgentId, ClientCertError, FromURIError},
     cert_helpers::CertHelperError,
-    messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share},
+    messages::{
+        AgentMountStatus, AgentMountStatusEntry, EVENT_CHANNEL_PROTOCOL,
+        EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share,
+    },
     tokens::Claims,
 };
 use rustls::ServerConfig;
@@ -87,15 +96,26 @@ pub struct EventSystemState {
 
     /// Updated from the connection handler
     pub connected_agents: HashSet<AgentId>,
+
+    /// The last mount status each connected agent reported; updated from the connection handler
+    pub mount_status: HashMap<AgentId, AgentMountStatus>,
 }
 
 async fn handle_ws_message(
     msg: &str,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     last_state: Arc<Mutex<EventSystemState>>,
+    state_updates_tx: &broadcast::Sender<SmbDropState>,
     agent_id: &AgentId,
 ) -> Result<(), HandlerError> {
-    let msg: EventChannelRequests = serde_json::from_str(msg)?;
+    // requests from newer agents that we don't know: keep the connection
+    let msg: EventChannelRequests = match serde_json::from_str(msg) {
+        Ok(msg) => msg,
+        Err(e) => {
+            warn!("ignoring request from {agent_id:?} that we don't understand: {e}");
+            return Ok(());
+        }
+    };
 
     match msg {
         EventChannelRequests::ShareListUpdate => {
@@ -105,6 +125,17 @@ async fn handle_ws_message(
             ws_stream
                 .send(tungstenite::Message::Text(json_msg.into()))
                 .await?;
+        }
+        EventChannelRequests::ReportMountStatus { status } => {
+            let mut state = last_state.lock().await;
+            let previous = state.mount_status.insert(agent_id.clone(), status);
+            // like connecting and disconnecting agents, a changed status is propagated by
+            // sending out the current shares and users again
+            if previous != Some(status) {
+                state_updates_tx
+                    .send(state.inner_state.clone())
+                    .map_err(|_| HandlerError::Disconnected)?;
+            }
         }
     }
 
@@ -123,10 +154,23 @@ async fn update_msg_from_state(
     // re-evaluated.
     let mut connected_agents: Vec<AgentId> = state.connected_agents.iter().cloned().collect();
     connected_agents.sort_by(|id1, id2| id1.san_encoded.cmp(&id2.san_encoded));
+    let agent_mount_status = connected_agents
+        .iter()
+        .filter_map(|agent| {
+            state
+                .mount_status
+                .get(agent)
+                .map(|status| AgentMountStatusEntry {
+                    agent: agent.clone(),
+                    status: *status,
+                })
+        })
+        .collect();
     EventChannelMessage::UpdateShareList {
         shares: shares.clone(),
         foreground_share: shares.iter().last().cloned(),
         connected_agents,
+        agent_mount_status,
     }
 }
 
@@ -166,6 +210,7 @@ fn share_list_from_state(state: &EventSystemState, agent_id: &AgentId) -> Vec<Sh
 async fn handle_connection(
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     mut state_updates_rx: broadcast::Receiver<SmbDropState>,
+    state_updates_tx: &broadcast::Sender<SmbDropState>,
     last_state: Arc<Mutex<EventSystemState>>,
     agent_id: AgentId,
 ) -> Result<(), HandlerError> {
@@ -175,19 +220,29 @@ async fn handle_connection(
                 let msg = if let Some(msg) = msg { msg? } else { break };
                 if let Ok(msg) = msg.into_text() {
                     info!("Got ws message: {}", msg);
-                    handle_ws_message(&msg, ws_stream, Arc::clone(&last_state), &agent_id)
-                        .await?;
+                    handle_ws_message(
+                        &msg,
+                        ws_stream,
+                        Arc::clone(&last_state),
+                        state_updates_tx,
+                        &agent_id,
+                    )
+                    .await?;
                 } else {
                     warn!("received non-text ws message or conversion failed");
                 }
             },
             maybe_state = state_updates_rx.recv() => {
                 let new_state = maybe_state.map_err(|_| HandlerError::Disconnected)?;
-                // compose the update of shares and users with connected shares:
+                // compose the update of shares and users with connected agents:
                 info!("propagating state update from channel: {new_state:?}");
-                let comp_state = EventSystemState {
-                    inner_state: new_state,
-                    connected_agents: last_state.lock().await.connected_agents.clone(),
+                let comp_state = {
+                    let last_state = last_state.lock().await;
+                    EventSystemState {
+                        inner_state: new_state,
+                        connected_agents: last_state.connected_agents.clone(),
+                        mount_status: last_state.mount_status.clone(),
+                    }
                 };
                 handle_state_update(&comp_state, ws_stream, &agent_id).await?;
             }
@@ -206,9 +261,17 @@ enum AcceptError {
     MessagingError(#[from] tungstenite::Error),
 }
 
+/// What the agent told us about itself when logging in
+struct ClientInfo<'a> {
+    version: &'a str,
+
+    /// The highest event channel protocol version the agent speaks
+    protocol: u32,
+}
+
 async fn handle_authenticated_connection(
     peer: SocketAddr,
-    version: &str,
+    client: ClientInfo<'_>,
     mut ws_stream: WebSocketStream<TlsStream<TcpStream>>,
     claims: Claims,
     last_state: Arc<Mutex<EventSystemState>>,
@@ -216,11 +279,23 @@ async fn handle_authenticated_connection(
     state_updates_tx: broadcast::Sender<SmbDropState>,
 ) -> Result<(), HandlerError> {
     info!(
-        "connection {peer} authenticated with token from {} version {version}",
-        claims.sub
+        "connection {peer} authenticated with token from {} version {} protocol {}",
+        claims.sub, client.version, client.protocol
     );
 
     let agent_id = AgentId::from_uri(&claims.sub)?;
+
+    // before any update, so the agent knows which protocol version to use from the start:
+    if client.protocol >= 1 {
+        let welcome = EventChannelMessage::Welcome {
+            protocol: client.protocol.min(EVENT_CHANNEL_PROTOCOL),
+        };
+        ws_stream
+            .send(tungstenite::Message::Text(
+                serde_json::to_string(&welcome)?.into(),
+            ))
+            .await?;
+    }
 
     // update connected agents and broadcast a state update
     {
@@ -236,6 +311,7 @@ async fn handle_authenticated_connection(
     if let Err(e) = handle_connection(
         &mut ws_stream,
         state_updates_rx,
+        &state_updates_tx,
         conn_last_state,
         agent_id.clone(),
     )
@@ -256,6 +332,7 @@ async fn handle_authenticated_connection(
     {
         let mut state_unlocked = last_state.lock().await;
         state_unlocked.connected_agents.remove(&agent_id);
+        state_unlocked.mount_status.remove(&agent_id);
         state_updates_tx
             .send(state_unlocked.inner_state.clone())
             .map_err(|_| HandlerError::Disconnected)?;
@@ -284,12 +361,19 @@ async fn authenticate_agent_connection(
                     serde_json::from_str(&msg).map_err(|e| HandlerError::Auth(e.to_string()))?;
 
                 match msg {
-                    EventChannelInitialMessages::Login { token, version } => {
+                    EventChannelInitialMessages::Login {
+                        token,
+                        version,
+                        protocol,
+                    } => {
                         debug!("connection attempt; client version {version}");
                         if let Some(claims) = token_verifier.verify(&token) {
                             handle_authenticated_connection(
                                 peer,
-                                &version,
+                                ClientInfo {
+                                    version: &version,
+                                    protocol,
+                                },
                                 ws_stream,
                                 claims,
                                 last_state,
@@ -360,6 +444,7 @@ pub async fn start_event_server(
     let state = EventSystemState {
         inner_state: state.clone(),
         connected_agents: HashSet::new(),
+        mount_status: HashMap::new(),
     };
     let (tx, mut rx) = broadcast::channel::<SmbDropState>(16);
     let token_verifier = LocalTokenVerifier::new(secret_key);
@@ -434,7 +519,10 @@ mod test {
     use modama_common::{
         agent::AgentId,
         ca::Ca,
-        messages::{EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share},
+        messages::{
+            AgentMountStatus, AgentMountStatusEntry, EVENT_CHANNEL_PROTOCOL,
+            EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share,
+        },
         test_helpers::MockTokenProvider,
         tokens::{Claims, LocalTokenSigner, TokenProvider},
         version::modama_git_version,
@@ -602,6 +690,7 @@ mod test {
         let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
             token: sign_response.token,
             version: modama_git_version().to_owned(),
+            protocol: 0,
         })
         .unwrap();
         server
@@ -631,6 +720,7 @@ mod test {
                     agent: "test_agent".to_owned(),
                     san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
                 }],
+                agent_mount_status: vec![],
             }
         );
 
@@ -652,6 +742,7 @@ mod test {
         let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
             token: sign_response.token,
             version: modama_git_version().to_owned(),
+            protocol: 0,
         })
         .unwrap();
         server
@@ -681,6 +772,7 @@ mod test {
                     agent: "test_agent".to_owned(),
                     san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
                 }],
+                agent_mount_status: vec![],
             }
         );
 
@@ -720,6 +812,7 @@ mod test {
             let login_msg_2 = serde_json::to_string(&EventChannelInitialMessages::Login {
                 token: sign_response_2.token,
                 version: modama_git_version().to_owned(),
+                protocol: 0,
             })
             .unwrap();
             conn.send(Message::Text(login_msg_2.into())).await.unwrap();
@@ -758,6 +851,7 @@ mod test {
                             san_encoded: "x-modama-agent://test_resource#test_agent_2".to_owned()
                         },
                     ],
+                    agent_mount_status: vec![],
                 }
             );
 
@@ -786,6 +880,7 @@ mod test {
                     agent: "test_agent".to_owned(),
                     san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
                 }],
+                agent_mount_status: vec![],
             }
         );
 
@@ -803,6 +898,7 @@ mod test {
         let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
             token: sign_response.token,
             version: modama_git_version().to_owned(),
+            protocol: 0,
         })
         .unwrap();
         server
@@ -830,6 +926,7 @@ mod test {
                     agent: "test_agent".to_owned(),
                     san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
                 }],
+                agent_mount_status: vec![],
             }
         );
 
@@ -867,6 +964,7 @@ mod test {
                     agent: "test_agent".to_owned(),
                     san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
                 }],
+                agent_mount_status: vec![],
             }
         );
         server.handle.abort();
@@ -880,6 +978,7 @@ mod test {
         let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
             token: sign_response.token,
             version: modama_git_version().to_owned(),
+            protocol: 0,
         })
         .unwrap();
         server
@@ -907,6 +1006,7 @@ mod test {
                     agent: "test_agent".to_owned(),
                     san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
                 }],
+                agent_mount_status: vec![],
             }
         );
 
@@ -960,8 +1060,179 @@ mod test {
                     agent: "test_agent".to_owned(),
                     san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
                 }],
+                agent_mount_status: vec![],
             }
         );
+        server.handle.abort();
+    }
+
+    type WsStream = WebSocketStream<MaybeTlsStream<net::TcpStream>>;
+
+    fn agent_id(agent: &str) -> AgentId {
+        AgentId {
+            resource: "test_resource".to_owned(),
+            agent: agent.to_owned(),
+            san_encoded: format!("x-modama-agent://test_resource#{agent}"),
+        }
+    }
+
+    /// Connect another agent of `test_resource` and log in with the given protocol version
+    async fn connect_agent(
+        server: &TestEventServer,
+        client_config: &ClientConfig,
+        agent: &str,
+        protocol: u32,
+    ) -> WsStream {
+        let (mut conn, _response) = connect_async_tls_with_config(
+            server.ws_url.clone(),
+            None,
+            false,
+            Some(Connector::Rustls(Arc::new(client_config.clone()))),
+        )
+        .await
+        .unwrap();
+        let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
+            signer: LocalTokenSigner::new(&server.certs.server_secret),
+            claims: Claims {
+                sub: agent_id(agent).san_encoded,
+                exp: (SystemTime::now() + Duration::from_secs(1000))
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            },
+        });
+        let token = token_provider.fetch_token().await.unwrap().token;
+        let login = serde_json::to_string(&EventChannelInitialMessages::Login {
+            token,
+            version: modama_git_version().to_owned(),
+            protocol,
+        })
+        .unwrap();
+        conn.send(Message::Text(login.into())).await.unwrap();
+        conn
+    }
+
+    async fn next_msg(conn: &mut WsStream) -> EventChannelMessage {
+        let msg = timeout(Duration::from_millis(500), conn.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        serde_json::from_str(&msg.into_text().unwrap()).unwrap()
+    }
+
+    async fn assert_no_msg(conn: &mut WsStream) {
+        let res = timeout(Duration::from_millis(100), conn.next()).await;
+        assert!(res.is_err(), "unexpected message: {res:?}");
+    }
+
+    async fn send_request(conn: &mut WsStream, request: &EventChannelRequests) {
+        let text = serde_json::to_string(request).unwrap();
+        conn.send(Message::Text(text.into())).await.unwrap();
+    }
+
+    fn update(agents: &[&str], mount_status: &[(&str, AgentMountStatus)]) -> EventChannelMessage {
+        EventChannelMessage::UpdateShareList {
+            shares: vec![],
+            foreground_share: None,
+            connected_agents: agents.iter().map(|agent| agent_id(agent)).collect(),
+            agent_mount_status: mount_status
+                .iter()
+                .map(|(agent, status)| AgentMountStatusEntry {
+                    agent: agent_id(agent),
+                    status: *status,
+                })
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_welcome_before_first_update() {
+        let server = make_test_event_server().await;
+        let mut conn = connect_agent(
+            &server,
+            &server.certs.client_config_1,
+            "test_agent",
+            EVENT_CHANNEL_PROTOCOL,
+        )
+        .await;
+        assert_eq!(
+            next_msg(&mut conn).await,
+            EventChannelMessage::Welcome {
+                protocol: EVENT_CHANNEL_PROTOCOL
+            }
+        );
+        assert_eq!(next_msg(&mut conn).await, update(&["test_agent"], &[]));
+        assert_no_msg(&mut conn).await;
+        server.handle.abort();
+    }
+
+    /// An agent newer than us gets the protocol version we speak
+    #[tokio::test]
+    async fn test_welcome_negotiates_down() {
+        let server = make_test_event_server().await;
+        let mut conn = connect_agent(
+            &server,
+            &server.certs.client_config_1,
+            "test_agent",
+            EVENT_CHANNEL_PROTOCOL + 5,
+        )
+        .await;
+        assert_eq!(
+            next_msg(&mut conn).await,
+            EventChannelMessage::Welcome {
+                protocol: EVENT_CHANNEL_PROTOCOL
+            }
+        );
+        server.handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_mount_status_is_broadcast_and_removed_on_disconnect() {
+        let server = make_test_event_server().await;
+        let mut agent_1 =
+            connect_agent(&server, &server.certs.client_config_1, "test_agent", 1).await;
+        next_msg(&mut agent_1).await; // Welcome
+        assert_eq!(next_msg(&mut agent_1).await, update(&["test_agent"], &[]));
+
+        // agent 2 is an old agent, it can still see the status of others
+        let mut agent_2 =
+            connect_agent(&server, &server.certs.client_config_2, "test_agent_2", 0).await;
+        let both = ["test_agent", "test_agent_2"];
+        assert_eq!(next_msg(&mut agent_1).await, update(&both, &[]));
+        assert_eq!(next_msg(&mut agent_2).await, update(&both, &[]));
+
+        let report = EventChannelRequests::ReportMountStatus {
+            status: AgentMountStatus::LeftoverWork,
+        };
+        send_request(&mut agent_1, &report).await;
+        let expected = update(&both, &[("test_agent", AgentMountStatus::LeftoverWork)]);
+        assert_eq!(next_msg(&mut agent_1).await, expected);
+        assert_eq!(next_msg(&mut agent_2).await, expected);
+
+        // the same status again is not broadcast
+        send_request(&mut agent_1, &report).await;
+        assert_no_msg(&mut agent_2).await;
+
+        // the status goes away with the agent
+        agent_1.close(None).await.unwrap();
+        assert_eq!(next_msg(&mut agent_2).await, update(&["test_agent_2"], &[]));
+        assert_no_msg(&mut agent_2).await;
+        server.handle.abort();
+    }
+
+    /// Requests from newer agents that we don't understand don't end the connection
+    #[tokio::test]
+    async fn test_unknown_request_is_ignored() {
+        let server = make_test_event_server().await;
+        let mut conn = connect_agent(&server, &server.certs.client_config_1, "test_agent", 0).await;
+        assert_eq!(next_msg(&mut conn).await, update(&["test_agent"], &[]));
+
+        conn.send(Message::Text(r#"{"type": "FromTheFuture"}"#.into()))
+            .await
+            .unwrap();
+        send_request(&mut conn, &EventChannelRequests::ShareListUpdate).await;
+        assert_eq!(next_msg(&mut conn).await, update(&["test_agent"], &[]));
         server.handle.abort();
     }
 }

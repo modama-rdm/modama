@@ -10,7 +10,7 @@ use std::{path::PathBuf, process::Stdio};
 
 use log::{info, warn};
 use modama_common::{
-    foreground::{foreground_projection, foreground_share, is_reconciling},
+    foreground::{actual_differs_from_desired, foreground_projection, foreground_share},
     internal_api_types::{SessionHelperState, ToSessionHelper},
     local_api_messages::APICurrentForegroundShare,
 };
@@ -81,7 +81,9 @@ pub fn tray_state(
     });
     let status = match (connected, shares, actual) {
         (false, _, _) => TrayStatus::Disconnected,
-        (true, Some(shares), Some(actual)) if !is_reconciling(shares, actual) => TrayStatus::Ready,
+        (true, Some(shares), Some(actual)) if !actual_differs_from_desired(shares, actual) => {
+            TrayStatus::Ready
+        }
         (true, _, actual) => TrayStatus::Working {
             reason: actual
                 .and_then(|actual| actual.errors.first())
@@ -238,6 +240,7 @@ mod tests {
                 mount_path: Some(format!("/mnt/{id}").into()),
             }],
             errors: vec![],
+            reconciled_share_ids: None,
         }
     }
 

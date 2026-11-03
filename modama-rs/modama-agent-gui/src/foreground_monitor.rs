@@ -397,6 +397,7 @@ mod tests {
                     mount_path: Some(format!("/mnt/{id}").into()),
                 }],
                 errors: vec![],
+                reconciled_share_ids: None,
             }),
             desired_shares: Some(Shares {
                 foreground_share_id: Some(id.to_owned()),

@@ -86,14 +86,7 @@ where
 
 /// The desired shares as sent to helpers and GUIs; None until smbdrop has sent them
 fn desired_shares(remote_info: Option<&RemoteInfo>) -> Option<Shares> {
-    remote_info.map(|remote| Shares {
-        foreground_share_id: remote
-            .desired_shares
-            .foreground_share
-            .as_ref()
-            .map(|s| s.share_id.clone()),
-        shares: remote.desired_shares.shares.clone(),
-    })
+    remote_info.map(RemoteInfo::shares)
 }
 
 async fn send_update_to_session_helper(
@@ -147,12 +140,18 @@ async fn record_update_from_session_helper(
     state: &mut AgentState,
 ) -> Result<(), EventAPIError> {
     match session_update {
-        ToAgent::SessionUpdate { shares, errors } => {
+        ToAgent::SessionUpdate {
+            shares,
+            errors,
+            reconciled_share_ids,
+        } => {
             let helper_state = SessionHelperState {
                 mounted_shares: shares,
                 errors,
+                reconciled_share_ids,
             };
             state.session_helpers.insert(scope, helper_state.clone());
+            state.mount_status_inputs_changed.notify_one();
             // forward to the GUI
             tx.send(StateUpdateToSession::MountUpdate {
                 scope,
@@ -770,6 +769,7 @@ mod tests {
                 SessionHelperState {
                     mounted_shares: vec![mounted_share.clone()],
                     errors: vec![],
+                    reconciled_share_ids: None,
                 },
             )
             .await;
@@ -863,6 +863,7 @@ mod tests {
                     mount_path: Some(PathBuf::from("/mnt/share-1")),
                 }],
                 errors: vec![],
+                reconciled_share_ids: None,
             },
         )
         .await;
@@ -909,6 +910,7 @@ mod tests {
                     mount_path: Some(PathBuf::from("/mnt/mounted")),
                 }],
                 errors: vec![],
+                reconciled_share_ids: None,
             },
         )
         .await;
@@ -965,6 +967,7 @@ mod tests {
             &ToAgent::SessionUpdate {
                 shares: vec![],
                 errors: vec![],
+                reconciled_share_ids: None,
             },
         )
         .await;
@@ -999,6 +1002,7 @@ mod tests {
                     mount_path: Some(PathBuf::from("/mnt/ignored")),
                 }],
                 errors: vec![],
+                reconciled_share_ids: None,
             },
         )
         .await;
@@ -1053,6 +1057,7 @@ mod tests {
             &ToAgent::SessionUpdate {
                 shares: vec![],
                 errors: vec![],
+                reconciled_share_ids: None,
             },
         )
         .await;
@@ -1131,6 +1136,7 @@ mod tests {
                     mount_path: Some(PathBuf::from("/mnt/share-1")),
                 }],
                 errors: vec![],
+                reconciled_share_ids: None,
             },
         )
         .await;
@@ -1190,6 +1196,7 @@ mod tests {
             &ToAgent::SessionUpdate {
                 shares: vec![mounted.clone()],
                 errors: vec![error.clone()],
+                reconciled_share_ids: None,
             },
         )
         .await;
@@ -1200,6 +1207,7 @@ mod tests {
             Some(SessionHelperState {
                 mounted_shares: vec![mounted],
                 errors: vec![error],
+                reconciled_share_ids: None,
             })
         );
     }

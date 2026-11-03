@@ -6,7 +6,7 @@ use futures_util::{
 };
 use log::{debug, error, info, warn};
 use modama_common::{
-    foreground::project_and_session,
+    foreground::{desired_share_ids, project_and_session},
     internal_api_types::{SessionHelperState, ToAgent, ToSessionHelper},
     messages::Share,
     mount_popup::PopupMount,
@@ -152,7 +152,11 @@ impl LoopState {
             // the popup task only stops with the helper
             let _ = self.popup.send(created);
         }
-        let report = result.state;
+        // so the agent can tell which desired state this report answers
+        let report = SessionHelperState {
+            reconciled_share_ids: Some(desired_share_ids(share_state)),
+            ..result.state
+        };
         self.actual = Some(report.clone());
         self.publish_tray_state();
 
@@ -165,6 +169,7 @@ impl LoopState {
         let msg = ToAgent::SessionUpdate {
             shares: report.mounted_shares.clone(),
             errors: report.errors.clone(),
+            reconciled_share_ids: report.reconciled_share_ids.clone(),
         };
         let text = match serde_json::to_string(&msg) {
             Ok(text) => text,
@@ -457,6 +462,15 @@ mod tests {
                 })
                 .collect(),
             errors: vec![],
+            reconciled_share_ids: None,
+        }
+    }
+
+    /// `state` as reported after a pass for the shares with the given IDs
+    fn echo(state: SessionHelperState, ids: &[&str]) -> SessionHelperState {
+        SessionHelperState {
+            reconciled_share_ids: Some(ids.iter().map(|id| (*id).to_owned()).collect()),
+            ..state
         }
     }
 
@@ -491,10 +505,15 @@ mod tests {
     async fn next_report(socket: &mut AgentSocket, wait: Duration) -> Option<SessionHelperState> {
         let message = timeout(wait, socket.next()).await.ok()?;
         let text = message.unwrap().unwrap().into_text().unwrap();
-        let ToAgent::SessionUpdate { shares, errors } = serde_json::from_str(&text).unwrap();
+        let ToAgent::SessionUpdate {
+            shares,
+            errors,
+            reconciled_share_ids,
+        } = serde_json::from_str(&text).unwrap();
         Some(SessionHelperState {
             mounted_shares: shares,
             errors,
+            reconciled_share_ids,
         })
     }
 
@@ -513,7 +532,10 @@ mod tests {
 
         send_desired(&mut agent, Some(vec![share("a"), share("b")])).await;
 
-        assert_eq!(next_report(&mut agent, LONG).await, Some(result));
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(result, &["a", "b"]))
+        );
         assert_eq!(setup.backend.calls.lock().unwrap()[0], vec!["a", "b"]);
     }
 
@@ -601,13 +623,19 @@ mod tests {
         let setup = Setup::start(Ok(report(&["a"]))).await;
         let mut agent = setup.accept().await;
         send_desired(&mut agent, Some(vec![share("a")])).await;
-        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&["a"])));
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&["a"]), &["a"]))
+        );
 
         setup.wait_for_calls(4).await;
         assert_eq!(next_report(&mut agent, SHORT).await, None);
 
         setup.backend.set_result(Ok(report(&[])));
-        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&[])));
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&[]), &["a"]))
+        );
     }
 
     #[tokio::test]
@@ -626,7 +654,10 @@ mod tests {
         let setup = Setup::start(Ok(report(&["a"]))).await;
         let mut agent = setup.accept().await;
         send_desired(&mut agent, Some(vec![share("a")])).await;
-        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&["a"])));
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&["a"]), &["a"]))
+        );
 
         // the agent goes away; the helper keeps reconciling the retained desired state
         drop(agent);
@@ -636,7 +667,10 @@ mod tests {
         // after the reconnect, the same (unchanged) state is reported again
         let mut agent = setup.accept().await;
         send_desired(&mut agent, Some(vec![share("a")])).await;
-        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&["a"])));
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&["a"]), &["a"]))
+        );
     }
 
     #[tokio::test]
@@ -644,7 +678,10 @@ mod tests {
         let setup = Setup::start(Ok(report(&["a"]))).await;
         let mut agent = setup.accept().await;
         send_desired(&mut agent, Some(vec![share("a")])).await;
-        assert_eq!(next_report(&mut agent, LONG).await, Some(report(&["a"])));
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&["a"]), &["a"]))
+        );
         drop(agent);
 
         // accept the TCP connection, but never answer the websocket handshake
@@ -654,5 +691,24 @@ mod tests {
             .unwrap();
         let calls = setup.backend.calls();
         setup.wait_for_calls(calls + 3).await;
+    }
+
+    /// A new desired state gets a report, even if the pass result is the same as before:
+    /// otherwise the agent couldn't tell that the pass for it already ran
+    #[tokio::test]
+    async fn new_desired_state_is_reported_even_with_the_same_result() {
+        let setup = Setup::start(Ok(report(&["a"]))).await;
+        let mut agent = setup.accept().await;
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&["a"]), &["a"]))
+        );
+
+        send_desired(&mut agent, Some(vec![share("b"), share("a")])).await;
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&["a"]), &["a", "b"]))
+        );
     }
 }

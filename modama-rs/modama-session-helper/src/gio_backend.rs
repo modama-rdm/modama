@@ -205,6 +205,8 @@ fn reconcile_pass<A: GioApi>(
                 })
                 .collect(),
             errors,
+            // the main loop adds which desired state the pass was for
+            reconciled_share_ids: None,
         },
         created,
     })

@@ -6,7 +6,7 @@ use log::warn;
 use crate::{
     internal_api_types::{SessionHelperState, Shares},
     local_api_messages::APICurrentForegroundShare,
-    messages::Share,
+    messages::{AgentMountStatus, Share},
 };
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -123,10 +123,11 @@ pub fn hand_off_blocked(desired: &Shares, helper: &SessionHelperState) -> bool {
     stale_mount && failed_share
 }
 
-/// Whether actual state hasn't caught up with desired state yet: a desired share is missing or
-/// has no usable path, or a mount that is no longer desired is still there. This is the only
-/// health signal; every reason for it heals on a later pass or has its desire withdrawn.
-pub fn is_reconciling(desired: &Shares, helper: &SessionHelperState) -> bool {
+/// Whether actual state differs from desired state: a desired share is missing or has no usable
+/// path, or a mount that is no longer desired is still there. Every reason for it heals on a
+/// later pass or has its desire withdrawn; whether a pass for the current desired state already
+/// ran is a separate question, see `scope_mount_status`.
+pub fn actual_differs_from_desired(desired: &Shares, helper: &SessionHelperState) -> bool {
     let all_mounted = desired.shares.iter().all(|share| {
         helper.mounted_shares.iter().any(|mounted| {
             mounted.share_name.eq_ignore_ascii_case(&share.share_name)
@@ -142,6 +143,56 @@ pub fn is_reconciling(desired: &Shares, helper: &SessionHelperState) -> bool {
     !(all_mounted && all_desired)
 }
 
+/// The sorted IDs of the desired shares, as the session helper echoes them in its report
+pub fn desired_share_ids(desired: &Shares) -> Vec<String> {
+    let mut ids: Vec<String> = desired
+        .shares
+        .iter()
+        .map(|share| share.share_id.clone())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// Mount status of one session helper (`None`: connected, but hasn't reported yet)
+pub fn scope_mount_status(
+    desired: &Shares,
+    helper: Option<&SessionHelperState>,
+) -> AgentMountStatus {
+    let Some(helper) = helper else {
+        return AgentMountStatus::Reconciling;
+    };
+    let differs = actual_differs_from_desired(desired, helper);
+    match &helper.reconciled_share_ids {
+        Some(ids) if *ids != desired_share_ids(desired) => AgentMountStatus::Reconciling,
+        Some(_) if differs => AgentMountStatus::LeftoverWork,
+        // a helper that doesn't echo can't tell us whether its pass already ran
+        None if differs => AgentMountStatus::Reconciling,
+        Some(_) | None => AgentMountStatus::Idle,
+    }
+}
+
+/// Mount status of the agent: `NoHelper` without any connected session helper, otherwise the
+/// worst status of its helpers (`None`: connected, but hasn't reported yet)
+pub fn agent_mount_status<'a>(
+    desired: &Shares,
+    helpers: impl IntoIterator<Item = Option<&'a SessionHelperState>>,
+) -> AgentMountStatus {
+    fn badness(status: AgentMountStatus) -> u8 {
+        match status {
+            AgentMountStatus::Idle => 0,
+            AgentMountStatus::Reconciling => 1,
+            AgentMountStatus::LeftoverWork => 2,
+            AgentMountStatus::NoHelper | AgentMountStatus::Unknown => 3,
+        }
+    }
+    helpers
+        .into_iter()
+        .map(|helper| scope_mount_status(desired, helper))
+        .max_by_key(|status| badness(*status))
+        .unwrap_or(AgentMountStatus::NoHelper)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -149,12 +200,13 @@ mod tests {
     use crate::{
         internal_api_types::{MountedShare, SessionHelperState, ShareError, Shares},
         local_api_messages::APICurrentForegroundShare,
-        messages::Share,
+        messages::{AgentMountStatus, Share},
     };
 
     use super::{
-        NO_HELPER_MESSAGE, ShareDestinationError, WAITING_MESSAGE, foreground_projection,
-        foreground_share, hand_off_blocked, is_reconciling, project_and_session,
+        NO_HELPER_MESSAGE, ShareDestinationError, WAITING_MESSAGE, actual_differs_from_desired,
+        agent_mount_status, foreground_projection, foreground_share, hand_off_blocked,
+        project_and_session, scope_mount_status,
     };
 
     fn share(id: &str) -> Share {
@@ -216,6 +268,7 @@ mod tests {
                     message: (*message).to_owned(),
                 })
                 .collect(),
+            reconciled_share_ids: None,
         }
     }
 
@@ -337,6 +390,7 @@ mod tests {
             |mounted_shares: Vec<MountedShare>, errors: Vec<ShareError>| SessionHelperState {
                 mounted_shares,
                 errors,
+                reconciled_share_ids: None,
             };
 
         assert!(hand_off_blocked(
@@ -351,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn reconciling_until_every_desired_share_has_a_path_and_nothing_else_is_mounted() {
+    fn differs_until_every_desired_share_has_a_path_and_nothing_else_is_mounted() {
         let desired = Shares {
             foreground_share_id: None,
             shares: vec![share("a")],
@@ -363,21 +417,22 @@ mod tests {
         let state = |mounted_shares: Vec<MountedShare>| SessionHelperState {
             mounted_shares,
             errors: vec![],
+            reconciled_share_ids: None,
         };
 
         // converged; share names are case-insensitive
-        assert!(!is_reconciling(
+        assert!(!actual_differs_from_desired(
             &desired,
             &state(vec![mounted("SHARE", Some("/mnt/a"))])
         ));
         // missing, or without a usable path
-        assert!(is_reconciling(&desired, &state(vec![])));
-        assert!(is_reconciling(
+        assert!(actual_differs_from_desired(&desired, &state(vec![])));
+        assert!(actual_differs_from_desired(
             &desired,
             &state(vec![mounted("share", None)])
         ));
         // a stale mount awaiting removal
-        assert!(is_reconciling(
+        assert!(actual_differs_from_desired(
             &desired,
             &state(vec![
                 mounted("share", Some("/mnt/a")),
@@ -389,6 +444,87 @@ mod tests {
             foreground_share_id: None,
             shares: vec![],
         };
-        assert!(!is_reconciling(&nothing, &state(vec![])));
+        assert!(!actual_differs_from_desired(&nothing, &state(vec![])));
+    }
+
+    /// A helper state with share "a" (name "share") mounted, reconciled against `ids`
+    fn reconciled(mounted: bool, ids: Option<&[&str]>) -> SessionHelperState {
+        SessionHelperState {
+            mounted_shares: if mounted {
+                vec![MountedShare {
+                    share_name: "share".to_owned(),
+                    mount_path: Some(PathBuf::from("/mnt/a")),
+                }]
+            } else {
+                vec![]
+            },
+            errors: vec![],
+            reconciled_share_ids: ids.map(|ids| ids.iter().map(|id| (*id).to_owned()).collect()),
+        }
+    }
+
+    fn desired_a() -> Shares {
+        Shares {
+            foreground_share_id: Some("a".to_owned()),
+            shares: vec![share("a")],
+        }
+    }
+
+    #[test]
+    fn scope_status_from_the_echoed_desired_state() {
+        let desired = desired_a();
+        // not reported yet
+        assert_eq!(
+            scope_mount_status(&desired, None),
+            AgentMountStatus::Reconciling
+        );
+        // reported for an older desired state, even if it happens to match
+        assert_eq!(
+            scope_mount_status(&desired, Some(&reconciled(true, Some(&[])))),
+            AgentMountStatus::Reconciling
+        );
+        // reported for the current desired state
+        assert_eq!(
+            scope_mount_status(&desired, Some(&reconciled(true, Some(&["a"])))),
+            AgentMountStatus::Idle
+        );
+        assert_eq!(
+            scope_mount_status(&desired, Some(&reconciled(false, Some(&["a"])))),
+            AgentMountStatus::LeftoverWork
+        );
+    }
+
+    #[test]
+    fn scope_status_of_helpers_that_dont_echo() {
+        let desired = desired_a();
+        assert_eq!(
+            scope_mount_status(&desired, Some(&reconciled(true, None))),
+            AgentMountStatus::Idle
+        );
+        // can't tell a pending pass from leftovers
+        assert_eq!(
+            scope_mount_status(&desired, Some(&reconciled(false, None))),
+            AgentMountStatus::Reconciling
+        );
+    }
+
+    #[test]
+    fn agent_status_is_the_worst_helper_status() {
+        let desired = desired_a();
+        let idle = reconciled(true, Some(&["a"]));
+        let leftover = reconciled(false, Some(&["a"]));
+        assert_eq!(agent_mount_status(&desired, []), AgentMountStatus::NoHelper);
+        assert_eq!(
+            agent_mount_status(&desired, [Some(&idle)]),
+            AgentMountStatus::Idle
+        );
+        assert_eq!(
+            agent_mount_status(&desired, [Some(&idle), None]),
+            AgentMountStatus::Reconciling
+        );
+        assert_eq!(
+            agent_mount_status(&desired, [None, Some(&leftover), Some(&idle)]),
+            AgentMountStatus::LeftoverWork
+        );
     }
 }

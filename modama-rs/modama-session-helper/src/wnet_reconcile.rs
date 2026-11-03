@@ -215,6 +215,8 @@ pub fn reconcile_pass(
                 })
                 .collect(),
             errors,
+            // the main loop adds which desired state the pass was for
+            reconciled_share_ids: None,
         },
         created,
     })

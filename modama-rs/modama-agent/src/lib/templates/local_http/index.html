@@ -7,7 +7,7 @@
 <p>This agent: {{ identity }}</p>
 {% if connected_agents %}
 <h2>Connected agents at this resource</h2>
-<ul>{% for agent in connected_agents %}<li>{{ agent }}</li>{% endfor %}</ul>
+<ul>{% for agent in connected_agents %}<li>{{ agent.name }}: {{ agent.status }}</li>{% endfor %}</ul>
 {% endif %}
 <h2>Foreground ingest</h2>
 {% if foreground.kind == "none" %}

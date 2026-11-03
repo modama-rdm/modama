@@ -14,7 +14,7 @@ use minijinja::{AutoEscape, Environment, Value, context};
 use modama_common::{
     foreground::project_and_session,
     local_api_messages::APICurrentForegroundShare,
-    messages::Share,
+    messages::{AgentMountStatus, Share},
     tokens::{TokenError, TokenProvider},
 };
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -67,6 +67,24 @@ fn create_env() -> Environment<'static> {
     env.set_auto_escape_callback(|_| AutoEscape::Html);
 
     env
+}
+
+/// A connected agent at our resource, with the mount status it reported
+#[derive(Serialize)]
+struct ConnectedAgentView {
+    name: String,
+    status: &'static str,
+}
+
+/// How the HTML pages show a mount status; `?` if the agent didn't report one
+fn mount_status_label(status: Option<AgentMountStatus>) -> &'static str {
+    match status {
+        Some(AgentMountStatus::Idle) => "idle",
+        Some(AgentMountStatus::Reconciling) => "reconciling",
+        Some(AgentMountStatus::LeftoverWork) => "reconciled, with work left over",
+        Some(AgentMountStatus::NoHelper) => "no session helper",
+        Some(AgentMountStatus::Unknown) | None => "?",
+    }
 }
 
 #[derive(Serialize)]
@@ -294,7 +312,7 @@ fn validate_session_name(input: &str) -> Result<String, &'static str> {
     }
 }
 
-async fn local_snapshot(agent_state: &ApiState) -> (String, Vec<String>) {
+async fn local_snapshot(agent_state: &ApiState) -> (String, Vec<ConnectedAgentView>) {
     let state = agent_state.state.lock().await;
     let (identity, resource_name) = match &state.config.identity {
         MTLSIdentity::Anonymous { hostname } => {
@@ -316,7 +334,10 @@ async fn local_snapshot(agent_state: &ApiState) -> (String, Vec<String>) {
                 .connected_agents
                 .iter()
                 .filter(|agent| agent.resource == resource_name)
-                .map(|agent| agent.san_encoded.clone())
+                .map(|agent| ConnectedAgentView {
+                    name: agent.san_encoded.clone(),
+                    status: mount_status_label(remote.mount_status_of(agent)),
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -1111,18 +1132,24 @@ mod tests {
             let shared_state = crate::agent_state::AgentState::new(&cfg).await;
             shared_state.lock().await.remote_info = Some(RemoteInfo::default());
 
-            shared_state
-                .lock()
-                .await
-                .remote_info
-                .as_mut()
-                .unwrap()
-                .connected_agents
-                .push(modama_common::agent::AgentId {
+            {
+                let mut state = shared_state.lock().await;
+                let remote_info = state.remote_info.as_mut().unwrap();
+                let agent_at = |agent: &str| modama_common::agent::AgentId {
                     resource: "res".to_string(),
-                    agent: "agent".to_string(),
-                    san_encoded: "x-modama-agent://res#agent".to_string(),
-                });
+                    agent: agent.to_string(),
+                    san_encoded: format!("x-modama-agent://res#{agent}"),
+                };
+                // one agent reported its status, the other one didn't
+                remote_info.connected_agents.push(agent_at("agent"));
+                remote_info.connected_agents.push(agent_at("old-agent"));
+                remote_info.agent_mount_status.push(
+                    modama_common::messages::AgentMountStatusEntry {
+                        agent: agent_at("agent"),
+                        status: AgentMountStatus::LeftoverWork,
+                    },
+                );
+            }
 
             let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
             let mut api_state = ApiState::new(&shared_state, &token_provider);
@@ -1150,6 +1177,7 @@ mod tests {
                             mount_path: Some(PathBuf::from(mount_path)),
                         }],
                         errors: vec![],
+                        reconciled_share_ids: None,
                     },
                 );
             }
@@ -1558,7 +1586,11 @@ mod tests {
         );
 
         let body_str = body_text(resp).await;
-        assert!(body_str.contains("x-modama-agent:&#x2f;&#x2f;res#agent"));
+        assert!(
+            body_str
+                .contains("x-modama-agent:&#x2f;&#x2f;res#agent: reconciled, with work left over")
+        );
+        assert!(body_str.contains("x-modama-agent:&#x2f;&#x2f;res#old-agent: ?"));
         assert!(body_str.contains("agent-name"));
         assert!(body_str.contains("Signed in as testuser."));
         assert!(body_str.contains("<form action=\"/logout/\" method=\"post\">"));

@@ -67,6 +67,11 @@ pub enum ToAgent {
     SessionUpdate {
         shares: Vec<MountedShare>,
         errors: Vec<ShareError>,
+
+        /// The sorted IDs of the desired shares the reporting pass reconciled against; None
+        /// from helpers that don't send it yet
+        #[serde(default)]
+        reconciled_share_ids: Option<Vec<String>>,
     },
 }
 
@@ -76,6 +81,12 @@ pub enum ToAgent {
 pub struct SessionHelperState {
     pub mounted_shares: Vec<MountedShare>,
     pub errors: Vec<ShareError>,
+
+    /// The sorted IDs of the desired shares this state was reconciled against; when they
+    /// differ from the current desired shares, a pass for those is still to come. None if the
+    /// helper doesn't send them.
+    #[serde(default)]
+    pub reconciled_share_ids: Option<Vec<String>>,
 }
 
 /// Why a desired share is not mounted

@@ -1,23 +1,38 @@
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result as AnyResult};
-use tungstenite::Message;
-
-use crate::agent_state::{
-    AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdateToSession,
-};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, StreamExt};
 use log::{error, info, warn};
 use modama_common::{
-    messages::{EventChannelInitialMessages, EventChannelMessage, Share},
+    messages::{
+        AgentMountStatus, EVENT_CHANNEL_PROTOCOL, EventChannelInitialMessages, EventChannelMessage,
+        EventChannelRequests, Share,
+    },
     tokens::TokenProvider,
     version::modama_git_version,
 };
 use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
+use tungstenite::Message;
 
-async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<()> {
+use crate::agent_state::{
+    AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdateToSession,
+};
+
+/// Whether two desired states are the same; the order of the shares doesn't matter, as
+/// smbdrop doesn't keep a stable order for shares created at the same time
+fn same_desired(a: &ShareState<Share>, b: &ShareState<Share>) -> bool {
+    let sorted = |state: &ShareState<Share>| {
+        let mut shares = state.shares.clone();
+        shares.sort_by(|s1, s2| s1.share_id.cmp(&s2.share_id));
+        shares
+    };
+    a.foreground_share == b.foreground_share && sorted(a) == sorted(b)
+}
+
+/// Handle one message from smbdrop; returns the protocol version if it was a `Welcome`
+async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<Option<u32>> {
     let event_msg: EventChannelMessage = serde_json::from_str(msg)
         .with_context(|| format!("Invalid message encountered: {}", msg))?;
     info!("Received EventChannelMessage: {event_msg:?}");
@@ -27,19 +42,27 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
             shares,
             foreground_share,
             connected_agents,
+            agent_mount_status,
         } => {
             let desired_shares: ShareState<Share> = ShareState {
                 foreground_share,
                 shares: shares.into_iter().collect(),
             };
-            {
-                let mut state = state.lock().await;
-                state.remote_info = Some(RemoteInfo {
-                    connected_agents,
-                    desired_shares: desired_shares.clone(),
-                });
-                // forward desired state to session helpers
-                if let Err(_e) =
+            let mut state = state.lock().await;
+            // smbdrop also sends the shares again when only the connected agents or their
+            // status changed; session helpers would run a pass for nothing
+            let changed = state
+                .remote_info
+                .as_ref()
+                .is_none_or(|previous| !same_desired(&previous.desired_shares, &desired_shares));
+            state.remote_info = Some(RemoteInfo {
+                connected_agents,
+                agent_mount_status,
+                desired_shares: desired_shares.clone(),
+            });
+            // forward desired state to session helpers
+            if changed
+                && let Err(_e) =
                     state
                         .desired_state_channel
                         .send(StateUpdateToSession::DesiredState {
@@ -49,29 +72,32 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
                                 .map(|share| share.share_id),
                             shares: desired_shares.shares.clone(),
                         })
-                {
-                    warn!("tried to update session helpers but no one cared");
-                }
+            {
+                warn!("tried to update session helpers but no one cared");
             }
-            Ok(())
+            Ok(None)
         }
+        EventChannelMessage::Welcome { protocol } => Ok(Some(protocol)),
     }
 }
 
 async fn receive_inner(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
     state: &Arc<Mutex<AgentState>>,
-) -> ControlFlow<(), ()> {
+) -> ControlFlow<(), Option<u32>> {
     match message {
         Some(Ok(Message::Text(utf8_bytes))) => {
-            if let Err(e) = handle_message(state, utf8_bytes.as_str()).await {
-                error!("Error while handing message: {e}");
+            match handle_message(state, utf8_bytes.as_str()).await {
+                Ok(welcome) => ControlFlow::Continue(welcome),
+                Err(e) => {
+                    error!("Error while handing message: {e}");
+                    ControlFlow::Continue(None)
+                }
             }
-            ControlFlow::Continue(())
         }
         Some(Ok(_)) => {
             warn!("Message is not text, ignoring...");
-            ControlFlow::Continue(())
+            ControlFlow::Continue(None)
         }
         Some(Err(e)) => {
             error!("Could not receive message ({e}), reconnecting...");
@@ -86,12 +112,51 @@ async fn receive_inner(
     }
 }
 
+/// Mount status reporting for one connection to smbdrop
+#[derive(Default)]
+struct StatusReporter {
+    /// The negotiated protocol version; 0 until smbdrop sent `Welcome`
+    protocol: u32,
+
+    /// What we reported last on this connection
+    reported: Option<AgentMountStatus>,
+}
+
+impl StatusReporter {
+    /// Report our mount status if smbdrop understands it and it changed; Err if sending failed
+    async fn report<S>(&mut self, state: &Mutex<AgentState>, ws_write: &mut S) -> AnyResult<()>
+    where
+        S: Sink<Message> + Unpin,
+        S::Error: std::error::Error + Send + Sync + 'static,
+    {
+        if self.protocol < 1 {
+            return Ok(());
+        }
+        let Some(status) = state.lock().await.mount_status() else {
+            return Ok(());
+        };
+        if self.reported == Some(status) {
+            return Ok(());
+        }
+        let msg = serde_json::to_string(&EventChannelRequests::ReportMountStatus { status })?;
+        ws_write.send(Message::Text(msg.into())).await?;
+        self.reported = Some(status);
+        Ok(())
+    }
+}
+
 pub async fn message_loop(
     state: Arc<Mutex<AgentState>>,
     tls_config: Arc<ClientConfig>,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) {
-    let config = state.lock().await.config.clone();
+    let (config, mount_status_inputs_changed) = {
+        let state = state.lock().await;
+        (
+            state.config.clone(),
+            Arc::clone(&state.mount_status_inputs_changed),
+        )
+    };
 
     loop {
         state.lock().await.connection = ConnectionState::Connecting;
@@ -129,6 +194,7 @@ pub async fn message_loop(
         let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login {
             token: token.token,
             version: modama_git_version().to_owned(),
+            protocol: EVENT_CHANNEL_PROTOCOL,
         }) {
             Ok(msg) => msg,
             Err(e) => {
@@ -151,11 +217,24 @@ pub async fn message_loop(
         }
 
         state.lock().await.connection = ConnectionState::Connected;
+        let mut reporter = StatusReporter::default();
         loop {
-            let msg = ws_read.next().await;
-            match receive_inner(msg, &state).await {
-                ControlFlow::Continue(_) => continue, // success or ignored message
-                ControlFlow::Break(_) => break,       // error or disconnected => reconnect
+            tokio::select! {
+                msg = ws_read.next() => match receive_inner(msg, &state).await {
+                    ControlFlow::Continue(welcome) => {
+                        if let Some(protocol) = welcome {
+                            reporter.protocol = protocol.min(EVENT_CHANNEL_PROTOCOL);
+                        }
+                    }
+                    ControlFlow::Break(_) => break, // error or disconnected => reconnect
+                },
+                () = mount_status_inputs_changed.notified() => {}
+            }
+            // after a Welcome, a new desired state, or a change in our session helpers:
+            if let Err(e) = reporter.report(&state, &mut ws_write).await {
+                error!("Could not report mount status ({e}), reconnecting...");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                break;
             }
         }
     }
@@ -189,6 +268,34 @@ mod tests {
         pub event_queue: Sender<SmbDropState>,
         pub state: Arc<Mutex<AgentState>>,
         pub to_sessions: broadcast::Receiver<StateUpdateToSession>,
+    }
+
+    /// An `AgentConfig` pointing at an event server on `port`
+    fn test_config(port: u16) -> AgentConfig {
+        let api_url = Url::parse(&format!("wss://localhost:{port}")).expect("url");
+        let root = RootCertStore::empty();
+        AgentConfig {
+            events_api_url: api_url,
+            mgmt_api_url: Url::parse("http://localhost").unwrap(),
+            smb_hostname: "example.local".to_string(),
+            smb_ip: tokio::sync::OnceCell::new(),
+            smb_port: 445,
+            smb_domain: "WORKGROUP".to_string(),
+            identity: crate::config::MTLSIdentity::AgentId {
+                agent_name: "test-agent".to_string(),
+                resource_name: "test_resource".to_string(),
+            },
+            listen_local_api: "localhost:3001".to_owned(),
+            token_service_url: Url::parse("http://localhost").unwrap(),
+            ca_root_store: root.clone(),
+            ca_root_cert: "".to_owned(),
+            client_config: Arc::new(
+                ClientConfig::builder()
+                    .with_root_certificates(root)
+                    .with_no_client_auth(),
+            ),
+            client_cert: None,
+        }
     }
 
     impl MessageLoopTestSetup {
@@ -230,31 +337,7 @@ mod tests {
             .await
             .expect("start_event_server");
 
-            // build AgentConfig pointing at our server
-            let api_url = Url::parse(&format!("wss://localhost:{port}")).expect("url");
-            let root = RootCertStore::empty();
-            let config = AgentConfig {
-                events_api_url: api_url,
-                mgmt_api_url: Url::parse("http://localhost").unwrap(),
-                smb_hostname: "example.local".to_string(),
-                smb_ip: tokio::sync::OnceCell::new(),
-                smb_port: 445,
-                smb_domain: "WORKGROUP".to_string(),
-                identity: crate::config::MTLSIdentity::AgentId {
-                    agent_name: "test-agent".to_string(),
-                    resource_name: "test_resource".to_string(),
-                },
-                listen_local_api: "localhost:3001".to_owned(),
-                token_service_url: Url::parse("http://localhost").unwrap(),
-                ca_root_store: root.clone(),
-                ca_root_cert: "".to_owned(),
-                client_config: Arc::new(
-                    ClientConfig::builder()
-                        .with_root_certificates(root)
-                        .with_no_client_auth(),
-                ),
-                client_cert: None,
-            };
+            let config = test_config(port);
 
             let state = AgentState::new(&config).await;
 
@@ -475,5 +558,152 @@ mod tests {
             .await;
 
         test_setup.abort().await;
+    }
+
+    /// smbdrop resends the shares when agents come and go; helpers only get actual changes
+    #[tokio::test]
+    async fn test_unchanged_desired_state_is_not_forwarded() {
+        let mut test_setup = MessageLoopTestSetup::start().await;
+
+        let share_1 = test_share("test-id-1", 0);
+        let mut state_1 = test_setup.initial_state.clone();
+        state_1.shares.insert(share_1.share_id.clone(), share_1);
+        test_setup.event_queue.send(state_1.clone()).unwrap();
+        test_setup
+            .wait_for_forwarded(&["test-id-1"], Some("test-id-1"))
+            .await;
+
+        // the same again, then a change: the change is the next thing helpers see
+        test_setup.event_queue.send(state_1.clone()).unwrap();
+        let share_2 = test_share("test-id-2", 1);
+        let mut state_2 = state_1.clone();
+        state_2.shares.insert(share_2.share_id.clone(), share_2);
+        test_setup.event_queue.send(state_2).unwrap();
+
+        let next = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let StateUpdateToSession::DesiredState { shares, .. } =
+                    test_setup.to_sessions.recv().await.unwrap()
+                {
+                    return shares.len();
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(next, 2);
+
+        test_setup.abort().await;
+    }
+
+    /// Our status as smbdrop sends it back to us
+    async fn wait_for_own_status(test_setup: &MessageLoopTestSetup, expected: AgentMountStatus) {
+        let me =
+            modama_common::agent::AgentId::from_uri("x-modama-agent://test_resource#test-agent")
+                .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = test_setup
+                    .state
+                    .lock()
+                    .await
+                    .remote_info
+                    .as_ref()
+                    .and_then(|remote| remote.mount_status_of(&me));
+                if status == Some(expected) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("own status did not become {expected:?}"));
+    }
+
+    #[tokio::test]
+    async fn test_mount_status_is_reported() {
+        use crate::caller_scope::HelperScope;
+        use crate::events_api::SessionBeginEnd;
+        use modama_common::internal_api_types::SessionHelperState;
+
+        let test_setup = MessageLoopTestSetup::start().await;
+        wait_for_own_status(&test_setup, AgentMountStatus::NoHelper).await;
+
+        // a session helper connects, but hasn't reported yet
+        let scope = HelperScope::Uid(1000);
+        let sessions = test_setup.state.lock().await.session_channel_sender.clone();
+        sessions.send(SessionBeginEnd::Begin { scope }).unwrap();
+        wait_for_own_status(&test_setup, AgentMountStatus::Reconciling).await;
+
+        // it reports for the current (empty) desired state
+        {
+            let mut state = test_setup.state.lock().await;
+            state.session_helpers.insert(
+                scope,
+                SessionHelperState {
+                    mounted_shares: vec![],
+                    errors: vec![],
+                    reconciled_share_ids: Some(vec![]),
+                },
+            );
+            state.mount_status_inputs_changed.notify_one();
+        }
+        wait_for_own_status(&test_setup, AgentMountStatus::Idle).await;
+
+        // a share is desired: its pass is still to come
+        let share = test_share("test-id-1", 0);
+        let mut new_state = test_setup.initial_state.clone();
+        new_state.shares.insert(share.share_id.clone(), share);
+        test_setup.event_queue.send(new_state).unwrap();
+        wait_for_own_status(&test_setup, AgentMountStatus::Reconciling).await;
+
+        // the helper goes away
+        sessions.send(SessionBeginEnd::End { scope }).unwrap();
+        wait_for_own_status(&test_setup, AgentMountStatus::NoHelper).await;
+
+        test_setup.abort().await;
+    }
+
+    /// The requests the reporter sent into `sink`
+    fn sent_requests(sink: &[Message]) -> Vec<EventChannelRequests> {
+        sink.iter()
+            .map(|msg| serde_json::from_str(msg.to_text().unwrap()).unwrap())
+            .collect()
+    }
+
+    /// An smbdrop that never sent `Welcome` doesn't know the request
+    #[tokio::test]
+    async fn test_no_status_report_without_welcome() {
+        let state = AgentState::new(&test_config(1)).await;
+        state.lock().await.remote_info = Some(RemoteInfo::default());
+        let mut sink: Vec<Message> = vec![];
+
+        let mut reporter = StatusReporter::default();
+        reporter.report(&state, &mut sink).await.unwrap();
+        assert!(sink.is_empty());
+
+        // after Welcome, the status is sent once
+        reporter.protocol = 1;
+        reporter.report(&state, &mut sink).await.unwrap();
+        reporter.report(&state, &mut sink).await.unwrap();
+        assert_eq!(
+            sent_requests(&sink),
+            vec![EventChannelRequests::ReportMountStatus {
+                status: AgentMountStatus::NoHelper
+            }]
+        );
+    }
+
+    /// Before smbdrop told us the desired state, we don't know our status
+    #[tokio::test]
+    async fn test_no_status_report_without_desired_state() {
+        let state = AgentState::new(&test_config(1)).await;
+        let mut sink: Vec<Message> = vec![];
+        let mut reporter = StatusReporter {
+            protocol: 1,
+            reported: None,
+        };
+        reporter.report(&state, &mut sink).await.unwrap();
+        assert!(sink.is_empty());
     }
 }

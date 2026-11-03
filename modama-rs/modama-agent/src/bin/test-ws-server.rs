@@ -63,6 +63,10 @@ async fn handle_message(
                 .send(tungstenite::Message::Text(json_msg.into()))
                 .await?;
         }
+        // this server speaks protocol 0 (never sends Welcome), so agents shouldn't report
+        EventChannelRequests::ReportMountStatus { status } => {
+            info!("unexpected mount status report: {status:?}");
+        }
     }
 
     Ok(())
@@ -88,6 +92,7 @@ async fn get_share_list() -> EventChannelMessage {
         shares,
         foreground_share: Some(foreground_share),
         connected_agents: Default::default(),
+        agent_mount_status: Default::default(),
     }
 }
 
