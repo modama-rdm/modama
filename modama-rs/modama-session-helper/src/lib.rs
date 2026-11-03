@@ -2,6 +2,8 @@
 //! session (WNet drive mappings on Windows, GVfs on Linux), and shows the mount popup and the
 //! notification-area icon. It runs from the GUI executable (`modama-agent-gui session-helper`).
 
+#[cfg(windows)]
+mod dpi_windows;
 pub mod entry;
 #[cfg(target_os = "linux")]
 pub mod gio_backend;

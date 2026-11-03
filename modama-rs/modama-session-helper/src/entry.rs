@@ -76,6 +76,9 @@ pub fn run(agent_url: &Url) -> Result<()> {
         }
     };
 
+    #[cfg(windows)]
+    crate::dpi_windows::enable_per_monitor_dpi_awareness();
+
     let options = LoopOptions::new(events_url(agent_url)?);
     let popups = GuiPopups::from_current_exe().context("could not locate our own executable")?;
     tokio::runtime::Runtime::new()?.block_on(async {
