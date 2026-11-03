@@ -340,13 +340,13 @@ system decides who may change it.
   covers `raw/` only, so a sealed session's description can still change, and
   one can be written once the data is in.
 - People can edit the file over SMB or WebDAV; whatever it says is the
-  description. The service reads at most 64 KiB of it, and anything that is
-  not a regular file with a single link (a symlink, a FIFO, a hard link) reads
-  as no description. The API does not write or remove a `README.md` that is a
-  folder or a FIFO (`400 description_rejected`); writing to a FIFO would block
-  the WebDAV server. That server refuses any path through a symlink, so a
-  symlinked `README.md` is never written through: an empty text leaves it
-  alone, and a write fails in the server (`502`).
+  description. The service reads at most 64 KiB of it; anything
+  that is not a regular file (a symlink, a FIFO) reads as no description, and a
+  hard link is read like any file. The API does not write or remove a
+  `README.md` that is a folder or a FIFO (`400 description_rejected`); writing
+  to a FIFO would block the WebDAV server. That server refuses any path through
+  a symlink, so a symlinked `README.md` is never written through: an empty text
+  leaves it alone, and a write fails in the server (`502`).
 - A session cannot be named `README.md`.
 
 ## Browsing

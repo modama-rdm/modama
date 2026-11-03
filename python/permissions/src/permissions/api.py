@@ -125,9 +125,10 @@ def check_valid_dataset(name: str):
 #
 # The service runs as root inside folders that members can write to, so the
 # file is never trusted to be what its name says: it is opened without
-# following symlinks and without blocking, and only a regular file with a
-# single link counts. A FIFO named README.md would otherwise hang every project
-# listing, and a hard link could show another file.
+# following symlinks and without blocking, and only a regular file counts. A
+# FIFO named README.md would otherwise hang every project listing. A hard link
+# is read like any other file: with `protected_hardlinks` set (see README.rst),
+# nobody can link a file they could not read and write already.
 
 README_NAME = "README.md"
 # The API accepts 10 000 characters, at most 40 000 bytes of UTF-8.
@@ -140,8 +141,8 @@ def read_readme(folder: str) -> str | None:
     """
     The description kept in `folder`, or None if there is none.
 
-    Reads at most :data:`README_MAX_BYTES`. Anything but a regular file with a
-    single link, and any error on the way, reads as no description.
+    Reads at most :data:`README_MAX_BYTES`. Anything but a regular file, and
+    any error on the way, reads as no description.
     """
     path = os.path.join(folder, README_NAME)
     try:
@@ -149,8 +150,7 @@ def read_readme(folder: str) -> str | None:
     except OSError:
         return None
     try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
         chunks: list[bytes] = []
         remaining = README_MAX_BYTES
@@ -798,8 +798,23 @@ if __name__ == "__main__":
         ],
         check=True,
     )
+    # A hard link is read like any file.
+    myproj.add_dataset("hardlink", "testdieter")
+    write_as("testdieter", os.path.join(myproj.path, "linked.txt"), "linked text\n")
+    subprocess.run(
+        [
+            "sudo",
+            "-u",
+            "testdieter",
+            "ln",
+            os.path.join(myproj.path, "linked.txt"),
+            f"{myproj.path}/hardlink/{README_NAME}",
+        ],
+        check=True,
+    )
     described = {d.name: d.description for d in myproj.datasets}
     assert described["fifo"] is None and described["link"] is None
+    assert described["hardlink"] == "linked text"
 
     # A dataset may not take the project README's name.
     try:
