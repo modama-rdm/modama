@@ -1,5 +1,6 @@
 """
-Calls into the WebDAV server in front of the data tree, for browsing.
+Calls into the WebDAV server in front of the data tree: listing a path, for
+browsing, and writing or removing a single file, for descriptions (#112).
 
 One `PROPFIND` with `Depth: 1` answers everything the browse endpoint needs: the
 properties of the path itself and, for a folder, of each entry in it. The
@@ -7,17 +8,18 @@ legacy browse page made three such requests per folder (two of them full
 listings) through `webdavclient3`; this module makes one, asks for three
 properties instead of `allprop`, and needs no WebDAV library.
 
-The request is made as the signed-in user. The server (the `suid` fork of
+Every request is made as the signed-in user. The server (the `suid` fork of
 wsgidav) authenticates by username alone and switches to that user's Unix
-identity for the request, so the file system decides what the user sees. That
-trust model is the same as the Flask app's; the server is only reachable
-inside the compose network.
+identity for the request, so the file system decides what the user sees and
+what they may change, as it does over SMB. That trust model is the same as the
+Flask app's; the server is only reachable inside the compose network.
 """
 
 import posixpath
 from collections.abc import Iterator
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
+from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 from xml.etree import ElementTree
 
@@ -46,7 +48,11 @@ class NotFound(Exception):
 
 
 class NoAccess(Exception):
-    """The server refused to list the path as this user."""
+    """The server refused to list or change the path as this user."""
+
+
+class NotAFile(Exception):
+    """There is a folder where a file was expected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,17 +88,14 @@ def list_path(settings: Settings, username: str, path: str) -> Listing:
     The resource at `path` and, for a folder, its entries, as `username` sees
     them. `path` must be normalized.
     """
-    try:
-        response = requests.request(
-            "PROPFIND",
-            settings.webdav_api.rstrip("/") + quote(path),
-            auth=(username, _USERONLY_PASSWORD),
-            headers={"Depth": "1", "Content-Type": "application/xml"},
-            data=_PROPFIND_BODY,
-            timeout=settings.webdav_timeout_seconds,
-        )
-    except requests.RequestException as exc:
-        raise _unavailable() from exc
+    response = _request(
+        settings,
+        username,
+        "PROPFIND",
+        path,
+        headers={"Depth": "1", "Content-Type": "application/xml"},
+        data=_PROPFIND_BODY,
+    )
     if response.status_code == 404:
         raise NotFound(path)
     if response.status_code == 403:
@@ -102,6 +105,63 @@ def list_path(settings: Settings, username: str, path: str) -> Listing:
     try:
         return parse_multistatus(response.content, path)
     except (ElementTree.ParseError, ValueError) as exc:
+        raise _unavailable() from exc
+
+
+def put_file(settings: Settings, username: str, path: str, content: bytes) -> None:
+    """
+    Write `content` to the file at `path`, as `username`. `path` must be
+    normalized.
+
+    A new file belongs to `username`; an existing one is truncated and
+    rewritten in place, so it keeps its owner. The server refuses any path
+    through a symlink (it fails with a 500), and it would block on a FIFO; a
+    caller that may meet one checks first.
+    """
+    response = _request(settings, username, "PUT", path, data=content)
+    if response.status_code in (200, 201, 204):
+        return
+    if response.status_code == 403:
+        raise NoAccess(path)
+    # 409: the folder the file would go into is missing.
+    if response.status_code in (404, 409):
+        raise NotFound(path)
+    if response.status_code == 405:
+        raise NotAFile(path)
+    raise _unavailable()
+
+
+def delete_file(settings: Settings, username: str, path: str) -> None:
+    """
+    Remove the file at `path`, as `username`. `path` must be normalized.
+
+    `Depth: 0` makes the server refuse a folder with a 400, where `infinity`,
+    the default, would remove it with everything in it.
+    """
+    response = _request(settings, username, "DELETE", path, headers={"Depth": "0"})
+    if response.status_code in (200, 204):
+        return
+    if response.status_code == 403:
+        raise NoAccess(path)
+    if response.status_code == 404:
+        raise NotFound(path)
+    if response.status_code == 400:
+        raise NotAFile(path)
+    raise _unavailable()
+
+
+def _request(
+    settings: Settings, username: str, method: str, path: str, **kwargs: Any
+) -> requests.Response:
+    try:
+        return requests.request(
+            method,
+            settings.webdav_api.rstrip("/") + quote(path),
+            auth=(username, _USERONLY_PASSWORD),
+            timeout=settings.webdav_timeout_seconds,
+            **kwargs,
+        )
+    except requests.RequestException as exc:
         raise _unavailable() from exc
 
 

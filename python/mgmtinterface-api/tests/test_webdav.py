@@ -1,5 +1,5 @@
 """
-The WebDAV call and the `multistatus` parser.
+The WebDAV calls and the `multistatus` parser.
 
 The XML shapes are those wsgidav answered on the test VM on 26 Oct 2026: hrefs
 percent-encoded, a folder's with a trailing slash, a file's `resourcetype`
@@ -17,11 +17,14 @@ from mgmtinterface_api.config import Settings
 from mgmtinterface_api.errors import APIError
 from mgmtinterface_api.webdav import (
     NoAccess,
+    NotAFile,
     NotFound,
     Resource,
+    delete_file,
     list_path,
     normalize_path,
     parse_multistatus,
+    put_file,
 )
 
 MODIFIED = "Fri, 02 Oct 2026 11:00:00 GMT"
@@ -158,7 +161,7 @@ def test_an_answer_that_does_not_describe_the_path_is_an_error():
 def webdav(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """
     A fake `requests.request` that answers what `reply` holds and records the
-    call. Replaced per test; `list_path` is the only caller in this service.
+    call. Replaced per test; this module makes every WebDAV request.
     """
     state: dict[str, Any] = {"reply": None, "calls": []}
 
@@ -221,5 +224,90 @@ def test_anything_else_is_unavailable(
     webdav["reply"] = reply
     with pytest.raises(APIError) as excinfo:
         list_path(settings, "shanker", "/adhoc")
+    assert excinfo.value.status_code == 502
+    assert excinfo.value.code == "files_unavailable"
+
+
+# --- put_file and delete_file (#112) -----------------------------------------
+#
+# The statuses are those of the suid wsgidav: a `PermissionError` anywhere is a
+# 403, a PUT into a missing folder a 409, a PUT onto a folder a 405, and a
+# DELETE of a folder with `Depth: 0` a 400.
+
+README = "/adhoc/my proj#1/README.md"
+
+
+def reply(status: int) -> SimpleNamespace:
+    return SimpleNamespace(status_code=status, content=b"")
+
+
+def test_puts_the_bytes_as_the_user(settings: Settings, webdav: dict[str, Any]):
+    webdav["reply"] = reply(201)
+    put_file(settings, "shanker", README, b"text\n")
+
+    (call,) = webdav["calls"]
+    assert call["method"] == "PUT"
+    assert call["url"] == "http://webdav:8080/adhoc/my%20proj%231/README.md"
+    assert call["auth"][0] == "shanker"
+    assert call["data"] == b"text\n"
+    assert call["timeout"] == settings.webdav_timeout_seconds
+
+
+@pytest.mark.parametrize("status", [200, 201, 204])
+def test_a_put_succeeds(settings: Settings, webdav: dict[str, Any], status: int):
+    webdav["reply"] = reply(status)
+    put_file(settings, "shanker", README, b"x")
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [(403, NoAccess), (404, NotFound), (409, NotFound), (405, NotAFile)],
+)
+def test_a_refused_put(
+    settings: Settings, webdav: dict[str, Any], status: int, error: type
+):
+    webdav["reply"] = reply(status)
+    with pytest.raises(error):
+        put_file(settings, "shanker", README, b"x")
+
+
+def test_deletes_with_depth_zero_as_the_user(
+    settings: Settings, webdav: dict[str, Any]
+):
+    webdav["reply"] = reply(204)
+    delete_file(settings, "shanker", README)
+
+    (call,) = webdav["calls"]
+    assert call["method"] == "DELETE"
+    assert call["url"] == "http://webdav:8080/adhoc/my%20proj%231/README.md"
+    assert call["auth"][0] == "shanker"
+    # Never `infinity`, which would take a folder with everything in it.
+    assert call["headers"] == {"Depth": "0"}
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [(403, NoAccess), (404, NotFound), (400, NotAFile)],
+)
+def test_a_refused_delete(
+    settings: Settings, webdav: dict[str, Any], status: int, error: type
+):
+    webdav["reply"] = reply(status)
+    with pytest.raises(error):
+        delete_file(settings, "shanker", README)
+
+
+@pytest.mark.parametrize("call", [put_file, delete_file])
+@pytest.mark.parametrize(
+    "answer",
+    [requests.ConnectionError("webdav is down"), reply(500), reply(207)],
+)
+def test_any_other_answer_to_a_change_is_unavailable(
+    settings: Settings, webdav: dict[str, Any], call: Any, answer: Any
+):
+    webdav["reply"] = answer
+    args = (b"x",) if call is put_file else ()
+    with pytest.raises(APIError) as excinfo:
+        call(settings, "shanker", README, *args)
     assert excinfo.value.status_code == 502
     assert excinfo.value.code == "files_unavailable"
