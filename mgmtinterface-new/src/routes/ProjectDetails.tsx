@@ -81,8 +81,9 @@ const Markdown = lazy(() =>
 
 /**
  * The project's description, rendered from Markdown, with a way to edit it for
- * the owner and the members. Without one, they get a link to add it;
- * everyone else sees nothing.
+ * the owner and the members; whether the file system lets them is up to who
+ * wrote it, and the edit screen says so. Without one, they get a link to add
+ * it; everyone else sees nothing.
  */
 function ProjectDescription({
                                 project,

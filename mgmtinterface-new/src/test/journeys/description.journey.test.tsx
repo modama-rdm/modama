@@ -11,6 +11,9 @@ import {FIXTURE_DATASETS, FIXTURE_PROJECT} from '../fixtures/project'
  * the project's as Markdown, the search covers them, and the owner and the
  * members change them on their own screen. The texts are the hand-written
  * ones in the fixtures (see `fixtures/README.md`).
+ *
+ * Who may change one is the file system's call: the API writes README.md as
+ * the signed-in user, so only whoever wrote it first may change it.
  */
 describe('journey: descriptions', () => {
     const name = FIXTURE_PROJECT.name
@@ -163,21 +166,25 @@ describe('journey: descriptions', () => {
             expect(recorder.matching('PUT', projectPut)[0].body).toEqual({description: ''})
         })
 
-        it("shows the API's reason and keeps the text when the change is refused", async () => {
-            signIn('user1')
+        it.each([
+            {
+                why: 'README.md is not a plain file',
+                status: 400,
+                code: 'description_rejected',
+                message: `README.md in project '${name}' is not a plain file (it is a folder or a FIFO), so it is left alone.`,
+            },
+            {
+                // user2 is a member, but README.md is someone else's file.
+                why: 'someone else wrote README.md',
+                status: 403,
+                code: 'no_access',
+                message: `Only the person who created README.md in project '${name}' can change it.`,
+            },
+        ])("shows the API's reason and keeps the text when $why", async ({status, code, message}) => {
+            signIn('user2')
             installApiMock([
                 ...baseWorld(),
-                {
-                    method: 'PUT',
-                    path: projectPut,
-                    respond: () => ({
-                        status: 400,
-                        body: {
-                            code: 'description_rejected',
-                            message: 'README.md is not a regular file, so it is left alone.',
-                        },
-                    }),
-                },
+                {method: 'PUT', path: projectPut, respond: () => ({status, body: {code, message}})},
             ])
             const {user} = renderApp({route: `/projects/${name}/description`})
 
@@ -185,9 +192,16 @@ describe('journey: descriptions', () => {
             await user.type(field, ' more')
             await user.click(screen.getByRole('button', {name: 'Save Description'}))
 
-            expect(await screen.findByText('README.md is not a regular file, so it is left alone.'))
-                .toBeInTheDocument()
+            expect(await screen.findByText(message)).toBeInTheDocument()
             expect(screen.getByLabelText('Description')).toHaveValue(`${projectDescription} more`)
+        })
+
+        it('says who may change the file', async () => {
+            signIn('user2')
+            installApiMock(baseWorld())
+            renderApp({route: `/projects/${name}/description`})
+
+            expect(await screen.findByText(/belongs to whoever writes it first/)).toBeInTheDocument()
         })
 
         it('turns away someone outside the project', async () => {

@@ -105,8 +105,10 @@ export interface CreateSessionRequestV2 {
 /**
  * `PUT /mgmt-api/projects/<name>/description` and
  * `PUT /mgmt-api/projects/<name>/sessions/<session>/description`: the new
- * text of the folder's `README.md`; an empty text removes the file. The
- * owner and the members may change it. Answers the project or the session.
+ * text of the folder's `README.md`; an empty text removes the file. Only the
+ * owner and the members get that far (`403 not_a_member`); the API then
+ * writes the file over WebDAV as the signed-in user, so only whoever wrote it
+ * first may change it (`403 no_access`). Answers the project or the session.
  */
 export interface SetDescriptionRequestV2 {
     description: string

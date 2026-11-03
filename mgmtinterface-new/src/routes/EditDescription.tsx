@@ -50,7 +50,9 @@ function DescriptionForm() {
     const [submitting, setSubmitting] = useState(false)
 
     const backTo = `/projects/${project.name}`
-    // The rule the API applies: the owner and the members, as for sealing.
+    // The API's first check: the owner and the members, as for sealing. Who
+    // may change a README.md that is there is the file system's call (whoever
+    // wrote it), which only the save can tell: a 403 shown in the form.
     const canEdit = currentUser === project.owner || project.members.includes(currentUser)
     const dirty = text.trim() !== current.trim()
 
@@ -124,7 +126,8 @@ function DescriptionForm() {
                         the sessions table.
                     </>
                 )}{' '}
-                The owner and the members can change it.
+                The file belongs to whoever writes it first, and only they can change
+                it afterwards.
             </p>
 
             {error && (
