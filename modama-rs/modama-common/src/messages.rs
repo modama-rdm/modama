@@ -109,6 +109,18 @@ pub enum AgentMountStatus {
     Unknown,
 }
 
+/// One connection to smbdrop's event channel, numbered by smbdrop as it accepts them; unique
+/// while that smbdrop runs (the counter wraps after 2^64 connections)
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
+pub struct ConnectionId(pub u64);
+
+impl std::fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{}", self.0)
+    }
+}
+
 /// The last mount status an agent reported
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct AgentMountStatusEntry {

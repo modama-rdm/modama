@@ -1,9 +1,9 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::BTreeMap,
     io,
     net::SocketAddr,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use crate::{share_manager::SmbDropState, token_server::LocalTokenVerifier};
@@ -13,20 +13,16 @@ use modama_common::{
     agent::{AgentId, ClientCertError, FromURIError},
     cert_helpers::CertHelperError,
     messages::{
-        AgentMountStatus, AgentMountStatusEntry, EVENT_CHANNEL_PROTOCOL,
+        AgentMountStatus, AgentMountStatusEntry, ConnectionId, EVENT_CHANNEL_PROTOCOL,
         EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share,
     },
     tokens::Claims,
 };
 use rustls::ServerConfig;
-use serde::{Deserialize, Serialize};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::{
-        Mutex,
-        broadcast::{self, error::RecvError},
-    },
+    sync::broadcast::{self, error::RecvError},
     task::JoinHandle,
 };
 use tokio_rustls::{TlsAcceptor, rustls::server::VerifierBuilderError, server::TlsStream};
@@ -89,52 +85,126 @@ enum HandlerError {
     Disconnected,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct EventSystemState {
+/// One open event-channel connection
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConnectionEntry {
+    /// Whom the connection's token was issued to
+    agent: AgentId,
+
+    peer: SocketAddr,
+
+    /// The last mount status the agent reported on this connection
+    status: Option<AgentMountStatus>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EventSystemState {
     /// Shares and users updated from external (triggered via the HTTP API)
-    pub inner_state: SmbDropState,
+    inner_state: SmbDropState,
 
-    /// Updated from the connection handler
-    pub connected_agents: HashSet<AgentId>,
+    /// The open connections, added and removed by `ConnectionRegistration`
+    connections: BTreeMap<ConnectionId, ConnectionEntry>,
 
-    /// The last mount status each connected agent reported; updated from the connection handler
-    pub mount_status: HashMap<AgentId, AgentMountStatus>,
+    /// The number for the next connection
+    next_connection: u64,
+}
+
+/// Lock the shared state. Nothing panics while holding the lock, and every update leaves the
+/// state consistent, so a poisoned lock is used as it is.
+fn lock_state(state: &Mutex<EventSystemState>) -> MutexGuard<'_, EventSystemState> {
+    state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A connection's entry in the shared state, for as long as this value lives: it removes the
+/// entry when dropped, whichever way the connection handler ends (return, error or
+/// cancellation), and tells every connection about the change.
+struct ConnectionRegistration {
+    id: ConnectionId,
+    state: Arc<Mutex<EventSystemState>>,
+    state_updates_tx: broadcast::Sender<SmbDropState>,
+}
+
+impl ConnectionRegistration {
+    fn register(
+        state: &Arc<Mutex<EventSystemState>>,
+        state_updates_tx: &broadcast::Sender<SmbDropState>,
+        agent: AgentId,
+        peer: SocketAddr,
+    ) -> Self {
+        let mut locked = lock_state(state);
+        let id = ConnectionId(locked.next_connection);
+        locked.next_connection = locked.next_connection.wrapping_add(1);
+        locked.connections.insert(
+            id,
+            ConnectionEntry {
+                agent,
+                peer,
+                status: None,
+            },
+        );
+        broadcast_change(state_updates_tx, &locked);
+        Self {
+            id,
+            state: Arc::clone(state),
+            state_updates_tx: state_updates_tx.clone(),
+        }
+    }
+}
+
+impl Drop for ConnectionRegistration {
+    fn drop(&mut self) {
+        let mut locked = lock_state(&self.state);
+        locked.connections.remove(&self.id);
+        broadcast_change(&self.state_updates_tx, &locked);
+        info!("connection {} closed", self.id);
+    }
+}
+
+/// Make every connection send its agent an update, after a change to the connections or their
+/// mount status
+fn broadcast_change(state_updates_tx: &broadcast::Sender<SmbDropState>, state: &EventSystemState) {
+    // fails only without receivers, that is, without connections that could be told
+    if state_updates_tx.send(state.inner_state.clone()).is_err() {
+        debug!("no connections to tell about the change");
+    }
 }
 
 async fn handle_ws_message(
     msg: &str,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
-    last_state: Arc<Mutex<EventSystemState>>,
+    last_state: &Mutex<EventSystemState>,
     state_updates_tx: &broadcast::Sender<SmbDropState>,
+    connection: ConnectionId,
     agent_id: &AgentId,
 ) -> Result<(), HandlerError> {
     // requests from newer agents that we don't know: keep the connection
     let msg: EventChannelRequests = match serde_json::from_str(msg) {
         Ok(msg) => msg,
         Err(e) => {
-            warn!("ignoring request from {agent_id:?} that we don't understand: {e}");
+            warn!("ignoring request on connection {connection} that we don't understand: {e}");
             return Ok(());
         }
     };
 
     match msg {
         EventChannelRequests::ShareListUpdate => {
-            let state = { last_state.lock().await.clone() };
-            let msg = update_msg_from_state(&state, agent_id).await;
+            let state = lock_state(last_state).clone();
+            let msg = update_msg_from_state(&state, agent_id);
             let json_msg = serde_json::to_string(&msg)?;
             ws_stream
                 .send(tungstenite::Message::Text(json_msg.into()))
                 .await?;
         }
         EventChannelRequests::ReportMountStatus { status } => {
-            let mut state = last_state.lock().await;
-            let previous = state.mount_status.insert(agent_id.clone(), status);
+            let mut state = lock_state(last_state);
+            let Some(entry) = state.connections.get_mut(&connection) else {
+                return Err(HandlerError::Disconnected);
+            };
+            let previous = entry.status.replace(status);
             // like connecting and disconnecting agents, a changed status is propagated by
             // sending out the current shares and users again
             if previous != Some(status) {
-                state_updates_tx
-                    .send(state.inner_state.clone())
-                    .map_err(|_| HandlerError::Disconnected)?;
+                broadcast_change(state_updates_tx, &state);
             }
         }
     }
@@ -142,30 +212,33 @@ async fn handle_ws_message(
     Ok(())
 }
 
-async fn update_msg_from_state(
-    state: &EventSystemState,
-    agent_id: &AgentId,
-) -> EventChannelMessage {
+fn update_msg_from_state(state: &EventSystemState, agent_id: &AgentId) -> EventChannelMessage {
     let mut shares = share_list_from_state(state, agent_id);
     shares.sort_by_key(|share| share.get_created_systime());
 
     // FIXME: right now, the foreground share is always the latest share
     // for the resource, by creation timestamp. This might need to be
     // re-evaluated.
-    let mut connected_agents: Vec<AgentId> = state.connected_agents.iter().cloned().collect();
+
+    // one entry per agent, with the status of its oldest connection that reported one; an
+    // agent with several connections is listed once
+    let mut connected_agents: Vec<AgentId> = Vec::new();
+    let mut agent_mount_status: Vec<AgentMountStatusEntry> = Vec::new();
+    for entry in state.connections.values() {
+        if !connected_agents.contains(&entry.agent) {
+            connected_agents.push(entry.agent.clone());
+        }
+        if let Some(status) = entry.status
+            && !agent_mount_status.iter().any(|e| e.agent == entry.agent)
+        {
+            agent_mount_status.push(AgentMountStatusEntry {
+                agent: entry.agent.clone(),
+                status,
+            });
+        }
+    }
     connected_agents.sort_by(|id1, id2| id1.san_encoded.cmp(&id2.san_encoded));
-    let agent_mount_status = connected_agents
-        .iter()
-        .filter_map(|agent| {
-            state
-                .mount_status
-                .get(agent)
-                .map(|status| AgentMountStatusEntry {
-                    agent: agent.clone(),
-                    status: *status,
-                })
-        })
-        .collect();
+    agent_mount_status.sort_by(|e1, e2| e1.agent.san_encoded.cmp(&e2.agent.san_encoded));
     EventChannelMessage::UpdateShareList {
         shares: shares.clone(),
         foreground_share: shares.iter().last().cloned(),
@@ -179,7 +252,7 @@ async fn handle_state_update(
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     agent_id: &AgentId,
 ) -> Result<(), HandlerError> {
-    let msg = update_msg_from_state(state, agent_id).await;
+    let msg = update_msg_from_state(state, agent_id);
     let json_msg = serde_json::to_string(&msg)?;
     ws_stream
         .send(tungstenite::Message::Text(json_msg.into()))
@@ -211,21 +284,23 @@ async fn handle_connection(
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
     mut state_updates_rx: broadcast::Receiver<SmbDropState>,
     state_updates_tx: &broadcast::Sender<SmbDropState>,
-    last_state: Arc<Mutex<EventSystemState>>,
-    agent_id: AgentId,
+    last_state: &Mutex<EventSystemState>,
+    connection: ConnectionId,
+    agent_id: &AgentId,
 ) -> Result<(), HandlerError> {
     loop {
         select! {
             msg = ws_stream.next() => {
                 let msg = if let Some(msg) = msg { msg? } else { break };
                 if let Ok(msg) = msg.into_text() {
-                    info!("Got ws message: {}", msg);
+                    info!("connection {connection}: got ws message: {msg}");
                     handle_ws_message(
                         &msg,
                         ws_stream,
-                        Arc::clone(&last_state),
+                        last_state,
                         state_updates_tx,
-                        &agent_id,
+                        connection,
+                        agent_id,
                     )
                     .await?;
                 } else {
@@ -237,14 +312,14 @@ async fn handle_connection(
                 // compose the update of shares and users with connected agents:
                 info!("propagating state update from channel: {new_state:?}");
                 let comp_state = {
-                    let last_state = last_state.lock().await;
+                    let last_state = lock_state(last_state);
                     EventSystemState {
                         inner_state: new_state,
-                        connected_agents: last_state.connected_agents.clone(),
-                        mount_status: last_state.mount_status.clone(),
+                        connections: last_state.connections.clone(),
+                        next_connection: last_state.next_connection,
                     }
                 };
-                handle_state_update(&comp_state, ws_stream, &agent_id).await?;
+                handle_state_update(&comp_state, ws_stream, agent_id).await?;
             }
         }
     }
@@ -278,12 +353,16 @@ async fn handle_authenticated_connection(
     state_updates_rx: broadcast::Receiver<SmbDropState>,
     state_updates_tx: broadcast::Sender<SmbDropState>,
 ) -> Result<(), HandlerError> {
+    let agent_id = AgentId::from_uri(&claims.sub)?;
+
+    // from here on, the connection is listed until `registration` is dropped
+    let registration =
+        ConnectionRegistration::register(&last_state, &state_updates_tx, agent_id.clone(), peer);
+    let connection = registration.id;
     info!(
-        "connection {peer} authenticated with token from {} version {} protocol {}",
+        "connection {connection} from {peer} authenticated with token from {} version {} protocol {}",
         claims.sub, client.version, client.protocol
     );
-
-    let agent_id = AgentId::from_uri(&claims.sub)?;
 
     // before any update, so the agent knows which protocol version to use from the start:
     if client.protocol >= 1 {
@@ -297,23 +376,13 @@ async fn handle_authenticated_connection(
             .await?;
     }
 
-    // update connected agents and broadcast a state update
-    {
-        let mut state_unlocked = last_state.lock().await;
-        state_unlocked.connected_agents.insert(agent_id.clone());
-        state_updates_tx
-            .send(state_unlocked.inner_state.clone())
-            .map_err(|_| HandlerError::Disconnected)?;
-    }
-
-    let conn_last_state = Arc::clone(&last_state);
-
     if let Err(e) = handle_connection(
         &mut ws_stream,
         state_updates_rx,
         &state_updates_tx,
-        conn_last_state,
-        agent_id.clone(),
+        &last_state,
+        connection,
+        &agent_id,
     )
     .await
     {
@@ -321,21 +390,8 @@ async fn handle_authenticated_connection(
             HandlerError::WsError(tungstenite::Error::ConnectionClosed)
             | HandlerError::WsError(tungstenite::Error::Protocol(_))
             | HandlerError::WsError(tungstenite::Error::Utf8(_)) => (),
-            err => error!("Error handling connection: {err}"),
+            err => error!("Error handling connection {connection}: {err}"),
         }
-    }
-
-    // NOTE: be careful not to put anything that can panic or return between the
-    // update at the top and this one, so the state is properly updated on
-    // errors, too
-    // TODO: if possible replace with a guard that removes the agent on Drop
-    {
-        let mut state_unlocked = last_state.lock().await;
-        state_unlocked.connected_agents.remove(&agent_id);
-        state_unlocked.mount_status.remove(&agent_id);
-        state_updates_tx
-            .send(state_unlocked.inner_state.clone())
-            .map_err(|_| HandlerError::Disconnected)?;
     }
 
     Ok(())
@@ -443,8 +499,8 @@ pub async fn start_event_server(
 ) -> Result<(JoinHandle<()>, broadcast::Sender<SmbDropState>, u16), ServerStartError> {
     let state = EventSystemState {
         inner_state: state.clone(),
-        connected_agents: HashSet::new(),
-        mount_status: HashMap::new(),
+        connections: BTreeMap::new(),
+        next_connection: 0,
     };
     let (tx, mut rx) = broadcast::channel::<SmbDropState>(16);
     let token_verifier = LocalTokenVerifier::new(secret_key);
@@ -458,7 +514,7 @@ pub async fn start_event_server(
         loop {
             let maybe_state = rx.recv().await;
             if let Ok(state) = maybe_state {
-                wr_last_state.lock().await.inner_state = state;
+                lock_state(&wr_last_state).inner_state = state;
             } else if let Err(RecvError::Closed) = maybe_state {
                 break;
             }
@@ -1218,6 +1274,68 @@ mod test {
         agent_1.close(None).await.unwrap();
         assert_eq!(next_msg(&mut agent_2).await, update(&["test_agent_2"], &[]));
         assert_no_msg(&mut agent_2).await;
+        server.handle.abort();
+    }
+
+    /// Two connections with tokens for the same agent, as when an anonymous agent borrowed the
+    /// token: each keeps its own entry, and closing one leaves the other listed with its status
+    #[tokio::test]
+    async fn test_connections_with_one_identity_are_tracked_separately() {
+        for close_first in [true, false] {
+            let server = make_test_event_server().await;
+            let mut first =
+                connect_agent(&server, &server.certs.client_config_1, "test_agent", 1).await;
+            next_msg(&mut first).await; // Welcome
+            assert_eq!(next_msg(&mut first).await, update(&["test_agent"], &[]));
+            let mut second =
+                connect_agent(&server, &server.certs.client_config_1, "test_agent", 1).await;
+            next_msg(&mut second).await; // Welcome
+            assert_eq!(next_msg(&mut first).await, update(&["test_agent"], &[]));
+            assert_eq!(next_msg(&mut second).await, update(&["test_agent"], &[]));
+
+            let report = |status| EventChannelRequests::ReportMountStatus { status };
+            send_request(&mut first, &report(AgentMountStatus::Idle)).await;
+            let idle = update(&["test_agent"], &[("test_agent", AgentMountStatus::Idle)]);
+            assert_eq!(next_msg(&mut first).await, idle);
+            assert_eq!(next_msg(&mut second).await, idle);
+
+            // the second connection's status doesn't replace the first one's
+            send_request(&mut second, &report(AgentMountStatus::NoHelper)).await;
+            assert_eq!(next_msg(&mut first).await, idle);
+            assert_eq!(next_msg(&mut second).await, idle);
+
+            let (mut closing, mut staying, staying_status) = if close_first {
+                (first, second, AgentMountStatus::NoHelper)
+            } else {
+                (second, first, AgentMountStatus::Idle)
+            };
+            closing.close(None).await.unwrap();
+            assert_eq!(
+                next_msg(&mut staying).await,
+                update(&["test_agent"], &[("test_agent", staying_status)]),
+                "close_first: {close_first}"
+            );
+            assert_no_msg(&mut staying).await;
+            server.handle.abort();
+        }
+    }
+
+    /// A connection that goes away without a closing handshake is removed all the same
+    #[tokio::test]
+    async fn test_connection_dropped_without_close_is_removed() {
+        let server = make_test_event_server().await;
+        let mut staying =
+            connect_agent(&server, &server.certs.client_config_1, "test_agent", 1).await;
+        next_msg(&mut staying).await; // Welcome
+        next_msg(&mut staying).await;
+        let mut dropped =
+            connect_agent(&server, &server.certs.client_config_2, "test_agent_2", 1).await;
+        next_msg(&mut dropped).await; // Welcome
+        let both = update(&["test_agent", "test_agent_2"], &[]);
+        assert_eq!(next_msg(&mut staying).await, both);
+
+        drop(dropped);
+        assert_eq!(next_msg(&mut staying).await, update(&["test_agent"], &[]));
         server.handle.abort();
     }
 
