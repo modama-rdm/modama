@@ -1,7 +1,7 @@
 name: er-c-data
 # Test deployment inside WSL2 (NAT networking), with modama-agent and
 # modama-agent-gui running on the Windows host. Use on top of
-# docker-compose.override.yml, see upwsl.sh.
+# docker-compose.override.yml, see run.sh and README.md.
 #
 # Ports the agent needs are published on all WSL addresses instead of only
 # 127.0.0.1. With NAT networking these are only reachable from the Windows
