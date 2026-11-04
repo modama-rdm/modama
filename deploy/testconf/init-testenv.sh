@@ -38,12 +38,12 @@ init_folders() {
 
     mkdir -p data/adhoc nextcloud-data nextcloud-html postgres sampledb etc/smbdrop
 
-    # Nextcloud runs as www-data. Chown recursively only the first time, the
-    # html folder holds the whole Nextcloud source tree once it is installed.
+    # Nextcloud runs as www-data and has to own everything below these folders,
+    # not only the folders themselves: one left over from an older setup can
+    # have, for example, a config/ of the host user. Only what has another owner
+    # is changed; -h changes a symlink itself, not what it points to.
     for dir in nextcloud-data nextcloud-html; do
-        if [ "$(stat -c %u "$dir")" != "$NEXTCLOUD_UID" ]; then
-            chown -R "$NEXTCLOUD_UID:$NEXTCLOUD_UID" "$dir"
-        fi
+        find "$dir" ! -uid "$NEXTCLOUD_UID" -exec chown -h "$NEXTCLOUD_UID:$NEXTCLOUD_UID" {} +
     done
     chmod -R o-rwx nextcloud-data
 
