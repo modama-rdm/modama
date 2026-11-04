@@ -504,7 +504,9 @@ async fn authenticate_agent_connection(
     };
     debug!("connection attempt from {peer}; client version {version} protocol {protocol}");
 
-    let identity = if protocol < MIN_EVENT_CHANNEL_PROTOCOL {
+    // from the login message, we gather the identity,
+    // or reject the connection:
+    let identity_or_rejection = if protocol < MIN_EVENT_CHANNEL_PROTOCOL {
         Err(LoginRejection::ProtocolTooOld { protocol })
     } else {
         token_verifier
@@ -513,7 +515,7 @@ async fn authenticate_agent_connection(
             .ok_or(LoginRejection::InvalidToken)
             .and_then(|token_agent| identify(token_agent, certificate, anonymous_name))
     };
-    match identity {
+    match identity_or_rejection {
         Ok(identity) => {
             handle_authenticated_connection(
                 peer,
