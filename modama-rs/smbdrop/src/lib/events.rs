@@ -6,17 +6,19 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
-use crate::{share_manager::SmbDropState, token_server::LocalTokenVerifier};
+use crate::{
+    helpers::peer_agent_id, share_manager::SmbDropState, token_server::LocalTokenVerifier,
+};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use modama_common::{
-    agent::{AgentId, ClientCertError, FromURIError},
+    agent::{AgentId, ClientCertError},
     cert_helpers::CertHelperError,
     messages::{
         AgentMountStatus, AgentMountStatusEntry, ConnectionId, EVENT_CHANNEL_PROTOCOL,
-        EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share,
+        EventChannelInitialMessages, EventChannelMessage, EventChannelRequests,
+        MAX_ANONYMOUS_NAME_CHARS, MIN_EVENT_CHANNEL_PROTOCOL, ParticipantIdentity, Share,
     },
-    tokens::Claims,
 };
 use rustls::ServerConfig;
 use tokio::{
@@ -27,6 +29,7 @@ use tokio::{
 };
 use tokio_rustls::{TlsAcceptor, rustls::server::VerifierBuilderError, server::TlsStream};
 use tokio_tungstenite::{WebSocketStream, accept_async};
+use tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
 
 #[derive(thiserror::Error, Debug)]
 pub enum ServerStartError {
@@ -75,12 +78,6 @@ enum HandlerError {
     #[error("Authentication failed: {0}")]
     Auth(String),
 
-    #[error("Validate agent ID: {0}")]
-    ClientCert(#[from] ClientCertError),
-
-    #[error("Decode agent IRD: {0}")]
-    FromURI(#[from] FromURIError),
-
     #[error("channel disconnected")]
     Disconnected,
 }
@@ -88,8 +85,7 @@ enum HandlerError {
 /// One open event-channel connection
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ConnectionEntry {
-    /// Whom the connection's token was issued to
-    agent: AgentId,
+    identity: ParticipantIdentity,
 
     peer: SocketAddr,
 
@@ -128,7 +124,7 @@ impl ConnectionRegistration {
     fn register(
         state: &Arc<Mutex<EventSystemState>>,
         state_updates_tx: &broadcast::Sender<SmbDropState>,
-        agent: AgentId,
+        identity: ParticipantIdentity,
         peer: SocketAddr,
     ) -> Self {
         let mut locked = lock_state(state);
@@ -137,7 +133,7 @@ impl ConnectionRegistration {
         locked.connections.insert(
             id,
             ConnectionEntry {
-                agent,
+                identity,
                 peer,
                 status: None,
             },
@@ -175,7 +171,7 @@ async fn handle_ws_message(
     last_state: &Mutex<EventSystemState>,
     state_updates_tx: &broadcast::Sender<SmbDropState>,
     connection: ConnectionId,
-    agent_id: &AgentId,
+    resource: &str,
 ) -> Result<(), HandlerError> {
     // requests from newer agents that we don't know: keep the connection
     let msg: EventChannelRequests = match serde_json::from_str(msg) {
@@ -189,7 +185,7 @@ async fn handle_ws_message(
     match msg {
         EventChannelRequests::ShareListUpdate => {
             let state = lock_state(last_state).clone();
-            let msg = update_msg_from_state(&state, agent_id);
+            let msg = update_msg_from_state(&state, resource);
             let json_msg = serde_json::to_string(&msg)?;
             ws_stream
                 .send(tungstenite::Message::Text(json_msg.into()))
@@ -212,8 +208,8 @@ async fn handle_ws_message(
     Ok(())
 }
 
-fn update_msg_from_state(state: &EventSystemState, agent_id: &AgentId) -> EventChannelMessage {
-    let mut shares = share_list_from_state(state, agent_id);
+fn update_msg_from_state(state: &EventSystemState, resource: &str) -> EventChannelMessage {
+    let mut shares = share_list_from_state(state, resource);
     shares.sort_by_key(|share| share.get_created_systime());
 
     // FIXME: right now, the foreground share is always the latest share
@@ -221,18 +217,22 @@ fn update_msg_from_state(state: &EventSystemState, agent_id: &AgentId) -> EventC
     // re-evaluated.
 
     // one entry per agent, with the status of its oldest connection that reported one; an
-    // agent with several connections is listed once
+    // agent with several connections is listed once, an anonymous one under its lender
     let mut connected_agents: Vec<AgentId> = Vec::new();
     let mut agent_mount_status: Vec<AgentMountStatusEntry> = Vec::new();
     for entry in state.connections.values() {
-        if !connected_agents.contains(&entry.agent) {
-            connected_agents.push(entry.agent.clone());
+        let agent = match &entry.identity {
+            ParticipantIdentity::Certified { agent } => agent,
+            ParticipantIdentity::Anonymous { lender, .. } => lender,
+        };
+        if !connected_agents.contains(agent) {
+            connected_agents.push(agent.clone());
         }
         if let Some(status) = entry.status
-            && !agent_mount_status.iter().any(|e| e.agent == entry.agent)
+            && !agent_mount_status.iter().any(|e| &e.agent == agent)
         {
             agent_mount_status.push(AgentMountStatusEntry {
-                agent: entry.agent.clone(),
+                agent: agent.clone(),
                 status,
             });
         }
@@ -250,9 +250,9 @@ fn update_msg_from_state(state: &EventSystemState, agent_id: &AgentId) -> EventC
 async fn handle_state_update(
     state: &EventSystemState,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
-    agent_id: &AgentId,
+    resource: &str,
 ) -> Result<(), HandlerError> {
-    let msg = update_msg_from_state(state, agent_id);
+    let msg = update_msg_from_state(state, resource);
     let json_msg = serde_json::to_string(&msg)?;
     ws_stream
         .send(tungstenite::Message::Text(json_msg.into()))
@@ -261,16 +261,12 @@ async fn handle_state_update(
     Ok(())
 }
 
-fn share_list_from_state(state: &EventSystemState, agent_id: &AgentId) -> Vec<Share> {
+fn share_list_from_state(state: &EventSystemState, resource: &str) -> Vec<Share> {
     state
         .inner_state
         .shares
         .values()
-        .filter(|s| {
-            s.resource
-                .as_ref()
-                .is_some_and(|res| res == &agent_id.resource)
-        })
+        .filter(|s| s.resource.as_ref().is_some_and(|res| res == resource))
         .cloned()
         .collect()
 }
@@ -286,7 +282,7 @@ async fn handle_connection(
     state_updates_tx: &broadcast::Sender<SmbDropState>,
     last_state: &Mutex<EventSystemState>,
     connection: ConnectionId,
-    agent_id: &AgentId,
+    resource: &str,
 ) -> Result<(), HandlerError> {
     loop {
         select! {
@@ -300,7 +296,7 @@ async fn handle_connection(
                         last_state,
                         state_updates_tx,
                         connection,
-                        agent_id,
+                        resource,
                     )
                     .await?;
                 } else {
@@ -319,7 +315,7 @@ async fn handle_connection(
                         next_connection: last_state.next_connection,
                     }
                 };
-                handle_state_update(&comp_state, ws_stream, agent_id).await?;
+                handle_state_update(&comp_state, ws_stream, resource).await?;
             }
         }
     }
@@ -348,33 +344,42 @@ async fn handle_authenticated_connection(
     peer: SocketAddr,
     client: ClientInfo<'_>,
     mut ws_stream: WebSocketStream<TlsStream<TcpStream>>,
-    claims: Claims,
+    identity: ParticipantIdentity,
     last_state: Arc<Mutex<EventSystemState>>,
     state_updates_rx: broadcast::Receiver<SmbDropState>,
     state_updates_tx: broadcast::Sender<SmbDropState>,
 ) -> Result<(), HandlerError> {
-    let agent_id = AgentId::from_uri(&claims.sub)?;
+    let resource = identity.resource().to_owned();
+    let description = match &identity {
+        ParticipantIdentity::Certified { agent } => {
+            format!("certified agent {}", agent.san_encoded)
+        }
+        ParticipantIdentity::Anonymous { name, lender } => {
+            format!(
+                "anonymous agent {name:?} with a token from {}",
+                lender.san_encoded
+            )
+        }
+    };
 
     // from here on, the connection is listed until `registration` is dropped
     let registration =
-        ConnectionRegistration::register(&last_state, &state_updates_tx, agent_id.clone(), peer);
+        ConnectionRegistration::register(&last_state, &state_updates_tx, identity, peer);
     let connection = registration.id;
     info!(
-        "connection {connection} from {peer} authenticated with token from {} version {} protocol {}",
-        claims.sub, client.version, client.protocol
+        "connection {connection} from {peer}: {description}, version {} protocol {}",
+        client.version, client.protocol
     );
 
     // before any update, so the agent knows which protocol version to use from the start:
-    if client.protocol >= 1 {
-        let welcome = EventChannelMessage::Welcome {
-            protocol: client.protocol.min(EVENT_CHANNEL_PROTOCOL),
-        };
-        ws_stream
-            .send(tungstenite::Message::Text(
-                serde_json::to_string(&welcome)?.into(),
-            ))
-            .await?;
-    }
+    let welcome = EventChannelMessage::Welcome {
+        protocol: client.protocol.min(EVENT_CHANNEL_PROTOCOL),
+    };
+    ws_stream
+        .send(tungstenite::Message::Text(
+            serde_json::to_string(&welcome)?.into(),
+        ))
+        .await?;
 
     if let Err(e) = handle_connection(
         &mut ws_stream,
@@ -382,7 +387,7 @@ async fn handle_authenticated_connection(
         &state_updates_tx,
         &last_state,
         connection,
-        &agent_id,
+        &resource,
     )
     .await
     {
@@ -397,6 +402,83 @@ async fn handle_authenticated_connection(
     Ok(())
 }
 
+/// Why smbdrop turns a login away; logged, and sent to the agent as the close reason
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
+enum LoginRejection {
+    #[error(
+        "protocol {protocol} is too old, smbdrop needs {MIN_EVENT_CHANNEL_PROTOCOL}; update the agent"
+    )]
+    ProtocolTooOld { protocol: u32 },
+
+    #[error("token verification failed")]
+    InvalidToken,
+
+    #[error("the client certificate names no agent: {0}")]
+    InvalidCertificate(String),
+
+    #[error("token for {token}, client certificate for {certificate}")]
+    TokenNotForCertificate { token: String, certificate: String },
+
+    #[error("Login without a client certificate; agents without one use AnonymousLogin")]
+    LoginWithoutCertificate,
+
+    #[error("AnonymousLogin with a client certificate; agents with one use Login")]
+    AnonymousWithCertificate,
+}
+
+/// Who a login is from, by the rules of ADR 0001: the client certificate identifies an agent,
+/// the token authorizes it at the token's resource. `anonymous_name` is the name sent with an
+/// `AnonymousLogin`, `None` for a `Login`.
+fn identify(
+    token_agent: AgentId,
+    certificate: Result<Option<AgentId>, ClientCertError>,
+    anonymous_name: Option<String>,
+) -> Result<ParticipantIdentity, LoginRejection> {
+    let certificate = certificate.map_err(|e| LoginRejection::InvalidCertificate(e.to_string()))?;
+    match (certificate, anonymous_name) {
+        (Some(certificate), None) if certificate == token_agent => {
+            Ok(ParticipantIdentity::Certified { agent: certificate })
+        }
+        (Some(certificate), None) => Err(LoginRejection::TokenNotForCertificate {
+            token: token_agent.san_encoded,
+            certificate: certificate.san_encoded,
+        }),
+        (None, None) => Err(LoginRejection::LoginWithoutCertificate),
+        (Some(_), Some(_)) => Err(LoginRejection::AnonymousWithCertificate),
+        (None, Some(name)) => {
+            let cut: String = name.chars().take(MAX_ANONYMOUS_NAME_CHARS).collect();
+            if cut != name {
+                warn!(
+                    "anonymous agent's name is longer than {MAX_ANONYMOUS_NAME_CHARS} characters, listing it as {cut:?}"
+                );
+            }
+            Ok(ParticipantIdentity::Anonymous {
+                name: cut,
+                lender: token_agent,
+            })
+        }
+    }
+}
+
+/// Close the connection with `rejection` as the reason, which the agent logs
+async fn reject_login(
+    ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
+    rejection: &LoginRejection,
+) -> Result<(), HandlerError> {
+    // a close frame carries at most 123 bytes of reason
+    let mut reason = rejection.to_string();
+    while reason.len() > 123 {
+        reason.pop();
+    }
+    ws_stream
+        .close(Some(CloseFrame {
+            code: CloseCode::Policy,
+            reason: reason.into(),
+        }))
+        .await?;
+    Ok(())
+}
+
 async fn authenticate_agent_connection(
     peer: SocketAddr,
     stream: TlsStream<TcpStream>,
@@ -405,51 +487,64 @@ async fn authenticate_agent_connection(
     state_updates_rx: broadcast::Receiver<SmbDropState>,
     state_updates_tx: broadcast::Sender<SmbDropState>,
 ) -> Result<(), HandlerError> {
+    let certificate = peer_agent_id(&stream);
     let mut ws_stream = accept_async(stream).await?;
 
     // the first message must be the authentication, otherwise we err out:
-    let auth_msg = ws_stream.next().await;
-    match auth_msg {
-        Some(res) => {
-            let msg = res?;
-            if let Ok(msg) = msg.into_text() {
-                let msg: EventChannelInitialMessages =
-                    serde_json::from_str(&msg).map_err(|e| HandlerError::Auth(e.to_string()))?;
-
-                match msg {
-                    EventChannelInitialMessages::Login {
-                        token,
-                        version,
-                        protocol,
-                    } => {
-                        debug!("connection attempt; client version {version}");
-                        if let Some(claims) = token_verifier.verify(&token) {
-                            handle_authenticated_connection(
-                                peer,
-                                ClientInfo {
-                                    version: &version,
-                                    protocol,
-                                },
-                                ws_stream,
-                                claims,
-                                last_state,
-                                state_updates_rx,
-                                state_updates_tx,
-                            )
-                            .await?;
-                            Ok(())
-                        } else {
-                            Err(HandlerError::Auth("token verification failed".to_owned()))
-                        }
-                    }
-                }
-            } else {
-                Err(HandlerError::Auth("first message must be text".to_owned()))
-            }
-        }
-        None => Err(HandlerError::Auth(
+    let Some(msg) = ws_stream.next().await else {
+        return Err(HandlerError::Auth(
             "first message could not be received".to_owned(),
-        )),
+        ));
+    };
+    let Ok(msg) = msg?.into_text() else {
+        return Err(HandlerError::Auth("first message must be text".to_owned()));
+    };
+    let msg: EventChannelInitialMessages =
+        serde_json::from_str(&msg).map_err(|e| HandlerError::Auth(e.to_string()))?;
+    let (token, version, protocol, anonymous_name) = match msg {
+        EventChannelInitialMessages::Login {
+            token,
+            version,
+            protocol,
+        } => (token, version, protocol, None),
+        EventChannelInitialMessages::AnonymousLogin {
+            token,
+            version,
+            protocol,
+            name,
+        } => (token, version, protocol, Some(name)),
+    };
+    debug!("connection attempt from {peer}; client version {version} protocol {protocol}");
+
+    let identity = if protocol < MIN_EVENT_CHANNEL_PROTOCOL {
+        Err(LoginRejection::ProtocolTooOld { protocol })
+    } else {
+        token_verifier
+            .verify(&token)
+            .and_then(|claims| AgentId::from_uri(&claims.sub).ok())
+            .ok_or(LoginRejection::InvalidToken)
+            .and_then(|token_agent| identify(token_agent, certificate, anonymous_name))
+    };
+    match identity {
+        Ok(identity) => {
+            handle_authenticated_connection(
+                peer,
+                ClientInfo {
+                    version: &version,
+                    protocol,
+                },
+                ws_stream,
+                identity,
+                last_state,
+                state_updates_rx,
+                state_updates_tx,
+            )
+            .await
+        }
+        Err(rejection) => {
+            error!("rejecting connection from {peer}, agent version {version}: {rejection}");
+            reject_login(&mut ws_stream, &rejection).await
+        }
     }
 }
 
@@ -568,16 +663,14 @@ mod test {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
-    use futures_util::{
-        SinkExt, StreamExt,
-        stream::{SplitSink, SplitStream},
-    };
+    use futures_util::{SinkExt, StreamExt};
     use modama_common::{
         agent::AgentId,
         ca::Ca,
         messages::{
             AgentMountStatus, AgentMountStatusEntry, EVENT_CHANNEL_PROTOCOL,
-            EventChannelInitialMessages, EventChannelMessage, EventChannelRequests, Share,
+            EventChannelInitialMessages, EventChannelMessage, EventChannelRequests,
+            MAX_ANONYMOUS_NAME_CHARS, ParticipantIdentity, Share,
         },
         test_helpers::MockTokenProvider,
         tokens::{Claims, LocalTokenSigner, TokenProvider},
@@ -592,8 +685,9 @@ mod test {
     use tokio_tungstenite::{
         Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
     };
-    use tungstenite::Message;
+    use tungstenite::{Message, protocol::frame::coding::CloseCode};
 
+    use super::identify;
     use crate::{events::start_event_server, share_manager::SmbDropState};
 
     struct CertsForTesting {
@@ -601,6 +695,9 @@ mod test {
         pub server_secret: Vec<u8>,
         pub client_config_1: ClientConfig,
         pub client_config_2: ClientConfig,
+
+        /// A client without a certificate, as anonymous agents connect
+        pub client_config_anon: ClientConfig,
     }
 
     impl CertsForTesting {
@@ -614,7 +711,9 @@ mod test {
             roots
                 .add(CertificateDer::from_pem_slice(ca_cert.as_bytes()).unwrap())
                 .unwrap();
+            // like in production: clients with and without a certificate
             let client_cert_verifier = WebPkiClientVerifier::builder(roots.clone().into())
+                .allow_unauthenticated()
                 .build()
                 .unwrap();
 
@@ -669,23 +768,25 @@ mod test {
                 client_config
             };
 
+            let client_config_anon = ClientConfig::builder()
+                .with_root_certificates(roots.clone())
+                .with_no_client_auth();
+
             CertsForTesting {
                 server_config,
                 client_config_1,
                 client_config_2,
+                client_config_anon,
                 server_secret: server_pk_der.secret_der().to_vec(),
             }
         }
     }
 
     struct TestEventServer {
-        pub ws_read: SplitStream<WebSocketStream<MaybeTlsStream<net::TcpStream>>>,
-        pub ws_write: SplitSink<WebSocketStream<MaybeTlsStream<net::TcpStream>>, Message>,
         pub event_queue: Sender<SmbDropState>,
         pub ws_url: String,
         pub certs: CertsForTesting,
         pub handle: JoinHandle<()>,
-        pub token_provider: Arc<dyn TokenProvider>,
     }
 
     async fn make_test_event_server() -> TestEventServer {
@@ -694,386 +795,82 @@ mod test {
             shares: HashMap::new(),
             users: HashMap::new(),
         };
-        let listen_addr = "localhost:0";
-        let secret = &certs.server_secret;
-        let (task, event_server_queue, port) =
-            start_event_server(listen_addr, certs.server_config.clone(), secret, &state)
-                .await
-                .unwrap();
-
-        let tls_config = Arc::new(certs.client_config_1.clone());
-        let ws_url = format!("wss://localhost:{port}");
-        let (conn, _response) = connect_async_tls_with_config(
-            ws_url.clone(),
-            None,
-            false,
-            Some(Connector::Rustls(Arc::clone(&tls_config))),
+        let (task, event_server_queue, port) = start_event_server(
+            "localhost:0",
+            certs.server_config.clone(),
+            &certs.server_secret,
+            &state,
         )
         .await
         .unwrap();
-
-        let (ws_write, ws_read) = conn.split();
-
-        let token_signer = LocalTokenSigner::new(&certs.server_secret);
-
-        let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
-            signer: token_signer,
-            claims: Claims {
-                sub: "x-modama-agent://test_resource#test_agent".to_owned(),
-                exp: (SystemTime::now() + Duration::from_secs(1000))
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            },
-        });
-
         TestEventServer {
-            ws_read,
-            ws_write,
             event_queue: event_server_queue,
-            ws_url,
+            ws_url: format!("wss://localhost:{port}"),
             certs,
-            token_provider,
             handle: task,
         }
     }
 
-    #[tokio::test]
-    async fn test_websocket_api_initial_message() {
-        let mut server = make_test_event_server().await;
-
-        let sign_response = server.token_provider.fetch_token().await.unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
-            token: sign_response.token,
-            version: modama_git_version().to_owned(),
-            protocol: 0,
-        })
-        .unwrap();
-        server
-            .ws_write
-            .send(Message::Text(login_msg.into()))
-            .await
-            .unwrap();
-
-        let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-
-        let msg: EventChannelMessage =
-            serde_json::from_str(&greeting.into_text().unwrap()).unwrap();
-
-        println!("{msg:?}");
-
-        assert_eq!(
-            msg,
-            EventChannelMessage::UpdateShareList {
-                shares: vec![],
-                foreground_share: None,
-                connected_agents: vec![AgentId {
-                    resource: "test_resource".to_owned(),
-                    agent: "test_agent".to_owned(),
-                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
-                }],
-                agent_mount_status: vec![],
-            }
-        );
-
-        // no other messages:
-        let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
-        assert!(res.is_err());
-
-        server.handle.abort();
+    /// Connect a certified agent of `test_resource` that is welcomed and gets its first update
+    async fn connect_welcomed(
+        server: &TestEventServer,
+        client_config: &ClientConfig,
+        agent: &str,
+    ) -> WsStream {
+        let mut conn = connect_agent(server, client_config, agent, EVENT_CHANNEL_PROTOCOL).await;
+        assert!(matches!(
+            next_msg(&mut conn).await,
+            EventChannelMessage::Welcome { .. }
+        ));
+        next_msg(&mut conn).await;
+        conn
     }
 
     #[tokio::test]
     async fn test_websocket_api_second_agent() {
-        let mut server = make_test_event_server().await;
+        let server = make_test_event_server().await;
+        let mut first =
+            connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
 
-        let sign_response = Arc::clone(&server.token_provider)
-            .fetch_token()
-            .await
-            .unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
-            token: sign_response.token,
-            version: modama_git_version().to_owned(),
-            protocol: 0,
-        })
-        .unwrap();
-        server
-            .ws_write
-            .send(Message::Text(login_msg.into()))
-            .await
-            .unwrap();
-
-        let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-
-        let msg: EventChannelMessage =
-            serde_json::from_str(&greeting.into_text().unwrap()).unwrap();
-
-        println!("{msg:?}");
-
+        let mut second = connect_agent(
+            &server,
+            &server.certs.client_config_2,
+            "test_agent_2",
+            EVENT_CHANNEL_PROTOCOL,
+        )
+        .await;
         assert_eq!(
-            msg,
-            EventChannelMessage::UpdateShareList {
-                shares: vec![],
-                foreground_share: None,
-                connected_agents: vec![AgentId {
-                    resource: "test_resource".to_owned(),
-                    agent: "test_agent".to_owned(),
-                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
-                }],
-                agent_mount_status: vec![],
-            }
+            next_msg(&mut first).await,
+            update(&["test_agent", "test_agent_2"], &[])
         );
+        assert_no_msg(&mut first).await;
 
-        // no other messages:
-        let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
-        assert!(res.is_err());
-
-        {
-            let tls_config_2 = Arc::new(server.certs.client_config_2.clone());
-            // now another agent connects:
-            let (mut conn, _response) = connect_async_tls_with_config(
-                server.ws_url.clone(),
-                None,
-                false,
-                Some(Connector::Rustls(Arc::clone(&tls_config_2))),
-            )
-            .await
-            .unwrap();
-
-            let token_signer = LocalTokenSigner::new(&server.certs.server_secret);
-            let second_token_provider: Arc<dyn TokenProvider + 'static> =
-                Arc::new(MockTokenProvider {
-                    signer: token_signer,
-                    claims: Claims {
-                        sub: "x-modama-agent://test_resource#test_agent_2".to_owned(),
-                        exp: (SystemTime::now() + Duration::from_secs(1000))
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    },
-                });
-
-            let sign_response_2 = Arc::clone(&second_token_provider)
-                .fetch_token()
-                .await
-                .unwrap();
-            let login_msg_2 = serde_json::to_string(&EventChannelInitialMessages::Login {
-                token: sign_response_2.token,
-                version: modama_git_version().to_owned(),
-                protocol: 0,
-            })
-            .unwrap();
-            conn.send(Message::Text(login_msg_2.into())).await.unwrap();
-
-            // and we get an updated list of connected agents:
-            let update_msg = timeout(Duration::from_millis(100), server.ws_read.next())
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
-
-            let update: EventChannelMessage =
-                serde_json::from_str(&update_msg.into_text().unwrap()).unwrap();
-
-            println!("{update:?}");
-
-            // no other messages:
-            let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
-            assert!(res.is_err());
-
-            // now compare the actual messages:
-            assert_eq!(
-                update,
-                EventChannelMessage::UpdateShareList {
-                    shares: vec![],
-                    foreground_share: None,
-                    connected_agents: vec![
-                        AgentId {
-                            resource: "test_resource".to_owned(),
-                            agent: "test_agent".to_owned(),
-                            san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
-                        },
-                        AgentId {
-                            resource: "test_resource".to_owned(),
-                            agent: "test_agent_2".to_owned(),
-                            san_encoded: "x-modama-agent://test_resource#test_agent_2".to_owned()
-                        },
-                    ],
-                    agent_mount_status: vec![],
-                }
-            );
-
-            conn.close(None).await.unwrap();
-        }
-
-        let update_msg = timeout(Duration::from_millis(100), server.ws_read.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-
-        let msg: EventChannelMessage =
-            serde_json::from_str(&update_msg.into_text().unwrap()).unwrap();
-
-        println!("{msg:?}");
-
-        // second agent is gone:
-        assert_eq!(
-            msg,
-            EventChannelMessage::UpdateShareList {
-                shares: vec![],
-                foreground_share: None,
-                connected_agents: vec![AgentId {
-                    resource: "test_resource".to_owned(),
-                    agent: "test_agent".to_owned(),
-                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
-                }],
-                agent_mount_status: vec![],
-            }
-        );
-
-        // no other messages:
-        let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
-        assert!(res.is_err());
+        second.close(None).await.unwrap();
+        assert_eq!(next_msg(&mut first).await, update(&["test_agent"], &[]));
+        assert_no_msg(&mut first).await;
         server.handle.abort();
     }
 
     #[tokio::test]
     async fn test_websocket_api_request_share_update() {
-        let mut server = make_test_event_server().await;
+        let server = make_test_event_server().await;
+        let mut conn = connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
+        assert_no_msg(&mut conn).await;
 
-        let sign_response = server.token_provider.fetch_token().await.unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
-            token: sign_response.token,
-            version: modama_git_version().to_owned(),
-            protocol: 0,
-        })
-        .unwrap();
-        server
-            .ws_write
-            .send(Message::Text(login_msg.into()))
-            .await
-            .unwrap();
-
-        let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-
-        let msg: EventChannelMessage =
-            serde_json::from_str(&greeting.into_text().unwrap()).unwrap();
-        println!("{msg:?}");
-        assert_eq!(
-            msg,
-            EventChannelMessage::UpdateShareList {
-                shares: vec![],
-                foreground_share: None,
-                connected_agents: vec![AgentId {
-                    resource: "test_resource".to_owned(),
-                    agent: "test_agent".to_owned(),
-                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
-                }],
-                agent_mount_status: vec![],
-            }
-        );
-
-        // no other messages:
-        let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
-        assert!(res.is_err());
-
-        // now we request an update:
-        let update_msg = EventChannelRequests::ShareListUpdate;
-        server
-            .ws_write
-            .send(Message::Text(
-                serde_json::to_string(&update_msg).unwrap().into(),
-            ))
-            .await
-            .unwrap();
-
-        let update_msg_resp = timeout(Duration::from_millis(100), server.ws_read.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-
-        // we get the shares and agents again:
-        let msg: EventChannelMessage =
-            serde_json::from_str(&update_msg_resp.into_text().unwrap()).unwrap();
-        println!("{msg:?}");
-        assert_eq!(
-            msg,
-            EventChannelMessage::UpdateShareList {
-                shares: vec![],
-                foreground_share: None,
-                connected_agents: vec![AgentId {
-                    resource: "test_resource".to_owned(),
-                    agent: "test_agent".to_owned(),
-                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
-                }],
-                agent_mount_status: vec![],
-            }
-        );
+        send_request(&mut conn, &EventChannelRequests::ShareListUpdate).await;
+        assert_eq!(next_msg(&mut conn).await, update(&["test_agent"], &[]));
         server.handle.abort();
     }
 
     #[tokio::test]
     async fn test_websocket_api_share_added() {
-        let mut server = make_test_event_server().await;
+        let server = make_test_event_server().await;
+        let mut conn = connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
 
-        let sign_response = server.token_provider.fetch_token().await.unwrap();
-        let login_msg = serde_json::to_string(&EventChannelInitialMessages::Login {
-            token: sign_response.token,
-            version: modama_git_version().to_owned(),
-            protocol: 0,
-        })
-        .unwrap();
-        server
-            .ws_write
-            .send(Message::Text(login_msg.into()))
-            .await
-            .unwrap();
-
-        let greeting = timeout(Duration::from_millis(100), server.ws_read.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-
-        let msg: EventChannelMessage =
-            serde_json::from_str(&greeting.into_text().unwrap()).unwrap();
-        println!("{msg:?}");
-        assert_eq!(
-            msg,
-            EventChannelMessage::UpdateShareList {
-                shares: vec![],
-                foreground_share: None,
-                connected_agents: vec![AgentId {
-                    resource: "test_resource".to_owned(),
-                    agent: "test_agent".to_owned(),
-                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
-                }],
-                agent_mount_status: vec![],
-            }
-        );
-
-        // no other messages:
-        let res = timeout(Duration::from_millis(100), server.ws_read.next()).await;
-        assert!(res.is_err());
-
-        let shares = HashMap::new();
-        let users = HashMap::new();
-        let mut state = SmbDropState { shares, users };
-
+        let mut state = SmbDropState {
+            shares: HashMap::new(),
+            users: HashMap::new(),
+        };
         let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
         let share = Share {
             resource: Some("test_resource".to_owned()),
@@ -1087,7 +884,6 @@ mod test {
             gid: 1001,
             created_by: None,
         };
-
         state
             .get_or_create_user(1001, share_id.clone())
             .await
@@ -1095,27 +891,13 @@ mod test {
         state.add_share(share.clone()).await.unwrap();
         server.event_queue.send(state).unwrap();
 
-        // the share manager informs us about the change:
-        let state_update_msg = timeout(Duration::from_millis(100), server.ws_read.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-
-        // the new share is in the list of shares:
-        let msg: EventChannelMessage =
-            serde_json::from_str(&state_update_msg.into_text().unwrap()).unwrap();
-        println!("{msg:?}");
+        // the share manager informs us about the change, and the new share is in the list:
         assert_eq!(
-            msg,
+            next_msg(&mut conn).await,
             EventChannelMessage::UpdateShareList {
                 shares: vec![share.clone()],
                 foreground_share: Some(share),
-                connected_agents: vec![AgentId {
-                    resource: "test_resource".to_owned(),
-                    agent: "test_agent".to_owned(),
-                    san_encoded: "x-modama-agent://test_resource#test_agent".to_owned()
-                }],
+                connected_agents: vec![agent_id("test_agent")],
                 agent_mount_status: vec![],
             }
         );
@@ -1132,12 +914,45 @@ mod test {
         }
     }
 
-    /// Connect another agent of `test_resource` and log in with the given protocol version
+    /// Connect an agent of `test_resource` with a `Login` in the given protocol version and a
+    /// token for `agent`
     async fn connect_agent(
         server: &TestEventServer,
         client_config: &ClientConfig,
         agent: &str,
         protocol: u32,
+    ) -> WsStream {
+        connect_with_login(server, client_config, agent, |token| {
+            EventChannelInitialMessages::Login {
+                token,
+                version: modama_git_version().to_owned(),
+                protocol,
+            }
+        })
+        .await
+    }
+
+    /// Connect without a client certificate, with an `AnonymousLogin` named `name` and a
+    /// token borrowed from `lender`
+    async fn connect_anonymous(server: &TestEventServer, lender: &str, name: &str) -> WsStream {
+        connect_with_login(server, &server.certs.client_config_anon, lender, |token| {
+            EventChannelInitialMessages::AnonymousLogin {
+                token,
+                version: modama_git_version().to_owned(),
+                protocol: EVENT_CHANNEL_PROTOCOL,
+                name: name.to_owned(),
+            }
+        })
+        .await
+    }
+
+    /// Connect with `client_config` and send the login that `login` makes from a token for
+    /// `token_agent`
+    async fn connect_with_login(
+        server: &TestEventServer,
+        client_config: &ClientConfig,
+        token_agent: &str,
+        login: impl FnOnce(String) -> EventChannelInitialMessages,
     ) -> WsStream {
         let (mut conn, _response) = connect_async_tls_with_config(
             server.ws_url.clone(),
@@ -1150,7 +965,7 @@ mod test {
         let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
             signer: LocalTokenSigner::new(&server.certs.server_secret),
             claims: Claims {
-                sub: agent_id(agent).san_encoded,
+                sub: agent_id(token_agent).san_encoded,
                 exp: (SystemTime::now() + Duration::from_secs(1000))
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
@@ -1158,14 +973,27 @@ mod test {
             },
         });
         let token = token_provider.fetch_token().await.unwrap().token;
-        let login = serde_json::to_string(&EventChannelInitialMessages::Login {
-            token,
-            version: modama_git_version().to_owned(),
-            protocol,
-        })
-        .unwrap();
+        let login = serde_json::to_string(&login(token)).unwrap();
         conn.send(Message::Text(login.into())).await.unwrap();
         conn
+    }
+
+    /// The connection is closed with a reason containing `reason`
+    async fn assert_rejected(conn: &mut WsStream, reason: &str) {
+        let msg = timeout(Duration::from_millis(500), conn.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let Message::Close(Some(frame)) = msg else {
+            panic!("expected a close frame, got {msg:?}");
+        };
+        assert_eq!(frame.code, CloseCode::Policy);
+        assert!(
+            frame.reason.contains(reason),
+            "{:?} doesn't contain {reason:?}",
+            frame.reason
+        );
     }
 
     async fn next_msg(conn: &mut WsStream) -> EventChannelMessage {
@@ -1246,14 +1074,24 @@ mod test {
     #[tokio::test]
     async fn test_mount_status_is_broadcast_and_removed_on_disconnect() {
         let server = make_test_event_server().await;
-        let mut agent_1 =
-            connect_agent(&server, &server.certs.client_config_1, "test_agent", 1).await;
+        let mut agent_1 = connect_agent(
+            &server,
+            &server.certs.client_config_1,
+            "test_agent",
+            EVENT_CHANNEL_PROTOCOL,
+        )
+        .await;
         next_msg(&mut agent_1).await; // Welcome
         assert_eq!(next_msg(&mut agent_1).await, update(&["test_agent"], &[]));
 
-        // agent 2 is an old agent, it can still see the status of others
-        let mut agent_2 =
-            connect_agent(&server, &server.certs.client_config_2, "test_agent_2", 0).await;
+        let mut agent_2 = connect_agent(
+            &server,
+            &server.certs.client_config_2,
+            "test_agent_2",
+            EVENT_CHANNEL_PROTOCOL,
+        )
+        .await;
+        next_msg(&mut agent_2).await; // Welcome
         let both = ["test_agent", "test_agent_2"];
         assert_eq!(next_msg(&mut agent_1).await, update(&both, &[]));
         assert_eq!(next_msg(&mut agent_2).await, update(&both, &[]));
@@ -1283,12 +1121,22 @@ mod test {
     async fn test_connections_with_one_identity_are_tracked_separately() {
         for close_first in [true, false] {
             let server = make_test_event_server().await;
-            let mut first =
-                connect_agent(&server, &server.certs.client_config_1, "test_agent", 1).await;
+            let mut first = connect_agent(
+                &server,
+                &server.certs.client_config_1,
+                "test_agent",
+                EVENT_CHANNEL_PROTOCOL,
+            )
+            .await;
             next_msg(&mut first).await; // Welcome
             assert_eq!(next_msg(&mut first).await, update(&["test_agent"], &[]));
-            let mut second =
-                connect_agent(&server, &server.certs.client_config_1, "test_agent", 1).await;
+            let mut second = connect_agent(
+                &server,
+                &server.certs.client_config_1,
+                "test_agent",
+                EVENT_CHANNEL_PROTOCOL,
+            )
+            .await;
             next_msg(&mut second).await; // Welcome
             assert_eq!(next_msg(&mut first).await, update(&["test_agent"], &[]));
             assert_eq!(next_msg(&mut second).await, update(&["test_agent"], &[]));
@@ -1324,12 +1172,22 @@ mod test {
     #[tokio::test]
     async fn test_connection_dropped_without_close_is_removed() {
         let server = make_test_event_server().await;
-        let mut staying =
-            connect_agent(&server, &server.certs.client_config_1, "test_agent", 1).await;
+        let mut staying = connect_agent(
+            &server,
+            &server.certs.client_config_1,
+            "test_agent",
+            EVENT_CHANNEL_PROTOCOL,
+        )
+        .await;
         next_msg(&mut staying).await; // Welcome
         next_msg(&mut staying).await;
-        let mut dropped =
-            connect_agent(&server, &server.certs.client_config_2, "test_agent_2", 1).await;
+        let mut dropped = connect_agent(
+            &server,
+            &server.certs.client_config_2,
+            "test_agent_2",
+            EVENT_CHANNEL_PROTOCOL,
+        )
+        .await;
         next_msg(&mut dropped).await; // Welcome
         let both = update(&["test_agent", "test_agent_2"], &[]);
         assert_eq!(next_msg(&mut staying).await, both);
@@ -1339,12 +1197,91 @@ mod test {
         server.handle.abort();
     }
 
+    /// A login that breaks the rules of ADR 0001 is closed with the reason, and nobody else
+    /// hears of it
+    #[tokio::test]
+    async fn test_logins_are_checked_against_the_client_certificate() {
+        let server = make_test_event_server().await;
+        let mut observer =
+            connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
+        let certs = &server.certs;
+
+        let mut conn = connect_agent(
+            &server,
+            &certs.client_config_anon,
+            "test_agent",
+            EVENT_CHANNEL_PROTOCOL,
+        )
+        .await;
+        assert_rejected(&mut conn, "Login without a client certificate").await;
+
+        let mut conn = connect_agent(
+            &server,
+            &certs.client_config_2,
+            "test_agent",
+            EVENT_CHANNEL_PROTOCOL,
+        )
+        .await;
+        assert_rejected(
+            &mut conn,
+            "token for x-modama-agent://test_resource#test_agent, client certificate for x-modama-agent://test_resource#test_agent_2",
+        )
+        .await;
+
+        let mut conn =
+            connect_with_login(&server, &certs.client_config_2, "test_agent_2", |token| {
+                EventChannelInitialMessages::AnonymousLogin {
+                    token,
+                    version: modama_git_version().to_owned(),
+                    protocol: EVENT_CHANNEL_PROTOCOL,
+                    name: "pc".to_owned(),
+                }
+            })
+            .await;
+        assert_rejected(&mut conn, "AnonymousLogin with a client certificate").await;
+
+        let mut conn = connect_agent(&server, &certs.client_config_2, "test_agent_2", 1).await;
+        assert_rejected(&mut conn, "protocol 1 is too old").await;
+
+        assert_no_msg(&mut observer).await;
+        server.handle.abort();
+    }
+
+    /// An agent without a certificate takes part at the resource of the token it borrowed
+    #[tokio::test]
+    async fn test_anonymous_login_is_accepted() {
+        let server = make_test_event_server().await;
+        let mut lender =
+            connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
+
+        let mut anonymous = connect_anonymous(&server, "test_agent", "neighbour-pc").await;
+        assert!(matches!(
+            next_msg(&mut anonymous).await,
+            EventChannelMessage::Welcome { .. }
+        ));
+        assert_eq!(next_msg(&mut anonymous).await, update(&["test_agent"], &[]));
+        assert_eq!(next_msg(&mut lender).await, update(&["test_agent"], &[]));
+        server.handle.abort();
+    }
+
+    #[test]
+    fn test_anonymous_names_are_cut() {
+        let long = "ä".repeat(MAX_ANONYMOUS_NAME_CHARS + 6);
+        let identity = identify(agent_id("test_agent"), Ok(None), Some(long)).unwrap();
+        assert_eq!(
+            identity,
+            ParticipantIdentity::Anonymous {
+                name: "ä".repeat(MAX_ANONYMOUS_NAME_CHARS),
+                lender: agent_id("test_agent"),
+            }
+        );
+    }
+
     /// Requests from newer agents that we don't understand don't end the connection
     #[tokio::test]
     async fn test_unknown_request_is_ignored() {
         let server = make_test_event_server().await;
-        let mut conn = connect_agent(&server, &server.certs.client_config_1, "test_agent", 0).await;
-        assert_eq!(next_msg(&mut conn).await, update(&["test_agent"], &[]));
+        let mut conn = connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
 
         conn.send(Message::Text(r#"{"type": "FromTheFuture"}"#.into()))
             .await

@@ -7,7 +7,7 @@ use modama_common::{
     agent::AgentId,
     messages::{
         AgentMountStatus, EVENT_CHANNEL_PROTOCOL, EventChannelInitialMessages, EventChannelMessage,
-        EventChannelRequests, Share,
+        EventChannelRequests, MIN_EVENT_CHANNEL_PROTOCOL, Share,
     },
     tokens::TokenProvider,
     version::modama_git_version,
@@ -17,8 +17,9 @@ use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tungstenite::Message;
 
-use crate::agent_state::{
-    AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdateToSession,
+use crate::{
+    agent_state::{AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdateToSession},
+    config::MTLSIdentity,
 };
 
 /// Whether two desired states are the same; the order of the shares doesn't matter, as
@@ -95,6 +96,16 @@ async fn receive_inner(
                     ControlFlow::Continue(None)
                 }
             }
+        }
+        Some(Ok(Message::Close(frame))) => {
+            // the stream ends right after, which reconnects
+            match frame {
+                Some(frame) if !frame.reason.is_empty() => {
+                    error!("smbdrop closed the connection: {}", frame.reason);
+                }
+                _ => info!("smbdrop closed the connection"),
+            }
+            ControlFlow::Continue(None)
         }
         Some(Ok(_)) => {
             warn!("Message is not text, ignoring...");
@@ -201,11 +212,22 @@ pub async fn message_loop(
             agent: token.agent_name,
             san_encoded: token.agent_uri,
         };
-        let login_msg = match serde_json::to_string(&EventChannelInitialMessages::Login {
-            token: token.token,
-            version: modama_git_version().to_owned(),
-            protocol: EVENT_CHANNEL_PROTOCOL,
-        }) {
+        // with a client certificate, `Login`; without one, `AnonymousLogin` (ADR 0001)
+        let version = modama_git_version().to_owned();
+        let login = match &config.identity {
+            MTLSIdentity::AgentId { .. } => EventChannelInitialMessages::Login {
+                token: token.token,
+                version,
+                protocol: EVENT_CHANNEL_PROTOCOL,
+            },
+            MTLSIdentity::Anonymous { hostname } => EventChannelInitialMessages::AnonymousLogin {
+                token: token.token,
+                version,
+                protocol: EVENT_CHANNEL_PROTOCOL,
+                name: hostname.clone(),
+            },
+        };
+        let login_msg = match serde_json::to_string(&login) {
             Ok(msg) => msg,
             Err(e) => {
                 error!("Could not serialize authentication message, reconnecting...");
@@ -237,6 +259,14 @@ pub async fn message_loop(
                 msg = ws_read.next() => match receive_inner(msg, &state).await {
                     ControlFlow::Continue(welcome) => {
                         if let Some(protocol) = welcome {
+                            if protocol < MIN_EVENT_CHANNEL_PROTOCOL {
+                                error!(
+                                    "smbdrop speaks event channel protocol {protocol}, this agent \
+                                     needs {MIN_EVENT_CHANNEL_PROTOCOL}; update smbdrop. Reconnecting..."
+                                );
+                                tokio::time::sleep(Duration::from_secs(5)).await;
+                                break;
+                            }
                             reporter.protocol = protocol.min(EVENT_CHANNEL_PROTOCOL);
                         }
                     }
@@ -257,7 +287,7 @@ pub async fn message_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AgentConfig;
+    use crate::config::{AgentConfig, MTLSIdentity};
     use modama_common::ca::Ca;
     use modama_common::logging::init_logging;
     use modama_common::messages;
@@ -284,8 +314,16 @@ mod tests {
         pub to_sessions: broadcast::Receiver<StateUpdateToSession>,
     }
 
+    /// The certified agent `test-agent` at `test_resource`
+    fn certified() -> MTLSIdentity {
+        MTLSIdentity::AgentId {
+            agent_name: "test-agent".to_string(),
+            resource_name: "test_resource".to_string(),
+        }
+    }
+
     /// An `AgentConfig` pointing at an event server on `port`
-    fn test_config(port: u16) -> AgentConfig {
+    fn test_config(port: u16, identity: MTLSIdentity) -> AgentConfig {
         let api_url = Url::parse(&format!("wss://localhost:{port}")).expect("url");
         let root = RootCertStore::empty();
         AgentConfig {
@@ -295,10 +333,7 @@ mod tests {
             smb_ip: tokio::sync::OnceCell::new(),
             smb_port: 445,
             smb_domain: "WORKGROUP".to_string(),
-            identity: crate::config::MTLSIdentity::AgentId {
-                agent_name: "test-agent".to_string(),
-                resource_name: "test_resource".to_string(),
-            },
+            identity,
             listen_local_api: "localhost:3001".to_owned(),
             token_service_url: Url::parse("http://localhost").unwrap(),
             ca_root_store: root.clone(),
@@ -313,7 +348,14 @@ mod tests {
     }
 
     impl MessageLoopTestSetup {
+        /// A certified agent `test-agent` at `test_resource`
         async fn start() -> Self {
+            Self::start_as(certified()).await
+        }
+
+        /// An agent with `identity`: with a client certificate for `test-agent` if certified,
+        /// without one if anonymous; either way with a token for `test-agent`
+        async fn start_as(identity: MTLSIdentity) -> Self {
             init_logging();
 
             let ca = Ca::new::<String>(None, "hunter42").unwrap();
@@ -323,7 +365,9 @@ mod tests {
             roots
                 .add(CertificateDer::from_pem_slice(ca_cert.as_bytes()).unwrap())
                 .unwrap();
+            // like in production: clients with and without a certificate
             let client_cert_verifier = WebPkiClientVerifier::builder(roots.clone().into())
+                .allow_unauthenticated()
                 .build()
                 .unwrap();
 
@@ -351,23 +395,28 @@ mod tests {
             .await
             .expect("start_event_server");
 
-            let config = test_config(port);
+            let anonymous = matches!(identity, MTLSIdentity::Anonymous { .. });
+            let config = test_config(port, identity);
 
             let state = AgentState::new(&config).await;
 
             // subscribe before the message loop starts, so no update is missed
             let to_sessions = state.lock().await.desired_state_channel.subscribe();
 
-            let client_cert = ca.client_cert("test_agent", "test_resource").unwrap();
+            let client_cert = ca.client_cert("test-agent", "test_resource").unwrap();
             let client_chain: Vec<CertificateDer> = vec![
                 client_cert.cert.clone().into(),
                 CertificateDer::from_pem_slice(ca_cert.as_bytes()).unwrap(),
             ];
             let client_pk_der = PrivateKeyDer::Pkcs8(client_cert.key_pair.serialize_der().into());
-            let client_conf: ClientConfig = ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_client_auth_cert(client_chain, client_pk_der)
-                .unwrap();
+            let client_builder = ClientConfig::builder().with_root_certificates(roots);
+            let client_conf: ClientConfig = if anonymous {
+                client_builder.with_no_client_auth()
+            } else {
+                client_builder
+                    .with_client_auth_cert(client_chain, client_pk_der)
+                    .unwrap()
+            };
             let client_config = Arc::new(client_conf);
 
             let token_signer = LocalTokenSigner::new(server_pk_der.secret_der());
@@ -507,6 +556,26 @@ mod tests {
         test_setup
             .wait_for_desired(&["test-id-1"], Some("test-id-1"))
             .await;
+        test_setup
+            .wait_for_forwarded(&["test-id-1"], Some("test-id-1"))
+            .await;
+
+        test_setup.abort().await;
+    }
+
+    /// An agent without a client certificate logs in with `AnonymousLogin`; smbdrop would
+    /// close a `Login` without one, and no shares would arrive
+    #[tokio::test]
+    async fn test_anonymous_agent_is_accepted() {
+        let mut test_setup = MessageLoopTestSetup::start_as(MTLSIdentity::Anonymous {
+            hostname: "neighbour-pc".to_owned(),
+        })
+        .await;
+
+        let share = test_share("test-id-1", 0);
+        let mut new_state = test_setup.initial_state.clone();
+        new_state.shares.insert(share.share_id.clone(), share);
+        test_setup.event_queue.send(new_state).unwrap();
         test_setup
             .wait_for_forwarded(&["test-id-1"], Some("test-id-1"))
             .await;
@@ -688,7 +757,7 @@ mod tests {
     /// An smbdrop that never sent `Welcome` doesn't know the request
     #[tokio::test]
     async fn test_no_status_report_without_welcome() {
-        let state = AgentState::new(&test_config(1)).await;
+        let state = AgentState::new(&test_config(1, certified())).await;
         state.lock().await.remote_info = Some(RemoteInfo::default());
         let mut sink: Vec<Message> = vec![];
 
@@ -711,7 +780,7 @@ mod tests {
     /// Before smbdrop told us the desired state, we don't know our status
     #[tokio::test]
     async fn test_no_status_report_without_desired_state() {
-        let state = AgentState::new(&test_config(1)).await;
+        let state = AgentState::new(&test_config(1, certified())).await;
         let mut sink: Vec<Message> = vec![];
         let mut reporter = StatusReporter {
             protocol: 1,

@@ -75,16 +75,47 @@ impl std::fmt::Debug for Share {
 ///
 /// - 0: `UpdateShareList` and `ShareListUpdate` only; no `Welcome`
 /// - 1: `Welcome`, `ReportMountStatus`, `agent_mount_status` in `UpdateShareList`
+/// - 2: `Login` only from agents with a client certificate, `AnonymousLogin` from those
+///   without; smbdrop checks the variant against the certificate (ADR 0001)
 ///
-/// Both sides use the minimum of their own version and the peer's: the agent sends its
-/// version in `Login`, smbdrop answers with `Welcome` only to agents that sent 1 or more,
-/// before any `UpdateShareList`. An agent that gets an `UpdateShareList` first talks to
-/// version 0.
+/// smbdrop accepts versions from [`MIN_EVENT_CHANNEL_PROTOCOL`] on and closes the connection
+/// with a reason otherwise. Both sides use the minimum of their own version and the peer's:
+/// the agent sends its version when logging in, smbdrop answers with `Welcome` before any
+/// `UpdateShareList`.
 ///
 /// Rules for changes: a side sends a new message or request variant only if the negotiated
 /// version supports it; new fields must be optional (`#[serde(default)]`), so older peers
-/// can leave them out and ignore them.
-pub const EVENT_CHANNEL_PROTOCOL: u32 = 1;
+/// can leave them out and ignore them. A change older agents can't follow raises
+/// [`MIN_EVENT_CHANNEL_PROTOCOL`] instead.
+pub const EVENT_CHANNEL_PROTOCOL: u32 = 2;
+
+/// The oldest event channel protocol version smbdrop accepts
+pub const MIN_EVENT_CHANNEL_PROTOCOL: u32 = 2;
+
+/// The longest name an anonymous agent is listed under, in characters; smbdrop cuts longer ones
+pub const MAX_ANONYMOUS_NAME_CHARS: usize = 64;
+
+/// Who is behind an event-channel connection (ADR 0001)
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ParticipantIdentity {
+    /// An agent with a client certificate, identified by it
+    Certified { agent: AgentId },
+
+    /// An agent without one, taking part at the resource of the token it borrowed from
+    /// `lender`; `name` is what the agent calls itself, usually its hostname
+    Anonymous { name: String, lender: AgentId },
+}
+
+impl ParticipantIdentity {
+    /// The resource the participant takes part at
+    pub fn resource(&self) -> &str {
+        match self {
+            Self::Certified { agent } => &agent.resource,
+            Self::Anonymous { lender, .. } => &lender.resource,
+        }
+    }
+}
 
 /// The mount status of an agent, summarized over all of its session helpers
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -164,6 +195,8 @@ pub enum EventChannelRequests {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum EventChannelInitialMessages {
+    /// Login of an agent with a client certificate; the token must be issued to the
+    /// certificate's agent
     Login {
         token: String,
         version: String,
@@ -172,6 +205,17 @@ pub enum EventChannelInitialMessages {
         /// protocol versions existed leave it out, which means 0
         #[serde(default)]
         protocol: u32,
+    },
+
+    /// Login of an agent without a client certificate, with a token it borrowed. Protocol 2
+    /// and up.
+    AnonymousLogin {
+        token: String,
+        version: String,
+        protocol: u32,
+
+        /// What the agent calls itself, usually its hostname
+        name: String,
     },
 }
 
@@ -220,7 +264,9 @@ mod tests {
             "version": "v",
         }))
         .unwrap();
-        let EventChannelInitialMessages::Login { protocol, .. } = login;
+        let EventChannelInitialMessages::Login { protocol, .. } = login else {
+            panic!("not a Login");
+        };
         assert_eq!(protocol, 0);
     }
 

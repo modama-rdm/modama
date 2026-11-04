@@ -7,7 +7,10 @@ use std::{
 };
 
 use anyhow::Result;
+use modama_common::agent::{AgentId, ClientCertError};
 use nix::{errno::Errno, ioctl_read, ioctl_write_ptr};
+use tokio::net::TcpStream;
+use tokio_rustls::server::TlsStream;
 
 const FS_IMMUTABLE_FL: u64 = 0x010;
 
@@ -110,6 +113,20 @@ impl Drop for ImmutableGuard {
             log::error!("could not reset immutable flag for {:?}: {e}", self.path);
         }
     }
+}
+
+/// The agent identified by the client certificate of a TLS connection: `None` if the client
+/// sent no certificate, an error if its certificate names no agent. The certificate itself is
+/// verified against the CA in the handshake.
+pub fn peer_agent_id(stream: &TlsStream<TcpStream>) -> Result<Option<AgentId>, ClientCertError> {
+    let (_, server_connection) = stream.get_ref();
+    let Some(peer_cert) = server_connection
+        .peer_certificates()
+        .and_then(|certs| certs.first())
+    else {
+        return Ok(None);
+    };
+    AgentId::from_cert(peer_cert).map(Some)
 }
 
 #[cfg(test)]

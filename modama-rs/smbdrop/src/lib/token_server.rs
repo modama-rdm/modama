@@ -18,11 +18,11 @@ use modama_common::{
     cert_helpers::{get_private_key, load_tls_server_config},
     tokens::{Claims, LocalTokenSigner, SignError, TokenSignResponse, TokenVerifyResponse},
 };
-use tokio::{net::TcpListener, net::TcpStream, task::JoinHandle};
-use tokio_rustls::{TlsAcceptor, server::TlsStream};
+use tokio::{net::TcpListener, task::JoinHandle};
+use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
-use crate::events::ServerStartError;
+use crate::{events::ServerStartError, helpers::peer_agent_id};
 #[derive(Clone)]
 struct ConnState {
     /// Agent ID - None if client authentication didn't succeed
@@ -159,13 +159,6 @@ impl TokenServer {
     }
 }
 
-fn agent_id_from_stream(stream: &TlsStream<TcpStream>) -> Option<AgentId> {
-    let (_, server_connection) = stream.get_ref();
-    let peer_certs = server_connection.peer_certificates()?;
-    let peer_cert = peer_certs.first()?;
-    AgentId::from_cert(peer_cert).ok()
-}
-
 /// Serve requests using an already-bound TcpListener
 async fn serve_token_server_with_listener(
     listener: TcpListener,
@@ -189,7 +182,7 @@ async fn serve_token_server_with_listener(
                 return;
             };
 
-            let agent_id = agent_id_from_stream(&stream);
+            let agent_id = peer_agent_id(&stream).ok().flatten();
 
             let stream = TokioIo::new(stream);
 
