@@ -1,21 +1,24 @@
-//! Windows mount backend: one reconciliation pass over drive mappings. The WNet FFI lives in
-//! `platform_windows.rs`; this part is platform-independent, so it is tested everywhere.
+//! Windows mount backend: our drive mappings as a mount table for the reconciliation pass. The
+//! WNet FFI lives in `platform_windows.rs`; this part is platform-independent, so it is tested
+//! everywhere.
 //!
 //! On Windows, every connection to the configured host is ours, whatever share it is for:
 //! Windows allows only one set of credentials per server and logon session, so any other
 //! connection to that host (another researcher's mapping, a deviceless connection, `IPC$`)
 //! blocks our mappings with error 1219.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
-use log::{debug, warn};
-use modama_common::{
-    foreground::same_share,
-    internal_api_types::{MountedShare, SessionHelperConfig, SessionHelperState, ShareError},
-    messages::Share,
+use log::debug;
+use modama_common::{internal_api_types::SessionHelperConfig, messages::Share};
+
+use crate::{
+    mount_backend::{EnumerationError, PassResult},
+    reconcile::{
+        AddFailure, DuplicateEntries, MountTable, PathlessEntries, Policy, TableEntry,
+        reconcile_pass,
+    },
 };
-
-use crate::mount_backend::{EnumerationError, PassResult, unique_by_name};
 
 /// A network connection of this logon session
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -123,132 +126,112 @@ fn map_at_free_letter(
     Err(AddError::Other("no free drive letter".to_owned()))
 }
 
-/// One reconciliation pass: remove our connections that aren't a desired drive mapping (with
-/// `force`, even if files are open on them), map the missing shares, and return the actual
-/// state afterwards.
-pub fn reconcile_pass(
+/// Our connections, as a [`MountTable`] for one pass
+pub struct WNetTable<'a, A: WNetApi> {
+    api: &'a A,
+    host: &'a str,
+    domain: &'a str,
+    /// Drive letters of connections we couldn't remove
+    still_mapped: u32,
+    /// Drive letters in use, from the first mapping of this pass on
+    in_use: Option<u32>,
+}
+
+impl<'a, A: WNetApi> WNetTable<'a, A> {
+    pub fn new(api: &'a A, config: &'a SessionHelperConfig) -> Result<Self, EnumerationError> {
+        Ok(Self {
+            api,
+            host: valid_host(config)?,
+            domain: &config.smb_domain,
+            still_mapped: 0,
+            in_use: None,
+        })
+    }
+}
+
+impl<A: WNetApi> MountTable for WNetTable<'_, A> {
+    type Handle = Connection;
+
+    /// One drive mapping per desired share. A deviceless connection is never a mount: it offers
+    /// no path, and its credentials would block our mappings with error 1219.
+    fn policy(&self) -> Policy {
+        Policy {
+            pathless: PathlessEntries::Remove,
+            duplicates: DuplicateEntries::RemoveAllButOne,
+        }
+    }
+
+    fn entries(&mut self) -> Result<Vec<TableEntry<Connection>>, String> {
+        Ok(self
+            .api
+            .connections()?
+            .into_iter()
+            .filter_map(|connection| {
+                Some(TableEntry {
+                    share_name: our_share(&connection.remote, self.host)?.to_owned(),
+                    path: connection
+                        .local
+                        .as_ref()
+                        .map(|drive| PathBuf::from(format!(r"{drive}\"))),
+                    handle: connection,
+                })
+            })
+            .collect())
+    }
+
+    fn remove(&mut self, entry: &TableEntry<Connection>, force: bool) -> Result<(), String> {
+        let connection = &entry.handle;
+        let target = connection.local.as_deref().unwrap_or(&connection.remote);
+        debug!("removing connection {target} to {}", connection.remote);
+        self.api.cancel(target, force).map_err(|e| {
+            self.still_mapped |= connection.local.as_deref().map_or(0, drive_bit);
+            format!("connection {target} to {}: {e}", connection.remote)
+        })
+    }
+
+    fn add(&mut self, share: &Share) -> Result<(), AddFailure> {
+        if share.share_name.is_empty() || share.share_name.contains(['\\', '/']) {
+            return Err(AddFailure::Failed("invalid share name".to_owned()));
+        }
+        let remote = format!(r"\\{}\{}", self.host, share.share_name);
+        let user = qualified_username(&share.username, self.domain);
+        let (api, still_mapped) = (self.api, self.still_mapped);
+        let in_use = self
+            .in_use
+            .get_or_insert_with(|| api.used_drives() | still_mapped);
+        let drive = map_at_free_letter(api, in_use, &remote, &user, &share.password)
+            .map_err(|e| AddFailure::Failed(e.to_string()))?;
+        debug!("mapped {remote} at {drive}");
+        Ok(())
+    }
+}
+
+/// One reconciliation pass over our connections: remove those that aren't a desired drive
+/// mapping (with `force`, even if files are open on them), map the missing shares, and return
+/// the actual state afterwards.
+pub fn reconcile(
     api: &impl WNetApi,
     shares: &[Share],
     config: &SessionHelperConfig,
     force: bool,
 ) -> Result<PassResult, EnumerationError> {
-    let host = valid_host(config)?;
-    let ours = |all: Vec<Connection>| {
-        all.into_iter()
-            .filter_map(|c| Some((our_share(&c.remote, host)?.to_owned(), c)))
-            .collect::<Vec<_>>()
-    };
-    let before = ours(api.connections().map_err(EnumerationError)?);
-    let (desired, mut errors) = unique_by_name(shares);
-
-    // removal first: credentials of other connections to the host would block our mappings.
-    // We keep one drive mapping per desired share; deviceless connections never count.
-    let mut kept: Vec<&str> = Vec::new();
-    let mut still_mapped = 0;
-    for (name, connection) in &before {
-        if connection.local.is_some()
-            && desired.iter().any(|s| same_share(&s.share_name, name))
-            && !kept.iter().any(|k| same_share(k, name))
-        {
-            kept.push(name);
-            continue;
-        }
-        let target = connection.local.as_deref().unwrap_or(&connection.remote);
-        debug!("removing connection {target} to {}", connection.remote);
-        if let Err(e) = api.cancel(target, force) {
-            // it stays in the report, so the scope reads as not converged; the next pass retries
-            warn!(
-                "could not remove connection {target} to {}: {e}",
-                connection.remote
-            );
-            still_mapped |= connection.local.as_deref().map_or(0, drive_bit);
-        }
-    }
-
-    let mut in_use = api.used_drives() | still_mapped;
-    let mut add_errors = HashMap::new();
-    let mut created = Vec::new();
-    for share in &desired {
-        if kept.iter().any(|k| same_share(k, &share.share_name)) {
-            continue;
-        }
-        if share.share_name.is_empty() || share.share_name.contains(['\\', '/']) {
-            add_errors.insert(share.share_id.clone(), "invalid share name".to_owned());
-            continue;
-        }
-        let remote = format!(r"\\{host}\{}", share.share_name);
-        let user = qualified_username(&share.username, &config.smb_domain);
-        match map_at_free_letter(api, &mut in_use, &remote, &user, &share.password) {
-            Ok(drive) => {
-                debug!("mapped {remote} at {drive}");
-                created.push(share.share_name.clone());
-            }
-            Err(e) => {
-                add_errors.insert(share.share_id.clone(), e.to_string());
-            }
-        }
-    }
-
-    let after = ours(api.connections().map_err(EnumerationError)?);
-    for share in &desired {
-        let mapped = after
-            .iter()
-            .any(|(name, c)| c.local.is_some() && same_share(name, &share.share_name));
-        if !mapped {
-            errors.push(ShareError {
-                share_id: share.share_id.clone(),
-                message: add_errors
-                    .remove(&share.share_id)
-                    .unwrap_or_else(|| "not mounted".to_owned()),
-            });
-        }
-    }
-    Ok(PassResult {
-        state: SessionHelperState {
-            mounted_shares: after
-                .into_iter()
-                .map(|(share_name, connection)| MountedShare {
-                    share_name,
-                    // a deviceless connection exists, but offers no path
-                    mount_path: connection
-                        .local
-                        .map(|drive| PathBuf::from(format!(r"{drive}\"))),
-                })
-                .collect(),
-            errors,
-            // the main loop adds which desired state the pass was for
-            reconciled_share_ids: None,
-        },
-        created,
-    })
+    reconcile_pass(&mut WNetTable::new(api, config)?, shares, force)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::{cell::RefCell, collections::HashMap};
+
+    use modama_common::internal_api_types::SessionHelperState;
 
     use super::*;
+    use crate::reconcile::tests::{entry, mounted, share};
 
     fn config() -> SessionHelperConfig {
         SessionHelperConfig {
             smb_hostname: "smb.example.test".to_owned(),
             smb_port: 445,
             smb_domain: "WORKGROUP".to_owned(),
-        }
-    }
-
-    fn share(id: &str, name: &str) -> Share {
-        Share {
-            resource: None,
-            share_id: id.to_owned(),
-            share_name: name.to_owned(),
-            dest_path: format!("/project/{id}"),
-            created_timestamp: 0,
-            username: "user".to_owned(),
-            password: "s3cret-password".to_owned(),
-            uid: 1000,
-            gid: 1000,
-            created_by: None,
         }
     }
 
@@ -271,7 +254,6 @@ mod tests {
         connections: RefCell<Vec<Connection>>,
         /// letters in use besides the connections, e.g. local volumes
         local_drives: u32,
-        inventory_error: Option<String>,
         /// by remote name
         add_errors: HashMap<String, AddError>,
         /// letters that turn out to be taken when adding
@@ -291,10 +273,7 @@ mod tests {
 
     impl WNetApi for FakeWNet {
         fn connections(&self) -> Result<Vec<Connection>, String> {
-            match &self.inventory_error {
-                Some(e) => Err(e.clone()),
-                None => Ok(self.connections.borrow().clone()),
-            }
+            Ok(self.connections.borrow().clone())
         }
 
         fn used_drives(&self) -> u32 {
@@ -345,23 +324,8 @@ mod tests {
         }
     }
 
-    fn mounted(state: &SessionHelperState) -> Vec<(String, Option<String>)> {
-        let mut mounted: Vec<_> = state
-            .mounted_shares
-            .iter()
-            .map(|m| {
-                (
-                    m.share_name.clone(),
-                    m.mount_path.as_ref().map(|p| p.display().to_string()),
-                )
-            })
-            .collect();
-        mounted.sort();
-        mounted
-    }
-
-    fn entry(name: &str, path: Option<&str>) -> (String, Option<String>) {
-        (name.to_owned(), path.map(str::to_owned))
+    fn pass(api: &FakeWNet, shares: &[Share]) -> SessionHelperState {
+        reconcile(api, shares, &config(), false).unwrap().state
     }
 
     #[test]
@@ -385,14 +349,7 @@ mod tests {
             mapping("Y:", r"\\smb.example.test\stale"),
             mapping("X:", r"\\other.example.test\stale"),
         ]);
-        let state = reconcile_pass(
-            &api,
-            &[share("1", "keep"), share("2", "new")],
-            &config(),
-            false,
-        )
-        .unwrap()
-        .state;
+        let state = pass(&api, &[share("1", "keep"), share("2", "new")]);
         assert_eq!(
             mounted(&state),
             vec![entry("keep", Some(r"Z:\")), entry("new", Some(r"Y:\"))]
@@ -408,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn deviceless_connections_are_removed_and_never_count_as_mounted() {
+    fn deviceless_connections_are_removed_by_name_and_never_count_as_mounted() {
         let api = FakeWNet {
             cancel_errors: vec![r"\\smb.example.test\IPC$".to_owned()],
             ..FakeWNet::with(vec![
@@ -416,9 +373,7 @@ mod tests {
                 deviceless(r"\\smb.example.test\IPC$"),
             ])
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false)
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "a")]);
         assert_eq!(
             api.calls.borrow()[..2],
             [
@@ -439,9 +394,7 @@ mod tests {
             mapping("Z:", r"\\smb.example.test\a"),
             mapping("Y:", r"\\SMB.EXAMPLE.TEST\A"),
         ]);
-        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false)
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "a")]);
         assert_eq!(*api.calls.borrow(), vec!["cancel Y:"]);
         assert_eq!(mounted(&state), vec![entry("a", Some(r"Z:\"))]);
     }
@@ -453,9 +406,7 @@ mod tests {
             taken_on_add: vec!["Y:".to_owned()],
             ..FakeWNet::with(vec![mapping("X:", r"\\other.example.test\x")])
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false)
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "a")]);
         assert_eq!(
             *api.calls.borrow(),
             vec![
@@ -472,9 +423,7 @@ mod tests {
             local_drives: u32::MAX,
             ..FakeWNet::default()
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false)
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "a")]);
         assert_eq!(
             state.errors[0].message,
             "mount failed: no free drive letter"
@@ -496,9 +445,7 @@ mod tests {
             ]),
             ..FakeWNet::default()
         };
-        let state = reconcile_pass(&api, &[share("1", "a"), share("2", "b")], &config(), false)
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "a"), share("2", "b")]);
         let messages: Vec<_> = state.errors.iter().map(|e| e.message.as_str()).collect();
         assert_eq!(
             messages,
@@ -518,14 +465,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_removal_stays_in_the_report_and_keeps_its_letter() {
+    fn failed_removal_keeps_its_letter() {
         let api = FakeWNet {
             cancel_errors: vec!["Z:".to_owned()],
             ..FakeWNet::with(vec![mapping("Z:", r"\\smb.example.test\busy")])
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config(), false)
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "a")]);
         assert_eq!(
             mounted(&state),
             vec![entry("a", Some(r"Y:\")), entry("busy", Some(r"Z:\"))]
@@ -533,39 +478,12 @@ mod tests {
     }
 
     #[test]
-    fn inventory_error_fails_the_pass() {
-        let api = FakeWNet {
-            inventory_error: Some("access denied".to_owned()),
-            ..FakeWNet::default()
-        };
-        assert!(reconcile_pass(&api, &[share("1", "a")], &config(), false).is_err());
-        assert!(api.calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn duplicate_and_invalid_desired_names_get_errors() {
+    fn share_names_that_would_change_the_unc_path_are_rejected() {
         let api = FakeWNet::default();
-        let state = reconcile_pass(
-            &api,
-            &[share("1", "a"), share("2", "A"), share("3", r"b\..")],
-            &config(),
-            false,
-        )
-        .unwrap()
-        .state;
-        let errors: Vec<_> = state
-            .errors
-            .iter()
-            .map(|e| (e.share_id.as_str(), e.message.as_str()))
-            .collect();
-        assert_eq!(
-            errors,
-            vec![
-                ("2", "another desired share has the same name"),
-                ("3", "invalid share name"),
-            ]
-        );
-        assert_eq!(mounted(&state), vec![entry("a", Some(r"Z:\"))]);
+        let state = pass(&api, &[share("1", r"b\.."), share("2", "c/d")]);
+        let errors: Vec<_> = state.errors.iter().map(|e| e.message.as_str()).collect();
+        assert_eq!(errors, vec!["invalid share name", "invalid share name"]);
+        assert!(api.calls.borrow().is_empty());
     }
 
     #[test]
@@ -574,14 +492,14 @@ mod tests {
             smb_hostname: r"host\share".to_owned(),
             ..config()
         };
-        assert!(reconcile_pass(&FakeWNet::default(), &[], &config, false).is_err());
+        assert!(reconcile(&FakeWNet::default(), &[], &config, false).is_err());
     }
 
     #[test]
     fn removals_are_forced_only_when_asked() {
         for force in [false, true] {
             let api = FakeWNet::with(vec![mapping("Z:", r"\\smb.example.test\old")]);
-            reconcile_pass(&api, &[], &config(), force).unwrap();
+            reconcile(&api, &[], &config(), force).unwrap();
             let expected = if force {
                 "cancel Z: (forced)"
             } else {
@@ -589,18 +507,5 @@ mod tests {
             };
             assert_eq!(*api.calls.borrow(), vec![expected]);
         }
-    }
-
-    #[test]
-    fn created_lists_only_what_this_pass_mapped() {
-        let api = FakeWNet::with(vec![mapping("Z:", r"\\smb.example.test\keep")]);
-        let result = reconcile_pass(
-            &api,
-            &[share("1", "keep"), share("2", "new")],
-            &config(),
-            false,
-        )
-        .unwrap();
-        assert_eq!(result.created, vec!["new"]);
     }
 }

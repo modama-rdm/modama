@@ -14,6 +14,7 @@ pub mod open_folder;
 #[cfg_attr(target_os = "linux", path = "platform_linux.rs")]
 #[cfg_attr(target_os = "windows", path = "platform_windows.rs")]
 pub mod platform;
+pub mod reconcile;
 pub mod singleton;
 pub mod tray;
 #[cfg(target_os = "linux")]
@@ -21,4 +22,4 @@ mod tray_linux;
 #[cfg(windows)]
 mod tray_windows;
 #[cfg(any(windows, test))]
-pub mod wnet_reconcile;
+pub mod wnet_table;

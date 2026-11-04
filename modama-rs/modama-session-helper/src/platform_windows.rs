@@ -1,5 +1,5 @@
 //! Windows mount backend: WNet drive mappings in the helper's (non-elevated) logon session.
-//! The pass logic is in `wnet_reconcile`; this is the FFI underneath it.
+//! The mount table is in `wnet_table`; this is the FFI underneath it.
 
 use std::{
     collections::BTreeSet,
@@ -36,7 +36,7 @@ use windows::{
 
 use crate::{
     mount_backend::{EnumerationError, MountBackend, PassResult},
-    wnet_reconcile::{AddError, Connection, WNetApi, reconcile_pass},
+    wnet_table::{AddError, Connection, WNetApi, reconcile},
 };
 
 fn win32_message(error: WIN32_ERROR) -> String {
@@ -333,7 +333,7 @@ impl MountBackend for CurrentPlatformMountBackend {
             desired_shares.to_vec(),
             config.clone(),
         );
-        tokio::task::spawn_blocking(move || reconcile_pass(api.as_ref(), &shares, &config, force))
+        tokio::task::spawn_blocking(move || reconcile(api.as_ref(), &shares, &config, force))
             .await
             .map_err(|e| EnumerationError(format!("the reconciliation task failed: {e}")))?
     }
