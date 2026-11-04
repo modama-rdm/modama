@@ -66,15 +66,17 @@ need its results. It creates
   `smbdrop` server and the test directory server `ldap`. This is the same CA as in production (see
   [mTLS CA setup](./install.md#mtls-ca-setup)), but without a password.
 
-It only creates what is missing, so running it again changes nothing. You can run it
-on its own with `docker compose run --rm testenv-init`.
+`testenv-init` only creates what is missing; you can re-run it
+on its own with `docker compose run --rm testenv-init` to ensure the environment is set up properly.
 
 The other secrets are fixed test values, committed in `testconf/secrets/`. They protect
 nothing: all ports are on `localhost`, and there are no real accounts or data. Never put
 real secrets there.
 
 Source code of `mgmtinterface`, `mgmtinterface-api` and `permissions` is mounted into
-the containers, and these services restart when you change it.
+the containers, and these services restart when you change it. They run the development
+servers of their respective frameworks, so their behavior might differ slightly from
+production, for example debug mode might be enabled.
 
 ### Users and logins
 
