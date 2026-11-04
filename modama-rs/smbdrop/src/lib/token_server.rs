@@ -12,7 +12,7 @@ use axum::{
 use hyper::{StatusCode, body::Incoming};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonwebtoken::{DecodingKey, Validation, decode};
-use log::{error, warn};
+use log::{debug, error, warn};
 use modama_common::{
     agent::AgentId,
     cert_helpers::{get_private_key, load_tls_server_config},
@@ -43,7 +43,7 @@ async fn do_sign(state: &ConnState) -> Result<TokenSignResponse, SignError> {
     } else {
         return Err(SignError::Auth);
     };
-    eprintln!("agent id {:?}", agent_id);
+    debug!("signing a token for {}", agent_id.san_encoded);
 
     let sub = &agent_id.san_encoded;
     let claims = Claims {
@@ -182,7 +182,10 @@ async fn serve_token_server_with_listener(
                 return;
             };
 
-            let agent_id = peer_agent_id(&stream).ok().flatten();
+            let agent_id = peer_agent_id(&stream).unwrap_or_else(|e| {
+                warn!("client certificate from {addr} names no agent: {e}");
+                None
+            });
 
             let stream = TokioIo::new(stream);
 

@@ -10,16 +10,19 @@ use x509_parser::{
 
 #[derive(thiserror::Error, Debug)]
 pub enum ClientCertError {
-    #[error("invalid or missing SAN")]
-    InvalidSan(Option<String>),
+    #[error("no subject alternative name")]
+    MissingSan,
 
-    #[error("invalid URI: {0}")]
+    #[error("subject alternative name is not a URI: {0}")]
+    SanNotUri(String),
+
+    #[error(transparent)]
     InvalidURI(#[from] FromURIError),
 
-    #[error("error parsing the certificate")]
+    #[error("error parsing the certificate: {0}")]
     X509ParsingError(#[from] Err<X509Error>),
 
-    #[error("x509 error")]
+    #[error("x509 error: {0}")]
     X509Error(#[from] X509Error),
 }
 
@@ -66,16 +69,16 @@ impl AgentId {
 
         let san = client_cert
             .subject_alternative_name()?
-            .ok_or(ClientCertError::InvalidSan(None))?;
+            .ok_or(ClientCertError::MissingSan)?;
         let name = &san
             .value
             .general_names
             .first()
-            .ok_or(ClientCertError::InvalidSan(None))?;
+            .ok_or(ClientCertError::MissingSan)?;
         debug!("client SAN: {name}");
         match name {
             x509_parser::extensions::GeneralName::URI(u) => Ok(Self::from_uri(u)?),
-            _ => Err(ClientCertError::InvalidSan(Some(name.to_string()))),
+            _ => Err(ClientCertError::SanNotUri(name.to_string())),
         }
     }
 }
