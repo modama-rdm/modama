@@ -7,7 +7,9 @@ import sys
 OCC = ("sudo", "-u", "www-data", "php", "-d", "memory_limit=-1", "/var/www/html/occ")
 
 
-def occ(*args, occ_quiet=False, **kwargs):
+def occ(*args, occ_quiet=False, may_fail=False, **kwargs):
+    """Run occ as www-data. With may_fail, a failure is expected: it returns
+    None instead of raising, and the output goes to stdout like any other."""
     command = OCC + args
     if not occ_quiet:
         print(command)
@@ -22,8 +24,15 @@ def occ(*args, occ_quiet=False, **kwargs):
         return result
     except subprocess.CalledProcessError as e:
         if not occ_quiet:
-            # stderr: uptest.sh discards stdout, but this has to be seen
-            print(e.returncode, e.stdout, e.stderr, file=sys.stderr)
+            # stderr: uptest.sh discards stdout, but an error has to be seen
+            print(
+                e.returncode,
+                e.stdout,
+                e.stderr,
+                file=sys.stdout if may_fail else sys.stderr,
+            )
+        if may_fail:
+            return None
         raise
 
 
@@ -41,17 +50,11 @@ if __name__ == "__main__":
     ):
         # Make sure database is initialized for
         # the app in question
-        try:
-            occ("app:disable", app)
-        except subprocess.CalledProcessError:
-            pass
+        occ("app:disable", app, may_fail=True)
         occ("app:enable", app)
 
     for app in ("weather_status", "user_status", "survey_client", "firstrunwizard"):
-        try:
-            occ("app:disable", app)
-        except subprocess.CalledProcessError:
-            pass
+        occ("app:disable", app, may_fail=True)
 
     # Disable skeleton and template: Only external storage in user folder
     occ("config:system:set", "skeletondirectory")
@@ -61,10 +64,7 @@ if __name__ == "__main__":
     occ("config:system:set", "defaultapp", '--value="files"')
 
     # Properly initialize LDAP config
-    try:
-        occ("ldap:delete", "s01")
-    except subprocess.CalledProcessError:
-        pass
+    occ("ldap:delete", "s01", may_fail=True)
     occ("ldap:create-empty-config")
 
     occ("config:import", "/nextcloud-config.json")
