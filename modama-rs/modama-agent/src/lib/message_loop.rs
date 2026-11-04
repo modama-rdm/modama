@@ -99,11 +99,32 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
     }
 }
 
+/// Whether `msg` is a `Welcome` this agent understands; one from an smbdrop older than protocol
+/// 2 lacks the connection ID, and before protocol 1 there was none at all
+fn is_welcome(msg: &str) -> bool {
+    matches!(
+        serde_json::from_str(msg),
+        Ok(EventChannelMessage::Welcome { .. })
+    )
+}
+
+/// Handle what smbdrop sent; `welcomed` once its `Welcome` arrived. Before that, anything else
+/// means an smbdrop too old for this agent, which would never send a message we understand.
 async fn receive_inner(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
     state: &Arc<Mutex<AgentState>>,
+    welcomed: bool,
 ) -> ControlFlow<(), Option<u32>> {
     match message {
+        Some(Ok(Message::Text(utf8_bytes))) if !welcomed && !is_welcome(utf8_bytes.as_str()) => {
+            error!(
+                "smbdrop's first message is no Welcome of event channel protocol \
+                 {MIN_EVENT_CHANNEL_PROTOCOL} or later: it speaks an older one; update smbdrop. \
+                 Reconnecting..."
+            );
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            ControlFlow::Break(())
+        }
         Some(Ok(Message::Text(utf8_bytes))) => {
             match handle_message(state, utf8_bytes.as_str()).await {
                 Ok(welcome) => ControlFlow::Continue(welcome),
@@ -273,7 +294,8 @@ pub async fn message_loop(
         let mut reporter = StatusReporter::default();
         loop {
             tokio::select! {
-                msg = ws_read.next() => match receive_inner(msg, &state).await {
+                // the reporter learns the protocol from the Welcome
+                msg = ws_read.next() => match receive_inner(msg, &state, reporter.protocol != 0).await {
                     ControlFlow::Continue(welcome) => {
                         if let Some(protocol) = welcome {
                             if protocol < MIN_EVENT_CHANNEL_PROTOCOL {
@@ -695,6 +717,18 @@ mod tests {
         assert_eq!(next, 2);
 
         test_setup.abort().await;
+    }
+
+    #[test]
+    fn only_a_protocol_2_welcome_is_a_welcome() {
+        assert!(is_welcome(
+            r#"{"type": "Welcome", "protocol": 2, "connection": 7}"#
+        ));
+        // protocol 1 had no connection ID; protocol 0 started with an update
+        assert!(!is_welcome(r#"{"type": "Welcome", "protocol": 1}"#));
+        assert!(!is_welcome(
+            r#"{"type": "UpdateShareList", "shares": [], "foreground_share": null, "connected_agents": []}"#
+        ));
     }
 
     /// A change of only the participants is announced on its own, for GUIs; session helpers,
