@@ -139,8 +139,8 @@ impl<'a> ScopeView<'a> {
             })
     }
 
-    /// The desired foreground share; the stream only carries its ID
-    fn foreground_share(&self) -> Option<&'a Share> {
+    /// The desired foreground share, looked up by the ID the stream carries; mounted or not
+    pub fn foreground_share(&self) -> Option<&'a Share> {
         let id = self.foreground_share_id?;
         self.shares.iter().find(|share| share.share_id == id)
     }
@@ -685,6 +685,23 @@ mod tests {
         assert!(!blocked(&[current], &[]));
         // without a helper report, nothing is known to block
         assert!(!ScopeView::new(Some(&desired), None).hand_off_blocked());
+    }
+
+    #[test]
+    fn an_error_on_a_mounted_share_does_not_block_the_hand_off() {
+        // two desired shares of the same name: the helper mounts one and reports the other's
+        // name as taken; that error is no 1219, so a stale mount doesn't make it a hand-off
+        let desired = Shares {
+            foreground_share_id: Some("second".to_owned()),
+            shares: vec![share("first"), share("second")],
+        };
+        let report = helper(
+            &[("share", Some("/mnt/a")), ("old-share", Some("/mnt/old"))],
+            &[("second", "another desired share has the same name")],
+        );
+        let view = ScopeView::new(Some(&desired), Some(&report));
+        assert_eq!(view.stale_mounts().count(), 1);
+        assert!(!view.hand_off_blocked());
     }
 
     #[test]

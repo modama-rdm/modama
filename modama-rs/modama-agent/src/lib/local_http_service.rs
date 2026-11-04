@@ -12,7 +12,7 @@ use axum_macros::debug_handler;
 use log::error;
 use minijinja::{AutoEscape, Environment, Value, context};
 use modama_common::{
-    foreground::project_and_session,
+    foreground::{ScopeView, project_and_session},
     internal_api_types::{ConnectedAgent, ConnectedAgents},
     local_api_messages::APICurrentForegroundShare,
     messages::{AgentMountStatus, Share},
@@ -372,13 +372,17 @@ async fn local_snapshot(agent_state: &ApiState) -> (String, Option<ConnectedAgen
 /// The desired foreground share; mounted or not, this is what the user can close, and what
 /// prevents opening another ingest
 async fn desired_foreground(agent_state: &ApiState) -> Option<Share> {
-    agent_state
+    let desired = agent_state
         .state
         .lock()
         .await
         .remote_info
-        .as_ref()
-        .and_then(|remote| remote.desired_shares.foreground_share.clone())
+        .as_ref()?
+        .shares();
+    // as the foreground projection finds it, so the two can't disagree
+    ScopeView::new(Some(&desired), None)
+        .foreground_share()
+        .cloned()
 }
 
 /// Wrapper around the AgentState for the local API server

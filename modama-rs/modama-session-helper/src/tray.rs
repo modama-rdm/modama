@@ -269,6 +269,16 @@ mod tests {
     }
 
     #[test]
+    fn a_mount_reported_in_another_case_is_ready_and_openable() {
+        let desired = desired(vec![share("a")], Some("a"));
+        let mut actual = mounted("a");
+        actual.mounted_shares[0].share_name = "SHARE-A".to_owned();
+        let state = tray_state(true, Some(&desired), Some(&actual));
+        assert_eq!(state.status, TrayStatus::Ready);
+        assert_eq!(state.network_drive, Some(PathBuf::from("/mnt/a")));
+    }
+
+    #[test]
     fn working_until_converged_with_the_first_error_as_reason() {
         let desired = desired(vec![share("a"), share("b")], Some("b"));
         let mut actual = mounted("a");
