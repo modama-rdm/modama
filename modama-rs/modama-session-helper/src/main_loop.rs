@@ -23,6 +23,7 @@ use url::Url;
 
 use crate::{
     mount_backend::{MountBackend, PassResult, same_share},
+    mount_popup::{CreatedMount, PopupEvent},
     tray::{TrayState, tray_state},
 };
 
@@ -66,8 +67,11 @@ struct LoopState {
     /// What we last sent to the agent over the current connection
     last_report: Option<SessionHelperState>,
 
-    /// Mounts a pass created go to the mount popup
-    popup: mpsc::UnboundedSender<Vec<PopupMount>>,
+    /// Mounts a pass created, and which shares are still desired, go to the mount popup
+    popup: mpsc::UnboundedSender<PopupEvent>,
+
+    /// The desired share IDs the popup last heard of
+    popup_desired: Option<Vec<String>>,
 
     /// The last pass's result, connected or not; for the notification-area icon
     actual: Option<SessionHelperState>,
@@ -75,7 +79,7 @@ struct LoopState {
 }
 
 /// The mounts this pass created that offer a path, as the mount popup shows them
-fn popup_mounts(desired: &[Share], result: &PassResult) -> Vec<PopupMount> {
+fn popup_mounts(desired: &[Share], result: &PassResult) -> Vec<CreatedMount> {
     result
         .created
         .iter()
@@ -89,10 +93,13 @@ fn popup_mounts(desired: &[Share], result: &PassResult) -> Vec<PopupMount> {
                 .clone()?;
             let share = desired.iter().find(|s| same_share(&s.share_name, name))?;
             match project_and_session(&share.dest_path) {
-                Ok((project, session)) => Some(PopupMount {
-                    project,
-                    session,
-                    mount_path,
+                Ok((project, session)) => Some(CreatedMount {
+                    share_id: share.share_id.clone(),
+                    mount: PopupMount {
+                        project,
+                        session,
+                        mount_path,
+                    },
                 }),
                 Err(e) => {
                     warn!("not announcing share {name}: {e}");
@@ -135,6 +142,13 @@ impl LoopState {
         let Some(share_state) = &desired.share_state else {
             return;
         };
+        // before this pass's mounts, so the popup never shows a share that is gone already;
+        // the popup task only stops with the helper
+        let desired_ids = desired_share_ids(share_state);
+        if self.popup_desired.as_ref() != Some(&desired_ids) {
+            let _ = self.popup.send(PopupEvent::Desired(desired_ids.clone()));
+            self.popup_desired = Some(desired_ids);
+        }
 
         let result = match backend
             .reconcile(&share_state.shares, &desired.config, force)
@@ -149,9 +163,8 @@ impl LoopState {
         };
         let created = popup_mounts(&share_state.shares, &result);
         if !created.is_empty() {
-            // the popup task only stops with the helper
-            let _ = self.popup.send(created.clone());
             info!("created the following shares: {created:?}");
+            let _ = self.popup.send(PopupEvent::Created(created));
         }
         // so the agent can tell which desired state this report answers
         let report = SessionHelperState {
@@ -226,7 +239,7 @@ async fn next_message(
 pub async fn session_helper_loop(
     backend: &impl MountBackend,
     options: &LoopOptions,
-    popup: mpsc::UnboundedSender<Vec<PopupMount>>,
+    popup: mpsc::UnboundedSender<PopupEvent>,
     tray: watch::Sender<TrayState>,
 ) -> ! {
     let mut state = LoopState {
@@ -235,6 +248,7 @@ pub async fn session_helper_loop(
         stream: None,
         last_report: None,
         popup,
+        popup_desired: None,
         actual: None,
         tray,
     };
@@ -383,7 +397,7 @@ mod tests {
         listener: TcpListener,
         backend: FakeBackend,
         helper: JoinHandle<()>,
-        popup: mpsc::UnboundedReceiver<Vec<PopupMount>>,
+        popup: mpsc::UnboundedReceiver<PopupEvent>,
         tray: watch::Receiver<TrayState>,
     }
 
@@ -562,17 +576,48 @@ mod tests {
 
         send_desired(&mut agent, Some(vec![share("a"), share("b")])).await;
 
+        let first = timeout(LONG, setup.popup.recv()).await.unwrap().unwrap();
+        assert_eq!(first, desired_ids(&["a", "b"]));
         let mounts = timeout(LONG, setup.popup.recv()).await.unwrap().unwrap();
         assert_eq!(
             mounts,
-            vec![PopupMount {
-                project: "project".to_owned(),
-                session: "a".to_owned(),
-                mount_path: "/mnt/a".into(),
-            }]
+            PopupEvent::Created(vec![CreatedMount {
+                share_id: "a".to_owned(),
+                mount: PopupMount {
+                    project: "project".to_owned(),
+                    session: "a".to_owned(),
+                    mount_path: "/mnt/a".into(),
+                },
+            }])
         );
-        // later passes create nothing, so nothing more is announced:
+        // later passes create nothing and the desired state stays, so nothing more is announced:
         setup.wait_for_calls(3).await;
+        assert!(setup.popup.try_recv().is_err());
+    }
+
+    fn desired_ids(ids: &[&str]) -> PopupEvent {
+        PopupEvent::Desired(ids.iter().map(|id| (*id).to_owned()).collect())
+    }
+
+    #[tokio::test]
+    async fn the_popup_hears_when_the_desired_shares_change_but_not_while_unknown() {
+        let mut setup = Setup::start(Ok(report(&[]))).await;
+        let mut agent = setup.accept().await;
+
+        // the agent doesn't know yet what should be mounted: nothing is desired or undesired
+        send_desired(&mut agent, None).await;
+        send_desired(&mut agent, Some(vec![share("a"), share("b")])).await;
+        let event = timeout(LONG, setup.popup.recv()).await.unwrap().unwrap();
+        assert_eq!(event, desired_ids(&["a", "b"]));
+
+        send_desired(&mut agent, Some(vec![share("b")])).await;
+        let event = timeout(LONG, setup.popup.recv()).await.unwrap().unwrap();
+        assert_eq!(event, desired_ids(&["b"]));
+
+        send_desired(&mut agent, Some(vec![])).await;
+        let event = timeout(LONG, setup.popup.recv()).await.unwrap().unwrap();
+        assert_eq!(event, desired_ids(&[]));
+        setup.wait_for_calls(4).await;
         assert!(setup.popup.try_recv().is_err());
     }
 

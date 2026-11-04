@@ -121,21 +121,22 @@ impl eframe::App for MountPopupApp {
             }
             // like the confirmation dialog and the autostart offer
             ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-            let choice = ui
-                .with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    let open = ui.add(primary_button("Open network drive", ui)).clicked();
-                    let dismiss = ui.add(secondary_button("Dismiss", ui)).clicked();
-                    if open {
-                        Some(PopupChoice::Open)
-                    } else if dismiss {
-                        Some(PopupChoice::Dismiss)
-                    } else {
-                        None
-                    }
-                })
-                .inner;
-            // the window follows the content: up to its bottom, plus the padding below it
-            (choice, Some(ui.min_rect().max.y + padding.y))
+            // top-aligned: a centered row would take all the height there is, and the window,
+            // which follows the content, could never shrink when mounts leave the popup
+            let buttons = ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
+                let open = ui.add(primary_button("Open network drive", ui)).clicked();
+                let dismiss = ui.add(secondary_button("Dismiss", ui)).clicked();
+                if open {
+                    Some(PopupChoice::Open)
+                } else if dismiss {
+                    Some(PopupChoice::Dismiss)
+                } else {
+                    None
+                }
+            });
+            // the window follows the content: up to the buttons' bottom, plus the padding below
+            // (not the panel's, which is as tall as the window already is)
+            (buttons.inner, Some(buttons.response.rect.max.y + padding.y))
         });
         let (choice, height) = response.inner;
         if let Some(choice) = choice {
