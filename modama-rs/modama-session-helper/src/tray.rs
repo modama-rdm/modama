@@ -10,9 +10,8 @@ use std::{path::PathBuf, process::Stdio};
 
 use log::{info, warn};
 use modama_common::{
-    foreground::{actual_differs_from_desired, foreground_projection, foreground_share},
+    foreground::ScopeView,
     internal_api_types::{SessionHelperState, ToSessionHelper},
-    local_api_messages::APICurrentForegroundShare,
 };
 use tokio::sync::{mpsc, watch};
 use url::Url;
@@ -70,21 +69,17 @@ pub fn tray_state(
     desired: Option<&ToSessionHelper>,
     actual: Option<&SessionHelperState>,
 ) -> TrayState {
-    let shares = desired.and_then(|desired| desired.share_state.as_ref());
-    let network_drive = shares.and_then(|shares| {
-        match foreground_projection(foreground_share(shares), actual).ok()? {
-            APICurrentForegroundShare::Mounted { mount_path, .. } => {
-                Some(PathBuf::from(mount_path))
-            }
-            APICurrentForegroundShare::None | APICurrentForegroundShare::Unavailable { .. } => None,
-        }
-    });
-    let status = match (connected, shares, actual) {
-        (false, _, _) => TrayStatus::Disconnected,
-        (true, Some(shares), Some(actual)) if !actual_differs_from_desired(shares, actual) => {
-            TrayStatus::Ready
-        }
-        (true, _, actual) => TrayStatus::Working {
+    // None: the agent hasn't heard from smbdrop yet, so whether we're done is unknown
+    let view = desired
+        .and_then(|desired| desired.share_state.as_ref())
+        .map(|shares| ScopeView::new(Some(shares), actual));
+    let network_drive = view
+        .and_then(|view| view.foreground_mount_path())
+        .map(PathBuf::from);
+    let status = match (connected, view) {
+        (false, _) => TrayStatus::Disconnected,
+        (true, Some(view)) if !view.actual_differs_from_desired() => TrayStatus::Ready,
+        (true, _) => TrayStatus::Working {
             reason: actual
                 .and_then(|actual| actual.errors.first())
                 .map(|error| error.message.clone()),

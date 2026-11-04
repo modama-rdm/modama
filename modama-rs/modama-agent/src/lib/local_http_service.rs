@@ -1211,12 +1211,10 @@ mod tests {
                     },
                 );
             }
-            state
-                .remote_info
-                .as_mut()
-                .unwrap()
-                .desired_shares
-                .foreground_share = Some(share);
+            // as smbdrop's updates do, keep the foreground share in the share list
+            let desired = &mut state.remote_info.as_mut().unwrap().desired_shares;
+            desired.foreground_share = Some(share);
+            desired.ensure_consistent();
         }
     }
 

@@ -10,11 +10,12 @@ use std::{collections::HashMap, path::PathBuf};
 
 use log::{debug, warn};
 use modama_common::{
+    foreground::same_share,
     internal_api_types::{MountedShare, SessionHelperConfig, SessionHelperState, ShareError},
     messages::Share,
 };
 
-use crate::mount_backend::{EnumerationError, PassResult, same_share, unique_by_name};
+use crate::mount_backend::{EnumerationError, PassResult, unique_by_name};
 
 /// A network connection of this logon session
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

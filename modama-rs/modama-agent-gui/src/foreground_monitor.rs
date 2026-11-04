@@ -7,7 +7,7 @@ use std::{
 use eframe::egui;
 use futures_util::{SinkExt as _, StreamExt as _};
 use modama_common::{
-    foreground::{foreground_projection, foreground_share, hand_off_blocked, other_mounted_shares},
+    foreground::ScopeView,
     internal_api_types::{ConnectedAgents, ToAgentFromGui, ToSessionGui},
 };
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
@@ -106,11 +106,12 @@ impl MonitorState {
             self.launcher.launch();
         }
 
-        let blocked = self.offer_force_release
-            && match (&message.desired_shares, &message.session_helper) {
-                (Some(desired), Some(helper)) => hand_off_blocked(desired, helper),
-                _ => false,
-            };
+        let view = ScopeView::new(
+            message.desired_shares.as_ref(),
+            message.session_helper.as_ref(),
+        );
+
+        let blocked = self.offer_force_release && view.hand_off_blocked();
         if blocked != self.hand_off_blocked {
             self.hand_off_blocked = blocked;
             if !updates.send(ForegroundMonitorUpdate::HandOffBlocked(blocked)) {
@@ -121,13 +122,11 @@ impl MonitorState {
         // before the foreground: a share that moves from the foreground to the others has to
         // be known as mounted when the foreground changes, or a close in flight for it would
         // count as done
-        let other_mounts = match (&message.desired_shares, &message.session_helper) {
-            (Some(desired), Some(helper)) => other_mounted_shares(desired, helper)
-                .into_iter()
-                .map(ActiveSession::from)
-                .collect(),
-            _ => Vec::new(),
-        };
+        let other_mounts: Vec<ActiveSession> = view
+            .other_mounts()
+            .into_iter()
+            .map(ActiveSession::from)
+            .collect();
         if other_mounts != self.last_other_mounts {
             self.last_other_mounts = other_mounts.clone();
             if !updates.send(ForegroundMonitorUpdate::OtherMountsChanged(other_mounts)) {
@@ -144,8 +143,7 @@ impl MonitorState {
             }
         }
 
-        let desired = message.desired_shares.as_ref().and_then(foreground_share);
-        let foreground = match foreground_projection(desired, message.session_helper.as_ref()) {
+        let foreground = match view.foreground() {
             Ok(foreground) => ForegroundSession::from(foreground),
             Err(e) => {
                 log::warn!("ignoring foreground share: {e}");

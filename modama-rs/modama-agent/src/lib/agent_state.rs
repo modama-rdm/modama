@@ -3,10 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use log::{info, warn};
 use modama_common::{
     agent::AgentId,
-    foreground::{
-        OtherMount, ShareDestinationError, agent_mount_status, foreground_projection,
-        other_mounted_shares,
-    },
+    foreground::{OtherMount, ScopeView, ShareDestinationError, agent_mount_status},
     internal_api_types::{
         ConnectedAgent, ConnectedAgents, ConnectionDetails, SessionHelperState, Shares,
     },
@@ -248,32 +245,25 @@ impl AgentState {
         &self,
         scope: HelperScope,
     ) -> Result<APICurrentForegroundShare, ShareDestinationError> {
-        let desired = self
-            .remote_info
-            .as_ref()
-            .and_then(|remote| remote.desired_shares.foreground_share.as_ref());
-        foreground_projection(desired, self.session_helpers.get(&scope))
+        let desired = self.remote_info.as_ref().map(RemoteInfo::shares);
+        ScopeView::new(desired.as_ref(), self.session_helpers.get(&scope)).foreground()
     }
 
     /// Our mount status, over all connected session helpers; None as long as we haven't heard
     /// from smbdrop what should be mounted
     pub fn mount_status(&self) -> Option<AgentMountStatus> {
         let desired = self.remote_info.as_ref()?.shares();
-        let helpers = self
+        let scopes = self
             .session_connections
             .keys()
-            .map(|scope| self.session_helpers.get(scope));
-        Some(agent_mount_status(&desired, helpers))
+            .map(|scope| ScopeView::new(Some(&desired), self.session_helpers.get(scope)));
+        Some(agent_mount_status(scopes))
     }
 
     /// The desired shares besides the foreground one that `scope`'s session helper has mounted
     pub fn other_mounts_for(&self, scope: HelperScope) -> Vec<OtherMount> {
-        let (Some(remote), Some(helper)) =
-            (self.remote_info.as_ref(), self.session_helpers.get(&scope))
-        else {
-            return Vec::new();
-        };
-        other_mounted_shares(&remote.shares(), helper)
+        let desired = self.remote_info.as_ref().map(RemoteInfo::shares);
+        ScopeView::new(desired.as_ref(), self.session_helpers.get(&scope)).other_mounts()
     }
 
     /// The agents connected at the resource of our token; None until we are connected and

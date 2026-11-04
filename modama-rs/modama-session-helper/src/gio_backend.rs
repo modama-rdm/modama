@@ -16,6 +16,7 @@ use std::{
 use gio::prelude::*;
 use log::{debug, warn};
 use modama_common::{
+    foreground::same_share,
     internal_api_types::{MountedShare, SessionHelperConfig, SessionHelperState, ShareError},
     messages::Share,
 };
@@ -23,9 +24,7 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode
 use tokio::sync::oneshot;
 use url::Url;
 
-use crate::mount_backend::{
-    EnumerationError, MountBackend, PassResult, same_share, unique_by_name,
-};
+use crate::mount_backend::{EnumerationError, MountBackend, PassResult, unique_by_name};
 
 /// Upper bound for a single mount or unmount operation
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(30);

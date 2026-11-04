@@ -1,6 +1,7 @@
 use std::future::Future;
 
 use modama_common::{
+    foreground::same_share,
     internal_api_types::{SessionHelperConfig, SessionHelperState, ShareError},
     messages::Share,
 };
@@ -40,11 +41,6 @@ pub trait MountBackend {
         config: &SessionHelperConfig,
         force: bool,
     ) -> impl Future<Output = Result<PassResult, EnumerationError>>;
-}
-
-/// SMB share names are case-insensitive
-pub fn same_share(a: &str, b: &str) -> bool {
-    a.to_lowercase() == b.to_lowercase()
 }
 
 /// The desired shares, without those whose name another one already has; each of those gets an

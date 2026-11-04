@@ -1,10 +1,16 @@
-//! Where a client should write right now: the foreground share, projected from the desired
-//! state and the session helper's report. Used by the agent for the HTTP API and by the GUI.
+//! One scope's view of its shares: the desired state (from smbdrop via the agent) joined with
+//! the report of the scope's session helper (what it actually mounted). [`ScopeView`] owns the
+//! rule by which the two are matched ([`same_share`]) and answers every question callers have
+//! about the pair: where to write right now (the foreground projection), which other shares are
+//! mounted, whether a hand-off is blocked, and whether actual state has caught up. The agent
+//! uses it for its HTTP API and mount status, the GUI and the session helper for what they show.
+
+use std::path::Path;
 
 use log::warn;
 
 use crate::{
-    internal_api_types::{SessionHelperState, Shares},
+    internal_api_types::{MountedShare, SessionHelperState, Shares},
     local_api_messages::APICurrentForegroundShare,
     messages::{AgentMountStatus, Share},
 };
@@ -33,6 +39,13 @@ pub fn project_and_session(dest_path: &str) -> Result<(String, String), ShareDes
     Ok((project.to_owned(), session.to_owned()))
 }
 
+/// Whether two share names name the same share. SMB share names are case-insensitive, and a
+/// helper may report a mount under another case than smbdrop's (`Foo` for `foo`). Mounts are
+/// identified by name, as the helper may report mounts we know nothing about.
+pub fn same_share(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
+}
+
 /// Shown when no session helper has reported for the caller's scope
 pub const NO_HELPER_MESSAGE: &str = "No session helper is running for you. Open the Modama \
                                  GUI, which starts it, or run `modama-agent-gui session-helper`.";
@@ -40,62 +53,17 @@ pub const NO_HELPER_MESSAGE: &str = "No session helper is running for you. Open 
 /// Shown while the helper is there, but hasn't mounted the share (and hasn't reported an error)
 pub const WAITING_MESSAGE: &str = "Waiting for the session helper to mount the share.";
 
-/// Answer "where should I write right now?" from the desired foreground share and the
-/// report of the caller's session helper (None if no helper has reported for that scope).
-pub fn foreground_projection(
-    desired: Option<&Share>,
-    helper: Option<&SessionHelperState>,
-) -> Result<APICurrentForegroundShare, ShareDestinationError> {
-    let Some(desired) = desired else {
-        return Ok(APICurrentForegroundShare::None);
-    };
-    let (project, session) = project_and_session(&desired.dest_path)?;
-    let unavailable = |message: String| APICurrentForegroundShare::Unavailable {
-        share_id: desired.share_id.clone(),
-        project: project.clone(),
-        session: session.clone(),
-        dest_path: desired.dest_path.clone(),
-        message,
-        created_by: desired.created_by.clone(),
-    };
-
-    let Some(helper) = helper else {
-        return Ok(unavailable(NO_HELPER_MESSAGE.to_owned()));
-    };
-
-    // mounts are identified by share name, as the helper may report mounts we know nothing about:
-    let mount_path = helper
-        .mounted_shares
-        .iter()
-        .filter(|mounted| mounted.share_name == desired.share_name)
-        .find_map(|mounted| mounted.mount_path.as_ref());
-    if let Some(mount_path) = mount_path {
-        return Ok(match mount_path.to_str() {
-            Some(mount_path) => APICurrentForegroundShare::Mounted {
-                share_id: desired.share_id.clone(),
-                project,
-                session,
-                dest_path: desired.dest_path.clone(),
-                mount_path: mount_path.to_owned(),
-                created_by: desired.created_by.clone(),
-            },
-            None => {
-                let lossy = mount_path.to_string_lossy();
-                warn!("Mount path {lossy} contains invalid unicode, cannot report it");
-                unavailable(format!(
-                    "The share is mounted at {lossy}, but that path can't be represented as \
-                     text."
-                ))
-            }
-        });
-    }
-
-    let message = helper
-        .errors
-        .iter()
-        .find(|error| error.share_id == desired.share_id)
-        .map_or_else(|| WAITING_MESSAGE.to_owned(), |error| error.message.clone());
-    Ok(unavailable(message))
+/// Where one desired share stands, according to the session helper
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShareMount<'a> {
+    /// No session helper has reported for the scope
+    NoHelper,
+    /// Mounted, at a path applications can use
+    Mounted(&'a Path),
+    /// Not mounted (or without a usable path); the helper's error for it
+    Failed(&'a str),
+    /// Not mounted (or without a usable path) yet, and no error either
+    Waiting,
 }
 
 /// A desired share other than the foreground one that the caller's session helper has mounted
@@ -108,128 +76,211 @@ pub struct OtherMount {
     pub mount_path: String,
 }
 
-/// The desired shares besides the foreground one that are mounted in the caller's session,
-/// in the order of the desired state (oldest first). On Linux, a user's earlier shares on this
-/// resource stay mounted next to the newest one.
-pub fn other_mounted_shares(desired: &Shares, helper: &SessionHelperState) -> Vec<OtherMount> {
-    desired
-        .shares
-        .iter()
-        .filter(|share| desired.foreground_share_id.as_ref() != Some(&share.share_id))
-        .filter_map(|share| {
-            // as in `foreground_projection`, mounts are identified by share name
-            let mount_path = helper
-                .mounted_shares
-                .iter()
-                .filter(|mounted| mounted.share_name == share.share_name)
-                .find_map(|mounted| mounted.mount_path.as_ref())?;
-            let Some(mount_path) = mount_path.to_str() else {
-                warn!(
-                    "Mount path {} contains invalid unicode, not listing it",
-                    mount_path.to_string_lossy()
-                );
-                return None;
-            };
-            let (project, session) = match project_and_session(&share.dest_path) {
-                Ok(names) => names,
-                Err(error) => {
-                    warn!("not listing mounted share {}: {error}", share.share_id);
-                    return None;
-                }
-            };
-            Some(OtherMount {
-                share_id: share.share_id.clone(),
-                project,
-                session,
-                created_by: share.created_by.clone(),
-                mount_path: mount_path.to_owned(),
+/// The desired shares of a scope, joined with what its session helper reported; build it once
+/// per state and read the answers from it
+#[derive(Clone, Copy, Debug)]
+pub struct ScopeView<'a> {
+    shares: &'a [Share],
+    foreground_share_id: Option<&'a str>,
+    helper: Option<&'a SessionHelperState>,
+}
+
+impl<'a> ScopeView<'a> {
+    /// `desired`: None while the desired state isn't known yet; nothing counts as desired then.
+    /// `helper`: the last report of the scope's session helper; None if none has reported.
+    pub fn new(desired: Option<&'a Shares>, helper: Option<&'a SessionHelperState>) -> Self {
+        Self {
+            shares: desired.map_or(&[], |desired| desired.shares.as_slice()),
+            foreground_share_id: desired.and_then(|desired| desired.foreground_share_id.as_deref()),
+            helper,
+        }
+    }
+
+    fn mount_of(&self, share: &'a Share) -> ShareMount<'a> {
+        let Some(helper) = self.helper else {
+            return ShareMount::NoHelper;
+        };
+        let mount_path = helper
+            .mounted_shares
+            .iter()
+            .filter(|mounted| same_share(&mounted.share_name, &share.share_name))
+            .find_map(|mounted| mounted.mount_path.as_deref());
+        if let Some(mount_path) = mount_path {
+            return ShareMount::Mounted(mount_path);
+        }
+        helper
+            .errors
+            .iter()
+            .find(|error| error.share_id == share.share_id)
+            .map_or(ShareMount::Waiting, |error| {
+                ShareMount::Failed(error.message.as_str())
             })
-        })
-        .collect()
-}
+    }
 
-/// The desired foreground share; the stream only carries its ID
-pub fn foreground_share(shares: &Shares) -> Option<&Share> {
-    let id = shares.foreground_share_id.as_ref()?;
-    shares.shares.iter().find(|share| &share.share_id == id)
-}
-
-/// A hand-off is blocked when a mount that is no longer desired is still there and a desired
-/// share failed: on Windows, the old mount's credentials keep the new ones out (error 1219)
-/// until it is released, by force if files are open on it.
-pub fn hand_off_blocked(desired: &Shares, helper: &SessionHelperState) -> bool {
-    let is_desired = |name: &str| {
-        desired
-            .shares
+    /// Every desired share with where it stands, in the order of the desired state (oldest
+    /// first)
+    pub fn desired(&self) -> impl Iterator<Item = (&'a Share, ShareMount<'a>)> + '_ {
+        self.shares
             .iter()
-            .any(|share| share.share_name.eq_ignore_ascii_case(name))
-    };
-    let stale_mount = helper
-        .mounted_shares
-        .iter()
-        .any(|mounted| !is_desired(&mounted.share_name));
-    let failed_share = helper
-        .errors
-        .iter()
-        .any(|error| desired.shares.iter().any(|s| s.share_id == error.share_id));
-    stale_mount && failed_share
-}
+            .map(|share| (share, self.mount_of(share)))
+    }
 
-/// Whether actual state differs from desired state: a desired share is missing or has no usable
-/// path, or a mount that is no longer desired is still there. Every reason for it heals on a
-/// later pass or has its desire withdrawn; whether a pass for the current desired state already
-/// ran is a separate question, see `scope_mount_status`.
-pub fn actual_differs_from_desired(desired: &Shares, helper: &SessionHelperState) -> bool {
-    let all_mounted = desired.shares.iter().all(|share| {
-        helper.mounted_shares.iter().any(|mounted| {
-            mounted.share_name.eq_ignore_ascii_case(&share.share_name)
-                && mounted.mount_path.is_some()
+    /// The reported mounts that no desired share matches: left over from a share that is no
+    /// longer desired, awaiting removal
+    pub fn stale_mounts(&self) -> impl Iterator<Item = &'a MountedShare> + '_ {
+        self.helper
+            .into_iter()
+            .flat_map(|helper| &helper.mounted_shares)
+            .filter(|mounted| {
+                !self
+                    .shares
+                    .iter()
+                    .any(|share| same_share(&share.share_name, &mounted.share_name))
+            })
+    }
+
+    /// The desired foreground share; the stream only carries its ID
+    fn foreground_share(&self) -> Option<&'a Share> {
+        let id = self.foreground_share_id?;
+        self.shares.iter().find(|share| share.share_id == id)
+    }
+
+    /// Answer "where should I write right now?"
+    pub fn foreground(&self) -> Result<APICurrentForegroundShare, ShareDestinationError> {
+        let Some(desired) = self.foreground_share() else {
+            return Ok(APICurrentForegroundShare::None);
+        };
+        let (project, session) = project_and_session(&desired.dest_path)?;
+        let unavailable = |message: String| APICurrentForegroundShare::Unavailable {
+            share_id: desired.share_id.clone(),
+            project: project.clone(),
+            session: session.clone(),
+            dest_path: desired.dest_path.clone(),
+            message,
+            created_by: desired.created_by.clone(),
+        };
+        Ok(match self.mount_of(desired) {
+            ShareMount::NoHelper => unavailable(NO_HELPER_MESSAGE.to_owned()),
+            ShareMount::Waiting => unavailable(WAITING_MESSAGE.to_owned()),
+            ShareMount::Failed(message) => unavailable(message.to_owned()),
+            ShareMount::Mounted(mount_path) => match mount_path.to_str() {
+                Some(mount_path) => APICurrentForegroundShare::Mounted {
+                    share_id: desired.share_id.clone(),
+                    project,
+                    session,
+                    dest_path: desired.dest_path.clone(),
+                    mount_path: mount_path.to_owned(),
+                    created_by: desired.created_by.clone(),
+                },
+                None => {
+                    let lossy = mount_path.to_string_lossy();
+                    warn!("Mount path {lossy} contains invalid unicode, cannot report it");
+                    unavailable(format!(
+                        "The share is mounted at {lossy}, but that path can't be represented \
+                         as text."
+                    ))
+                }
+            },
         })
-    });
-    let all_desired = helper.mounted_shares.iter().all(|mounted| {
-        desired
-            .shares
-            .iter()
-            .any(|share| share.share_name.eq_ignore_ascii_case(&mounted.share_name))
-    });
-    !(all_mounted && all_desired)
+    }
+
+    /// Where the foreground share is mounted; None unless it is mounted at a usable path
+    pub fn foreground_mount_path(&self) -> Option<&'a Path> {
+        match self.mount_of(self.foreground_share()?) {
+            ShareMount::Mounted(path) => Some(path),
+            ShareMount::NoHelper | ShareMount::Failed(_) | ShareMount::Waiting => None,
+        }
+    }
+
+    /// The desired shares besides the foreground one that are mounted in the scope, in the
+    /// order of the desired state (oldest first). On Linux, a user's earlier shares on this
+    /// resource stay mounted next to the newest one.
+    pub fn other_mounts(&self) -> Vec<OtherMount> {
+        self.desired()
+            .filter(|(share, _)| self.foreground_share_id != Some(share.share_id.as_str()))
+            .filter_map(|(share, mount)| {
+                let ShareMount::Mounted(mount_path) = mount else {
+                    return None;
+                };
+                let Some(mount_path) = mount_path.to_str() else {
+                    warn!(
+                        "Mount path {} contains invalid unicode, not listing it",
+                        mount_path.to_string_lossy()
+                    );
+                    return None;
+                };
+                let (project, session) = match project_and_session(&share.dest_path) {
+                    Ok(names) => names,
+                    Err(error) => {
+                        warn!("not listing mounted share {}: {error}", share.share_id);
+                        return None;
+                    }
+                };
+                Some(OtherMount {
+                    share_id: share.share_id.clone(),
+                    project,
+                    session,
+                    created_by: share.created_by.clone(),
+                    mount_path: mount_path.to_owned(),
+                })
+            })
+            .collect()
+    }
+
+    /// A hand-off is blocked when a mount that is no longer desired is still there and a
+    /// desired share failed: on Windows, the old mount's credentials keep the new ones out
+    /// (error 1219) until it is released, by force if files are open on it.
+    pub fn hand_off_blocked(&self) -> bool {
+        self.stale_mounts().next().is_some()
+            && self
+                .desired()
+                .any(|(_, mount)| matches!(mount, ShareMount::Failed(_)))
+    }
+
+    /// Whether actual state differs from desired state: a desired share is missing or has no
+    /// usable path, a mount that is no longer desired is still there, or the helper hasn't
+    /// reported at all. Every reason for it heals on a later pass or has its desire withdrawn;
+    /// whether a pass for the current desired state already ran is a separate question, see
+    /// [`Self::mount_status`].
+    pub fn actual_differs_from_desired(&self) -> bool {
+        self.helper.is_none()
+            || self
+                .desired()
+                .any(|(_, mount)| !matches!(mount, ShareMount::Mounted(_)))
+            || self.stale_mounts().next().is_some()
+    }
+
+    /// Mount status of the scope's session helper (no report: connected, but hasn't reported
+    /// yet)
+    pub fn mount_status(&self) -> AgentMountStatus {
+        let Some(helper) = self.helper else {
+            return AgentMountStatus::Reconciling;
+        };
+        let differs = self.actual_differs_from_desired();
+        match &helper.reconciled_share_ids {
+            Some(ids) if *ids != sorted_ids(self.shares) => AgentMountStatus::Reconciling,
+            Some(_) if differs => AgentMountStatus::LeftoverWork,
+            // a helper that doesn't echo can't tell us whether its pass already ran
+            None if differs => AgentMountStatus::Reconciling,
+            Some(_) | None => AgentMountStatus::Idle,
+        }
+    }
 }
 
 /// The sorted IDs of the desired shares, as the session helper echoes them in its report
 pub fn desired_share_ids(desired: &Shares) -> Vec<String> {
-    let mut ids: Vec<String> = desired
-        .shares
-        .iter()
-        .map(|share| share.share_id.clone())
-        .collect();
+    sorted_ids(&desired.shares)
+}
+
+fn sorted_ids(shares: &[Share]) -> Vec<String> {
+    let mut ids: Vec<String> = shares.iter().map(|share| share.share_id.clone()).collect();
     ids.sort();
     ids
 }
 
-/// Mount status of one session helper (`None`: connected, but hasn't reported yet)
-pub fn scope_mount_status(
-    desired: &Shares,
-    helper: Option<&SessionHelperState>,
-) -> AgentMountStatus {
-    let Some(helper) = helper else {
-        return AgentMountStatus::Reconciling;
-    };
-    let differs = actual_differs_from_desired(desired, helper);
-    match &helper.reconciled_share_ids {
-        Some(ids) if *ids != desired_share_ids(desired) => AgentMountStatus::Reconciling,
-        Some(_) if differs => AgentMountStatus::LeftoverWork,
-        // a helper that doesn't echo can't tell us whether its pass already ran
-        None if differs => AgentMountStatus::Reconciling,
-        Some(_) | None => AgentMountStatus::Idle,
-    }
-}
-
 /// Mount status of the agent: `NoHelper` without any connected session helper, otherwise the
-/// worst status of its helpers (`None`: connected, but hasn't reported yet)
-pub fn agent_mount_status<'a>(
-    desired: &Shares,
-    helpers: impl IntoIterator<Item = Option<&'a SessionHelperState>>,
-) -> AgentMountStatus {
+/// worst status of its helpers' scopes
+pub fn agent_mount_status<'a>(scopes: impl IntoIterator<Item = ScopeView<'a>>) -> AgentMountStatus {
     fn badness(status: AgentMountStatus) -> u8 {
         match status {
             AgentMountStatus::Idle => 0,
@@ -238,16 +289,16 @@ pub fn agent_mount_status<'a>(
             AgentMountStatus::NoHelper | AgentMountStatus::Unknown => 3,
         }
     }
-    helpers
+    scopes
         .into_iter()
-        .map(|helper| scope_mount_status(desired, helper))
+        .map(|scope| scope.mount_status())
         .max_by_key(|status| badness(*status))
         .unwrap_or(AgentMountStatus::NoHelper)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use crate::{
         internal_api_types::{MountedShare, SessionHelperState, ShareError, Shares},
@@ -256,9 +307,8 @@ mod tests {
     };
 
     use super::{
-        NO_HELPER_MESSAGE, OtherMount, ShareDestinationError, WAITING_MESSAGE,
-        actual_differs_from_desired, agent_mount_status, foreground_projection, foreground_share,
-        hand_off_blocked, other_mounted_shares, project_and_session, scope_mount_status,
+        NO_HELPER_MESSAGE, OtherMount, ScopeView, ShareDestinationError, ShareMount,
+        WAITING_MESSAGE, agent_mount_status, project_and_session, same_share,
     };
 
     fn share(id: &str) -> Share {
@@ -324,6 +374,21 @@ mod tests {
         }
     }
 
+    /// The desired state with `share` as its only and foreground share
+    fn only(share: Share) -> Shares {
+        Shares {
+            foreground_share_id: Some(share.share_id.clone()),
+            shares: vec![share],
+        }
+    }
+
+    fn foreground(
+        desired: Option<&Shares>,
+        helper: Option<&SessionHelperState>,
+    ) -> Result<APICurrentForegroundShare, ShareDestinationError> {
+        ScopeView::new(desired, helper).foreground()
+    }
+
     fn unavailable(message: &str) -> APICurrentForegroundShare {
         APICurrentForegroundShare::Unavailable {
             share_id: "foreground".to_owned(),
@@ -337,25 +402,36 @@ mod tests {
 
     #[test]
     fn no_desired_foreground_is_none_even_if_something_is_mounted() {
-        assert_eq!(
-            foreground_projection(None, None),
-            Ok(APICurrentForegroundShare::None)
-        );
+        let mounted = helper(&[("share", Some("/mnt/old"))], &[]);
+        let no_foreground = Shares {
+            foreground_share_id: None,
+            shares: vec![share("a")],
+        };
+        let unknown_foreground = Shares {
+            foreground_share_id: Some("missing".to_owned()),
+            shares: vec![share("a")],
+        };
+        assert_eq!(foreground(None, None), Ok(APICurrentForegroundShare::None));
         // a share that is no longer desired is not shown, even while it is still mounted:
         assert_eq!(
-            foreground_projection(None, Some(&helper(&[("share", Some("/mnt/old"))], &[]))),
+            foreground(None, Some(&mounted)),
             Ok(APICurrentForegroundShare::None)
         );
+        // the foreground share is looked up by ID
+        for desired in [&no_foreground, &unknown_foreground] {
+            assert_eq!(
+                foreground(Some(desired), Some(&mounted)),
+                Ok(APICurrentForegroundShare::None)
+            );
+        }
     }
 
     #[test]
     fn mounted_foreground_share_is_mounted() {
-        let desired = share("foreground");
+        let desired = only(share("foreground"));
+        let report = helper(&[("share", Some("/mnt/session"))], &[]);
         assert_eq!(
-            foreground_projection(
-                Some(&desired),
-                Some(&helper(&[("share", Some("/mnt/session"))], &[]))
-            ),
+            foreground(Some(&desired), Some(&report)),
             Ok(APICurrentForegroundShare::Mounted {
                 share_id: "foreground".to_owned(),
                 project: "project".to_owned(),
@@ -365,17 +441,21 @@ mod tests {
                 created_by: None,
             })
         );
+        assert_eq!(
+            ScopeView::new(Some(&desired), Some(&report)).foreground_mount_path(),
+            Some(Path::new("/mnt/session"))
+        );
     }
 
     #[test]
     fn the_projection_says_who_started_the_share() {
-        let desired = Share {
+        let desired = only(Share {
             created_by: Some("alice".to_owned()),
             ..share("foreground")
-        };
+        });
         let mounted = helper(&[("share", Some("/mnt/session"))], &[]);
         for helper in [None, Some(&mounted)] {
-            let created_by = match foreground_projection(Some(&desired), helper) {
+            let created_by = match foreground(Some(&desired), helper) {
                 Ok(APICurrentForegroundShare::Mounted { created_by, .. })
                 | Ok(APICurrentForegroundShare::Unavailable { created_by, .. }) => created_by,
                 other => panic!("unexpected: {other:?}"),
@@ -394,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn other_mounted_shares_are_the_mounted_non_foreground_ones() {
+    fn other_mounts_are_the_mounted_non_foreground_ones() {
         let desired = Shares {
             foreground_share_id: Some("new".to_owned()),
             shares: vec![
@@ -413,7 +493,7 @@ mod tests {
             &[],
         );
         assert_eq!(
-            other_mounted_shares(&desired, &helper),
+            ScopeView::new(Some(&desired), Some(&helper)).other_mounts(),
             vec![OtherMount {
                 share_id: "old".to_owned(),
                 project: "project".to_owned(),
@@ -431,21 +511,29 @@ mod tests {
             shares: vec![named_share("a", "share-a", "first")],
         };
         let helper = helper(&[("share-a", Some("/mnt/first"))], &[]);
-        assert_eq!(other_mounted_shares(&desired, &helper).len(), 1);
-    }
-
-    #[test]
-    fn without_helper_the_message_says_how_to_start_one() {
-        let desired = share("foreground");
         assert_eq!(
-            foreground_projection(Some(&desired), None),
-            Ok(unavailable(NO_HELPER_MESSAGE))
+            ScopeView::new(Some(&desired), Some(&helper))
+                .other_mounts()
+                .len(),
+            1
         );
     }
 
     #[test]
+    fn without_helper_the_message_says_how_to_start_one() {
+        let desired = only(share("foreground"));
+        assert_eq!(
+            foreground(Some(&desired), None),
+            Ok(unavailable(NO_HELPER_MESSAGE))
+        );
+        let view = ScopeView::new(Some(&desired), None);
+        assert_eq!(view.other_mounts(), vec![]);
+        assert_eq!(view.foreground_mount_path(), None);
+    }
+
+    #[test]
     fn helper_error_for_the_share_is_the_message() {
-        let desired = share("foreground");
+        let desired = only(share("foreground"));
         let report = helper(
             &[],
             &[
@@ -454,14 +542,14 @@ mod tests {
             ],
         );
         assert_eq!(
-            foreground_projection(Some(&desired), Some(&report)),
+            foreground(Some(&desired), Some(&report)),
             Ok(unavailable("credential conflict"))
         );
     }
 
     #[test]
     fn not_yet_mounted_or_without_usable_path_is_waiting() {
-        let desired = share("foreground");
+        let desired = only(share("foreground"));
         for report in [
             helper(&[], &[]),
             helper(&[("other-share", Some("/mnt/other"))], &[]),
@@ -469,60 +557,134 @@ mod tests {
             helper(&[("share", None)], &[]),
         ] {
             assert_eq!(
-                foreground_projection(Some(&desired), Some(&report)),
+                foreground(Some(&desired), Some(&report)),
                 Ok(unavailable(WAITING_MESSAGE))
             );
         }
     }
 
     #[test]
-    fn foreground_share_is_looked_up_by_id() {
-        let shares = |id: Option<&str>| Shares {
-            foreground_share_id: id.map(str::to_owned),
-            shares: vec![share("a"), share("b")],
+    fn each_desired_share_is_mounted_failed_or_waiting() {
+        let desired = Shares {
+            foreground_share_id: None,
+            shares: vec![
+                named_share("mounted", "share-mounted", "first"),
+                named_share("failed", "share-failed", "second"),
+                named_share("waiting", "share-waiting", "third"),
+            ],
         };
-        assert_eq!(
-            foreground_share(&shares(Some("b"))).map(|s| s.share_id.as_str()),
-            Some("b")
+        let report = helper(
+            &[
+                ("share-mounted", Some("/mnt/first")),
+                ("share-waiting", None),
+                ("share-stale", Some("/mnt/stale")),
+            ],
+            &[("failed", "access denied")],
         );
-        assert_eq!(foreground_share(&shares(Some("missing"))), None);
-        assert_eq!(foreground_share(&shares(None)), None);
+        let view = ScopeView::new(Some(&desired), Some(&report));
+        let states: Vec<_> = view
+            .desired()
+            .map(|(share, mount)| (share.share_id.as_str(), mount))
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                ("mounted", ShareMount::Mounted(Path::new("/mnt/first"))),
+                ("failed", ShareMount::Failed("access denied")),
+                ("waiting", ShareMount::Waiting),
+            ]
+        );
+        let stale: Vec<_> = view
+            .stale_mounts()
+            .map(|mounted| mounted.share_name.as_str())
+            .collect();
+        assert_eq!(stale, vec!["share-stale"]);
+
+        let no_helper = ScopeView::new(Some(&desired), None);
+        assert!(
+            no_helper
+                .desired()
+                .all(|(_, mount)| mount == ShareMount::NoHelper)
+        );
+        assert_eq!(no_helper.stale_mounts().count(), 0);
+    }
+
+    /// The one matching rule, pinned for every question: a share reported under another case
+    /// is the desired share, not a stale mount
+    #[test]
+    fn share_names_match_case_insensitively_everywhere() {
+        for (desired_name, reported_name, same) in [
+            ("foo", "foo", true),
+            ("foo", "Foo", true),
+            ("Foo", "foo", true),
+            ("foo", "FOO", true),
+            ("ingest-ÄÖ", "INGEST-äö", true),
+            ("foo", "foo2", false),
+            ("foo", "fo", false),
+        ] {
+            let case = format!("desired {desired_name:?}, reported {reported_name:?}");
+            assert_eq!(same_share(desired_name, reported_name), same, "{case}");
+
+            let foreground = named_share("fg", desired_name, "session");
+            let other = named_share("other", &format!("{desired_name}-other"), "earlier");
+            let desired = Shares {
+                foreground_share_id: Some("fg".to_owned()),
+                shares: vec![other, foreground],
+            };
+            let report = helper(
+                &[
+                    (reported_name, Some("/mnt/fg")),
+                    (&format!("{reported_name}-OTHER"), Some("/mnt/other")),
+                ],
+                &[("fg", "failed")],
+            );
+            let view = ScopeView::new(Some(&desired), Some(&report));
+
+            let projected_mounted = matches!(
+                view.foreground(),
+                Ok(APICurrentForegroundShare::Mounted { ref mount_path, .. })
+                    if mount_path == "/mnt/fg"
+            );
+            assert_eq!(projected_mounted, same, "foreground: {case}");
+            assert_eq!(
+                view.foreground_mount_path(),
+                same.then(|| Path::new("/mnt/fg")),
+                "foreground path: {case}"
+            );
+            let other_mounts: Vec<_> = view
+                .other_mounts()
+                .into_iter()
+                .map(|other| other.mount_path)
+                .collect();
+            assert_eq!(
+                other_mounts,
+                if same { vec!["/mnt/other"] } else { vec![] },
+                "other mounts: {case}"
+            );
+            assert_eq!(view.stale_mounts().count() == 0, same, "stale: {case}");
+            assert_eq!(view.hand_off_blocked(), !same, "hand-off: {case}");
+            assert_eq!(view.actual_differs_from_desired(), !same, "differs: {case}");
+        }
     }
 
     #[test]
     fn hand_off_is_blocked_by_a_stale_mount_and_a_failed_share() {
-        let desired = Shares {
-            foreground_share_id: Some("new".to_owned()),
-            shares: vec![share("new")],
+        let desired = only(share("new"));
+        let stale = ("old-share", Some("Z:\\"));
+        let current = ("SHARE", Some("Y:\\"));
+        let error = ("new", "another user's drive is still connected");
+        let blocked = |mounted: &[(&str, Option<&str>)], errors: &[(&str, &str)]| {
+            ScopeView::new(Some(&desired), Some(&helper(mounted, errors))).hand_off_blocked()
         };
-        let stale = MountedShare {
-            share_name: "old-share".to_owned(),
-            mount_path: Some(PathBuf::from("Z:\\")),
-        };
-        let current = MountedShare {
-            share_name: "SHARE".to_owned(),
-            mount_path: Some(PathBuf::from("Y:\\")),
-        };
-        let error = ShareError {
-            share_id: "new".to_owned(),
-            message: "another user's drive is still connected".to_owned(),
-        };
-        let state =
-            |mounted_shares: Vec<MountedShare>, errors: Vec<ShareError>| SessionHelperState {
-                mounted_shares,
-                errors,
-                reconciled_share_ids: None,
-            };
 
-        assert!(hand_off_blocked(
-            &desired,
-            &state(vec![stale.clone()], vec![error.clone()])
-        ));
+        assert!(blocked(&[stale], &[error]));
         // a stale mount alone is just not removed yet; an error alone has another cause
-        assert!(!hand_off_blocked(&desired, &state(vec![stale], vec![])));
-        assert!(!hand_off_blocked(&desired, &state(vec![], vec![error])));
+        assert!(!blocked(&[stale], &[]));
+        assert!(!blocked(&[], &[error]));
         // share names are case-insensitive
-        assert!(!hand_off_blocked(&desired, &state(vec![current], vec![])));
+        assert!(!blocked(&[current], &[]));
+        // without a helper report, nothing is known to block
+        assert!(!ScopeView::new(Some(&desired), None).hand_off_blocked());
     }
 
     #[test]
@@ -531,120 +693,101 @@ mod tests {
             foreground_share_id: None,
             shares: vec![share("a")],
         };
-        let mounted = |name: &str, path: Option<&str>| MountedShare {
-            share_name: name.to_owned(),
-            mount_path: path.map(PathBuf::from),
-        };
-        let state = |mounted_shares: Vec<MountedShare>| SessionHelperState {
-            mounted_shares,
-            errors: vec![],
-            reconciled_share_ids: None,
+        let differs = |desired: &Shares, mounted: &[(&str, Option<&str>)]| {
+            ScopeView::new(Some(desired), Some(&helper(mounted, &[]))).actual_differs_from_desired()
         };
 
         // converged; share names are case-insensitive
-        assert!(!actual_differs_from_desired(
-            &desired,
-            &state(vec![mounted("SHARE", Some("/mnt/a"))])
-        ));
+        assert!(!differs(&desired, &[("SHARE", Some("/mnt/a"))]));
         // missing, or without a usable path
-        assert!(actual_differs_from_desired(&desired, &state(vec![])));
-        assert!(actual_differs_from_desired(
-            &desired,
-            &state(vec![mounted("share", None)])
-        ));
+        assert!(differs(&desired, &[]));
+        assert!(differs(&desired, &[("share", None)]));
         // a stale mount awaiting removal
-        assert!(actual_differs_from_desired(
+        assert!(differs(
             &desired,
-            &state(vec![
-                mounted("share", Some("/mnt/a")),
-                mounted("old", Some("/mnt/b"))
-            ])
+            &[("share", Some("/mnt/a")), ("old", Some("/mnt/b"))]
         ));
         // nothing desired, nothing mounted
         let nothing = Shares {
             foreground_share_id: None,
             shares: vec![],
         };
-        assert!(!actual_differs_from_desired(&nothing, &state(vec![])));
+        assert!(!differs(&nothing, &[]));
+        // without a report, actual state is unknown
+        assert!(ScopeView::new(Some(&nothing), None).actual_differs_from_desired());
     }
 
     /// A helper state with share "a" (name "share") mounted, reconciled against `ids`
     fn reconciled(mounted: bool, ids: Option<&[&str]>) -> SessionHelperState {
         SessionHelperState {
-            mounted_shares: if mounted {
-                vec![MountedShare {
-                    share_name: "share".to_owned(),
-                    mount_path: Some(PathBuf::from("/mnt/a")),
-                }]
-            } else {
-                vec![]
-            },
-            errors: vec![],
             reconciled_share_ids: ids.map(|ids| ids.iter().map(|id| (*id).to_owned()).collect()),
+            ..helper(
+                if mounted {
+                    &[("share", Some("/mnt/a"))]
+                } else {
+                    &[]
+                },
+                &[],
+            )
         }
     }
 
-    fn desired_a() -> Shares {
-        Shares {
-            foreground_share_id: Some("a".to_owned()),
-            shares: vec![share("a")],
-        }
+    fn scope_status(desired: &Shares, helper: Option<&SessionHelperState>) -> AgentMountStatus {
+        ScopeView::new(Some(desired), helper).mount_status()
     }
 
     #[test]
     fn scope_status_from_the_echoed_desired_state() {
-        let desired = desired_a();
+        let desired = only(share("a"));
         // not reported yet
-        assert_eq!(
-            scope_mount_status(&desired, None),
-            AgentMountStatus::Reconciling
-        );
+        assert_eq!(scope_status(&desired, None), AgentMountStatus::Reconciling);
         // reported for an older desired state, even if it happens to match
         assert_eq!(
-            scope_mount_status(&desired, Some(&reconciled(true, Some(&[])))),
+            scope_status(&desired, Some(&reconciled(true, Some(&[])))),
             AgentMountStatus::Reconciling
         );
         // reported for the current desired state
         assert_eq!(
-            scope_mount_status(&desired, Some(&reconciled(true, Some(&["a"])))),
+            scope_status(&desired, Some(&reconciled(true, Some(&["a"])))),
             AgentMountStatus::Idle
         );
         assert_eq!(
-            scope_mount_status(&desired, Some(&reconciled(false, Some(&["a"])))),
+            scope_status(&desired, Some(&reconciled(false, Some(&["a"])))),
             AgentMountStatus::LeftoverWork
         );
     }
 
     #[test]
     fn scope_status_of_helpers_that_dont_echo() {
-        let desired = desired_a();
+        let desired = only(share("a"));
         assert_eq!(
-            scope_mount_status(&desired, Some(&reconciled(true, None))),
+            scope_status(&desired, Some(&reconciled(true, None))),
             AgentMountStatus::Idle
         );
         // can't tell a pending pass from leftovers
         assert_eq!(
-            scope_mount_status(&desired, Some(&reconciled(false, None))),
+            scope_status(&desired, Some(&reconciled(false, None))),
             AgentMountStatus::Reconciling
         );
     }
 
     #[test]
     fn agent_status_is_the_worst_helper_status() {
-        let desired = desired_a();
+        let desired = only(share("a"));
         let idle = reconciled(true, Some(&["a"]));
         let leftover = reconciled(false, Some(&["a"]));
-        assert_eq!(agent_mount_status(&desired, []), AgentMountStatus::NoHelper);
+        let status = |helpers: &[Option<&SessionHelperState>]| {
+            agent_mount_status(
+                helpers
+                    .iter()
+                    .map(|helper| ScopeView::new(Some(&desired), *helper)),
+            )
+        };
+        assert_eq!(status(&[]), AgentMountStatus::NoHelper);
+        assert_eq!(status(&[Some(&idle)]), AgentMountStatus::Idle);
+        assert_eq!(status(&[Some(&idle), None]), AgentMountStatus::Reconciling);
         assert_eq!(
-            agent_mount_status(&desired, [Some(&idle)]),
-            AgentMountStatus::Idle
-        );
-        assert_eq!(
-            agent_mount_status(&desired, [Some(&idle), None]),
-            AgentMountStatus::Reconciling
-        );
-        assert_eq!(
-            agent_mount_status(&desired, [None, Some(&leftover), Some(&idle)]),
+            status(&[None, Some(&leftover), Some(&idle)]),
             AgentMountStatus::LeftoverWork
         );
     }
