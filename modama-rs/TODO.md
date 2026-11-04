@@ -2,8 +2,6 @@
 
 - [ ] expose structured project/session metadata from the management API while
       keeping smbdrop project-agnostic (deferred until the new mgmtinterface API exists)
-- [ ] re-examine polling for status updates
-    - expose websocket from modama-agent and have a background thread continuously listen on that?
 - [ ] Monitor critical background tasks and restart them internally or propagate their failure.
 
 ## smbdrop event channel
@@ -20,26 +18,25 @@
       send the current state instead.
 - [ ] no keepalive: without pings, a vanished peer stays listed until a send fails or TCP gives up
 
+## Agent: local network token proxy
+
+- [ ] tasks for vanished interface addresses never end: `token_publisher_loop`
+      (`modama-agent/src/lib/local_net_token_proxy.rs`) starts an `advertisement_loop` per private
+      address but never stops one when its address goes away (the comment says the tasks end by
+      themselves; they retry socket creation every 5 s forever). Seen on Windows after sleep and
+      network changes: 127 "error creating multicast socket … 10049" lines overnight for two
+      vanished addresses. Abort the tasks (advertisement and token server) of addresses that are
+      no longer listed.
+
 ## GUI
 
 - [ ] upgrade the egui stack to 0.36 once compatible releases of both
       `egui_taffy` and `egui-phosphor` are available
-- [ ] workflow issues
-    - [ ] if user A creates an ingest share at resource R1, and later user B uses the same resource, B must be able to act
-        - this requires non-localized changes to the permission system probably?
-        - must only be allowed to act if the resource of the ingest matches
-        - maybe we need to have a "detach from resource" kind of API call, where a running ingest can be detached from the resource (the ingest itself will continue to be available, but not auto-mounted on any resource; current mounts can continue to exist etc.)
 - [ ] test long project and ingest-share session names against backend limits
 - [ ] general design fixes
     - [ ] Review vertical and horizontal flow: pixel peep a bit and check typographic baselines of horizontally aligned items, and horizontal guide lines where text starts (or stops at the right edge!!!!)
 
 ## Minimal HTML UI
 
-- [ ] replace Basic authentication for the minimal HTML UI with cookie-backed sessions and a reliable logout action
 - [ ] add hidden CSRF tokens to every state-changing minimal HTML form for legacy
       browsers that do not send `Origin` or `Sec-Fetch-Site`
-
-## Session helper
-
-- [ ] modama-agent: add internal API: websocket endpoint
-    - basically mirrors the events we get from smbdrop, in addition to our own full-state-on-connect message
