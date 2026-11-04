@@ -334,9 +334,9 @@ mod tests {
 
     use modama_common::{
         internal_api_types::{
-            ConnectedAgent, MountedShare, SessionHelperState, ShareError, Shares,
+            ConnectedAgent, ConnectionDetails, MountedShare, SessionHelperState, ShareError, Shares,
         },
-        messages::Share,
+        messages::{ConnectionId, Share},
     };
     use tokio::net::{TcpListener, TcpStream};
     use tokio_tungstenite::{WebSocketStream, accept_async};
@@ -542,6 +542,14 @@ mod tests {
         assert_eq!(setup.next_update(SHORT).await, None);
     }
 
+    fn connection(id: u8) -> ConnectionDetails {
+        ConnectionDetails {
+            id: ConnectionId(id.into()),
+            peer: std::net::SocketAddr::from(([192, 0, 2, id], 50000)),
+            lender: None,
+        }
+    }
+
     #[tokio::test]
     async fn connected_agents_are_forwarded_once_per_change() {
         let setup = Setup::start().await;
@@ -559,11 +567,13 @@ mod tests {
                 name: "k2".to_owned(),
                 verified: true,
                 status: None,
+                connection: connection(1),
             },
             others: vec![ConnectedAgent {
                 name: "detector".to_owned(),
                 verified: true,
                 status: None,
+                connection: connection(2),
             }],
         };
         let mut with_agents = mounted("a");

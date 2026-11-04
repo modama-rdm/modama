@@ -43,23 +43,21 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
         EventChannelMessage::UpdateShareList {
             shares,
             foreground_share,
-            connected_agents,
-            agent_mount_status,
+            participants,
         } => {
             let desired_shares: ShareState<Share> = ShareState {
                 foreground_share,
                 shares: shares.into_iter().collect(),
             };
             let mut state = state.lock().await;
-            // smbdrop also sends the shares again when only the connected agents or their
-            // status changed; session helpers would run a pass for nothing
+            // smbdrop also sends the shares again when only the participants or their status
+            // changed; session helpers would run a pass for nothing
             let changed = state
                 .remote_info
                 .as_ref()
                 .is_none_or(|previous| !same_desired(&previous.desired_shares, &desired_shares));
             state.remote_info = Some(RemoteInfo {
-                connected_agents,
-                agent_mount_status,
+                participants,
                 desired_shares: desired_shares.clone(),
             });
             // forward desired state to session helpers
@@ -79,7 +77,14 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
             }
             Ok(None)
         }
-        EventChannelMessage::Welcome { protocol } => Ok(Some(protocol)),
+        EventChannelMessage::Welcome {
+            protocol,
+            connection,
+        } => {
+            info!("smbdrop welcomed us on connection {connection}, protocol {protocol}");
+            state.lock().await.own_connection = Some(connection);
+            Ok(Some(protocol))
+        }
     }
 }
 
@@ -175,6 +180,7 @@ pub async fn message_loop(
             let mut state = state.lock().await;
             state.connection = ConnectionState::Connecting;
             state.token_identity = None;
+            state.own_connection = None;
         }
         let (conn, _response) = match connect_async_tls_with_config(
             &config.events_api_url.to_string(),
@@ -681,18 +687,16 @@ mod tests {
 
     /// Our status as smbdrop sends it back to us
     async fn wait_for_own_status(test_setup: &MessageLoopTestSetup, expected: AgentMountStatus) {
-        let me =
-            modama_common::agent::AgentId::from_uri("x-modama-agent://test_resource#test-agent")
-                .unwrap();
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                let status = test_setup
-                    .state
-                    .lock()
-                    .await
-                    .remote_info
-                    .as_ref()
-                    .and_then(|remote| remote.mount_status_of(&me));
+                let status = {
+                    let state = test_setup.state.lock().await;
+                    state
+                        .own_connection
+                        .zip(state.remote_info.as_ref())
+                        .and_then(|(own, remote)| remote.participant(own))
+                        .and_then(|participant| participant.status)
+                };
                 if status == Some(expected) {
                     return;
                 }

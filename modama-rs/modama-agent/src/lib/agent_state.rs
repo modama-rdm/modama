@@ -7,9 +7,11 @@ use modama_common::{
         OtherMount, ShareDestinationError, agent_mount_status, foreground_projection,
         other_mounted_shares,
     },
-    internal_api_types::{ConnectedAgent, ConnectedAgents, SessionHelperState, Shares},
+    internal_api_types::{
+        ConnectedAgent, ConnectedAgents, ConnectionDetails, SessionHelperState, Shares,
+    },
     local_api_messages::APICurrentForegroundShare,
-    messages::{AgentMountStatus, AgentMountStatusEntry, Share},
+    messages::{AgentMountStatus, ConnectionId, Participant, ParticipantIdentity, Share},
 };
 use tokio::sync::{Mutex, Notify, broadcast, mpsc};
 
@@ -89,10 +91,8 @@ where
 
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {
-    pub connected_agents: Vec<AgentId>,
-
-    /// Mount status of the connected agents that reported one, including ourselves
-    pub agent_mount_status: Vec<AgentMountStatusEntry>,
+    /// Every connection to smbdrop, ours included
+    pub participants: Vec<Participant>,
 
     pub desired_shares: ShareState<Share>,
 }
@@ -100,8 +100,7 @@ pub struct RemoteInfo {
 impl RemoteInfo {
     pub fn new() -> Self {
         Self {
-            connected_agents: Default::default(),
-            agent_mount_status: Default::default(),
+            participants: Default::default(),
             desired_shares: Default::default(),
         }
     }
@@ -118,12 +117,11 @@ impl RemoteInfo {
         }
     }
 
-    /// The last mount status `agent` reported to smbdrop; None if it didn't (yet)
-    pub fn mount_status_of(&self, agent: &AgentId) -> Option<AgentMountStatus> {
-        self.agent_mount_status
+    /// The participant on `connection`; None if smbdrop doesn't list it
+    pub fn participant(&self, connection: ConnectionId) -> Option<&Participant> {
+        self.participants
             .iter()
-            .find(|entry| &entry.agent == agent)
-            .map(|entry| entry.status)
+            .find(|participant| participant.connection == connection)
     }
 }
 
@@ -172,6 +170,10 @@ pub struct AgentState {
     /// The identity of the token of the current event channel connection: our own, or for an
     /// anonymous agent, that of the agent it borrowed the token from. None while not connected.
     pub token_identity: Option<AgentId>,
+
+    /// The ID smbdrop gave our current event channel connection in its `Welcome`; None while
+    /// not connected
+    pub own_connection: Option<ConnectionId>,
 
     /// Runtime configuration
     pub config: AgentConfig,
@@ -276,6 +278,7 @@ impl AgentState {
         connected_agents_at(
             &self.config.identity,
             self.token_identity.as_ref(),
+            self.own_connection,
             self.remote_info.as_ref(),
             self.mount_status(),
         )
@@ -291,6 +294,7 @@ impl AgentState {
             connection: Default::default(),
             remote_info: None,
             token_identity: None,
+            own_connection: None,
             config,
             desired_state_channel: tx,
             session_helpers: Default::default(),
@@ -306,43 +310,64 @@ impl AgentState {
     }
 }
 
-/// The agents in `remote` at the resource of `token_identity`, with this agent (`identity`, with
-/// `own_status`) on its own
+/// How `participant` is connected, for the GUI
+fn connection_details(participant: &Participant) -> ConnectionDetails {
+    ConnectionDetails {
+        id: participant.connection,
+        peer: participant.peer,
+        lender: match &participant.identity {
+            ParticipantIdentity::Certified { .. } => None,
+            ParticipantIdentity::Anonymous { lender, .. } => Some(lender.agent.clone()),
+        },
+    }
+}
+
+/// The participants in `remote` at the resource of `token_identity`, with this agent
+/// (`identity`, on `own_connection`, with `own_status`) on its own; None until smbdrop welcomed
+/// us and listed the participants, this agent's connection among them
 fn connected_agents_at(
     identity: &MTLSIdentity,
     token_identity: Option<&AgentId>,
+    own_connection: Option<ConnectionId>,
     remote: Option<&RemoteInfo>,
     own_status: Option<AgentMountStatus>,
 ) -> Option<ConnectedAgents> {
     let resource = &token_identity?.resource;
+    let own_connection = own_connection?;
     let remote = remote?;
-    let own = match identity {
-        MTLSIdentity::AgentId { agent_name, .. } => ConnectedAgent {
-            name: agent_name.clone(),
-            verified: true,
-            status: own_status,
-        },
-        MTLSIdentity::Anonymous { hostname } => ConnectedAgent {
-            name: hostname.clone(),
-            verified: false,
-            status: own_status,
-        },
+    let (name, verified) = match identity {
+        MTLSIdentity::AgentId { agent_name, .. } => (agent_name.clone(), true),
+        MTLSIdentity::Anonymous { hostname } => (hostname.clone(), false),
+    };
+    let own = ConnectedAgent {
+        name,
+        verified,
+        status: own_status,
+        connection: connection_details(remote.participant(own_connection)?),
     };
     let mut others: Vec<ConnectedAgent> = remote
-        .connected_agents
+        .participants
         .iter()
-        .filter(|agent| &agent.resource == resource)
-        // a certified agent is in the list itself; an anonymous one isn't, it connects with the
-        // identity it borrowed its token from
-        .filter(|agent| !(own.verified && agent.agent == own.name))
-        .map(|agent| ConnectedAgent {
-            name: agent.agent.clone(),
-            verified: true,
-            status: remote.mount_status_of(agent),
+        .filter(|participant| participant.identity.resource() == resource)
+        .filter(|participant| participant.connection != own_connection)
+        .map(|participant| {
+            let (name, verified) = match &participant.identity {
+                ParticipantIdentity::Certified { agent } => (agent.agent.clone(), true),
+                ParticipantIdentity::Anonymous { name, .. } => (name.clone(), false),
+            };
+            ConnectedAgent {
+                name,
+                verified,
+                status: participant.status,
+                connection: connection_details(participant),
+            }
         })
         .collect();
-    others.sort_by(|a, b| a.name.cmp(&b.name));
-    others.dedup();
+    others.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| a.connection.id.cmp(&b.connection.id))
+    });
     Some(ConnectedAgents {
         resource: resource.clone(),
         own,
@@ -362,17 +387,32 @@ mod tests {
         }
     }
 
-    fn verified(name: &str) -> ConnectedAgent {
-        ConnectedAgent {
-            name: name.to_owned(),
-            verified: true,
+    fn certified_at(id: u64, resource: &str, name: &str) -> Participant {
+        Participant {
+            connection: ConnectionId(id),
+            identity: ParticipantIdentity::Certified {
+                agent: agent(resource, name),
+            },
+            peer: format!("192.0.2.{id}:50000").parse().unwrap(),
             status: None,
         }
     }
 
-    fn remote(connected: &[AgentId]) -> RemoteInfo {
+    fn anonymous_at(id: u64, name: &str, lender: &AgentId) -> Participant {
+        Participant {
+            connection: ConnectionId(id),
+            identity: ParticipantIdentity::Anonymous {
+                name: name.to_owned(),
+                lender: lender.clone(),
+            },
+            peer: format!("192.0.2.{id}:50000").parse().unwrap(),
+            status: None,
+        }
+    }
+
+    fn remote(participants: &[Participant]) -> RemoteInfo {
         RemoteInfo {
-            connected_agents: connected.to_vec(),
+            participants: participants.to_vec(),
             ..RemoteInfo::default()
         }
     }
@@ -384,74 +424,125 @@ mod tests {
         }
     }
 
+    fn anonymous() -> MTLSIdentity {
+        MTLSIdentity::Anonymous {
+            hostname: "workstation".to_owned(),
+        }
+    }
+
+    /// (name, verified, connection ID, lender) of a listed agent
+    fn summary(agent: &ConnectedAgent) -> (&str, bool, u64, Option<&str>) {
+        (
+            &agent.name,
+            agent.verified,
+            agent.connection.id.0,
+            agent.connection.lender.as_deref(),
+        )
+    }
+
+    fn others(agents: &ConnectedAgents) -> Vec<(&str, bool, u64, Option<&str>)> {
+        agents.others.iter().map(summary).collect()
+    }
+
     #[test]
     fn a_certified_agent_lists_the_others_at_its_resource() {
-        let connected = [
-            agent("Holo", "tem-camera"),
-            agent("Other", "elsewhere"),
-            agent("Holo", "k2"),
-            agent("Holo", "detector"),
+        let participants = [
+            certified_at(1, "Holo", "tem-camera"),
+            certified_at(2, "Other", "elsewhere"),
+            certified_at(3, "Holo", "k2"),
+            certified_at(4, "Holo", "detector"),
         ];
         let agents = connected_agents_at(
             &certified(),
             Some(&agent("Holo", "k2")),
-            Some(&remote(&connected)),
+            Some(ConnectionId(3)),
+            Some(&remote(&participants)),
             None,
         )
         .unwrap();
         assert_eq!(agents.resource, "Holo");
-        assert_eq!(agents.own, verified("k2"));
+        assert_eq!(summary(&agents.own), ("k2", true, 3, None));
+        assert_eq!(agents.own.connection.peer.to_string(), "192.0.2.3:50000");
         assert_eq!(
-            agents.others,
-            vec![verified("detector"), verified("tem-camera")]
+            others(&agents),
+            vec![("detector", true, 4, None), ("tem-camera", true, 1, None)]
         );
     }
 
     #[test]
     fn a_certified_agent_alone_has_no_others() {
-        let connected = [agent("Holo", "k2")];
         let agents = connected_agents_at(
             &certified(),
             Some(&agent("Holo", "k2")),
-            Some(&remote(&connected)),
+            Some(ConnectionId(3)),
+            Some(&remote(&[certified_at(3, "Holo", "k2")])),
             None,
         )
         .unwrap();
         assert!(agents.others.is_empty());
     }
 
+    /// An anonymous agent takes part at its lender's resource; the lender is listed as itself,
+    /// and the anonymous agent's own connection only as its own row
     #[test]
-    fn an_anonymous_agent_inherits_the_resource_of_its_token() {
-        let anonymous = MTLSIdentity::Anonymous {
-            hostname: "workstation".to_owned(),
-        };
-        let connected = [agent("Holo", "k2"), agent("Other", "elsewhere")];
+    fn an_anonymous_agent_is_listed_apart_from_its_lender() {
+        let k2 = agent("Holo", "k2");
+        let participants = [
+            certified_at(1, "Holo", "k2"),
+            anonymous_at(2, "workstation", &k2),
+            certified_at(3, "Other", "elsewhere"),
+        ];
         let agents = connected_agents_at(
-            &anonymous,
-            Some(&agent("Holo", "k2")),
-            Some(&remote(&connected)),
+            &anonymous(),
+            Some(&k2),
+            Some(ConnectionId(2)),
+            Some(&remote(&participants)),
             None,
         )
         .unwrap();
         assert_eq!(agents.resource, "Holo");
-        assert_eq!(
-            agents.own,
-            ConnectedAgent {
-                name: "workstation".to_owned(),
-                verified: false,
-                status: None,
-            }
-        );
-        // the agent it borrowed the token from is one of the others
-        assert_eq!(agents.others, vec![verified("k2")]);
+        assert_eq!(summary(&agents.own), ("workstation", false, 2, Some("k2")));
+        assert_eq!(others(&agents), vec![("k2", true, 1, None)]);
+
+        // and the lender sees the anonymous agent
+        let agents = connected_agents_at(
+            &certified(),
+            Some(&k2),
+            Some(ConnectionId(1)),
+            Some(&remote(&participants)),
+            None,
+        )
+        .unwrap();
+        assert_eq!(others(&agents), vec![("workstation", false, 2, Some("k2"))]);
+    }
+
+    /// Two connections under one name, for example our own old connection that smbdrop still
+    /// holds after a reconnect: only our current one is our own row
+    #[test]
+    fn other_connections_with_our_identity_are_others() {
+        let participants = [certified_at(2, "Holo", "k2"), certified_at(5, "Holo", "k2")];
+        let agents = connected_agents_at(
+            &certified(),
+            Some(&agent("Holo", "k2")),
+            Some(ConnectionId(5)),
+            Some(&remote(&participants)),
+            None,
+        )
+        .unwrap();
+        assert_eq!(summary(&agents.own), ("k2", true, 5, None));
+        assert_eq!(others(&agents), vec![("k2", true, 2, None)]);
     }
 
     #[test]
-    fn unknown_until_connected_and_told() {
-        let connected = [agent("Holo", "k2")];
-        assert!(connected_agents_at(&certified(), None, Some(&remote(&connected)), None).is_none());
-        assert!(
-            connected_agents_at(&certified(), Some(&agent("Holo", "k2")), None, None).is_none()
-        );
+    fn unknown_until_welcomed_and_told() {
+        let participants = [certified_at(3, "Holo", "k2")];
+        let k2 = agent("Holo", "k2");
+        let remote = remote(&participants);
+        let at = |token, own, remote| connected_agents_at(&certified(), token, own, remote, None);
+        assert!(at(None, Some(ConnectionId(3)), Some(&remote)).is_none());
+        assert!(at(Some(&k2), None, Some(&remote)).is_none());
+        assert!(at(Some(&k2), Some(ConnectionId(3)), None).is_none());
+        // listed, but not yet with our own connection
+        assert!(at(Some(&k2), Some(ConnectionId(4)), Some(&remote)).is_none());
     }
 }

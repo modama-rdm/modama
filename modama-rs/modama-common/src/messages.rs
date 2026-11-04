@@ -1,4 +1,5 @@
 use std::{
+    net::SocketAddr,
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -76,7 +77,9 @@ impl std::fmt::Debug for Share {
 /// - 0: `UpdateShareList` and `ShareListUpdate` only; no `Welcome`
 /// - 1: `Welcome`, `ReportMountStatus`, `agent_mount_status` in `UpdateShareList`
 /// - 2: `Login` only from agents with a client certificate, `AnonymousLogin` from those
-///   without; smbdrop checks the variant against the certificate (ADR 0001)
+///   without; smbdrop checks the variant against the certificate (ADR 0001). `Welcome`
+///   carries the connection's ID, `UpdateShareList` one `participants` entry per connection
+///   instead of `connected_agents` and `agent_mount_status`
 ///
 /// smbdrop accepts versions from [`MIN_EVENT_CHANNEL_PROTOCOL`] on and closes the connection
 /// with a reason otherwise. Both sides use the minimum of their own version and the peer's:
@@ -152,11 +155,18 @@ impl std::fmt::Display for ConnectionId {
     }
 }
 
-/// The last mount status an agent reported
+/// One connection to the event channel, as smbdrop lists it to the agents
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct AgentMountStatusEntry {
-    pub agent: AgentId,
-    pub status: AgentMountStatus,
+pub struct Participant {
+    pub connection: ConnectionId,
+
+    pub identity: ParticipantIdentity,
+
+    /// The connection's peer address, as smbdrop sees it
+    pub peer: SocketAddr,
+
+    /// The last mount status the agent reported on this connection; None if it didn't (yet)
+    pub status: Option<AgentMountStatus>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -169,16 +179,20 @@ pub enum EventChannelMessage {
     UpdateShareList {
         shares: Vec<Share>,
         foreground_share: Option<Share>,
-        connected_agents: Vec<AgentId>,
 
-        /// Mount status of the connected agents that reported one; agents that didn't
-        /// (yet) report are missing. Protocol 1 and up.
-        #[serde(default)]
-        agent_mount_status: Vec<AgentMountStatusEntry>,
+        /// Every open connection, the receiver's own included, in the order smbdrop
+        /// accepted them
+        participants: Vec<Participant>,
     },
 
-    /// First message to agents that logged in with protocol 1 or more
-    Welcome { protocol: u32 },
+    /// First message after a login smbdrop accepted, before any `UpdateShareList`
+    Welcome {
+        /// The protocol version both sides use
+        protocol: u32,
+
+        /// The ID of this connection, as in `participants`
+        connection: ConnectionId,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -221,7 +235,11 @@ pub enum EventChannelInitialMessages {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentMountStatus, EventChannelInitialMessages, EventChannelMessage, Share};
+    use super::{
+        AgentMountStatus, ConnectionId, EventChannelInitialMessages, Participant,
+        ParticipantIdentity, Share,
+    };
+    use crate::agent::AgentId;
     use crate::requests::CreateShareRequest;
 
     /// Shares persisted by an smbdrop that didn't record the creator yet
@@ -270,24 +288,34 @@ mod tests {
         assert_eq!(protocol, 0);
     }
 
-    /// Update from an smbdrop that speaks protocol 0
+    /// How an anonymous participant looks on the wire
     #[test]
-    fn update_without_mount_status_deserializes() {
-        let msg: EventChannelMessage = serde_json::from_value(serde_json::json!({
-            "type": "UpdateShareList",
-            "shares": [],
-            "foreground_share": null,
-            "connected_agents": [],
-        }))
-        .unwrap();
+    fn participant_wire_format() {
+        let participant = Participant {
+            connection: ConnectionId(7),
+            identity: ParticipantIdentity::Anonymous {
+                name: "neighbour-pc".to_owned(),
+                lender: AgentId::from_uri("x-modama-agent://laptop#dev").unwrap(),
+            },
+            peer: "192.0.2.1:53810".parse().unwrap(),
+            status: Some(AgentMountStatus::NoHelper),
+        };
         assert_eq!(
-            msg,
-            EventChannelMessage::UpdateShareList {
-                shares: vec![],
-                foreground_share: None,
-                connected_agents: vec![],
-                agent_mount_status: vec![],
-            }
+            serde_json::to_value(&participant).unwrap(),
+            serde_json::json!({
+                "connection": 7,
+                "identity": {
+                    "kind": "anonymous",
+                    "name": "neighbour-pc",
+                    "lender": {
+                        "resource": "laptop",
+                        "agent": "dev",
+                        "san_encoded": "x-modama-agent://laptop#dev",
+                    },
+                },
+                "peer": "192.0.2.1:53810",
+                "status": "no_helper",
+            })
         );
     }
 

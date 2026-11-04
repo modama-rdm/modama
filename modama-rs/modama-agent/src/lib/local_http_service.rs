@@ -1146,22 +1146,39 @@ mod tests {
             });
 
             {
+                use modama_common::messages::{ConnectionId, Participant, ParticipantIdentity};
+
                 let mut state = shared_state.lock().await;
+                state.own_connection = Some(ConnectionId(1));
                 let remote_info = state.remote_info.as_mut().unwrap();
                 let agent_at = |agent: &str| modama_common::agent::AgentId {
                     resource: "res".to_string(),
                     agent: agent.to_string(),
                     san_encoded: format!("x-modama-agent://res#{agent}"),
                 };
-                // one agent reported its status, the other one didn't
-                remote_info.connected_agents.push(agent_at("agent"));
-                remote_info.connected_agents.push(agent_at("old-agent"));
-                remote_info.agent_mount_status.push(
-                    modama_common::messages::AgentMountStatusEntry {
-                        agent: agent_at("agent"),
-                        status: AgentMountStatus::LeftoverWork,
-                    },
-                );
+                let participant = |id, identity, status| Participant {
+                    connection: ConnectionId(id),
+                    identity,
+                    peer: format!("192.0.2.{id}:50000").parse().unwrap(),
+                    status,
+                };
+                let certified = |agent| ParticipantIdentity::Certified {
+                    agent: agent_at(agent),
+                };
+                // this agent; one that reported its status, and two that didn't
+                remote_info.participants = vec![
+                    participant(1, certified("agent-name"), None),
+                    participant(2, certified("agent"), Some(AgentMountStatus::LeftoverWork)),
+                    participant(3, certified("old-agent"), None),
+                    participant(
+                        4,
+                        ParticipantIdentity::Anonymous {
+                            name: "neighbour-pc".to_string(),
+                            lender: agent_at("agent-name"),
+                        },
+                        None,
+                    ),
+                ];
             }
 
             let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
@@ -1610,6 +1627,7 @@ mod tests {
                 .contains("<li>agent (identity verified): reconciled, with work left over</li>")
         );
         assert!(body_str.contains("<li>old-agent (identity verified): ?</li>"));
+        assert!(body_str.contains("<li>neighbour-pc: ?</li>"));
         assert!(!body_str.contains("No other agents are connected."));
         assert!(body_str.contains("Signed in as testuser."));
         assert!(body_str.contains("<form action=\"/logout/\" method=\"post\">"));
@@ -1654,8 +1672,8 @@ mod tests {
             .remote_info
             .as_mut()
             .unwrap()
-            .connected_agents
-            .clear();
+            .participants
+            .truncate(1);
         let body_str = index_page(test_setup).await;
         assert!(
             body_str

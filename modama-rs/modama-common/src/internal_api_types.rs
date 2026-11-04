@@ -1,11 +1,11 @@
 //! Wire format used in the internal websocket API between modama-agent, the session helper and the
 //! GUI. Don't put non-wire types here.
 
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::messages::AgentMountStatus;
+use crate::messages::{AgentMountStatus, ConnectionId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionHelperConfig {
@@ -63,14 +63,26 @@ pub struct ConnectedAgents {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConnectedAgent {
-    /// The agent name; the hostname for an anonymous agent
+    /// The agent name; for an anonymous agent, the name it reports, usually its hostname
     pub name: String,
-    /// The identity is verified by a client certificate. smbdrop only knows certified agents
-    /// so far; anonymous ones connect with the identity they borrowed a token from.
+    /// The identity is verified by a client certificate; an anonymous agent's name is only
+    /// its own claim
     pub verified: bool,
     /// The mount status it reported; None if it didn't (yet), or reports none at all
     #[serde(default)]
     pub status: Option<AgentMountStatus>,
+    /// Its connection to smbdrop
+    pub connection: ConnectionDetails,
+}
+
+/// An agent's connection to smbdrop, for telling connections apart and tracing them in logs
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConnectionDetails {
+    pub id: ConnectionId,
+    /// The peer address, as smbdrop sees it
+    pub peer: SocketAddr,
+    /// For an anonymous agent, the name of the agent it borrowed its token from
+    pub lender: Option<String>,
 }
 
 /// Desired state and the session helper's report, for the GUI's own scope. The agent determines

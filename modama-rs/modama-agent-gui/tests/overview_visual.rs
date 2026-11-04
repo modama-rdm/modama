@@ -3,7 +3,7 @@ use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
-    guide_screenshots::{VIEWPORT, representative_connected_agents},
+    guide_screenshots::{VIEWPORT, representative_connected_agents, representative_connection},
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
     state::{
@@ -811,6 +811,7 @@ fn connected_agents_snapshots() {
         name: "workstation".to_owned(),
         verified: false,
         status: Some(AgentMountStatus::Idle),
+        connection: representative_connection(9, Some("k2")),
     };
     anonymous.state_mut().app_state.connected_agents = Some(agents);
     // two frames: in the first, egui's debug build flags the own row's tag, whose ID changed

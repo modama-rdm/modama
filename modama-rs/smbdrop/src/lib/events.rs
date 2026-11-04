@@ -15,9 +15,9 @@ use modama_common::{
     agent::{AgentId, ClientCertError},
     cert_helpers::CertHelperError,
     messages::{
-        AgentMountStatus, AgentMountStatusEntry, ConnectionId, EVENT_CHANNEL_PROTOCOL,
-        EventChannelInitialMessages, EventChannelMessage, EventChannelRequests,
-        MAX_ANONYMOUS_NAME_CHARS, MIN_EVENT_CHANNEL_PROTOCOL, ParticipantIdentity, Share,
+        AgentMountStatus, ConnectionId, EVENT_CHANNEL_PROTOCOL, EventChannelInitialMessages,
+        EventChannelMessage, EventChannelRequests, MAX_ANONYMOUS_NAME_CHARS,
+        MIN_EVENT_CHANNEL_PROTOCOL, Participant, ParticipantIdentity, Share,
     },
 };
 use rustls::ServerConfig;
@@ -215,35 +215,20 @@ fn update_msg_from_state(state: &EventSystemState, resource: &str) -> EventChann
     // FIXME: right now, the foreground share is always the latest share
     // for the resource, by creation timestamp. This might need to be
     // re-evaluated.
-
-    // one entry per agent, with the status of its oldest connection that reported one; an
-    // agent with several connections is listed once, an anonymous one under its lender
-    let mut connected_agents: Vec<AgentId> = Vec::new();
-    let mut agent_mount_status: Vec<AgentMountStatusEntry> = Vec::new();
-    for entry in state.connections.values() {
-        let agent = match &entry.identity {
-            ParticipantIdentity::Certified { agent } => agent,
-            ParticipantIdentity::Anonymous { lender, .. } => lender,
-        };
-        if !connected_agents.contains(agent) {
-            connected_agents.push(agent.clone());
-        }
-        if let Some(status) = entry.status
-            && !agent_mount_status.iter().any(|e| &e.agent == agent)
-        {
-            agent_mount_status.push(AgentMountStatusEntry {
-                agent: agent.clone(),
-                status,
-            });
-        }
-    }
-    connected_agents.sort_by(|id1, id2| id1.san_encoded.cmp(&id2.san_encoded));
-    agent_mount_status.sort_by(|e1, e2| e1.agent.san_encoded.cmp(&e2.agent.san_encoded));
+    let participants = state
+        .connections
+        .iter()
+        .map(|(connection, entry)| Participant {
+            connection: *connection,
+            identity: entry.identity.clone(),
+            peer: entry.peer,
+            status: entry.status,
+        })
+        .collect();
     EventChannelMessage::UpdateShareList {
         shares: shares.clone(),
         foreground_share: shares.iter().last().cloned(),
-        connected_agents,
-        agent_mount_status,
+        participants,
     }
 }
 
@@ -374,6 +359,7 @@ async fn handle_authenticated_connection(
     // before any update, so the agent knows which protocol version to use from the start:
     let welcome = EventChannelMessage::Welcome {
         protocol: client.protocol.min(EVENT_CHANNEL_PROTOCOL),
+        connection,
     };
     ws_stream
         .send(tungstenite::Message::Text(
@@ -668,9 +654,9 @@ mod test {
         agent::AgentId,
         ca::Ca,
         messages::{
-            AgentMountStatus, AgentMountStatusEntry, EVENT_CHANNEL_PROTOCOL,
-            EventChannelInitialMessages, EventChannelMessage, EventChannelRequests,
-            MAX_ANONYMOUS_NAME_CHARS, ParticipantIdentity, Share,
+            AgentMountStatus, ConnectionId, EVENT_CHANNEL_PROTOCOL, EventChannelInitialMessages,
+            EventChannelMessage, EventChannelRequests, MAX_ANONYMOUS_NAME_CHARS, Participant,
+            ParticipantIdentity, Share,
         },
         test_helpers::MockTokenProvider,
         tokens::{Claims, LocalTokenSigner, TokenProvider},
@@ -840,13 +826,16 @@ mod test {
         )
         .await;
         assert_eq!(
-            next_msg(&mut first).await,
-            update(&["test_agent", "test_agent_2"], &[])
+            next_participants(&mut first).await,
+            listed(&[("test_agent", None), ("test_agent_2", None)])
         );
         assert_no_msg(&mut first).await;
 
         second.close(None).await.unwrap();
-        assert_eq!(next_msg(&mut first).await, update(&["test_agent"], &[]));
+        assert_eq!(
+            next_participants(&mut first).await,
+            listed(&[("test_agent", None)])
+        );
         assert_no_msg(&mut first).await;
         server.handle.abort();
     }
@@ -858,7 +847,10 @@ mod test {
         assert_no_msg(&mut conn).await;
 
         send_request(&mut conn, &EventChannelRequests::ShareListUpdate).await;
-        assert_eq!(next_msg(&mut conn).await, update(&["test_agent"], &[]));
+        assert_eq!(
+            next_participants(&mut conn).await,
+            listed(&[("test_agent", None)])
+        );
         server.handle.abort();
     }
 
@@ -892,14 +884,19 @@ mod test {
         server.event_queue.send(state).unwrap();
 
         // the share manager informs us about the change, and the new share is in the list:
+        let EventChannelMessage::UpdateShareList {
+            shares,
+            foreground_share,
+            participants,
+        } = next_msg(&mut conn).await
+        else {
+            panic!("expected an update");
+        };
+        assert_eq!(shares, vec![share.clone()]);
+        assert_eq!(foreground_share, Some(share));
         assert_eq!(
-            next_msg(&mut conn).await,
-            EventChannelMessage::UpdateShareList {
-                shares: vec![share.clone()],
-                foreground_share: Some(share),
-                connected_agents: vec![agent_id("test_agent")],
-                agent_mount_status: vec![],
-            }
+            participants.iter().map(listing).collect::<Listed>(),
+            listed(&[("test_agent", None)])
         );
         server.handle.abort();
     }
@@ -1015,19 +1012,47 @@ mod test {
         conn.send(Message::Text(text.into())).await.unwrap();
     }
 
-    fn update(agents: &[&str], mount_status: &[(&str, AgentMountStatus)]) -> EventChannelMessage {
-        EventChannelMessage::UpdateShareList {
-            shares: vec![],
-            foreground_share: None,
-            connected_agents: agents.iter().map(|agent| agent_id(agent)).collect(),
-            agent_mount_status: mount_status
-                .iter()
-                .map(|(agent, status)| AgentMountStatusEntry {
-                    agent: agent_id(agent),
-                    status: *status,
-                })
-                .collect(),
-        }
+    type Listed = Vec<(String, Option<AgentMountStatus>)>;
+
+    /// How `participant` is listed in tests: the agent name of a certified agent,
+    /// "<name> via <lender>" for an anonymous one, and the status
+    fn listing(participant: &Participant) -> (String, Option<AgentMountStatus>) {
+        let label = match &participant.identity {
+            ParticipantIdentity::Certified { agent } => agent.agent.clone(),
+            ParticipantIdentity::Anonymous { name, lender } => {
+                format!("{name} via {}", lender.agent)
+            }
+        };
+        (label, participant.status)
+    }
+
+    /// The participants of the next message, an update without shares, as `listing` lists them
+    async fn next_participants(conn: &mut WsStream) -> Listed {
+        let EventChannelMessage::UpdateShareList {
+            shares,
+            participants,
+            ..
+        } = next_msg(conn).await
+        else {
+            panic!("expected an update");
+        };
+        assert!(shares.is_empty(), "unexpected shares: {shares:?}");
+        participants.iter().map(listing).collect()
+    }
+
+    fn listed(participants: &[(&str, Option<AgentMountStatus>)]) -> Listed {
+        participants
+            .iter()
+            .map(|(label, status)| ((*label).to_owned(), *status))
+            .collect()
+    }
+
+    /// The connection ID in the next message, a `Welcome`
+    async fn next_welcome(conn: &mut WsStream) -> ConnectionId {
+        let EventChannelMessage::Welcome { connection, .. } = next_msg(conn).await else {
+            panic!("expected a Welcome");
+        };
+        connection
     }
 
     #[tokio::test]
@@ -1040,13 +1065,21 @@ mod test {
             EVENT_CHANNEL_PROTOCOL,
         )
         .await;
-        assert_eq!(
-            next_msg(&mut conn).await,
-            EventChannelMessage::Welcome {
-                protocol: EVENT_CHANNEL_PROTOCOL
-            }
-        );
-        assert_eq!(next_msg(&mut conn).await, update(&["test_agent"], &[]));
+        let EventChannelMessage::Welcome {
+            protocol,
+            connection,
+        } = next_msg(&mut conn).await
+        else {
+            panic!("expected a Welcome");
+        };
+        assert_eq!(protocol, EVENT_CHANNEL_PROTOCOL);
+        let EventChannelMessage::UpdateShareList { participants, .. } = next_msg(&mut conn).await
+        else {
+            panic!("expected an update");
+        };
+        // the ID in the Welcome is the one this connection is listed under
+        assert_eq!(participants.len(), 1);
+        assert_eq!(participants[0].connection, connection);
         assert_no_msg(&mut conn).await;
         server.handle.abort();
     }
@@ -1062,12 +1095,13 @@ mod test {
             EVENT_CHANNEL_PROTOCOL + 5,
         )
         .await;
-        assert_eq!(
+        assert!(matches!(
             next_msg(&mut conn).await,
             EventChannelMessage::Welcome {
-                protocol: EVENT_CHANNEL_PROTOCOL
+                protocol: EVENT_CHANNEL_PROTOCOL,
+                ..
             }
-        );
+        ));
         server.handle.abort();
     }
 
@@ -1081,8 +1115,11 @@ mod test {
             EVENT_CHANNEL_PROTOCOL,
         )
         .await;
-        next_msg(&mut agent_1).await; // Welcome
-        assert_eq!(next_msg(&mut agent_1).await, update(&["test_agent"], &[]));
+        next_welcome(&mut agent_1).await;
+        assert_eq!(
+            next_participants(&mut agent_1).await,
+            listed(&[("test_agent", None)])
+        );
 
         let mut agent_2 = connect_agent(
             &server,
@@ -1091,18 +1128,21 @@ mod test {
             EVENT_CHANNEL_PROTOCOL,
         )
         .await;
-        next_msg(&mut agent_2).await; // Welcome
-        let both = ["test_agent", "test_agent_2"];
-        assert_eq!(next_msg(&mut agent_1).await, update(&both, &[]));
-        assert_eq!(next_msg(&mut agent_2).await, update(&both, &[]));
+        next_welcome(&mut agent_2).await;
+        let both = listed(&[("test_agent", None), ("test_agent_2", None)]);
+        assert_eq!(next_participants(&mut agent_1).await, both);
+        assert_eq!(next_participants(&mut agent_2).await, both);
 
         let report = EventChannelRequests::ReportMountStatus {
             status: AgentMountStatus::LeftoverWork,
         };
         send_request(&mut agent_1, &report).await;
-        let expected = update(&both, &[("test_agent", AgentMountStatus::LeftoverWork)]);
-        assert_eq!(next_msg(&mut agent_1).await, expected);
-        assert_eq!(next_msg(&mut agent_2).await, expected);
+        let expected = listed(&[
+            ("test_agent", Some(AgentMountStatus::LeftoverWork)),
+            ("test_agent_2", None),
+        ]);
+        assert_eq!(next_participants(&mut agent_1).await, expected);
+        assert_eq!(next_participants(&mut agent_2).await, expected);
 
         // the same status again is not broadcast
         send_request(&mut agent_1, &report).await;
@@ -1110,26 +1150,23 @@ mod test {
 
         // the status goes away with the agent
         agent_1.close(None).await.unwrap();
-        assert_eq!(next_msg(&mut agent_2).await, update(&["test_agent_2"], &[]));
+        assert_eq!(
+            next_participants(&mut agent_2).await,
+            listed(&[("test_agent_2", None)])
+        );
         assert_no_msg(&mut agent_2).await;
         server.handle.abort();
     }
 
-    /// Two connections with tokens for the same agent, as when an anonymous agent borrowed the
-    /// token: each keeps its own entry, and closing one leaves the other listed with its status
+    /// Two connections with tokens for the same agent, as while smbdrop still holds an agent's
+    /// old connection after it reconnected: each is listed with its own status, and closing one
+    /// leaves the other
     #[tokio::test]
     async fn test_connections_with_one_identity_are_tracked_separately() {
         for close_first in [true, false] {
             let server = make_test_event_server().await;
-            let mut first = connect_agent(
-                &server,
-                &server.certs.client_config_1,
-                "test_agent",
-                EVENT_CHANNEL_PROTOCOL,
-            )
-            .await;
-            next_msg(&mut first).await; // Welcome
-            assert_eq!(next_msg(&mut first).await, update(&["test_agent"], &[]));
+            let mut first =
+                connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
             let mut second = connect_agent(
                 &server,
                 &server.certs.client_config_1,
@@ -1137,20 +1174,22 @@ mod test {
                 EVENT_CHANNEL_PROTOCOL,
             )
             .await;
-            next_msg(&mut second).await; // Welcome
-            assert_eq!(next_msg(&mut first).await, update(&["test_agent"], &[]));
-            assert_eq!(next_msg(&mut second).await, update(&["test_agent"], &[]));
+            next_welcome(&mut second).await;
+            let both = listed(&[("test_agent", None), ("test_agent", None)]);
+            assert_eq!(next_participants(&mut first).await, both);
+            assert_eq!(next_participants(&mut second).await, both);
 
             let report = |status| EventChannelRequests::ReportMountStatus { status };
             send_request(&mut first, &report(AgentMountStatus::Idle)).await;
-            let idle = update(&["test_agent"], &[("test_agent", AgentMountStatus::Idle)]);
-            assert_eq!(next_msg(&mut first).await, idle);
-            assert_eq!(next_msg(&mut second).await, idle);
-
-            // the second connection's status doesn't replace the first one's
+            next_participants(&mut first).await;
+            next_participants(&mut second).await;
             send_request(&mut second, &report(AgentMountStatus::NoHelper)).await;
-            assert_eq!(next_msg(&mut first).await, idle);
-            assert_eq!(next_msg(&mut second).await, idle);
+            let reported = listed(&[
+                ("test_agent", Some(AgentMountStatus::Idle)),
+                ("test_agent", Some(AgentMountStatus::NoHelper)),
+            ]);
+            assert_eq!(next_participants(&mut first).await, reported);
+            assert_eq!(next_participants(&mut second).await, reported);
 
             let (mut closing, mut staying, staying_status) = if close_first {
                 (first, second, AgentMountStatus::NoHelper)
@@ -1159,8 +1198,8 @@ mod test {
             };
             closing.close(None).await.unwrap();
             assert_eq!(
-                next_msg(&mut staying).await,
-                update(&["test_agent"], &[("test_agent", staying_status)]),
+                next_participants(&mut staying).await,
+                listed(&[("test_agent", Some(staying_status))]),
                 "close_first: {close_first}"
             );
             assert_no_msg(&mut staying).await;
@@ -1168,19 +1207,50 @@ mod test {
         }
     }
 
+    /// The certified agent and an anonymous agent with its token, as on the Windows test
+    /// machine: both listed, each with its own status, whoever leaves first
+    #[tokio::test]
+    async fn test_anonymous_agent_and_its_lender_are_listed_separately() {
+        let server = make_test_event_server().await;
+        let mut lender =
+            connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
+        let mut anonymous = connect_anonymous(&server, "test_agent", "neighbour-pc").await;
+        next_welcome(&mut anonymous).await;
+        next_participants(&mut lender).await;
+        next_participants(&mut anonymous).await;
+
+        let report = |status| EventChannelRequests::ReportMountStatus { status };
+        send_request(&mut lender, &report(AgentMountStatus::Idle)).await;
+        next_participants(&mut lender).await;
+        next_participants(&mut anonymous).await;
+        send_request(&mut anonymous, &report(AgentMountStatus::NoHelper)).await;
+        let expected = listed(&[
+            ("test_agent", Some(AgentMountStatus::Idle)),
+            (
+                "neighbour-pc via test_agent",
+                Some(AgentMountStatus::NoHelper),
+            ),
+        ]);
+        assert_eq!(next_participants(&mut lender).await, expected);
+        assert_eq!(next_participants(&mut anonymous).await, expected);
+
+        lender.close(None).await.unwrap();
+        assert_eq!(
+            next_participants(&mut anonymous).await,
+            listed(&[(
+                "neighbour-pc via test_agent",
+                Some(AgentMountStatus::NoHelper)
+            )])
+        );
+        server.handle.abort();
+    }
+
     /// A connection that goes away without a closing handshake is removed all the same
     #[tokio::test]
     async fn test_connection_dropped_without_close_is_removed() {
         let server = make_test_event_server().await;
-        let mut staying = connect_agent(
-            &server,
-            &server.certs.client_config_1,
-            "test_agent",
-            EVENT_CHANNEL_PROTOCOL,
-        )
-        .await;
-        next_msg(&mut staying).await; // Welcome
-        next_msg(&mut staying).await;
+        let mut staying =
+            connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
         let mut dropped = connect_agent(
             &server,
             &server.certs.client_config_2,
@@ -1188,12 +1258,15 @@ mod test {
             EVENT_CHANNEL_PROTOCOL,
         )
         .await;
-        next_msg(&mut dropped).await; // Welcome
-        let both = update(&["test_agent", "test_agent_2"], &[]);
-        assert_eq!(next_msg(&mut staying).await, both);
+        next_welcome(&mut dropped).await;
+        let both = listed(&[("test_agent", None), ("test_agent_2", None)]);
+        assert_eq!(next_participants(&mut staying).await, both);
 
         drop(dropped);
-        assert_eq!(next_msg(&mut staying).await, update(&["test_agent"], &[]));
+        assert_eq!(
+            next_participants(&mut staying).await,
+            listed(&[("test_agent", None)])
+        );
         server.handle.abort();
     }
 
@@ -1247,23 +1320,6 @@ mod test {
         server.handle.abort();
     }
 
-    /// An agent without a certificate takes part at the resource of the token it borrowed
-    #[tokio::test]
-    async fn test_anonymous_login_is_accepted() {
-        let server = make_test_event_server().await;
-        let mut lender =
-            connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
-
-        let mut anonymous = connect_anonymous(&server, "test_agent", "neighbour-pc").await;
-        assert!(matches!(
-            next_msg(&mut anonymous).await,
-            EventChannelMessage::Welcome { .. }
-        ));
-        assert_eq!(next_msg(&mut anonymous).await, update(&["test_agent"], &[]));
-        assert_eq!(next_msg(&mut lender).await, update(&["test_agent"], &[]));
-        server.handle.abort();
-    }
-
     #[test]
     fn test_anonymous_names_are_cut() {
         let long = "ä".repeat(MAX_ANONYMOUS_NAME_CHARS + 6);
@@ -1287,7 +1343,10 @@ mod test {
             .await
             .unwrap();
         send_request(&mut conn, &EventChannelRequests::ShareListUpdate).await;
-        assert_eq!(next_msg(&mut conn).await, update(&["test_agent"], &[]));
+        assert_eq!(
+            next_participants(&mut conn).await,
+            listed(&[("test_agent", None)])
+        );
         server.handle.abort();
     }
 }

@@ -6,8 +6,10 @@ use time::{Date, Month};
 use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
 use modama_common::{
-    internal_api_types::{ConnectedAgent as ConnectedAgentEntry, ConnectedAgents},
-    messages::AgentMountStatus,
+    internal_api_types::{
+        ConnectedAgent as ConnectedAgentEntry, ConnectedAgents, ConnectionDetails,
+    },
+    messages::{AgentMountStatus, ConnectionId},
 };
 
 use crate::{
@@ -89,6 +91,16 @@ fn seed_identity(app: &mut AgentGuiApp) {
     ]));
 }
 
+/// Connection `id` to smbdrop, from a documentation address (RFC 5737); `lender` for an
+/// anonymous agent
+pub fn representative_connection(id: u8, lender: Option<&str>) -> ConnectionDetails {
+    ConnectionDetails {
+        id: ConnectionId(id.into()),
+        peer: std::net::SocketAddr::from(([192, 0, 2, id], 50000)),
+        lender: lender.map(str::to_owned),
+    }
+}
+
 /// The agents at Holo as seen by its agent `k2`, with `others` connected besides it. `k2` is
 /// idle; the others take turns through the other mount statuses, so four of them show all five.
 pub fn representative_connected_agents(others: &[&str]) -> ConnectedAgents {
@@ -105,14 +117,17 @@ pub fn representative_connected_agents(others: &[&str]) -> ConnectedAgents {
             name: "k2".to_owned(),
             verified: true,
             status: Some(AgentMountStatus::Idle),
+            connection: representative_connection(1, None),
         },
         others: others
             .iter()
             .zip(STATUSES.iter().cycle())
-            .map(|(name, status)| ConnectedAgentEntry {
+            .zip(2..)
+            .map(|((name, status), id)| ConnectedAgentEntry {
                 name: (*name).to_owned(),
                 verified: true,
                 status: *status,
+                connection: representative_connection(id, None),
             })
             .collect(),
     }
