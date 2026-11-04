@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 
 OCC = ("sudo", "-u", "www-data", "php", "-d", "memory_limit=-1", "/var/www/html/occ")
 
@@ -21,7 +22,8 @@ def occ(*args, occ_quiet=False, **kwargs):
         return result
     except subprocess.CalledProcessError as e:
         if not occ_quiet:
-            print(e.returncode, e.stdout, e.stderr)
+            # stderr: uptest.sh discards stdout, but this has to be seen
+            print(e.returncode, e.stdout, e.stderr, file=sys.stderr)
         raise
 
 
