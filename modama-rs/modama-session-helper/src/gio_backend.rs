@@ -9,22 +9,21 @@
 //! (`smb://<configured host>[:<configured port>]/<share>`). Other mounts, even to the same
 //! server, don't get in the way of ours (unlike Windows connections), so they are left alone.
 
-use std::{
-    cell::Cell, collections::HashMap, path::PathBuf, rc::Rc, sync::mpsc, thread, time::Duration,
-};
+use std::{cell::Cell, path::PathBuf, rc::Rc, sync::mpsc, thread, time::Duration};
 
 use gio::prelude::*;
-use log::{debug, warn};
-use modama_common::{
-    foreground::same_share,
-    internal_api_types::{MountedShare, SessionHelperConfig, SessionHelperState, ShareError},
-    messages::Share,
-};
+use modama_common::{internal_api_types::SessionHelperConfig, messages::Share};
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use tokio::sync::oneshot;
 use url::Url;
 
-use crate::mount_backend::{EnumerationError, MountBackend, PassResult, unique_by_name};
+use crate::{
+    mount_backend::{EnumerationError, MountBackend, PassResult},
+    reconcile::{
+        AddFailure, DuplicateEntries, MountTable, PathlessEntries, Policy, TableEntry,
+        reconcile_pass,
+    },
+};
 
 /// Upper bound for a single mount or unmount operation
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -90,8 +89,9 @@ fn our_share(root_uri: &str, config: &SessionHelperConfig) -> Option<String> {
         .map(|s| s.into_owned())
 }
 
-/// The URI we mount `share_name` with; credentials never go into it
-fn share_uri(config: &SessionHelperConfig, share_name: &str) -> Result<Url, EnumerationError> {
+/// `smb://<host>[:<port>]/`: the base of the URIs we mount with, if the configuration allows
+/// one; credentials never go into it
+fn base_uri(config: &SessionHelperConfig) -> Result<Url, EnumerationError> {
     let host = &config.smb_hostname;
     if host.is_empty()
         || host
@@ -110,8 +110,14 @@ fn share_uri(config: &SessionHelperConfig, share_name: &str) -> Result<Url, Enum
         url.set_port(Some(port))
             .map_err(|()| EnumerationError(format!("invalid SMB port {port}")))?;
     }
-    url.set_path(&utf8_percent_encode(share_name, NON_ALPHANUMERIC).to_string());
     Ok(url)
+}
+
+/// The URI we mount `share_name` with: any share name, percent-encoded
+fn share_uri(base: &Url, share_name: &str) -> Url {
+    let mut url = base.clone();
+    url.set_path(&utf8_percent_encode(share_name, NON_ALPHANUMERIC).to_string());
+    url
 }
 
 /// GIO messages may contain the URI; error messages must not (and never the password)
@@ -126,89 +132,77 @@ fn redact(message: &str, uri: &Url, share: &Share) -> String {
     message
 }
 
-/// One reconciliation pass: remove our mounts that aren't desired, mount the missing ones, and
-/// return the actual state afterwards.
-fn reconcile_pass<A: GioApi>(
+/// Our mounts, as a [`MountTable`] for one pass
+struct GioTable<'a, A: GioApi> {
+    api: &'a A,
+    config: &'a SessionHelperConfig,
+    base: Url,
+}
+
+impl<'a, A: GioApi> GioTable<'a, A> {
+    fn new(api: &'a A, config: &'a SessionHelperConfig) -> Result<Self, EnumerationError> {
+        Ok(Self {
+            api,
+            config,
+            base: base_uri(config)?,
+        })
+    }
+}
+
+impl<A: GioApi> MountTable for GioTable<'_, A> {
+    type Handle = A::Handle;
+
+    /// Remounting a mount without a local path would give one without a path again; it is
+    /// kept, and the error points at the likely cause
+    fn policy(&self) -> Policy {
+        Policy {
+            pathless: PathlessEntries::KeepWithError(
+                "mounted, but without a local path (is gvfs-fuse installed?)",
+            ),
+            duplicates: DuplicateEntries::Keep,
+        }
+    }
+
+    fn entries(&mut self) -> Result<Vec<TableEntry<A::Handle>>, String> {
+        Ok(self
+            .api
+            .mounts()?
+            .into_iter()
+            .filter_map(|m| {
+                Some(TableEntry {
+                    share_name: our_share(&m.root_uri, self.config)?,
+                    path: m.path,
+                    handle: m.handle,
+                })
+            })
+            .collect())
+    }
+
+    /// GVfs keeps credentials per mount, so an old mount never blocks a new one on Linux;
+    /// nothing to force
+    fn remove(&mut self, entry: &TableEntry<A::Handle>, _force: bool) -> Result<(), String> {
+        self.api.unmount(&entry.handle)
+    }
+
+    fn add(&mut self, share: &Share) -> Result<(), AddFailure> {
+        let uri = share_uri(&self.base, &share.share_name);
+        match self.api.mount(&uri, share, &self.config.smb_domain) {
+            Ok(()) => Ok(()),
+            Err(MountError::AlreadyMounted) => Err(AddFailure::AlreadyMounted),
+            Err(e) => Err(AddFailure::Failed(redact(&e.to_string(), &uri, share))),
+        }
+    }
+}
+
+/// One reconciliation pass over our mounts: remove those that aren't desired, mount the missing
+/// ones, and return the actual state afterwards
+fn reconcile<A: GioApi>(
     api: &A,
     shares: &[Share],
     config: &SessionHelperConfig,
 ) -> Result<PassResult, EnumerationError> {
-    let ours = |listed: Vec<ListedMount<A::Handle>>| {
-        listed
-            .into_iter()
-            .filter_map(|m| our_share(&m.root_uri, config).map(|share| (share, m)))
-            .collect::<Vec<_>>()
-    };
-    let before = ours(api.mounts().map_err(EnumerationError)?);
-
-    let (desired, mut errors) = unique_by_name(shares);
-    let is_desired = |name: &str| desired.iter().any(|s| same_share(&s.share_name, name));
-
-    // removal first: frees resources before we add new mounts
-    for (name, mount) in &before {
-        if !is_desired(name)
-            && let Err(e) = api.unmount(&mount.handle)
-        {
-            // it stays in the report, so the scope reads as not converged; the next pass retries
-            warn!("could not unmount share {name}: {e}");
-        }
-    }
-
-    let mut mount_errors = HashMap::new();
-    let mut created = Vec::new();
-    for share in &desired {
-        if before
-            .iter()
-            .any(|(name, _)| same_share(name, &share.share_name))
-        {
-            continue;
-        }
-        let uri = share_uri(config, &share.share_name)?;
-        debug!("mounting share {}", share.share_name);
-        match api.mount(&uri, share, &config.smb_domain) {
-            Ok(()) => created.push(share.share_name.clone()),
-            // someone else mounted it in the meantime, so it isn't ours to announce
-            Err(MountError::AlreadyMounted) => {}
-            Err(e) => {
-                mount_errors.insert(share.share_id.clone(), redact(&e.to_string(), &uri, share));
-            }
-        }
-    }
-
-    let after = ours(api.mounts().map_err(EnumerationError)?);
-    for share in &desired {
-        match after
-            .iter()
-            .find(|(name, _)| same_share(name, &share.share_name))
-        {
-            None => errors.push(ShareError {
-                share_id: share.share_id.clone(),
-                message: mount_errors
-                    .remove(&share.share_id)
-                    .unwrap_or_else(|| "not mounted".to_owned()),
-            }),
-            Some((_, mount)) if mount.path.is_none() => errors.push(ShareError {
-                share_id: share.share_id.clone(),
-                message: "mounted, but without a local path (is gvfs-fuse installed?)".to_owned(),
-            }),
-            Some(_) => {}
-        }
-    }
-    Ok(PassResult {
-        state: SessionHelperState {
-            mounted_shares: after
-                .into_iter()
-                .map(|(share_name, mount)| MountedShare {
-                    share_name,
-                    mount_path: mount.path,
-                })
-                .collect(),
-            errors,
-            // the main loop adds which desired state the pass was for
-            reconciled_share_ids: None,
-        },
-        created,
-    })
+    // forcing makes no difference here (see `GioTable::remove`)
+    reconcile_pass(&mut GioTable::new(api, config)?, shares, false)
 }
 
 /// GIO itself; must only be created and used on the thread that owns the default main context
@@ -355,7 +349,7 @@ fn gio_actor(commands: mpsc::Receiver<Command>, ready: mpsc::SyncSender<Result<(
                 reply,
             }) => {
                 // the caller may have given up; nothing to do about that
-                let _ = reply.send(reconcile_pass(&gio, &shares, &config));
+                let _ = reply.send(reconcile(&gio, &shares, &config));
             }
             Ok(Command::Shutdown) => break,
             // a sender wakes the context after sending, so this doesn't sleep through commands
@@ -406,8 +400,7 @@ impl MountBackend for GioBackend {
         &self,
         desired_shares: &[Share],
         config: &SessionHelperConfig,
-        // GVfs keeps credentials per mount, so an old mount never blocks a new one on Linux;
-        // nothing to force
+        // nothing to force (see `GioTable::remove`)
         _force: bool,
     ) -> ReconcileResult {
         let stopped = || EnumerationError("the GIO thread stopped".to_owned());
@@ -426,30 +419,18 @@ impl MountBackend for GioBackend {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, collections::HashSet};
+    use std::{cell::RefCell, collections::HashMap};
+
+    use modama_common::internal_api_types::SessionHelperState;
 
     use super::*;
+    use crate::reconcile::tests::share;
 
     fn config() -> SessionHelperConfig {
         SessionHelperConfig {
             smb_hostname: "smb.example.test".to_owned(),
             smb_port: 445,
             smb_domain: "WORKGROUP".to_owned(),
-        }
-    }
-
-    fn share(id: &str, name: &str) -> Share {
-        Share {
-            resource: None,
-            share_id: id.to_owned(),
-            share_name: name.to_owned(),
-            dest_path: format!("/project/{id}"),
-            created_timestamp: 0,
-            username: "user".to_owned(),
-            password: "s3cret-password".to_owned(),
-            uid: 1000,
-            gid: 1000,
-            created_by: None,
         }
     }
 
@@ -495,29 +476,30 @@ mod tests {
     #[test]
     fn share_uri_round_trips_through_our_share() {
         let mut config = config();
-        for name in ["ingest", "a b", "ünï%cöde"] {
-            let uri = share_uri(&config, name).unwrap();
+        let base = base_uri(&config).unwrap();
+        for name in ["ingest", "a b", "ünï%cöde", r"b\..", "c/d"] {
+            let uri = share_uri(&base, name);
             assert_eq!(our_share(uri.as_str(), &config).as_deref(), Some(name));
         }
         assert_eq!(
-            share_uri(&config, "ingest").unwrap().as_str(),
+            share_uri(&base, "ingest").as_str(),
             "smb://smb.example.test/ingest"
         );
         config.smb_port = 1445;
         assert_eq!(
-            share_uri(&config, "ingest").unwrap().as_str(),
+            share_uri(&base_uri(&config).unwrap(), "ingest").as_str(),
             "smb://smb.example.test:1445/ingest"
         );
     }
 
     #[test]
-    fn share_uri_rejects_hosts_that_would_change_the_uri() {
+    fn base_uri_rejects_hosts_that_would_change_the_uri() {
         for host in ["", "user@host", "host/path", "host:1", "a b", "host?x"] {
             let config = SessionHelperConfig {
                 smb_hostname: host.to_owned(),
                 ..config()
             };
-            assert!(share_uri(&config, "ingest").is_err(), "{host:?}");
+            assert!(base_uri(&config).is_err(), "{host:?}");
         }
     }
 
@@ -525,9 +507,7 @@ mod tests {
     #[derive(Default)]
     struct FakeGio {
         mounts: RefCell<Vec<(String, Option<PathBuf>)>>,
-        inventory_error: Option<String>,
         mount_errors: HashMap<String, MountError>,
-        unmount_errors: HashSet<String>,
         /// mount succeeds, but without a local path (no gvfs-fuse)
         no_path: bool,
         calls: RefCell<Vec<String>>,
@@ -550,9 +530,6 @@ mod tests {
         type Handle = String;
 
         fn mounts(&self) -> Result<Vec<ListedMount<String>>, String> {
-            if let Some(e) = &self.inventory_error {
-                return Err(e.clone());
-            }
             Ok(self
                 .mounts
                 .borrow()
@@ -584,12 +561,13 @@ mod tests {
 
         fn unmount(&self, handle: &String) -> Result<(), String> {
             self.calls.borrow_mut().push(format!("unmount {handle}"));
-            if self.unmount_errors.contains(handle) {
-                return Err("device busy".to_owned());
-            }
             self.mounts.borrow_mut().retain(|(uri, _)| uri != handle);
             Ok(())
         }
+    }
+
+    fn pass(api: &FakeGio, shares: &[Share]) -> SessionHelperState {
+        reconcile(api, shares, &config()).unwrap().state
     }
 
     fn names(state: &SessionHelperState) -> Vec<&str> {
@@ -612,9 +590,7 @@ mod tests {
             "smb://smb.example.test/",
             "gphoto2://[usb:001,005]/",
         ]);
-        let state = reconcile_pass(&api, &[share("1", "keep"), share("2", "new")], &config())
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "keep"), share("2", "new")]);
 
         assert_eq!(names(&state), vec!["keep", "new"]);
         assert!(state.errors.is_empty());
@@ -630,12 +606,13 @@ mod tests {
     }
 
     #[test]
-    fn inventory_error_fails_the_pass() {
-        let api = FakeGio {
-            inventory_error: Some("no D-Bus".to_owned()),
-            ..FakeGio::default()
+    fn invalid_hostname_fails_the_pass_before_anything_changes() {
+        let api = FakeGio::with_mounts(&["smb://smb.example.test/stale/"]);
+        let config = SessionHelperConfig {
+            smb_hostname: "smb.example.test/x".to_owned(),
+            ..config()
         };
-        assert!(reconcile_pass(&api, &[share("1", "a")], &config()).is_err());
+        assert!(reconcile(&api, &[share("1", "a")], &config).is_err());
         assert!(api.calls.borrow().is_empty());
     }
 
@@ -645,19 +622,15 @@ mod tests {
         api.mount_errors
             .insert("a".to_owned(), MountError::AlreadyMounted);
         // the fake doesn't record the mount then; the next inventory decides:
-        let state = reconcile_pass(&api, &[share("1", "a")], &config())
-            .unwrap()
-            .state;
-        assert_eq!(state.errors[0].message, "not mounted");
+        let result = reconcile(&api, &[share("1", "a")], &config()).unwrap();
+        assert_eq!(result.state.errors[0].message, "not mounted");
+        assert!(result.created.is_empty());
 
         api.mounts.borrow_mut().push((
             "smb://smb.example.test/a/".to_owned(),
             Some("/fuse/a".into()),
         ));
-        let state = reconcile_pass(&api, &[share("1", "a")], &config())
-            .unwrap()
-            .state;
-        assert!(state.errors.is_empty());
+        assert!(pass(&api, &[share("1", "a")]).errors.is_empty());
     }
 
     #[test]
@@ -672,9 +645,7 @@ mod tests {
         );
         api.mount_errors
             .insert("c".to_owned(), MountError::AuthenticationFailed);
-        let state = reconcile_pass(&api, &[share("1", "a b"), share("2", "c")], &config())
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "a b"), share("2", "c")]);
 
         assert!(state.mounted_shares.is_empty());
         let message = &state.errors[0].message;
@@ -688,50 +659,18 @@ mod tests {
     }
 
     #[test]
-    fn failed_unmount_stays_in_the_report() {
-        let mut api = FakeGio::with_mounts(&["smb://smb.example.test/busy/"]);
-        api.unmount_errors
-            .insert("smb://smb.example.test/busy/".to_owned());
-        let state = reconcile_pass(&api, &[], &config()).unwrap().state;
-        assert_eq!(names(&state), vec!["busy"]);
-    }
-
-    #[test]
-    fn duplicate_desired_names_get_an_error() {
-        let api = FakeGio::default();
-        let state = reconcile_pass(&api, &[share("1", "a"), share("2", "A")], &config())
-            .unwrap()
-            .state;
-        assert_eq!(names(&state), vec!["a"]);
-        assert_eq!(state.errors.len(), 1);
-        assert_eq!(state.errors[0].share_id, "2");
-    }
-
-    #[test]
-    fn mount_without_local_path_explains_itself() {
+    fn mount_without_local_path_is_kept_and_explains_itself() {
         let api = FakeGio {
             no_path: true,
             ..FakeGio::default()
         };
-        let state = reconcile_pass(&api, &[share("1", "a")], &config())
-            .unwrap()
-            .state;
+        let state = pass(&api, &[share("1", "a")]);
         assert_eq!(state.mounted_shares[0].mount_path, None);
         assert!(state.errors[0].message.contains("gvfs-fuse"));
-    }
 
-    #[test]
-    fn created_lists_only_what_this_pass_mounted() {
-        let mut api = FakeGio::with_mounts(&["smb://smb.example.test/keep/"]);
-        // someone else mounted "raced" first: not ours to announce
-        api.mount_errors
-            .insert("raced".to_owned(), MountError::AlreadyMounted);
-        let result = reconcile_pass(
-            &api,
-            &[share("1", "keep"), share("2", "new"), share("3", "raced")],
-            &config(),
-        )
-        .unwrap();
-        assert_eq!(result.created, vec!["new"]);
+        // the next pass leaves it alone
+        let state = pass(&api, &[share("1", "a")]);
+        assert_eq!(*api.calls.borrow(), vec!["mount smb://smb.example.test/a"]);
+        assert!(state.errors[0].message.contains("gvfs-fuse"));
     }
 }
