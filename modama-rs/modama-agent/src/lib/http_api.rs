@@ -39,8 +39,8 @@ async fn api_shares_foreground(
     ConnectInfo(conn): ConnectInfo<ConnInfo>,
 ) -> Result<impl IntoResponse, LocalAPIError> {
     let scope = api_state.resolve_scope(conn).await?;
-    let state = api_state.state.lock().await;
-    Ok(Json(state.foreground_for(scope)?))
+    let fan_out = Arc::clone(&api_state.state.lock().await.fan_out);
+    Ok(Json(fan_out.foreground_for(scope)?))
 }
 
 #[utoipa::path(

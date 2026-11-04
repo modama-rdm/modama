@@ -1,4 +1,4 @@
-use std::{ops::DerefMut as _, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     Router,
@@ -13,17 +13,13 @@ use axum::{
 use hyper::StatusCode;
 use log::{debug, error, warn};
 use modama_common::internal_api_types::{
-    ConnectedAgents, SessionHelperConfig, SessionHelperState, Shares, ToAgent, ToAgentFromGui,
-    ToSessionGui, ToSessionHelper,
+    SessionHelperConfig, SessionHelperState, ToAgent, ToAgentFromGui, ToSessionHelper,
 };
 use serde::{Serialize, de::DeserializeOwned};
-use tokio::{
-    select,
-    sync::{Mutex, broadcast, mpsc},
-};
+use tokio::{select, sync::Mutex};
 
 use crate::{
-    agent_state::{AgentState, RemoteInfo, StateUpdateToSession},
+    agent_state::AgentState,
     caller_scope::{ConnInfo, HelperScope},
     local_http_service::{ApiState, LocalAPIError},
 };
@@ -41,15 +37,6 @@ pub enum EventAPIError {
 
     #[error("serialization/message format error")]
     Serialization(#[from] serde_json::Error),
-
-    #[error("internal communication error")]
-    ChannelRecv(#[from] tokio::sync::broadcast::error::RecvError),
-
-    #[error("internal communication error")]
-    ChannelSend(#[from] tokio::sync::broadcast::error::SendError<StateUpdateToSession>),
-
-    #[error("state error, message sent out of turn?")]
-    StateError,
 }
 
 async fn recv_obj<T>(socket: &mut WebSocket) -> Result<T, EventAPIError>
@@ -84,199 +71,49 @@ where
     Ok(())
 }
 
-/// The desired shares as sent to helpers and GUIs; None until smbdrop has sent them
-fn desired_shares(remote_info: Option<&RemoteInfo>) -> Option<Shares> {
-    remote_info.map(RemoteInfo::shares)
-}
-
-async fn send_update_to_session_helper(
-    update: StateUpdateToSession,
-    config: &SessionHelperConfig,
-    own_scope: HelperScope,
-    state: &Mutex<AgentState>,
-    socket: &mut WebSocket,
-) -> Result<(), EventAPIError> {
-    match update {
-        StateUpdateToSession::DesiredState {
-            foreground_share_id,
-            shares,
-        } => {
-            send_obj(
-                socket,
-                &ToSessionHelper {
-                    config: config.clone(),
-                    share_state: Some(Shares {
-                        foreground_share_id,
-                        shares,
-                    }),
-                    force_release_obsolete: false,
-                },
-            )
-            .await?;
-        }
-        StateUpdateToSession::ForceRelease { scope } if scope == own_scope => {
-            let share_state = desired_shares(state.lock().await.remote_info.as_ref());
-            send_obj(
-                socket,
-                &ToSessionHelper {
-                    config: config.clone(),
-                    share_state,
-                    force_release_obsolete: true,
-                },
-            )
-            .await?;
-        }
-        StateUpdateToSession::ForceRelease { .. }
-        | StateUpdateToSession::MountUpdate { .. }
-        | StateUpdateToSession::ParticipantsChanged => {}
-    }
-
-    Ok(())
-}
-
-/// Send the update from the session helper to the agent state receiver.
-async fn record_update_from_session_helper(
-    session_update: ToAgent,
-    tx: broadcast::Sender<StateUpdateToSession>,
-    scope: HelperScope,
-    state: &mut AgentState,
-) -> Result<(), EventAPIError> {
-    match session_update {
-        ToAgent::SessionUpdate {
-            shares,
-            errors,
-            reconciled_share_ids,
-        } => {
-            let helper_state = SessionHelperState {
-                mounted_shares: shares,
-                errors,
-                reconciled_share_ids,
-            };
-            state.session_helpers.insert(scope, helper_state.clone());
-            state.mount_status_inputs_changed.notify_one();
-            // forward to the GUI
-            tx.send(StateUpdateToSession::MountUpdate {
-                scope,
-                session_helper: Some(helper_state),
-            })?;
-            Ok(())
-        }
-    }
-}
-
-async fn recv_handle_lagging<T: Clone>(
-    rx: &mut broadcast::Receiver<T>,
-) -> Result<T, EventAPIError> {
-    loop {
-        match rx.recv().await {
-            Ok(t) => return Ok(t),
-            Err(e @ broadcast::error::RecvError::Closed) => {
-                return Err(EventAPIError::ChannelRecv(e));
-            }
-            // recover from lagging state updates
-            // FIXME: proper recovery, don't care for the MVP
-            // (worst case, unlikely to happen, is that the session helper doesn't get a current
-            // desired state message, which is only the case if all following messages are
-            // DesktopSessionState)
-            Err(_e @ broadcast::error::RecvError::Lagged(_n)) => continue,
-        }
-    }
-}
-
 async fn handle_session_helper_websocket(
     state: Arc<Mutex<AgentState>>,
     mut socket: WebSocket,
     scope: HelperScope,
 ) -> Result<(), EventAPIError> {
-    let _guard =
-        SessionConnection::new(scope, state.lock().await.session_channel_sender.clone()).await;
-    let (mut rx, tx, remote_info, smb_hostname, smb_port, smb_domain) = {
-        let agent_state = state.lock().await;
-        let receiver = agent_state.desired_state_channel.subscribe();
-
-        (
-            receiver,
-            agent_state.desired_state_channel.clone(),
-            agent_state.remote_info.clone(),
-            agent_state.config.smb_hostname.clone(),
-            agent_state.config.smb_port,
-            agent_state.config.smb_domain.clone(),
-        )
+    let (fan_out, config) = {
+        let state = state.lock().await;
+        let config = SessionHelperConfig {
+            smb_hostname: state.config.smb_hostname.clone(),
+            smb_port: state.config.smb_port,
+            smb_domain: state.config.smb_domain.clone(),
+        };
+        (Arc::clone(&state.fan_out), config)
     };
-
-    let session_config = SessionHelperConfig {
-        smb_hostname,
-        smb_port,
-        smb_domain,
-    };
-
-    // initial state
-    send_obj(
-        &mut socket,
-        &ToSessionHelper {
-            config: session_config.clone(),
-            share_state: desired_shares(remote_info.as_ref()),
-            force_release_obsolete: false,
-        },
-    )
-    .await?;
+    // present until this connection ends; the first update is the current desired state
+    let (presence, mut updates) = fan_out.connect_helper(scope);
 
     loop {
         select! {
-            state_update = recv_handle_lagging(&mut rx) => {
-                let update = state_update?;
-                send_update_to_session_helper(update, &session_config, scope, &state, &mut socket).await?;
+            update = updates.next() => {
+                send_obj(
+                    &mut socket,
+                    &ToSessionHelper {
+                        config: config.clone(),
+                        share_state: update.share_state,
+                        force_release_obsolete: update.force_release_obsolete,
+                    },
+                )
+                .await?;
             }
-            session_update = recv_obj::<ToAgent>(&mut socket) => {
-                record_update_from_session_helper(session_update?, tx.clone(), scope, state.lock().await.deref_mut()).await?;
+            session_update = recv_obj::<ToAgent>(&mut socket) => match session_update? {
+                ToAgent::SessionUpdate {
+                    shares,
+                    errors,
+                    reconciled_share_ids,
+                } => presence.report(SessionHelperState {
+                    mounted_shares: shares,
+                    errors,
+                    reconciled_share_ids,
+                }),
             }
         }
     }
-}
-
-async fn send_update_to_gui(
-    update: StateUpdateToSession,
-    own_scope: HelperScope,
-    socket: &mut WebSocket,
-    remote_info: Option<RemoteInfo>,
-    session_helper: Option<SessionHelperState>,
-    connected_agents: Option<ConnectedAgents>,
-) -> Result<(), EventAPIError> {
-    let msg = match update {
-        StateUpdateToSession::DesiredState {
-            foreground_share_id,
-            shares,
-        } => ToSessionGui {
-            session_helper,
-            desired_shares: Some(Shares {
-                foreground_share_id,
-                shares,
-            }),
-            connected_agents,
-        },
-        StateUpdateToSession::MountUpdate {
-            scope,
-            session_helper,
-        } => {
-            // ignore any updates that don't concern our scope:
-            if scope != own_scope {
-                return Ok(());
-            }
-            ToSessionGui {
-                session_helper,
-                desired_shares: desired_shares(remote_info.as_ref()),
-                connected_agents,
-            }
-        }
-        StateUpdateToSession::ParticipantsChanged => ToSessionGui {
-            session_helper,
-            desired_shares: desired_shares(remote_info.as_ref()),
-            connected_agents,
-        },
-        StateUpdateToSession::ForceRelease { .. } => return Ok(()),
-    };
-    send_obj(socket, &msg).await?;
-    Ok(())
 }
 
 async fn handle_gui_websocket(
@@ -284,46 +121,14 @@ async fn handle_gui_websocket(
     mut socket: WebSocket,
     scope: HelperScope,
 ) -> Result<(), EventAPIError> {
-    let (mut rx, tx, remote_info, session_helper, connected_agents) = {
-        let agent_state = state.lock().await;
-        let receiver = agent_state.desired_state_channel.subscribe();
-        let session_helper = agent_state.session_helpers.get(&scope).cloned();
-
-        (
-            receiver,
-            agent_state.desired_state_channel.clone(),
-            agent_state.remote_info.clone(),
-            session_helper,
-            agent_state.connected_agents_here(),
-        )
-    };
-
-    // initial state
-    send_obj(
-        &mut socket,
-        &ToSessionGui {
-            session_helper,
-            desired_shares: desired_shares(remote_info.as_ref()),
-            connected_agents,
-        },
-    )
-    .await?;
+    let fan_out = Arc::clone(&state.lock().await.fan_out);
+    // the first view is what the GUI shows now
+    let mut views = fan_out.subscribe_gui(scope);
 
     loop {
         select! {
-            state_update = recv_handle_lagging(&mut rx) => {
-                let update = state_update?;
-                // every update to a GUI carries the current connected agents; a change to only
-                // them comes as `ParticipantsChanged`
-                let (remote_info, session_helper, connected_agents) = {
-                    let agent_state = state.lock().await;
-                    (
-                        agent_state.remote_info.clone(),
-                        agent_state.session_helpers.get(&scope).cloned(),
-                        agent_state.connected_agents_here(),
-                    )
-                };
-                send_update_to_gui(update, scope, &mut socket, remote_info, session_helper, connected_agents).await?;
+            view = views.next() => {
+                send_obj(&mut socket, &view).await?;
             }
             message = recv_obj::<serde_json::Value>(&mut socket) => {
                 // malformed JSON ends the connection; a well-formed message we don't know is
@@ -332,52 +137,11 @@ async fn handle_gui_websocket(
                 match serde_json::from_value::<ToAgentFromGui>(message.clone()) {
                     Ok(ToAgentFromGui::ForceRelease) => {
                         debug!("GUI of {scope:?} asks to force the release of obsolete mounts");
-                        tx.send(StateUpdateToSession::ForceRelease { scope })?;
+                        fan_out.request_force_release(scope);
                     }
                     Err(_) => warn!("GUI sent us something unexpected over the websocket connection: {message}"),
                 }
             }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum SessionBeginEnd {
-    Begin { scope: HelperScope },
-    End { scope: HelperScope },
-}
-
-/// Session connection guard; when dropped, we send a message via the MPSC
-/// channel which triggers cleanup in `agent_state::session_bookkeeper`
-#[derive(Debug)]
-struct SessionConnection {
-    scope: HelperScope,
-    channel: mpsc::UnboundedSender<SessionBeginEnd>,
-}
-
-impl SessionConnection {
-    #[must_use]
-    pub async fn new(scope: HelperScope, channel: mpsc::UnboundedSender<SessionBeginEnd>) -> Self {
-        #[allow(clippy::expect_used)]
-        channel
-            .send(SessionBeginEnd::Begin { scope })
-            .expect("the session bookkeeping channel should be alive");
-        SessionConnection { scope, channel }
-    }
-}
-
-impl Drop for SessionConnection {
-    fn drop(&mut self) {
-        // On runtime shutdown, the bookkeeper may be gone before us; the state it would clean up
-        // is dropped as well then, so losing this message is fine (and panicking in drop isn't).
-        if let Err(_e) = self
-            .channel
-            .send(SessionBeginEnd::End { scope: self.scope })
-        {
-            debug!(
-                "session bookkeeper is gone, not sending cleanup for {:?}",
-                self.scope
-            );
         }
     }
 }
@@ -455,8 +219,8 @@ mod tests {
     use futures_util::{SinkExt, StreamExt};
     use minijinja::Environment;
     use modama_common::{
-        internal_api_types::{MountedShare, ShareError},
-        messages::Share,
+        internal_api_types::{MountedShare, ShareError, Shares, ToSessionGui},
+        messages::{AgentMountStatus, Share},
         tokens::{BoxFutureToken, TokenProvider, TokenSignResponse},
     };
     use rustls::{ClientConfig, RootCertStore};
@@ -473,7 +237,7 @@ mod tests {
     use url::Url;
 
     use super::*;
-    use crate::caller_scope::QueueScopeResolver;
+    use crate::{caller_scope::QueueScopeResolver, local_fan_out::LocalFanOut};
 
     type TestWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -525,7 +289,7 @@ mod tests {
                 ),
                 client_cert: None,
             };
-            let shared_state = AgentState::new(&config).await;
+            let shared_state = AgentState::new(&config);
             let token_provider: Arc<dyn TokenProvider + Send + Sync> = Arc::new(DummyTokenProvider);
             let scopes = Arc::new(QueueScopeResolver::default());
             let api_state = ApiState {
@@ -581,35 +345,15 @@ mod tests {
             self.connect(&self.websocket_helper()).await
         }
 
-        async fn seed_remote_info(&self, foreground_share: Share, shares: Vec<Share>) {
-            let mut remote_info = RemoteInfo::new();
-            remote_info
-                .desired_shares
-                .replace_state(shares, Some(foreground_share));
-            self.shared_state.lock().await.remote_info = Some(remote_info);
+        async fn fan_out(&self) -> Arc<LocalFanOut> {
+            Arc::clone(&self.shared_state.lock().await.fan_out)
         }
 
-        async fn seed_session_helper(&self, id: &str, helper_state: SessionHelperState) {
-            self.shared_state
-                .lock()
+        /// smbdrop sends `shares`, `foreground` among them, and no participants
+        async fn smbdrop_sends(&self, foreground: Option<Share>, shares: Vec<Share>) {
+            self.fan_out()
                 .await
-                .session_helpers
-                .insert(scope(id), helper_state);
-        }
-
-        async fn wait_for_state(&self, predicate: impl Fn(&AgentState) -> bool) {
-            timeout(Duration::from_secs(1), async {
-                loop {
-                    let state = self.shared_state.lock().await;
-                    if predicate(&state) {
-                        return;
-                    }
-                    drop(state);
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("agent state did not reach the expected value");
+                .apply_share_list(shares, foreground, vec![]);
         }
     }
 
@@ -710,18 +454,19 @@ mod tests {
     #[tokio::test]
     async fn browser_connections_are_denied() {
         let test_setup = TestSetup::start().await;
-        let mut request = test_setup.websocket_gui().into_client_request().unwrap();
-        request
-            .headers_mut()
-            .insert("origin", "https://attacker.example".parse().unwrap());
+        for url in [test_setup.websocket_gui(), test_setup.websocket_helper()] {
+            test_setup.scopes.push(scope("desktop-1"));
+            let mut request = url.into_client_request().unwrap();
+            request
+                .headers_mut()
+                .insert("origin", "https://attacker.example".parse().unwrap());
 
-        let error = connect_async(request).await.unwrap_err();
-
-        match error {
-            WebSocketError::Http(response) => {
-                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            match connect_async(request).await.unwrap_err() {
+                WebSocketError::Http(response) => {
+                    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+                }
+                error => panic!("expected an HTTP rejection, got {error:?}"),
             }
-            error => panic!("expected an HTTP rejection, got {error:?}"),
         }
     }
 
@@ -737,13 +482,11 @@ mod tests {
                 error => panic!("expected an HTTP rejection, got {error:?}"),
             }
         }
-        assert!(
-            test_setup
-                .shared_state
-                .lock()
-                .await
-                .session_connections
-                .is_empty()
+        // no session helper counts as connected
+        test_setup.smbdrop_sends(None, vec![]).await;
+        assert_eq!(
+            test_setup.fan_out().await.mount_status(),
+            Some(AgentMountStatus::NoHelper)
         );
     }
 
@@ -756,6 +499,7 @@ mod tests {
         let message: ToSessionGui = receive_message(&mut gui).await;
         assert_eq!(message.session_helper, None);
         assert!(message.desired_shares.is_none());
+        assert!(message.connected_agents.is_none());
     }
 
     #[tokio::test]
@@ -766,6 +510,9 @@ mod tests {
         let message: ToSessionHelper = receive_message(&mut session_helper).await;
         assert_eq!(message.config.smb_hostname, "smb.example.test");
         assert_eq!(message.config.smb_port, 1445);
+        assert_eq!(message.config.smb_domain, "WORKGROUP");
+        assert!(message.share_state.is_none());
+        assert!(!message.force_release_obsolete);
     }
 
     #[tokio::test]
@@ -779,18 +526,17 @@ mod tests {
             mount_path: Some(PathBuf::from("/mnt/background")),
         };
         test_setup
-            .seed_remote_info(foreground_share.clone(), desired_shares.clone())
+            .smbdrop_sends(Some(foreground_share.clone()), desired_shares.clone())
             .await;
-        test_setup
-            .seed_session_helper(
-                "desktop-1",
-                SessionHelperState {
-                    mounted_shares: vec![mounted_share.clone()],
-                    errors: vec![],
-                    reconciled_share_ids: None,
-                },
-            )
-            .await;
+        let (helper, _) = test_setup
+            .fan_out()
+            .await
+            .connect_helper(scope("desktop-1"));
+        helper.report(SessionHelperState {
+            mounted_shares: vec![mounted_share.clone()],
+            errors: vec![],
+            reconciled_share_ids: None,
+        });
 
         let mut gui = test_setup.connect_gui("desktop-1").await;
         let gui_message: ToSessionGui = receive_message(&mut gui).await;
@@ -798,157 +544,89 @@ mod tests {
             gui_message.session_helper.map(|h| h.mounted_shares),
             Some(vec![mounted_share])
         );
-
         assert_eq!(
-            gui_message
-                .desired_shares
-                .clone()
-                .map(|shares| shares.foreground_share_id),
-            Some(Some("foreground".to_owned()))
-        );
-        assert_eq!(
-            gui_message.desired_shares.map(|s| s.shares),
-            Some(desired_shares.clone())
+            gui_message.desired_shares,
+            Some(Shares {
+                foreground_share_id: Some("foreground".to_owned()),
+                shares: desired_shares.clone(),
+            })
         );
 
         let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
         let helper_message: ToSessionHelper = receive_message(&mut session_helper).await;
         assert_eq!(helper_message.config.smb_hostname, "smb.example.test");
-        assert_eq!(helper_message.config.smb_port, 1445);
         assert_eq!(
-            helper_message
-                .share_state
-                .clone()
-                .unwrap()
-                .foreground_share_id
-                .as_deref(),
-            Some("foreground")
-        );
-        assert_eq!(helper_message.share_state.unwrap().shares, desired_shares);
-    }
-
-    #[tokio::test]
-    async fn later_desired_state_reaches_session_helper() {
-        let test_setup = TestSetup::start().await;
-        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut session_helper).await;
-        let foreground_share = share("foreground");
-        let background_share = share("background");
-
-        test_setup
-            .shared_state
-            .lock()
-            .await
-            .desired_state_channel
-            .send(StateUpdateToSession::DesiredState {
-                foreground_share_id: Some(foreground_share.share_id.clone()),
-                shares: vec![foreground_share.clone(), background_share.clone()],
+            helper_message.share_state,
+            Some(Shares {
+                foreground_share_id: Some("foreground".to_owned()),
+                shares: desired_shares,
             })
-            .unwrap();
-
-        let message: ToSessionHelper = receive_message(&mut session_helper).await;
-        assert_eq!(message.config.smb_hostname, "smb.example.test");
-        assert_eq!(message.config.smb_port, 1445);
-        assert_eq!(
-            message
-                .share_state
-                .clone()
-                .unwrap()
-                .foreground_share_id
-                .as_deref(),
-            Some("foreground")
-        );
-        assert_eq!(
-            message.share_state.clone().unwrap().shares,
-            vec![foreground_share, background_share]
         );
     }
 
+    /// One helper and one GUI of a scope, from smbdrop's update to the helper's report, the
+    /// GUI's force release, and the helper going away
     #[tokio::test]
-    async fn update_from_session_helper_propagates() {
+    async fn helper_and_gui_end_to_end() {
         let test_setup = TestSetup::start().await;
         let mut gui = test_setup.connect_gui("desktop-1").await;
         let _: ToSessionGui = receive_message(&mut gui).await;
-        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut session_helper).await;
-        let updated_share = share("share-1");
+        let mut helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: ToSessionHelper = receive_message(&mut helper).await;
+        // the helper is connected, but until smbdrop sends a share list our status is unknown,
+        // so the GUI's view doesn't change yet
 
-        send_message(
-            &mut session_helper,
-            &ToAgent::SessionUpdate {
-                shares: vec![MountedShare {
-                    share_name: updated_share.share_name.clone(),
-                    mount_path: Some(PathBuf::from("/mnt/share-1")),
-                }],
-                errors: vec![],
-                reconciled_share_ids: None,
-            },
-        )
-        .await;
-
-        let message: ToSessionGui = receive_message(&mut gui).await;
-        let mounted_shares = message.session_helper.unwrap().mounted_shares;
-        assert_eq!(mounted_shares.len(), 1);
-        assert_eq!(mounted_shares[0].share_name, updated_share.share_name);
-        assert_eq!(
-            mounted_shares[0].mount_path,
-            Some(PathBuf::from("/mnt/share-1"))
-        );
-        assert!(matches!(
-            test_setup
-                .shared_state
-                .lock()
-                .await
-                .session_helpers
-                .get(&scope("desktop-1")),
-            Some(helper) if helper.mounted_shares.len() == 1
-        ));
-    }
-
-    #[tokio::test]
-    async fn mount_update_to_gui_includes_current_desired_state() {
-        let test_setup = TestSetup::start().await;
-        let foreground_share = share("foreground");
-        let background_share = share("background");
-        let desired_shares = vec![foreground_share.clone(), background_share];
+        let desired = share("desired");
         test_setup
-            .seed_remote_info(foreground_share, desired_shares.clone())
+            .smbdrop_sends(Some(desired.clone()), vec![desired.clone()])
             .await;
-        let mut gui = test_setup.connect_gui("desktop-1").await;
-        let _: ToSessionGui = receive_message(&mut gui).await;
-        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut session_helper).await;
-        let mounted_share = share("mounted");
+        let shares = Shares {
+            foreground_share_id: Some("desired".to_owned()),
+            shares: vec![desired.clone()],
+        };
+        let message: ToSessionHelper = receive_message(&mut helper).await;
+        assert_eq!(message.share_state, Some(shares.clone()));
+        assert!(!message.force_release_obsolete);
+        let message: ToSessionGui = receive_message(&mut gui).await;
+        assert_eq!(message.desired_shares, Some(shares.clone()));
+        assert_eq!(message.session_helper, None);
 
+        let report = SessionHelperState {
+            mounted_shares: vec![MountedShare {
+                share_name: desired.share_name.clone(),
+                mount_path: Some(PathBuf::from("/mnt/desired")),
+            }],
+            errors: vec![ShareError {
+                share_id: "failed".to_owned(),
+                message: "credential conflict".to_owned(),
+            }],
+            reconciled_share_ids: Some(vec!["desired".to_owned()]),
+        };
         send_message(
-            &mut session_helper,
+            &mut helper,
             &ToAgent::SessionUpdate {
-                shares: vec![MountedShare {
-                    share_name: mounted_share.share_name.clone(),
-                    mount_path: Some(PathBuf::from("/mnt/mounted")),
-                }],
-                errors: vec![],
-                reconciled_share_ids: None,
+                shares: report.mounted_shares.clone(),
+                errors: report.errors.clone(),
+                reconciled_share_ids: report.reconciled_share_ids.clone(),
             },
         )
         .await;
-
         let message: ToSessionGui = receive_message(&mut gui).await;
+        assert_eq!(message.session_helper, Some(report));
+        assert_eq!(message.desired_shares, Some(shares.clone()));
+
+        send_message(&mut gui, &ToAgentFromGui::ForceRelease).await;
+        let message: ToSessionHelper = receive_message(&mut helper).await;
+        assert!(message.force_release_obsolete);
+        assert_eq!(message.share_state, Some(shares));
+
+        helper.close(None).await.unwrap();
+        let message: ToSessionGui = receive_message(&mut gui).await;
+        assert_eq!(message.session_helper, None);
         assert_eq!(
-            message.session_helper.map(|h| h.mounted_shares),
-            Some(vec![MountedShare {
-                share_name: mounted_share.share_name,
-                mount_path: Some(PathBuf::from("/mnt/mounted")),
-            }])
+            test_setup.fan_out().await.mount_status(),
+            Some(AgentMountStatus::NoHelper)
         );
-        assert_eq!(
-            message
-                .desired_shares
-                .as_ref()
-                .and_then(|shares| shares.foreground_share_id.as_deref()),
-            Some("foreground")
-        );
-        assert_eq!(message.desired_shares.unwrap().shares, desired_shares);
     }
 
     #[tokio::test]
@@ -976,42 +654,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_state_cleaned_up_on_disconnect() {
-        let test_setup = TestSetup::start().await;
-        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut session_helper).await;
-        send_message(
-            &mut session_helper,
-            &ToAgent::SessionUpdate {
-                shares: vec![],
-                errors: vec![],
-                reconciled_share_ids: None,
-            },
-        )
-        .await;
-        test_setup
-            .wait_for_state(|state| {
-                state.session_helpers.contains_key(&scope("desktop-1"))
-                    && state.session_connections.get(&scope("desktop-1")) == Some(&1)
-            })
-            .await;
-
-        session_helper.close(None).await.unwrap();
-
-        test_setup
-            .wait_for_state(|state| {
-                !state.session_helpers.contains_key(&scope("desktop-1"))
-                    && !state.session_connections.contains_key(&scope("desktop-1"))
-            })
-            .await;
-    }
-
-    #[tokio::test]
-    async fn invalid_message_from_gui_are_ignored_and_bookkeeping_stays_alive() {
+    async fn unknown_messages_from_a_gui_are_ignored() {
         let test_setup = TestSetup::start().await;
         let mut gui = test_setup.connect_gui("desktop-1").await;
         let _: ToSessionGui = receive_message(&mut gui).await;
 
+        // a helper's report, from a GUI
         send_message(
             &mut gui,
             &ToAgent::SessionUpdate {
@@ -1032,17 +680,10 @@ mod tests {
         .unwrap();
         wait_for_pong(&mut gui, ping_payload).await;
         test_setup
-            .shared_state
-            .lock()
-            .await
-            .desired_state_channel
-            .send(StateUpdateToSession::DesiredState {
-                foreground_share_id: Some("desired-share".to_owned()),
-                shares: vec![share("desired-share")],
-            })
-            .unwrap();
+            .smbdrop_sends(Some(share("desired-share")), vec![share("desired-share")])
+            .await;
 
-        // what the GUI sent must not show up as helper state:
+        // the connection is still alive, and what the GUI sent doesn't show up as helper state:
         let message: ToSessionGui = receive_message(&mut gui).await;
         assert_eq!(message.session_helper, None);
         assert_eq!(
@@ -1050,220 +691,6 @@ mod tests {
             Some(Shares {
                 foreground_share_id: Some("desired-share".to_owned()),
                 shares: vec![share("desired-share")]
-            })
-        );
-        assert!(
-            test_setup
-                .shared_state
-                .lock()
-                .await
-                .session_helpers
-                .is_empty()
-        );
-    }
-
-    #[tokio::test]
-    async fn session_helper_disconnect_updates_state_to_discernable_value() {
-        let test_setup = TestSetup::start().await;
-        let mut gui = test_setup.connect_gui("desktop-1").await;
-        let _: ToSessionGui = receive_message(&mut gui).await;
-        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut session_helper).await;
-
-        send_message(
-            &mut session_helper,
-            &ToAgent::SessionUpdate {
-                shares: vec![],
-                errors: vec![],
-                reconciled_share_ids: None,
-            },
-        )
-        .await;
-        let mounted_message: ToSessionGui = receive_message(&mut gui).await;
-        assert!(matches!(
-            mounted_message,
-            ToSessionGui {
-                session_helper: Some(ref helper),
-                ..
-            } if helper.mounted_shares.is_empty()
-        ));
-
-        session_helper.close(None).await.unwrap();
-
-        let disconnected_message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(disconnected_message.session_helper, None);
-    }
-
-    #[tokio::test]
-    async fn participant_changes_reach_guis_but_not_session_helpers() {
-        let test_setup = TestSetup::start().await;
-        let desired = share("desired");
-        test_setup
-            .seed_remote_info(desired.clone(), vec![desired.clone()])
-            .await;
-        let mut gui = test_setup.connect_gui("desktop-1").await;
-        let _: ToSessionGui = receive_message(&mut gui).await;
-        let mut helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut helper).await;
-
-        let channel = test_setup
-            .shared_state
-            .lock()
-            .await
-            .desired_state_channel
-            .clone();
-        channel
-            .send(StateUpdateToSession::ParticipantsChanged)
-            .unwrap();
-        let message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(
-            message.desired_shares.map(|s| s.shares),
-            Some(vec![desired.clone()])
-        );
-
-        // the helper's next message is the next desired state
-        channel
-            .send(StateUpdateToSession::DesiredState {
-                foreground_share_id: None,
-                shares: vec![],
-            })
-            .unwrap();
-        let message: ToSessionHelper = receive_message(&mut helper).await;
-        assert_eq!(message.share_state.map(|s| s.shares), Some(vec![]));
-    }
-
-    #[tokio::test]
-    async fn force_release_reaches_only_the_helper_of_the_gui_scope() {
-        let test_setup = TestSetup::start().await;
-        let desired = share("desired");
-        test_setup
-            .seed_remote_info(desired.clone(), vec![desired.clone()])
-            .await;
-        let mut gui = test_setup.connect_gui("desktop-1").await;
-        let _: ToSessionGui = receive_message(&mut gui).await;
-        let mut own_helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut own_helper).await;
-        let mut other_helper = test_setup.connect_session_helper("desktop-2").await;
-        let _: ToSessionHelper = receive_message(&mut other_helper).await;
-
-        send_message(&mut gui, &ToAgentFromGui::ForceRelease).await;
-
-        let message: ToSessionHelper = receive_message(&mut own_helper).await;
-        assert!(message.force_release_obsolete);
-        assert_eq!(
-            message.share_state.map(|s| s.shares),
-            Some(vec![desired.clone()])
-        );
-
-        // the other scope's next message is the next desired state, not a forced one:
-        test_setup
-            .shared_state
-            .lock()
-            .await
-            .desired_state_channel
-            .send(StateUpdateToSession::DesiredState {
-                foreground_share_id: None,
-                shares: vec![],
-            })
-            .unwrap();
-        let message: ToSessionHelper = receive_message(&mut other_helper).await;
-        assert!(!message.force_release_obsolete);
-        assert_eq!(message.share_state.map(|s| s.shares), Some(vec![]));
-        let message: ToSessionHelper = receive_message(&mut own_helper).await;
-        assert!(!message.force_release_obsolete);
-    }
-
-    #[tokio::test]
-    async fn updates_to_gui_connections_are_session_filtered() {
-        let test_setup = TestSetup::start().await;
-        let mut matching_gui = test_setup.connect_gui("desktop-1").await;
-        let _: ToSessionGui = receive_message(&mut matching_gui).await;
-        let mut other_gui = test_setup.connect_gui("desktop-2").await;
-        let _: ToSessionGui = receive_message(&mut other_gui).await;
-        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut session_helper).await;
-        let updated_share = share("share-1");
-
-        send_message(
-            &mut session_helper,
-            &ToAgent::SessionUpdate {
-                shares: vec![MountedShare {
-                    share_name: updated_share.share_name.clone(),
-                    mount_path: Some(PathBuf::from("/mnt/share-1")),
-                }],
-                errors: vec![],
-                reconciled_share_ids: None,
-            },
-        )
-        .await;
-
-        let message: ToSessionGui = receive_message(&mut matching_gui).await;
-        assert_eq!(
-            message.session_helper.map(|h| h.mounted_shares),
-            Some(vec![MountedShare {
-                share_name: updated_share.share_name,
-                mount_path: Some(PathBuf::from("/mnt/share-1")),
-            }])
-        );
-
-        let desired_share = share("desired-share");
-        test_setup
-            .shared_state
-            .lock()
-            .await
-            .desired_state_channel
-            .send(StateUpdateToSession::DesiredState {
-                foreground_share_id: Some(desired_share.share_id.clone()),
-                shares: vec![desired_share.clone()],
-            })
-            .unwrap();
-
-        let message: ToSessionGui = receive_message(&mut other_gui).await;
-        assert_eq!(
-            message
-                .desired_shares
-                .clone()
-                .unwrap()
-                .foreground_share_id
-                .as_deref(),
-            Some("desired-share")
-        );
-        assert_eq!(message.desired_shares.unwrap().shares, vec![desired_share]);
-    }
-
-    #[tokio::test]
-    async fn share_errors_reach_gui() {
-        let test_setup = TestSetup::start().await;
-        let mut gui = test_setup.connect_gui("desktop-1").await;
-        let _: ToSessionGui = receive_message(&mut gui).await;
-        let mut session_helper = test_setup.connect_session_helper("desktop-1").await;
-        let _: ToSessionHelper = receive_message(&mut session_helper).await;
-        let mounted = MountedShare {
-            share_name: share("mounted").share_name,
-            mount_path: Some(PathBuf::from("/mnt/mounted")),
-        };
-        let error = ShareError {
-            share_id: share("failed").share_id,
-            message: "credential conflict".to_owned(),
-        };
-
-        send_message(
-            &mut session_helper,
-            &ToAgent::SessionUpdate {
-                shares: vec![mounted.clone()],
-                errors: vec![error.clone()],
-                reconciled_share_ids: None,
-            },
-        )
-        .await;
-
-        let message: ToSessionGui = receive_message(&mut gui).await;
-        assert_eq!(
-            message.session_helper,
-            Some(SessionHelperState {
-                mounted_shares: vec![mounted],
-                errors: vec![error],
-                reconciled_share_ids: None,
             })
         );
     }

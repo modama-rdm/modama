@@ -12,7 +12,7 @@ use axum_macros::debug_handler;
 use log::error;
 use minijinja::{AutoEscape, Environment, Value, context};
 use modama_common::{
-    foreground::{ScopeView, project_and_session},
+    foreground::project_and_session,
     internal_api_types::{ConnectedAgent, ConnectedAgents},
     local_api_messages::APICurrentForegroundShare,
     messages::{AgentMountStatus, Share},
@@ -366,23 +366,13 @@ async fn local_snapshot(agent_state: &ApiState) -> (String, Option<ConnectedAgen
             resource_name,
         } => format!("{agent_name} at {resource_name}"),
     };
-    (identity, state.connected_agents_here().map(Into::into))
+    (identity, state.fan_out.connected_agents().map(Into::into))
 }
 
 /// The desired foreground share; mounted or not, this is what the user can close, and what
 /// prevents opening another ingest
 async fn desired_foreground(agent_state: &ApiState) -> Option<Share> {
-    let desired = agent_state
-        .state
-        .lock()
-        .await
-        .remote_info
-        .as_ref()?
-        .shares();
-    // as the foreground projection finds it, so the two can't disagree
-    ScopeView::new(Some(&desired), None)
-        .foreground_share()
-        .cloned()
+    agent_state.state.lock().await.fan_out.desired_foreground()
 }
 
 /// Wrapper around the AgentState for the local API server
@@ -589,7 +579,10 @@ async fn serve_index_page(
     let scope = agent_state.resolve_scope(conn).await?;
     let (foreground, other_mounts) = {
         let state = agent_state.state.lock().await;
-        (state.foreground_for(scope)?, state.other_mounts_for(scope))
+        (
+            state.fan_out.foreground_for(scope)?,
+            state.fan_out.other_mounts_for(scope),
+        )
     };
     let other_mounts = other_mounts
         .into_iter()
@@ -739,7 +732,7 @@ async fn start_ingest_step2(
 
     let (res_name, instrument) = match &agent_state.state.lock().await.config.identity {
         // TODO: name the resource an anonymous agent inherits from its token
-        // (`AgentState::token_identity`), like the connected agents on the index page
+        // (`LocalFanOut::logged_in`), like the connected agents on the index page
         MTLSIdentity::Anonymous { hostname } => (hostname.clone(), "this instrument".to_owned()),
         MTLSIdentity::AgentId {
             agent_name: _,
@@ -1078,13 +1071,14 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_state::RemoteInfo;
+    use crate::local_fan_out::{HelperPresence, LocalFanOut};
     use axum::body::Body;
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use modama_common::internal_api_types::{MountedShare, SessionHelperState};
     use modama_common::messages::Share as MessageShare;
+    use modama_common::messages::{ConnectionId, Participant, ParticipantIdentity};
     use modama_common::tokens::{BoxFutureToken, TokenSignResponse};
     use rustls::ClientConfig;
     use serde_json::Value;
@@ -1110,13 +1104,33 @@ mod tests {
         }
     }
 
+    /// What smbdrop sent last
+    #[derive(Default)]
+    struct SmbdropSays {
+        foreground: Option<MessageShare>,
+        shares: Vec<MessageShare>,
+        participants: Vec<Participant>,
+    }
+
     struct TestSetup {
         pub app: Router,
         pub shared_state: Arc<Mutex<AgentState>>,
+        fan_out: Arc<LocalFanOut>,
+        smbdrop: Mutex<SmbdropSays>,
+        /// The session helper of the test scope, once it reported
+        helper: Mutex<Option<HelperPresence>>,
     }
 
     impl TestSetup {
         pub async fn start() -> Self {
+            Self::start_as(crate::config::MTLSIdentity::AgentId {
+                agent_name: "agent-name".to_string(),
+                resource_name: "res".to_string(),
+            })
+            .await
+        }
+
+        pub async fn start_as(identity: MTLSIdentity) -> Self {
             let root = RootCertStore::empty();
 
             let cfg = crate::config::AgentConfig {
@@ -1126,10 +1140,7 @@ mod tests {
                 smb_ip: tokio::sync::OnceCell::new(),
                 smb_port: 445,
                 smb_domain: "WINDOWS_FOR_WORKGROUPS".to_string(),
-                identity: crate::config::MTLSIdentity::AgentId {
-                    agent_name: "agent-name".to_string(),
-                    resource_name: "res".to_string(),
-                },
+                identity,
                 listen_local_api: "localhost:3001".to_owned(),
                 token_service_url: Url::parse("http://localhost/").unwrap(),
                 ca_root_store: root.clone(),
@@ -1141,49 +1152,43 @@ mod tests {
                 ),
                 client_cert: None,
             };
-            let shared_state = crate::agent_state::AgentState::new(&cfg).await;
-            shared_state.lock().await.remote_info = Some(RemoteInfo::default());
-            shared_state.lock().await.token_identity = Some(modama_common::agent::AgentId {
+            let shared_state = crate::agent_state::AgentState::new(&cfg);
+            let fan_out = Arc::clone(&shared_state.lock().await.fan_out);
+            fan_out.logged_in(modama_common::agent::AgentId {
                 resource: "res".to_string(),
                 agent: "agent-name".to_string(),
                 san_encoded: "x-modama-agent://res#agent-name".to_string(),
             });
+            fan_out.welcomed(ConnectionId(1));
 
-            {
-                use modama_common::messages::{ConnectionId, Participant, ParticipantIdentity};
-
-                let mut state = shared_state.lock().await;
-                state.own_connection = Some(ConnectionId(1));
-                let remote_info = state.remote_info.as_mut().unwrap();
-                let agent_at = |agent: &str| modama_common::agent::AgentId {
-                    resource: "res".to_string(),
-                    agent: agent.to_string(),
-                    san_encoded: format!("x-modama-agent://res#{agent}"),
-                };
-                let participant = |id, identity, status| Participant {
-                    connection: ConnectionId(id),
-                    identity,
-                    peer: format!("192.0.2.{id}:50000").parse().unwrap(),
-                    status,
-                };
-                let certified = |agent| ParticipantIdentity::Certified {
-                    agent: agent_at(agent),
-                };
-                // this agent; one that reported its status, and two that didn't
-                remote_info.participants = vec![
-                    participant(1, certified("agent-name"), None),
-                    participant(2, certified("agent"), Some(AgentMountStatus::LeftoverWork)),
-                    participant(3, certified("old-agent"), None),
-                    participant(
-                        4,
-                        ParticipantIdentity::Anonymous {
-                            name: "neighbour-pc".to_string(),
-                            lender: agent_at("agent-name"),
-                        },
-                        None,
-                    ),
-                ];
-            }
+            let agent_at = |agent: &str| modama_common::agent::AgentId {
+                resource: "res".to_string(),
+                agent: agent.to_string(),
+                san_encoded: format!("x-modama-agent://res#{agent}"),
+            };
+            let participant = |id, identity, status| Participant {
+                connection: ConnectionId(id),
+                identity,
+                peer: format!("192.0.2.{id}:50000").parse().unwrap(),
+                status,
+            };
+            let certified = |agent| ParticipantIdentity::Certified {
+                agent: agent_at(agent),
+            };
+            // this agent; one that reported its status, and two that didn't
+            let participants = vec![
+                participant(1, certified("agent-name"), None),
+                participant(2, certified("agent"), Some(AgentMountStatus::LeftoverWork)),
+                participant(3, certified("old-agent"), None),
+                participant(
+                    4,
+                    ParticipantIdentity::Anonymous {
+                        name: "neighbour-pc".to_string(),
+                        lender: agent_at("agent-name"),
+                    },
+                    None,
+                ),
+            ];
 
             let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
             let mut api_state = ApiState::new(&shared_state, &token_provider);
@@ -1195,30 +1200,59 @@ mod tests {
                     peer: ([127, 0, 0, 1], 50000).into(),
                 }));
 
-            Self { app, shared_state }
+            let test_setup = Self {
+                app,
+                shared_state,
+                fan_out,
+                smbdrop: Mutex::new(SmbdropSays::default()),
+                helper: Mutex::new(None),
+            };
+            test_setup
+                .smbdrop_sends(|says| says.participants = participants)
+                .await;
+            test_setup
+        }
+
+        /// smbdrop sends what it said last, changed by `change`
+        async fn smbdrop_sends(&self, change: impl FnOnce(&mut SmbdropSays)) {
+            let mut says = self.smbdrop.lock().await;
+            change(&mut says);
+            self.fan_out.apply_share_list(
+                says.shares.clone(),
+                says.foreground.clone(),
+                says.participants.clone(),
+            );
+        }
+
+        /// The session helper of the test scope reports `mounted`, as (share name, mount path)
+        async fn helper_reports(&self, mounted: &[(&str, &str)]) {
+            let mut helper = self.helper.lock().await;
+            let helper = helper.get_or_insert_with(|| self.fan_out.connect_helper(TEST_SCOPE).0);
+            helper.report(SessionHelperState {
+                mounted_shares: mounted
+                    .iter()
+                    .map(|(share_name, mount_path)| MountedShare {
+                        share_name: (*share_name).to_owned(),
+                        mount_path: Some(PathBuf::from(mount_path)),
+                    })
+                    .collect(),
+                errors: vec![],
+                reconciled_share_ids: None,
+            });
         }
 
         /// Make `share` the desired foreground share; if `mount_path` is given, the session
         /// helper of the test scope reports it as mounted there
         async fn set_foreground(&self, share: MessageShare, mount_path: Option<&str>) {
-            let mut state = self.shared_state.lock().await;
             if let Some(mount_path) = mount_path {
-                state.session_helpers.insert(
-                    TEST_SCOPE,
-                    SessionHelperState {
-                        mounted_shares: vec![MountedShare {
-                            share_name: share.share_name.clone(),
-                            mount_path: Some(PathBuf::from(mount_path)),
-                        }],
-                        errors: vec![],
-                        reconciled_share_ids: None,
-                    },
-                );
+                self.helper_reports(&[(&share.share_name, mount_path)])
+                    .await;
             }
-            // as smbdrop's updates do, keep the foreground share in the share list
-            let desired = &mut state.remote_info.as_mut().unwrap().desired_shares;
-            desired.foreground_share = Some(share);
-            desired.ensure_consistent();
+            self.smbdrop_sends(|says| {
+                says.shares = vec![share.clone()];
+                says.foreground = Some(share);
+            })
+            .await;
         }
     }
 
@@ -1668,14 +1702,8 @@ mod tests {
     async fn index_page_says_when_no_other_agents_are_connected() {
         let test_setup = TestSetup::start().await;
         test_setup
-            .shared_state
-            .lock()
-            .await
-            .remote_info
-            .as_mut()
-            .unwrap()
-            .participants
-            .truncate(1);
+            .smbdrop_sends(|says| says.participants.truncate(1))
+            .await;
         let body_str = index_page(test_setup).await;
         assert!(
             body_str
@@ -1687,7 +1715,7 @@ mod tests {
     #[tokio::test]
     async fn index_page_says_when_the_connected_agents_are_unknown() {
         let test_setup = TestSetup::start().await;
-        test_setup.shared_state.lock().await.token_identity = None;
+        test_setup.fan_out.smbdrop_disconnected();
         let body_str = index_page(test_setup).await;
         assert!(body_str.contains("<h2>Connected agents</h2>"));
         assert!(body_str.contains("Not connected to the server yet."));
@@ -1695,10 +1723,10 @@ mod tests {
 
     #[tokio::test]
     async fn an_anonymous_agent_lists_the_agents_at_the_resource_of_its_token() {
-        let test_setup = TestSetup::start().await;
-        test_setup.shared_state.lock().await.config.identity = MTLSIdentity::Anonymous {
+        let test_setup = TestSetup::start_as(MTLSIdentity::Anonymous {
             hostname: "workstation".to_owned(),
-        };
+        })
+        .await;
         let body_str = index_page(test_setup).await;
         assert!(body_str.contains("<h2>Connected agents at res</h2>"));
         assert!(body_str.contains("<li>workstation (this agent): no session helper</li>"));
@@ -2133,22 +2161,18 @@ mod tests {
     async fn index_lists_the_other_mounted_shares() {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "current-share").await;
-        {
-            let mut state = test_setup.shared_state.lock().await;
-            let older = MessageShare {
-                share_name: "share-older".to_owned(),
-                dest_path: "/adhoc/the-project/older-session/".to_owned(),
-                created_by: Some("testuser".to_owned()),
-                ..foreground_share("older-share")
-            };
-            let desired = &mut state.remote_info.as_mut().unwrap().desired_shares;
-            desired.shares = vec![older, foreground_share("current-share")];
-            let helper = state.session_helpers.get_mut(&TEST_SCOPE).unwrap();
-            helper.mounted_shares.push(MountedShare {
-                share_name: "share-older".to_owned(),
-                mount_path: Some(PathBuf::from("/mnt/older")),
-            });
-        }
+        let older = MessageShare {
+            share_name: "share-older".to_owned(),
+            dest_path: "/adhoc/the-project/older-session/".to_owned(),
+            created_by: Some("testuser".to_owned()),
+            ..foreground_share("older-share")
+        };
+        test_setup
+            .smbdrop_sends(|says| says.shares.insert(0, older))
+            .await;
+        test_setup
+            .helper_reports(&[("share-name", "/mnt/ingest"), ("share-older", "/mnt/older")])
+            .await;
         let mut server = mgmt_api_server(&test_setup).await;
         server
             .mock("GET", "/mgmt-api/projects")

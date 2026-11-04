@@ -7,7 +7,7 @@ use modama_common::{
     agent::AgentId,
     messages::{
         AgentMountStatus, EVENT_CHANNEL_PROTOCOL, EventChannelInitialMessages, EventChannelMessage,
-        EventChannelRequests, MIN_EVENT_CHANNEL_PROTOCOL, Share,
+        EventChannelRequests, MIN_EVENT_CHANNEL_PROTOCOL,
     },
     tokens::TokenProvider,
     version::modama_git_version,
@@ -18,23 +18,13 @@ use tokio_tungstenite::connect_async_tls_with_config;
 use tungstenite::Message;
 
 use crate::{
-    agent_state::{AgentState, ConnectionState, RemoteInfo, ShareState, StateUpdateToSession},
+    agent_state::{AgentState, ConnectionState},
     config::MTLSIdentity,
+    local_fan_out::LocalFanOut,
 };
 
-/// Whether two desired states are the same; the order of the shares doesn't matter, as
-/// smbdrop doesn't keep a stable order for shares created at the same time
-fn same_desired(a: &ShareState<Share>, b: &ShareState<Share>) -> bool {
-    let sorted = |state: &ShareState<Share>| {
-        let mut shares = state.shares.clone();
-        shares.sort_by(|s1, s2| s1.share_id.cmp(&s2.share_id));
-        shares
-    };
-    a.foreground_share == b.foreground_share && sorted(a) == sorted(b)
-}
-
 /// Handle one message from smbdrop; returns the protocol version if it was a `Welcome`
-async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<Option<u32>> {
+fn handle_message(fan_out: &LocalFanOut, msg: &str) -> AnyResult<Option<u32>> {
     let event_msg: EventChannelMessage = serde_json::from_str(msg)
         .with_context(|| format!("Invalid message encountered: {}", msg))?;
     info!("Received EventChannelMessage: {event_msg:?}");
@@ -45,47 +35,7 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
             foreground_share,
             participants,
         } => {
-            let desired_shares: ShareState<Share> = ShareState {
-                foreground_share,
-                shares: shares.into_iter().collect(),
-            };
-            let mut state = state.lock().await;
-            // smbdrop also sends the shares again when only the participants or their status
-            // changed; session helpers would run a pass for nothing, but GUIs show them
-            let changed = state
-                .remote_info
-                .as_ref()
-                .is_none_or(|previous| !same_desired(&previous.desired_shares, &desired_shares));
-            let participants_changed = state
-                .remote_info
-                .as_ref()
-                .is_none_or(|previous| previous.participants != participants);
-            state.remote_info = Some(RemoteInfo {
-                participants,
-                desired_shares: desired_shares.clone(),
-            });
-            // forward desired state to session helpers
-            if changed
-                && let Err(_e) =
-                    state
-                        .desired_state_channel
-                        .send(StateUpdateToSession::DesiredState {
-                            foreground_share_id: desired_shares
-                                .foreground_share
-                                .clone()
-                                .map(|share| share.share_id),
-                            shares: desired_shares.shares.clone(),
-                        })
-            {
-                warn!("tried to update session helpers but no one cared");
-            }
-            // a desired state carries the participants along; only without one they need their
-            // own update. Sending fails only without receivers, with no GUI to tell.
-            if !changed && participants_changed {
-                let _ = state
-                    .desired_state_channel
-                    .send(StateUpdateToSession::ParticipantsChanged);
-            }
+            fan_out.apply_share_list(shares, foreground_share, participants);
             Ok(None)
         }
         EventChannelMessage::Welcome {
@@ -93,7 +43,7 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
             connection,
         } => {
             info!("smbdrop welcomed us on connection {connection}, protocol {protocol}");
-            state.lock().await.own_connection = Some(connection);
+            fan_out.welcomed(connection);
             Ok(Some(protocol))
         }
     }
@@ -108,11 +58,12 @@ fn is_welcome(msg: &str) -> bool {
     )
 }
 
-/// Handle what smbdrop sent; `welcomed` once its `Welcome` arrived. Before that, anything else
-/// means an smbdrop too old for this agent, which would never send a message we understand.
+/// Handle a message from smbdrop; `welcomed` is `true` once its `Welcome` arrived. Before that,
+/// anything else means an smbdrop too old for this agent, which would never send a message we
+/// understand.
 async fn receive_inner(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
-    state: &Arc<Mutex<AgentState>>,
+    fan_out: &LocalFanOut,
     welcomed: bool,
 ) -> ControlFlow<(), Option<u32>> {
     match message {
@@ -125,15 +76,13 @@ async fn receive_inner(
             tokio::time::sleep(Duration::from_secs(5)).await;
             ControlFlow::Break(())
         }
-        Some(Ok(Message::Text(utf8_bytes))) => {
-            match handle_message(state, utf8_bytes.as_str()).await {
-                Ok(welcome) => ControlFlow::Continue(welcome),
-                Err(e) => {
-                    error!("Error while handing message: {e}");
-                    ControlFlow::Continue(None)
-                }
+        Some(Ok(Message::Text(utf8_bytes))) => match handle_message(fan_out, utf8_bytes.as_str()) {
+            Ok(welcome) => ControlFlow::Continue(welcome),
+            Err(e) => {
+                error!("Error while handing message: {e}");
+                ControlFlow::Continue(None)
             }
-        }
+        },
         Some(Ok(Message::Close(frame))) => {
             // the stream ends right after, which reconnects
             match frame {
@@ -172,8 +121,12 @@ struct StatusReporter {
 }
 
 impl StatusReporter {
-    /// Report our mount status if smbdrop understands it and it changed; Err if sending failed
-    async fn report<S>(&mut self, state: &Mutex<AgentState>, ws_write: &mut S) -> AnyResult<()>
+    /// Report our mount `status` if smbdrop understands it and it changed; Err if sending failed
+    async fn report<S>(
+        &mut self,
+        status: Option<AgentMountStatus>,
+        ws_write: &mut S,
+    ) -> AnyResult<()>
     where
         S: Sink<Message> + Unpin,
         S::Error: std::error::Error + Send + Sync + 'static,
@@ -181,7 +134,7 @@ impl StatusReporter {
         if self.protocol < 1 {
             return Ok(());
         }
-        let Some(status) = state.lock().await.mount_status() else {
+        let Some(status) = status else {
             return Ok(());
         };
         if self.reported == Some(status) {
@@ -199,21 +152,14 @@ pub async fn message_loop(
     tls_config: Arc<ClientConfig>,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) {
-    let (config, mount_status_inputs_changed) = {
+    let (config, fan_out) = {
         let state = state.lock().await;
-        (
-            state.config.clone(),
-            Arc::clone(&state.mount_status_inputs_changed),
-        )
+        (state.config.clone(), Arc::clone(&state.fan_out))
     };
 
     loop {
-        {
-            let mut state = state.lock().await;
-            state.connection = ConnectionState::Connecting;
-            state.token_identity = None;
-            state.own_connection = None;
-        }
+        state.lock().await.connection = ConnectionState::Connecting;
+        fan_out.smbdrop_disconnected();
         let (conn, _response) = match connect_async_tls_with_config(
             &config.events_api_url.to_string(),
             None,
@@ -286,16 +232,14 @@ pub async fn message_loop(
             continue;
         }
 
-        {
-            let mut state = state.lock().await;
-            state.connection = ConnectionState::Connected;
-            state.token_identity = Some(token_identity);
-        }
+        state.lock().await.connection = ConnectionState::Connected;
+        fan_out.logged_in(token_identity);
         let mut reporter = StatusReporter::default();
+        let mut mount_statuses = fan_out.mount_status_feed();
         loop {
             tokio::select! {
                 // the reporter learns the protocol from the Welcome
-                msg = ws_read.next() => match receive_inner(msg, &state, reporter.protocol != 0).await {
+                msg = ws_read.next() => match receive_inner(msg, &fan_out, reporter.protocol != 0).await {
                     ControlFlow::Continue(welcome) => {
                         if let Some(protocol) = welcome {
                             if protocol < MIN_EVENT_CHANNEL_PROTOCOL {
@@ -311,10 +255,11 @@ pub async fn message_loop(
                     }
                     ControlFlow::Break(_) => break, // error or disconnected => reconnect
                 },
-                () = mount_status_inputs_changed.notified() => {}
+                _ = mount_statuses.next() => {}
             }
-            // after a Welcome, a new desired state, or a change in our session helpers:
-            if let Err(e) = reporter.report(&state, &mut ws_write).await {
+            // after any message from smbdrop (a Welcome needs the status), or when our mount status
+            // changed; the reporter sends only changes
+            if let Err(e) = reporter.report(fan_out.mount_status(), &mut ws_write).await {
                 error!("Could not report mount status ({e}), reconnecting...");
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 break;
@@ -326,8 +271,11 @@ pub async fn message_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::caller_scope::HelperScope;
     use crate::config::{AgentConfig, MTLSIdentity};
+    use crate::local_fan_out::{HelperFeed, HelperPresence};
     use modama_common::ca::Ca;
+    use modama_common::internal_api_types::Shares;
     use modama_common::logging::init_logging;
     use modama_common::messages;
     use modama_common::test_helpers::MockTokenProvider;
@@ -339,8 +287,7 @@ mod tests {
     use smbdrop::share_manager::SmbDropState;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::sync::Mutex;
-    use tokio::sync::broadcast::{self, Sender};
+    use tokio::sync::broadcast::Sender;
     use tokio::task::JoinHandle;
     use url::Url;
 
@@ -349,8 +296,7 @@ mod tests {
         event_server_task: JoinHandle<()>,
         pub initial_state: SmbDropState,
         pub event_queue: Sender<SmbDropState>,
-        pub state: Arc<Mutex<AgentState>>,
-        pub to_sessions: broadcast::Receiver<StateUpdateToSession>,
+        pub fan_out: Arc<LocalFanOut>,
     }
 
     /// The certified agent `test-agent` at `test_resource`
@@ -437,10 +383,8 @@ mod tests {
             let anonymous = matches!(identity, MTLSIdentity::Anonymous { .. });
             let config = test_config(port, identity);
 
-            let state = AgentState::new(&config).await;
-
-            // subscribe before the message loop starts, so no update is missed
-            let to_sessions = state.lock().await.desired_state_channel.subscribe();
+            let state = AgentState::new(&config);
+            let fan_out = Arc::clone(&state.lock().await.fan_out);
 
             let client_cert = ca.client_cert("test-agent", "test_resource").unwrap();
             let client_chain: Vec<CertificateDer> = vec![
@@ -489,83 +433,68 @@ mod tests {
                 event_server_task,
                 initial_state,
                 event_queue,
-                state,
-                to_sessions,
+                fan_out,
             }
         }
 
         /// Wait until the desired shares in the agent state match the given share IDs
-        /// (in any order) and foreground share ID.
+        /// (in any order) and foreground share ID, as a GUI sees them
         async fn wait_for_desired(&self, share_ids: &[&str], foreground_share_id: Option<&str>) {
-            let mut expected: Vec<&str> = share_ids.to_vec();
-            expected.sort();
+            let mut gui = self.fan_out.subscribe_gui(HelperScope::Uid(1000));
             tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
-                    let state = self.state.lock().await;
-                    if let Some(remote_info) = &state.remote_info {
-                        let desired = &remote_info.desired_shares;
-                        let mut ids: Vec<&str> =
-                            desired.shares.iter().map(|s| s.share_id.as_str()).collect();
-                        ids.sort();
-                        let fg = desired
-                            .foreground_share
-                            .as_ref()
-                            .map(|s| s.share_id.as_str());
-                        if ids == expected && fg == foreground_share_id {
-                            return;
-                        }
+                    let desired = gui.next().await.desired_shares;
+                    if desired.is_some_and(|d| matches(&d, share_ids, foreground_share_id)) {
+                        return;
                     }
-                    drop(state);
-                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             })
             .await
             .expect("agent desired state did not reach the expected value");
         }
 
-        /// Wait until the desired state forwarded to session helpers matches the given
-        /// share IDs (in any order) and foreground share ID; earlier updates are skipped.
-        async fn wait_for_forwarded(
-            &mut self,
-            share_ids: &[&str],
-            foreground_share_id: Option<&str>,
-        ) {
-            let mut expected: Vec<&str> = share_ids.to_vec();
-            expected.sort();
-            tokio::time::timeout(Duration::from_secs(2), async {
-                loop {
-                    match self.to_sessions.recv().await {
-                        Ok(StateUpdateToSession::DesiredState {
-                            foreground_share_id: fg,
-                            shares,
-                        }) => {
-                            let mut ids: Vec<&str> =
-                                shares.iter().map(|s| s.share_id.as_str()).collect();
-                            ids.sort();
-                            if ids == expected && fg.as_deref() == foreground_share_id {
-                                return;
-                            }
-                        }
-                        Ok(
-                            StateUpdateToSession::MountUpdate { .. }
-                            | StateUpdateToSession::ForceRelease { .. }
-                            | StateUpdateToSession::ParticipantsChanged,
-                        ) => {}
-                        Err(broadcast::error::RecvError::Lagged(_)) => {}
-                        Err(broadcast::error::RecvError::Closed) => {
-                            panic!("desired state channel closed")
-                        }
-                    }
-                }
-            })
-            .await
-            .expect("forwarded desired state did not reach the expected value");
+        /// A session helper connection that never reports. Returns once smbdrop lists our
+        /// status as `Reconciling`, which then no longer changes. Until then, every status report
+        /// makes smbdrop resend its share list, and an old list resent after a newer one would
+        /// replace it (see `modama-rs/TODO.md`, "smbdrop event channel").
+        async fn connect_helper(&self) -> (HelperPresence, HelperFeed) {
+            let helper = self.fan_out.connect_helper(HelperScope::Uid(1000));
+            wait_for_own_status(self, AgentMountStatus::Reconciling).await;
+            helper
         }
 
         async fn abort(&self) {
             self.event_server_task.abort();
             self.message_loop_task.abort();
         }
+    }
+
+    /// Whether `shares` has the given share IDs (in any order) and foreground share ID
+    fn matches(shares: &Shares, share_ids: &[&str], foreground_share_id: Option<&str>) -> bool {
+        let mut expected: Vec<&str> = share_ids.to_vec();
+        expected.sort();
+        let mut ids: Vec<&str> = shares.shares.iter().map(|s| s.share_id.as_str()).collect();
+        ids.sort();
+        ids == expected && shares.foreground_share_id.as_deref() == foreground_share_id
+    }
+
+    /// Wait until the desired state forwarded to the session helper of `feed` matches the given
+    /// share IDs (in any order) and foreground share ID; earlier updates are skipped
+    async fn wait_for_forwarded(
+        feed: &mut HelperFeed,
+        share_ids: &[&str],
+        foreground_share_id: Option<&str>,
+    ) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let shares = feed.next().await.share_state;
+                if shares.is_some_and(|s| matches(&s, share_ids, foreground_share_id)) {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("forwarded desired state did not reach the expected value");
     }
 
     fn test_share(id: &str, created_timestamp: u64) -> messages::Share {
@@ -585,7 +514,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_message_loop() {
-        let mut test_setup = MessageLoopTestSetup::start().await;
+        let test_setup = MessageLoopTestSetup::start().await;
+        let (_helper, mut feed) = test_setup.connect_helper().await;
 
         // send a state update via the event server's broadcast channel
         let share = test_share("test-id-1", 0);
@@ -596,9 +526,7 @@ mod tests {
         test_setup
             .wait_for_desired(&["test-id-1"], Some("test-id-1"))
             .await;
-        test_setup
-            .wait_for_forwarded(&["test-id-1"], Some("test-id-1"))
-            .await;
+        wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
         test_setup.abort().await;
     }
@@ -607,25 +535,25 @@ mod tests {
     /// close a `Login` without one, and no shares would arrive
     #[tokio::test]
     async fn test_anonymous_agent_is_accepted() {
-        let mut test_setup = MessageLoopTestSetup::start_as(MTLSIdentity::Anonymous {
+        let test_setup = MessageLoopTestSetup::start_as(MTLSIdentity::Anonymous {
             hostname: "neighbour-pc".to_owned(),
         })
         .await;
+        let (_helper, mut feed) = test_setup.connect_helper().await;
 
         let share = test_share("test-id-1", 0);
         let mut new_state = test_setup.initial_state.clone();
         new_state.shares.insert(share.share_id.clone(), share);
         test_setup.event_queue.send(new_state).unwrap();
-        test_setup
-            .wait_for_forwarded(&["test-id-1"], Some("test-id-1"))
-            .await;
+        wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
         test_setup.abort().await;
     }
 
     #[tokio::test]
     async fn test_message_loop_remove_share() {
-        let mut test_setup = MessageLoopTestSetup::start().await;
+        let test_setup = MessageLoopTestSetup::start().await;
+        let (_helper, mut feed) = test_setup.connect_helper().await;
 
         let share = test_share("test-id-1", 0);
         let mut new_state = test_setup.initial_state.clone();
@@ -635,9 +563,7 @@ mod tests {
         test_setup
             .wait_for_desired(&["test-id-1"], Some("test-id-1"))
             .await;
-        test_setup
-            .wait_for_forwarded(&["test-id-1"], Some("test-id-1"))
-            .await;
+        wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
         // now remove again (back to initial state):
         test_setup
@@ -646,14 +572,15 @@ mod tests {
             .unwrap();
 
         test_setup.wait_for_desired(&[], None).await;
-        test_setup.wait_for_forwarded(&[], None).await;
+        wait_for_forwarded(&mut feed, &[], None).await;
 
         test_setup.abort().await;
     }
 
     #[tokio::test]
     async fn test_message_loop_newest_share_is_foreground() {
-        let mut test_setup = MessageLoopTestSetup::start().await;
+        let test_setup = MessageLoopTestSetup::start().await;
+        let (_helper, mut feed) = test_setup.connect_helper().await;
 
         let share_1 = test_share("test-id-1", 0);
         let mut new_state_1 = test_setup.initial_state.clone();
@@ -663,9 +590,7 @@ mod tests {
         test_setup
             .wait_for_desired(&["test-id-1"], Some("test-id-1"))
             .await;
-        test_setup
-            .wait_for_forwarded(&["test-id-1"], Some("test-id-1"))
-            .await;
+        wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
         // one more share, created later => it becomes the foreground share
         let share_2 = test_share("test-id-2", 1);
@@ -676,9 +601,7 @@ mod tests {
         test_setup
             .wait_for_desired(&["test-id-1", "test-id-2"], Some("test-id-2"))
             .await;
-        test_setup
-            .wait_for_forwarded(&["test-id-1", "test-id-2"], Some("test-id-2"))
-            .await;
+        wait_for_forwarded(&mut feed, &["test-id-1", "test-id-2"], Some("test-id-2")).await;
 
         test_setup.abort().await;
     }
@@ -686,15 +609,14 @@ mod tests {
     /// smbdrop resends the shares when agents come and go; helpers only get actual changes
     #[tokio::test]
     async fn test_unchanged_desired_state_is_not_forwarded() {
-        let mut test_setup = MessageLoopTestSetup::start().await;
+        let test_setup = MessageLoopTestSetup::start().await;
+        let (_helper, mut feed) = test_setup.connect_helper().await;
 
         let share_1 = test_share("test-id-1", 0);
         let mut state_1 = test_setup.initial_state.clone();
         state_1.shares.insert(share_1.share_id.clone(), share_1);
         test_setup.event_queue.send(state_1.clone()).unwrap();
-        test_setup
-            .wait_for_forwarded(&["test-id-1"], Some("test-id-1"))
-            .await;
+        wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
         // the same again, then a change: the change is the next thing helpers see
         test_setup.event_queue.send(state_1.clone()).unwrap();
@@ -703,18 +625,10 @@ mod tests {
         state_2.shares.insert(share_2.share_id.clone(), share_2);
         test_setup.event_queue.send(state_2).unwrap();
 
-        let next = tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if let StateUpdateToSession::DesiredState { shares, .. } =
-                    test_setup.to_sessions.recv().await.unwrap()
-                {
-                    return shares.len();
-                }
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(next, 2);
+        let next = tokio::time::timeout(Duration::from_secs(2), feed.next())
+            .await
+            .unwrap();
+        assert_eq!(next.share_state.map(|s| s.shares.len()), Some(2));
 
         test_setup.abort().await;
     }
@@ -731,14 +645,16 @@ mod tests {
         ));
     }
 
-    /// A change of only the participants is announced on its own, for GUIs; session helpers,
-    /// which only act on desired states, see nothing new
-    #[tokio::test]
-    async fn test_participant_changes_are_announced_without_a_desired_state() {
+    /// A change of only the participants reaches GUIs; session helpers, which only act on
+    /// desired states, see nothing new
+    #[test]
+    fn test_participant_changes_reach_guis_only() {
         use modama_common::messages::{ConnectionId, Participant, ParticipantIdentity};
 
-        let state = AgentState::new(&test_config(1, certified())).await;
-        let mut updates = state.lock().await.desired_state_channel.subscribe();
+        let fan_out = Arc::new(LocalFanOut::new(certified()));
+        let scope = HelperScope::Uid(1000);
+        let (_helper, mut helper) = fan_out.connect_helper(scope);
+        let mut gui = fan_out.subscribe_gui(scope);
         let update = |status| {
             serde_json::to_string(&EventChannelMessage::UpdateShareList {
                 shares: vec![],
@@ -754,41 +670,36 @@ mod tests {
             })
             .unwrap()
         };
+        // what they show before smbdrop told us anything
+        assert_eq!(helper.try_next().unwrap().share_state, None);
+        assert!(gui.try_next().is_some());
 
-        handle_message(&state, &update(None)).await.unwrap();
-        assert!(matches!(
-            updates.try_recv(),
-            Ok(StateUpdateToSession::DesiredState { .. })
-        ));
-        assert!(updates.try_recv().is_err(), "one update for the first list");
+        handle_message(&fan_out, &update(None)).unwrap();
+        assert!(helper.try_next().unwrap().share_state.is_some());
+        assert!(gui.try_next().is_some());
 
-        handle_message(&state, &update(Some(AgentMountStatus::Idle)))
-            .await
-            .unwrap();
-        assert!(matches!(
-            updates.try_recv(),
-            Ok(StateUpdateToSession::ParticipantsChanged)
-        ));
+        handle_message(&fan_out, &update(Some(AgentMountStatus::Idle))).unwrap();
+        assert_eq!(helper.try_next(), None);
+        // GUIs list our own connection only after a Welcome, but they show the participants
+        // as part of the desired state's message
+        handle_message(
+            &fan_out,
+            r#"{"type": "Welcome", "protocol": 2, "connection": 3}"#,
+        )
+        .unwrap();
+        fan_out.logged_in(AgentId::from_uri("x-modama-agent://test_resource#other").unwrap());
+        assert!(gui.try_next().unwrap().connected_agents.is_some());
+        assert_eq!(helper.try_next(), None);
 
-        handle_message(&state, &update(Some(AgentMountStatus::Idle)))
-            .await
-            .unwrap();
-        assert!(updates.try_recv().is_err(), "nothing changed");
+        handle_message(&fan_out, &update(Some(AgentMountStatus::Idle))).unwrap();
+        assert!(gui.try_next().is_none(), "nothing changed");
     }
 
     /// Our status as smbdrop sends it back to us
     async fn wait_for_own_status(test_setup: &MessageLoopTestSetup, expected: AgentMountStatus) {
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                let status = {
-                    let state = test_setup.state.lock().await;
-                    state
-                        .own_connection
-                        .zip(state.remote_info.as_ref())
-                        .and_then(|(own, remote)| remote.participant(own))
-                        .and_then(|participant| participant.status)
-                };
-                if status == Some(expected) {
+                if test_setup.fan_out.own_status_at_smbdrop() == Some(expected) {
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -800,32 +711,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_mount_status_is_reported() {
-        use crate::caller_scope::HelperScope;
-        use crate::events_api::SessionBeginEnd;
         use modama_common::internal_api_types::SessionHelperState;
 
         let test_setup = MessageLoopTestSetup::start().await;
         wait_for_own_status(&test_setup, AgentMountStatus::NoHelper).await;
 
         // a session helper connects, but hasn't reported yet
-        let scope = HelperScope::Uid(1000);
-        let sessions = test_setup.state.lock().await.session_channel_sender.clone();
-        sessions.send(SessionBeginEnd::Begin { scope }).unwrap();
+        let (helper, _feed) = test_setup.fan_out.connect_helper(HelperScope::Uid(1000));
         wait_for_own_status(&test_setup, AgentMountStatus::Reconciling).await;
 
         // it reports for the current (empty) desired state
-        {
-            let mut state = test_setup.state.lock().await;
-            state.session_helpers.insert(
-                scope,
-                SessionHelperState {
-                    mounted_shares: vec![],
-                    errors: vec![],
-                    reconciled_share_ids: Some(vec![]),
-                },
-            );
-            state.mount_status_inputs_changed.notify_one();
-        }
+        helper.report(SessionHelperState {
+            mounted_shares: vec![],
+            errors: vec![],
+            reconciled_share_ids: Some(vec![]),
+        });
         wait_for_own_status(&test_setup, AgentMountStatus::Idle).await;
 
         // a share is desired: its pass is still to come
@@ -836,7 +736,7 @@ mod tests {
         wait_for_own_status(&test_setup, AgentMountStatus::Reconciling).await;
 
         // the helper goes away
-        sessions.send(SessionBeginEnd::End { scope }).unwrap();
+        drop(helper);
         wait_for_own_status(&test_setup, AgentMountStatus::NoHelper).await;
 
         test_setup.abort().await;
@@ -852,18 +752,17 @@ mod tests {
     /// An smbdrop that never sent `Welcome` doesn't know the request
     #[tokio::test]
     async fn test_no_status_report_without_welcome() {
-        let state = AgentState::new(&test_config(1, certified())).await;
-        state.lock().await.remote_info = Some(RemoteInfo::default());
+        let status = Some(AgentMountStatus::NoHelper);
         let mut sink: Vec<Message> = vec![];
 
         let mut reporter = StatusReporter::default();
-        reporter.report(&state, &mut sink).await.unwrap();
+        reporter.report(status, &mut sink).await.unwrap();
         assert!(sink.is_empty());
 
         // after Welcome, the status is sent once
         reporter.protocol = 1;
-        reporter.report(&state, &mut sink).await.unwrap();
-        reporter.report(&state, &mut sink).await.unwrap();
+        reporter.report(status, &mut sink).await.unwrap();
+        reporter.report(status, &mut sink).await.unwrap();
         assert_eq!(
             sent_requests(&sink),
             vec![EventChannelRequests::ReportMountStatus {
@@ -875,13 +774,16 @@ mod tests {
     /// Before smbdrop told us the desired state, we don't know our status
     #[tokio::test]
     async fn test_no_status_report_without_desired_state() {
-        let state = AgentState::new(&test_config(1, certified())).await;
+        let fan_out = LocalFanOut::new(certified());
         let mut sink: Vec<Message> = vec![];
         let mut reporter = StatusReporter {
             protocol: 1,
             reported: None,
         };
-        reporter.report(&state, &mut sink).await.unwrap();
+        reporter
+            .report(fan_out.mount_status(), &mut sink)
+            .await
+            .unwrap();
         assert!(sink.is_empty());
     }
 }
