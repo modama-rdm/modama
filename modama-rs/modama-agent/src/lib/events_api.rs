@@ -126,7 +126,9 @@ async fn send_update_to_session_helper(
             )
             .await?;
         }
-        StateUpdateToSession::ForceRelease { .. } | StateUpdateToSession::MountUpdate { .. } => {}
+        StateUpdateToSession::ForceRelease { .. }
+        | StateUpdateToSession::MountUpdate { .. }
+        | StateUpdateToSession::ParticipantsChanged => {}
     }
 
     Ok(())
@@ -266,6 +268,11 @@ async fn send_update_to_gui(
                 connected_agents,
             }
         }
+        StateUpdateToSession::ParticipantsChanged => ToSessionGui {
+            session_helper,
+            desired_shares: desired_shares(remote_info.as_ref()),
+            connected_agents,
+        },
         StateUpdateToSession::ForceRelease { .. } => return Ok(()),
     };
     send_obj(socket, &msg).await?;
@@ -306,8 +313,8 @@ async fn handle_gui_websocket(
         select! {
             state_update = recv_handle_lagging(&mut rx) => {
                 let update = state_update?;
-                // smbdrop sends a share list update whenever an agent connects or disconnects,
-                // so the connected agents come along with those
+                // every update to a GUI carries the current connected agents; a change to only
+                // them comes as `ParticipantsChanged`
                 let (remote_info, session_helper, connected_agents) = {
                     let agent_state = state.lock().await;
                     (
@@ -1085,6 +1092,44 @@ mod tests {
 
         let disconnected_message: ToSessionGui = receive_message(&mut gui).await;
         assert_eq!(disconnected_message.session_helper, None);
+    }
+
+    #[tokio::test]
+    async fn participant_changes_reach_guis_but_not_session_helpers() {
+        let test_setup = TestSetup::start().await;
+        let desired = share("desired");
+        test_setup
+            .seed_remote_info(desired.clone(), vec![desired.clone()])
+            .await;
+        let mut gui = test_setup.connect_gui("desktop-1").await;
+        let _: ToSessionGui = receive_message(&mut gui).await;
+        let mut helper = test_setup.connect_session_helper("desktop-1").await;
+        let _: ToSessionHelper = receive_message(&mut helper).await;
+
+        let channel = test_setup
+            .shared_state
+            .lock()
+            .await
+            .desired_state_channel
+            .clone();
+        channel
+            .send(StateUpdateToSession::ParticipantsChanged)
+            .unwrap();
+        let message: ToSessionGui = receive_message(&mut gui).await;
+        assert_eq!(
+            message.desired_shares.map(|s| s.shares),
+            Some(vec![desired.clone()])
+        );
+
+        // the helper's next message is the next desired state
+        channel
+            .send(StateUpdateToSession::DesiredState {
+                foreground_share_id: None,
+                shares: vec![],
+            })
+            .unwrap();
+        let message: ToSessionHelper = receive_message(&mut helper).await;
+        assert_eq!(message.share_state.map(|s| s.shares), Some(vec![]));
     }
 
     #[tokio::test]

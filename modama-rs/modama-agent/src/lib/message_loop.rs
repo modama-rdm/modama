@@ -51,11 +51,15 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
             };
             let mut state = state.lock().await;
             // smbdrop also sends the shares again when only the participants or their status
-            // changed; session helpers would run a pass for nothing
+            // changed; session helpers would run a pass for nothing, but GUIs show them
             let changed = state
                 .remote_info
                 .as_ref()
                 .is_none_or(|previous| !same_desired(&previous.desired_shares, &desired_shares));
+            let participants_changed = state
+                .remote_info
+                .as_ref()
+                .is_none_or(|previous| previous.participants != participants);
             state.remote_info = Some(RemoteInfo {
                 participants,
                 desired_shares: desired_shares.clone(),
@@ -74,6 +78,13 @@ async fn handle_message(state: &Arc<Mutex<AgentState>>, msg: &str) -> AnyResult<
                         })
             {
                 warn!("tried to update session helpers but no one cared");
+            }
+            // a desired state carries the participants along; only without one they need their
+            // own update. Sending fails only without receivers, with no GUI to tell.
+            if !changed && participants_changed {
+                let _ = state
+                    .desired_state_channel
+                    .send(StateUpdateToSession::ParticipantsChanged);
             }
             Ok(None)
         }
@@ -515,7 +526,8 @@ mod tests {
                         }
                         Ok(
                             StateUpdateToSession::MountUpdate { .. }
-                            | StateUpdateToSession::ForceRelease { .. },
+                            | StateUpdateToSession::ForceRelease { .. }
+                            | StateUpdateToSession::ParticipantsChanged,
                         ) => {}
                         Err(broadcast::error::RecvError::Lagged(_)) => {}
                         Err(broadcast::error::RecvError::Closed) => {
@@ -683,6 +695,51 @@ mod tests {
         assert_eq!(next, 2);
 
         test_setup.abort().await;
+    }
+
+    /// A change of only the participants is announced on its own, for GUIs; session helpers,
+    /// which only act on desired states, see nothing new
+    #[tokio::test]
+    async fn test_participant_changes_are_announced_without_a_desired_state() {
+        use modama_common::messages::{ConnectionId, Participant, ParticipantIdentity};
+
+        let state = AgentState::new(&test_config(1, certified())).await;
+        let mut updates = state.lock().await.desired_state_channel.subscribe();
+        let update = |status| {
+            serde_json::to_string(&EventChannelMessage::UpdateShareList {
+                shares: vec![],
+                foreground_share: None,
+                participants: vec![Participant {
+                    connection: ConnectionId(3),
+                    identity: ParticipantIdentity::Certified {
+                        agent: AgentId::from_uri("x-modama-agent://test_resource#other").unwrap(),
+                    },
+                    peer: "192.0.2.3:50000".parse().unwrap(),
+                    status,
+                }],
+            })
+            .unwrap()
+        };
+
+        handle_message(&state, &update(None)).await.unwrap();
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(StateUpdateToSession::DesiredState { .. })
+        ));
+        assert!(updates.try_recv().is_err(), "one update for the first list");
+
+        handle_message(&state, &update(Some(AgentMountStatus::Idle)))
+            .await
+            .unwrap();
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(StateUpdateToSession::ParticipantsChanged)
+        ));
+
+        handle_message(&state, &update(Some(AgentMountStatus::Idle)))
+            .await
+            .unwrap();
+        assert!(updates.try_recv().is_err(), "nothing changed");
     }
 
     /// Our status as smbdrop sends it back to us

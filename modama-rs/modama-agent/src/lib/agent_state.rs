@@ -149,6 +149,10 @@ pub enum StateUpdateToSession {
     /// The GUI of `scope` asked to force the release of mounts that are no longer desired; only
     /// that scope's helper acts on it
     ForceRelease { scope: HelperScope },
+
+    /// smbdrop listed other participants or statuses, with the same desired state; only GUIs
+    /// show them
+    ParticipantsChanged,
 }
 
 #[derive(Debug)]
