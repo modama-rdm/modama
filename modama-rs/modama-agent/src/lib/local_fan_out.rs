@@ -96,6 +96,11 @@ struct FanOutState {
     /// helper compares it with the count when it connected, so it acts on every request made
     /// while it is connected and on none made before.
     force_release_requests: HashMap<HelperScope, u64>,
+
+    /// Per scope, how often its last session helper went away. A GUI launches a session helper
+    /// when told its scope has none, so it hears of a departure even when what it shows stays
+    /// the same, for example when the helper never reported.
+    helper_departures: HashMap<HelperScope, u64>,
 }
 
 /// Whether two desired states are the same; the order of the shares doesn't matter, as
@@ -149,6 +154,7 @@ impl FanOutState {
             session_helper: self.report(scope).cloned(),
             desired_shares: self.desired_shares(),
             connected_agents: self.connected_agents(),
+            helper_departures: self.helper_departures.get(&scope).copied().unwrap_or(0),
         }
     }
 }
@@ -164,6 +170,7 @@ impl LocalFanOut {
             desired_version: 0,
             helpers: HashMap::new(),
             force_release_requests: HashMap::new(),
+            helper_departures: HashMap::new(),
         });
         Self { state }
     }
@@ -368,8 +375,9 @@ impl Drop for HelperPresence {
             if helpers.connections == 0 {
                 info!("the last session helper of {scope:?} went away");
                 state.helpers.remove(&scope);
+                *state.helper_departures.entry(scope).or_insert(0) += 1;
             }
-            // either way, the count of connections changes nobody's view
+            // a remaining connection changes nobody's view; the last one leaving does
             !state.helpers.contains_key(&scope)
         });
     }
@@ -429,6 +437,8 @@ struct GuiView {
     session_helper: Option<SessionHelperState>,
     desired_shares: Option<Shares>,
     connected_agents: Option<ConnectedAgents>,
+    /// Not shown, but a change is worth a message; see `FanOutState::helper_departures`
+    helper_departures: u64,
 }
 
 impl From<GuiView> for ToSessionGui {
@@ -910,6 +920,33 @@ mod tests {
         // the last one goes: no report, rather than an empty one
         drop(presence);
         assert_eq!(gui.try_next().unwrap().session_helper, None);
+    }
+
+    /// A GUI relaunches a missing helper when told there is no report; it is told also when a
+    /// helper that never reported goes away, which changes nothing it shows
+    #[test]
+    fn a_guis_scope_hears_when_its_helper_goes_away_without_reporting() {
+        let fan_out = fan_out();
+        let mut gui = fan_out.subscribe_gui(DESKTOP_1);
+        let mut other_gui = fan_out.subscribe_gui(DESKTOP_2);
+        gui.try_next();
+        other_gui.try_next();
+
+        let (presence, _feed) = fan_out.connect_helper(DESKTOP_1);
+        let (second, _second_feed) = fan_out.connect_helper(DESKTOP_1);
+        assert!(gui.try_next().is_none());
+        drop(presence);
+        assert!(
+            gui.try_next().is_none(),
+            "another helper of the scope is left"
+        );
+
+        drop(second);
+        let message = gui.try_next().unwrap();
+        assert_eq!(message.session_helper, None);
+        assert_eq!(message.desired_shares, None);
+        assert!(gui.try_next().is_none());
+        assert!(other_gui.try_next().is_none(), "another scope's helper");
     }
 
     #[test]

@@ -237,11 +237,13 @@ pub async fn message_loop(
         let mut reporter = StatusReporter::default();
         let mut mount_statuses = fan_out.mount_status_feed();
         loop {
-            tokio::select! {
+            // Some(status) when our mount status changed; None after a message from smbdrop, after
+            // which we read the current status
+            let status = tokio::select! {
                 // the reporter learns the protocol from the Welcome
-                msg = ws_read.next() => match receive_inner(msg, &fan_out, reporter.protocol != 0).await {
-                    ControlFlow::Continue(welcome) => {
-                        if let Some(protocol) = welcome {
+                msg = ws_read.next() => {
+                    match receive_inner(msg, &fan_out, reporter.protocol != 0).await {
+                        ControlFlow::Continue(Some(protocol)) => {
                             if protocol < MIN_EVENT_CHANNEL_PROTOCOL {
                                 error!(
                                     "smbdrop speaks event channel protocol {protocol}, this agent \
@@ -252,14 +254,17 @@ pub async fn message_loop(
                             }
                             reporter.protocol = protocol.min(EVENT_CHANNEL_PROTOCOL);
                         }
+                        ControlFlow::Continue(None) => {}
+                        ControlFlow::Break(_) => break, // error or disconnected => reconnect
                     }
-                    ControlFlow::Break(_) => break, // error or disconnected => reconnect
-                },
-                _ = mount_statuses.next() => {}
-            }
+                    None
+                }
+                status = mount_statuses.next() => Some(status),
+            };
             // after any message from smbdrop (a Welcome needs the status), or when our mount status
             // changed; the reporter sends only changes
-            if let Err(e) = reporter.report(fan_out.mount_status(), &mut ws_write).await {
+            let status = status.unwrap_or_else(|| fan_out.mount_status());
+            if let Err(e) = reporter.report(status, &mut ws_write).await {
                 error!("Could not report mount status ({e}), reconnecting...");
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 break;
@@ -652,21 +657,34 @@ mod tests {
         use modama_common::messages::{ConnectionId, Participant, ParticipantIdentity};
 
         let fan_out = Arc::new(LocalFanOut::new(certified()));
+        let own_agent = AgentId::from_uri("x-modama-agent://test_resource#test-agent").unwrap();
+        fan_out.logged_in(own_agent.clone());
+        handle_message(
+            &fan_out,
+            r#"{"type": "Welcome", "protocol": 2, "connection": 1}"#,
+        )
+        .unwrap();
         let scope = HelperScope::Uid(1000);
         let (_helper, mut helper) = fan_out.connect_helper(scope);
         let mut gui = fan_out.subscribe_gui(scope);
+        let participant = |id, agent: &str, status| Participant {
+            connection: ConnectionId(id),
+            identity: ParticipantIdentity::Certified {
+                agent: AgentId::from_uri(&format!("x-modama-agent://test_resource#{agent}"))
+                    .unwrap(),
+            },
+            peer: format!("192.0.2.{id}:50000").parse().unwrap(),
+            status,
+        };
+        // we, and another agent with `status`
         let update = |status| {
             serde_json::to_string(&EventChannelMessage::UpdateShareList {
                 shares: vec![],
                 foreground_share: None,
-                participants: vec![Participant {
-                    connection: ConnectionId(3),
-                    identity: ParticipantIdentity::Certified {
-                        agent: AgentId::from_uri("x-modama-agent://test_resource#other").unwrap(),
-                    },
-                    peer: "192.0.2.3:50000".parse().unwrap(),
-                    status,
-                }],
+                participants: vec![
+                    participant(1, "test-agent", None),
+                    participant(3, "other", status),
+                ],
             })
             .unwrap()
         };
@@ -676,23 +694,19 @@ mod tests {
 
         handle_message(&fan_out, &update(None)).unwrap();
         assert!(helper.try_next().unwrap().share_state.is_some());
-        assert!(gui.try_next().is_some());
+        let others = gui.try_next().unwrap().connected_agents.unwrap().others;
+        assert_eq!(others.len(), 1);
+        assert_eq!(others[0].status, None);
 
+        // only the other agent's status changes
         handle_message(&fan_out, &update(Some(AgentMountStatus::Idle))).unwrap();
         assert_eq!(helper.try_next(), None);
-        // GUIs list our own connection only after a Welcome, but they show the participants
-        // as part of the desired state's message
-        handle_message(
-            &fan_out,
-            r#"{"type": "Welcome", "protocol": 2, "connection": 3}"#,
-        )
-        .unwrap();
-        fan_out.logged_in(AgentId::from_uri("x-modama-agent://test_resource#other").unwrap());
-        assert!(gui.try_next().unwrap().connected_agents.is_some());
-        assert_eq!(helper.try_next(), None);
+        let others = gui.try_next().unwrap().connected_agents.unwrap().others;
+        assert_eq!(others[0].status, Some(AgentMountStatus::Idle));
 
         handle_message(&fan_out, &update(Some(AgentMountStatus::Idle))).unwrap();
         assert!(gui.try_next().is_none(), "nothing changed");
+        assert_eq!(helper.try_next(), None);
     }
 
     /// Our status as smbdrop sends it back to us
