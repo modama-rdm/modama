@@ -847,7 +847,25 @@ fn show_connected_agents(ui: &mut egui::Ui, connected_agents: Option<&ConnectedA
     }
 }
 
-/// `● name 🔒 … this agent`: the dot says connected, the lock that the identity is verified
+/// The hover text of a connected agent's lock or (i): whether its identity is verified, whose
+/// token an anonymous agent uses, and its connection to smbdrop, as smbdrop logs it
+fn identity_hover_text(agent: &ConnectedAgent) -> String {
+    let mut lines = vec![if agent.verified {
+        "Identity verified".to_owned()
+    } else {
+        "Identity not verified".to_owned()
+    }];
+    let connection = &agent.connection;
+    if let Some(lender) = &connection.lender {
+        lines.push(format!("Token from {lender}"));
+    }
+    lines.push(format!(
+        "Connection {} from {}",
+        connection.id, connection.peer
+    ));
+    lines.join("\n")
+}
+
 /// How a connected agent's mount status shows as the dot in front of its name
 #[derive(Debug, PartialEq)]
 struct StatusDot {
@@ -885,6 +903,8 @@ fn status_dot(status: Option<AgentMountStatus>) -> StatusDot {
     }
 }
 
+/// `● name 🔒 … this agent`: the dot shows the mount status, the lock that the identity is
+/// verified, an (i) in its place that it isn't
 fn connected_agent_row(ui: &mut egui::Ui, agent: &ConnectedAgent, own: bool, height: f32) {
     let width = ui.available_width();
     ui.allocate_ui_with_layout(
@@ -919,17 +939,22 @@ fn connected_agent_row(ui: &mut egui::Ui, agent: &ConnectedAgent, own: bool, hei
                 )
                 .truncate(),
             );
-            if agent.verified {
-                ui.add(Label::new(
-                    // phosphor's glyphs are in the proportional family
-                    RichText::new(egui_phosphor::regular::LOCK_SIMPLE)
-                        .font(egui::FontId::proportional(
-                            styles::typography::supporting_text::font_id().size,
-                        ))
-                        .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
-                ))
-                .on_hover_text("Identity verified");
-            }
+            // the lock for a verified identity, the (i) for an anonymous agent; either way, the
+            // connection's details on hover
+            let icon = if agent.verified {
+                egui_phosphor::regular::LOCK_SIMPLE
+            } else {
+                egui_phosphor::regular::INFO
+            };
+            ui.add(Label::new(
+                // phosphor's glyphs are in the proportional family
+                RichText::new(icon)
+                    .font(egui::FontId::proportional(
+                        styles::typography::supporting_text::font_id().size,
+                    ))
+                    .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+            ))
+            .on_hover_text(identity_hover_text(agent));
             if own {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add(Label::new(
@@ -992,6 +1017,32 @@ fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hover_text_says_how_an_agent_is_connected() {
+        use modama_common::{internal_api_types::ConnectionDetails, messages::ConnectionId};
+
+        let mut agent = ConnectedAgent {
+            name: "neighbour-pc".to_owned(),
+            verified: false,
+            status: None,
+            connection: ConnectionDetails {
+                id: ConnectionId(17),
+                peer: "192.0.2.1:53810".parse().unwrap(),
+                lender: Some("dev".to_owned()),
+            },
+        };
+        assert_eq!(
+            identity_hover_text(&agent),
+            "Identity not verified\nToken from dev\nConnection #17 from 192.0.2.1:53810"
+        );
+        agent.verified = true;
+        agent.connection.lender = None;
+        assert_eq!(
+            identity_hover_text(&agent),
+            "Identity verified\nConnection #17 from 192.0.2.1:53810"
+        );
+    }
 
     #[test]
     fn every_mount_status_has_its_own_dot() {

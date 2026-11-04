@@ -803,8 +803,8 @@ fn connected_agents_snapshots() {
     alone.snapshot("overview_connected_agents_alone");
     results.extend_harness(&mut alone);
 
-    // an anonymous agent: its own row has no lock; it lists the agents of the resource it
-    // inherited from its token
+    // an anonymous agent: its own row has an (i) instead of the lock; it lists the agents of
+    // the resource it inherited from its token. The pointer is on its (i).
     let mut anonymous = overview_harness(false, true);
     let mut agents = representative_connected_agents(&["detector-pc", "k2"]);
     agents.own = ConnectedAgentEntry {
@@ -817,6 +817,14 @@ fn connected_agents_snapshots() {
     // two frames: in the first, egui's debug build flags the own row's tag, whose ID changed
     // with the row's contents
     anonymous.run_steps(2);
+    let info = anonymous
+        .get_by_label(egui_phosphor::regular::INFO)
+        .rect()
+        .center();
+    anonymous.event(egui::Event::PointerMoved(info));
+    // tooltips show after a delay
+    anonymous.run_steps(60);
+    assert!(anonymous.query_by_label_contains("Token from k2").is_some());
     anonymous.snapshot("overview_connected_agents_anonymous");
     results.extend_harness(&mut anonymous);
 }
