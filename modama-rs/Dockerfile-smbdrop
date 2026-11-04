@@ -8,7 +8,7 @@ RUN --mount=type=cache,sharing=locked,target=/var/cache/apt apt-get update && ap
 
 COPY . .
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry/ --mount=type=cache,target=/usr/src/modama-rs/target/ cargo build --release --bin smbdrop && cp target/release/smbdrop /usr/bin/smbdrop
+RUN --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ --mount=type=cache,sharing=locked,target=/usr/src/modama-rs/target/ cargo build --release --bin smbdrop && cp target/release/smbdrop /usr/bin/smbdrop
 
 FROM debian:trixie-slim
 
