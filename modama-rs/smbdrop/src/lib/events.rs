@@ -215,9 +215,11 @@ fn update_msg_from_state(state: &EventSystemState, resource: &str) -> EventChann
     // FIXME: right now, the foreground share is always the latest share
     // for the resource, by creation timestamp. This might need to be
     // re-evaluated.
+    // only those at the receiver's resource: other resources are none of its business
     let participants = state
         .connections
         .iter()
+        .filter(|(_, entry)| entry.identity.resource() == resource)
         .map(|(connection, entry)| Participant {
             connection: *connection,
             identity: entry.identity.clone(),
@@ -951,6 +953,17 @@ mod test {
         token_agent: &str,
         login: impl FnOnce(String) -> EventChannelInitialMessages,
     ) -> WsStream {
+        connect_with_token_for(server, client_config, &agent_id(token_agent), login).await
+    }
+
+    /// Connect with `client_config` and send the login that `login` makes from a token for
+    /// `token_agent`, at any resource
+    async fn connect_with_token_for(
+        server: &TestEventServer,
+        client_config: &ClientConfig,
+        token_agent: &AgentId,
+        login: impl FnOnce(String) -> EventChannelInitialMessages,
+    ) -> WsStream {
         let (mut conn, _response) = connect_async_tls_with_config(
             server.ws_url.clone(),
             None,
@@ -962,7 +975,7 @@ mod test {
         let token_provider: Arc<dyn TokenProvider + 'static> = Arc::new(MockTokenProvider {
             signer: LocalTokenSigner::new(&server.certs.server_secret),
             claims: Claims {
-                sub: agent_id(token_agent).san_encoded,
+                sub: token_agent.san_encoded.clone(),
                 exp: (SystemTime::now() + Duration::from_secs(1000))
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
@@ -1317,6 +1330,41 @@ mod test {
         assert_rejected(&mut conn, "protocol 1 is too old").await;
 
         assert_no_msg(&mut observer).await;
+        server.handle.abort();
+    }
+
+    /// Every connection hears only of the participants at its own resource
+    #[tokio::test]
+    async fn test_participants_are_listed_per_resource() {
+        let server = make_test_event_server().await;
+        let mut here = connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
+
+        let elsewhere = AgentId {
+            resource: "other_resource".to_owned(),
+            agent: "remote".to_owned(),
+            san_encoded: "x-modama-agent://other_resource#remote".to_owned(),
+        };
+        let mut far = connect_with_token_for(
+            &server,
+            &server.certs.client_config_anon,
+            &elsewhere,
+            |token| EventChannelInitialMessages::AnonymousLogin {
+                token,
+                version: modama_git_version().to_owned(),
+                protocol: EVENT_CHANNEL_PROTOCOL,
+                name: "far-pc".to_owned(),
+            },
+        )
+        .await;
+        next_welcome(&mut far).await;
+        assert_eq!(
+            next_participants(&mut far).await,
+            listed(&[("far-pc via remote", None)])
+        );
+        assert_eq!(
+            next_participants(&mut here).await,
+            listed(&[("test_agent", None)])
+        );
         server.handle.abort();
     }
 

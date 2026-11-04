@@ -91,7 +91,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {
-    /// Every connection to smbdrop, ours included
+    /// The connections to smbdrop at our resource, ours included
     pub participants: Vec<Participant>,
 
     pub desired_shares: ShareState<Share>,
@@ -322,9 +322,9 @@ fn connection_details(participant: &Participant) -> ConnectionDetails {
     }
 }
 
-/// The participants in `remote` at the resource of `token_identity`, with this agent
-/// (`identity`, on `own_connection`, with `own_status`) on its own; None until smbdrop welcomed
-/// us and listed the participants, this agent's connection among them
+/// The participants in `remote`, which smbdrop limits to the resource of `token_identity`, with
+/// this agent (`identity`, on `own_connection`, with `own_status`) on its own; None until smbdrop
+/// welcomed us and listed the participants, this agent's connection among them
 fn connected_agents_at(
     identity: &MTLSIdentity,
     token_identity: Option<&AgentId>,
@@ -348,7 +348,6 @@ fn connected_agents_at(
     let mut others: Vec<ConnectedAgent> = remote
         .participants
         .iter()
-        .filter(|participant| participant.identity.resource() == resource)
         .filter(|participant| participant.connection != own_connection)
         .map(|participant| {
             let (name, verified) = match &participant.identity {
@@ -445,10 +444,9 @@ mod tests {
     }
 
     #[test]
-    fn a_certified_agent_lists_the_others_at_its_resource() {
+    fn a_certified_agent_lists_the_others() {
         let participants = [
             certified_at(1, "Holo", "tem-camera"),
-            certified_at(2, "Other", "elsewhere"),
             certified_at(3, "Holo", "k2"),
             certified_at(4, "Holo", "detector"),
         ];
@@ -490,7 +488,6 @@ mod tests {
         let participants = [
             certified_at(1, "Holo", "k2"),
             anonymous_at(2, "workstation", &k2),
-            certified_at(3, "Other", "elsewhere"),
         ];
         let agents = connected_agents_at(
             &anonymous(),

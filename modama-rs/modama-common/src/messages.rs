@@ -180,8 +180,8 @@ pub enum EventChannelMessage {
         shares: Vec<Share>,
         foreground_share: Option<Share>,
 
-        /// Every open connection, the receiver's own included, in the order smbdrop
-        /// accepted them
+        /// The open connections at the receiver's resource, its own included, in the order
+        /// smbdrop accepted them
         participants: Vec<Participant>,
     },
 
