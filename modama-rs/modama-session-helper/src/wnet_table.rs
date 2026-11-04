@@ -126,8 +126,9 @@ fn map_at_free_letter(
     Err(AddError::Other("no free drive letter".to_owned()))
 }
 
-/// Our connections, as a [`MountTable`] for one pass
-pub struct WNetTable<'a, A: WNetApi> {
+/// Our connections, as a [`MountTable`] for one pass only: it keeps which drive letters are
+/// taken, which goes stale after the pass
+struct WNetTable<'a, A: WNetApi> {
     api: &'a A,
     host: &'a str,
     domain: &'a str,
@@ -138,7 +139,7 @@ pub struct WNetTable<'a, A: WNetApi> {
 }
 
 impl<'a, A: WNetApi> WNetTable<'a, A> {
-    pub fn new(api: &'a A, config: &'a SessionHelperConfig) -> Result<Self, EnumerationError> {
+    fn new(api: &'a A, config: &'a SessionHelperConfig) -> Result<Self, EnumerationError> {
         Ok(Self {
             api,
             host: valid_host(config)?,
@@ -182,7 +183,6 @@ impl<A: WNetApi> MountTable for WNetTable<'_, A> {
     fn remove(&mut self, entry: &TableEntry<Connection>, force: bool) -> Result<(), String> {
         let connection = &entry.handle;
         let target = connection.local.as_deref().unwrap_or(&connection.remote);
-        debug!("removing connection {target} to {}", connection.remote);
         self.api.cancel(target, force).map_err(|e| {
             self.still_mapped |= connection.local.as_deref().map_or(0, drive_bit);
             format!("connection {target} to {}: {e}", connection.remote)

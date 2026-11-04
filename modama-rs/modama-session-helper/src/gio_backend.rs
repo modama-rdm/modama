@@ -659,6 +659,24 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_mounts_are_kept_and_any_path_counts() {
+        let api = FakeGio {
+            mounts: RefCell::new(vec![
+                ("smb://smb.example.test/a/".to_owned(), None),
+                (
+                    "smb://smb.example.test/A/".to_owned(),
+                    Some(PathBuf::from("/fuse/A")),
+                ),
+            ]),
+            ..FakeGio::default()
+        };
+        let state = pass(&api, &[share("1", "a")]);
+        assert!(api.calls.borrow().is_empty());
+        assert_eq!(names(&state), vec!["A", "a"]);
+        assert!(state.errors.is_empty(), "{state:?}");
+    }
+
+    #[test]
     fn mount_without_local_path_is_kept_and_explains_itself() {
         let api = FakeGio {
             no_path: true,
