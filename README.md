@@ -1,4 +1,6 @@
-# Cloning
+# Modama - modular data management
+
+## Cloning
 
 This project uses git submodules. You can pull all of them automatically when cloning, like this:
 
@@ -9,193 +11,33 @@ git clone --recursive gitlab@iffgit.fz-juelich.de:weber/data-management-system.g
 Or, after cloning, initialize and clone the submodules:
 
 ```
-git submodule init && git submodule update
+git submodule update --init
 ```
+
+## Quickstart
+
+To quickly get a development environment running:
+
+```bash
+cd deploy && ./uptest.sh
+```
+
+See the docs for details.
 
 ## Repository overview
 
 - `branding/` - logo and icons
 - `deploy/` - configuration for docker, docker-compose, nginx, ... for prod and dev
-- `modama-rs/` - components that are implemented in rust (`modama-agent`, `smbdrop` mainly)
+- `docs/` - user, administrator and developer documentation
+- `mgmtinterface-new/` - the front-end part of the (new) management interface
+- `modama-rs/` - components that are implemented in rust (`modama-agent{,-gui}`, `smbdrop` and supporting parts)
 - `python/` - all the other services and clients, and common data structures
 
-# Installing requirements
+## Documentation
 
-The system requires docker, see https://docs.docker.com/engine/install/
+Please see [the guide](docs/guide/src/SUMMARY.md) for further details, like how to deploy
+a production setup, set up a development environment, or user documentation
+on various topics.
 
-# Building
-
-The script `build.sh` sets the necessary environment variables and then builds
-the docker images using `docker compose`.
-
-# Test and production deployment
-
-Both a test and a production deployment are available. The configuration for the test deployment is defined by a combination of `docker-compose.yml` and `docker-compose.override.yml`, which is the default when using `docker compose up`. Test-specific configuration files except secrets are placed in `testconf/`.
-
-The test deployment needs no preparation: `docker compose up` in `deploy/` creates the
-folders in `testfolder/` that hold its state, and a CA for it, by itself. It is available under
-http://localhost:1890/ (Nextcloud) and http://localhost:5001/ (management interface).
-See `docs/guide/src/development.md` for details and how to reset it.
-
-The configuration for production deployment is defined by a combination of `docker-compose.yml` and `docker-compose.prod.yml`. The commands to bring this up and down are contained in the `upprod.sh` and `downprod.sh` scripts. Production-specific configuration files except secrets are placed in `prodconf/`. The production configuration expects Nextcloud-specific data directories in `/var/local/data-mgmt/`. It also expects an NFS server exporting `/er-c-data` as a volume on localhost, as well as local access to the same data in `/er-c-data` for the management interface.
-
-The production deployment expects files with site-specific secrets in `/var/local/data-mgmt/`. The test deployment uses throwaway values from `testconf/secrets/` instead, unless `MODAMA_SECRETS_DIR` points elsewhere.
-
-At the moment, the test and production deployment only differ in a number of volumes and ports, meaning the Docker images themselves are the same. If that should change, the build scripts should be adapted to that.
-
-For mgmtinterface the test deployment also overrides the source code copy with a read-only bind mount. Furthermore, it starts a Flask server in development mode instead of a production server. That way a change in the source code is immediately active in the container. This setup can/should be extended to other containers.
-
-A production system should increase the number of permitted inotify watches to match the expected number of folders. See https://www.suse.com/support/kb/doc/?id=000020048 for details.
-
-# How to upgrade Nextcloud
-
-Currently, the additional auth mechanism that avoids saving user credentials in
-the database is contained in nextcloud.patch. This patch is applied as part of
-building the Docker image until this change is possibly upstreamed in the future.
-
-In the Nextcloud Docker image there is a "baked in" version of the source code
-in /usr/src/nextcloud and the "production" version of the source code in
-/var/www/html. The "production" source code is overwritten with the baked-in
-version if the upgrade script detects that the baked-in version is newer than
-the production version, minus some configuration files.
-
-For that reason, the patch is applied to the "baked in" Docker image. In order
-to force an update in case the patch changes, the version.php is updated as
-well. Here, the original version tuple is replaced with an extended one. This
-has to be adapted to match the source version of the Docker image.
-
-After the patch is applied successfully, the upgrade procedure should proceed
-normally as described in the Nextcloud documentation.
-
-# Apply configuration
-
-The applyconfig.py script can apply all settings to a fresh installation that
-are required to bring it to a working state in the ER-C data management. It can
-be run with `docker compose exec nextcloud python3 /applyconfig.py`. It is not run automatically
-since the entrypoint script for Nextcloud is rather complex and doesn't allow to
-include custom extensions at the right point in the installation procedure.
-
-It manages the following items:
-
-* Disable `root` user
-* Enable required apps
-* Initialize and import config
-* Create mount for external storage
-* Theming
-
-Sensitive settings are kept in separate read-protected files outside the repository, under `/var/local/data-mgmt/`.
-
-The externally supplied file `externalstorage_pw` contains the preshared password for the WebDAV gateway.
-
-## Secrets
-
-`/var/local/data-mgmt/mgmt_secret.py`
-
-```
-SECRET_KEY = 'I am so super secret'
-```
-
-`/var/local/data-mgmt/modama_session_secret` signs the `mgmtinterface-api`
-session cookies. It is that service's equivalent of `SECRET_KEY`, read from a
-mounted file rather than from config, and the service refuses to start without
-it:
-
-```
-openssl rand -base64 48 > /var/local/data-mgmt/modama_session_secret
-```
-
-`docker-compose.prod.yml` mounts it read-only at `/session_secret` and points
-`MODAMA_SESSION_SECRET_FILE` at it. Changing the file signs everyone out.
-
-## mTLS CA setup
-
-Certificates and key material is stored in `/var/local/data-mgmt/CA/` in
-production, which has to be created on deployment. The test deployment creates its own CA
-automatically. There is a
-command-line tool to manage the certificates, which can be run via
-`deploy/ca.sh`. On initial deployment, run `deploy/ca.sh initialize-ca` to
-generate a key pair and the CA certificate. Using `deploy/ca.sh enroll-server`
-and `deploy/ca.sh enroll-agent`, additional servers and agents can be enrolled.
-This will create keypairs and client- or server-certificates in the
-aforementioned path.
-
-The `smbdrop` service will expect a server with name `smbdrop` to be enrolled.
-
-Since `/deploy/ca.sh` will run the `ca:latest` tag from
-`iffregistry.fz-juelich.de/weber/data-management-system/`, one can build and tag
-it locally for development work on this container or to work independent of the
-container registry:
-
-```
-docker build -f modama-rs/Dockerfile-ca-cli modama-rs/ -t iffregistry.fz-juelich.de/weber/data-management-system/ca:latest
-```
-
-## sssd.conf
-
-sssd.conf is private and placed in `/var/local/data-mgmt/` since it contains
-usename and password used to bind to LDAP. Unfortunately we didn't manage yet to
-split the configuration into generic and private parts. A redacted template with
-the working IFF configuration is included in `./sssd/sssd.conf.template`. Note
-that SSSD will only accept the config file if it is only readable by root. The LDAP
-configuration is very similar to the Nextcloud LDAP configuration.
-
-## NextCloud development setup
-
-For setting up the NextCloud container for development for the first time, you need to configure its authentication. Currently, we authenticate against the production LDAP server. The following steps are necessary:
-
-* Make sure `/var/local/data-mgmt/nextcloud-config-secret.json` exists (can be an empty json file, i.e. `{"system": {}}`)
-* Set the correct LDAP settings
-    * Run in the `nextcloud` container: `sudo -u www-data php -d memory_limit=-1 /var/www/html/occ user:enable root`
-    * Disable any existing LDAP authentication; run `sudo -u www-data php -d memory_limit=-1 /var/www/html/occ ldap:delete s01`
-    * Go to http://localhost:1890/nextcloud/ and log in with username `root`, password `secret`
-    * Go to the LDAP configuration and enter the correct settings for your environment
-        * You can use the default production values in `nextcloud/nextcloud-config.json` as starting values and adapt as needed.
-        * Should be accessible at http://localhost:1890/nextcloud/settings/admin/ldap
-        * Hostname, port (auto-detection doesn't seem to work), credentials, filters etc.
-        * Make sure the wizard is happy with your settings!
-* Run in the `nextcloud` container: `sudo -u www-data php -d memory_limit=-1 /var/www/html/occ config:list --private`
-* Update the file `/var/local/data-mgmt/nextcloud-config-secret.json` to look like the following:
-
-```
-{
-    "system": {
-        "passwordsalt": "...",
-        "secret": "..."
-    },
-    "apps": {
-        "user_ldap": {
-            "s01ldap_agent_password": "...",
-            "s01ldap_dn": "..."
-        }
-    }
-}
-```
-
-(fill the values with the ones from the `occ config:list` output above; you may
-need additional keys based on your environment, for example the correct LDAP
-server name, base, filters etc...).
-
-Note that the agent password above is not encrypted, just base64 encoded, so
-it's a good idea to use an LDAP account with minimal permissions, and/or use
-a separate LDAP server for development.
-Make sure the `nextcloud-config-secret.json` file has proper permissions, i.e.
-owned by root and not world-readable.
-
-After changing this file, restart the `nextcloud` container, as editing the file
-may actually create a new file that needs to be re-bind-mounted into the
-container. When this is done, re-generate the configuration using
-`docker compose exec nextcloud python3 /applyconfig.py`. This will also disable
-the `root` user again. Then, login via LDAP should work.
-
-# Create database for SampleDB
-
-The sampledb container is configured to expect the `sampledb` database. It will not be created automatically. In order to create it, run `docker compose exec db su - postgres -c "/usr/bin/createdb sampledb"`.
-
-# Backup
-
-The configuration for FZ Jülich IBM Spectrum Protect is only present for production, meaning any
-`docker compose` command requires `-f docker-compose.yml -f docker-compose.prod.yml`. The necessary configuration and password are saved on iff1020 outside the repository. Resources for using the `dsmc` command line client: https://intranet.fz-juelich.de/de/organisation/it-portal/software_services/infrastruktur/datensicherung/nutzen-lernen
-
-# Development docs
-
-Please see the development section of the guide book for guidelines on how to develop modama.
+You can [build and view a copy of the documentation](docs/guide/src/development.md#documentation) by running
+`mdbook serve --port 9991` or similar in the `docs/guide/` directory.
