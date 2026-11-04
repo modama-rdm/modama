@@ -1,6 +1,4 @@
 exclude = [
     "deploy/wsgidav",
     "python/PyInotify",
-    "python/smbdrop",
-    "python/smbdrop-gui",
 ]
