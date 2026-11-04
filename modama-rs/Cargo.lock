@@ -3768,7 +3768,6 @@ dependencies = [
  "reqwest",
  "reqwest-middleware",
  "rustls",
- "rustls-pemfile",
  "scopeguard",
  "serde",
  "serde_json",
