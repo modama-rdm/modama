@@ -3,14 +3,29 @@
 # wait until the services are healthy and Nextcloud has installed itself, then apply the
 # configuration (LDAP, external storage) that Nextcloud's installation does not.
 #
-# Extra arguments go to `docker compose up`, for example --build. Unlike upprod.sh this
-# does not follow the logs, so it can be used in a script. Idempotent.
+# Extra arguments go to `docker compose up -d`, for example --build after pulling changes;
+# -h/--help shows the help of `docker compose up`. Unlike upprod.sh this does not follow
+# the logs, so it can be used in a script. Idempotent.
 set -euo pipefail
 cd "$(dirname "$0")"
 
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) exec docker compose up "$@" ;;
+    esac
+done
+
 TIMEOUT=${UPTEST_TIMEOUT:-900}  # seconds, per wait; the first start is slow
 
-docker compose up -d "$@"
+stale_image_hint() {
+    cat >&2 <<'EOF'
+Images that are already on this machine are used as they are, even old ones.
+If a service failed (see `docker compose ps -a` and `docker compose logs <service>`),
+try `./uptest.sh --build`.
+EOF
+}
+
+docker compose up -d "$@" || { stale_image_hint; exit 1; }
 
 wait_for() {  # description, command...
     local what=$1
@@ -20,6 +35,7 @@ wait_for() {  # description, command...
     until "$@" > /dev/null 2>&1; do
         if [ $SECONDS -ge $deadline ]; then
             echo "- timeout after ${TIMEOUT}s" >&2
+            stale_image_hint
             exit 1
         fi
         echo -n "."
