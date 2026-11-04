@@ -6,9 +6,8 @@ use futures_util::{
 };
 use log::{debug, error, info, warn};
 use modama_common::{
-    foreground::{desired_share_ids, project_and_session},
-    internal_api_types::{SessionHelperState, ToAgent, ToSessionHelper},
-    messages::Share,
+    foreground::{ScopeView, ShareMount, desired_share_ids, project_and_session, same_share},
+    internal_api_types::{SessionHelperState, Shares, ToAgent, ToSessionHelper},
     mount_popup::PopupMount,
 };
 use rand::RngExt;
@@ -22,7 +21,7 @@ use tungstenite::Message;
 use url::Url;
 
 use crate::{
-    mount_backend::{MountBackend, PassResult, same_share},
+    mount_backend::{MountBackend, PassResult},
     mount_popup::{CreatedMount, PopupEvent},
     tray::{TrayState, tray_state},
 };
@@ -79,26 +78,26 @@ struct LoopState {
 }
 
 /// The mounts this pass created that offer a path, as the mount popup shows them
-fn popup_mounts(desired: &[Share], result: &PassResult) -> Vec<CreatedMount> {
+fn popup_mounts(desired: &Shares, result: &PassResult) -> Vec<CreatedMount> {
+    let view = ScopeView::new(Some(desired), Some(&result.state));
     result
         .created
         .iter()
         .filter_map(|name| {
-            let mount_path = result
-                .state
-                .mounted_shares
-                .iter()
-                .find(|mounted| same_share(&mounted.share_name, name))?
-                .mount_path
-                .clone()?;
-            let share = desired.iter().find(|s| same_share(&s.share_name, name))?;
+            // the first desired share of that name is the one the pass mounted
+            let (share, mount) = view
+                .desired()
+                .find(|(share, _)| same_share(&share.share_name, name))?;
+            let ShareMount::Mounted(mount_path) = mount else {
+                return None;
+            };
             match project_and_session(&share.dest_path) {
                 Ok((project, session)) => Some(CreatedMount {
                     share_id: share.share_id.clone(),
                     mount: PopupMount {
                         project,
                         session,
-                        mount_path,
+                        mount_path: mount_path.to_owned(),
                     },
                 }),
                 Err(e) => {
@@ -161,7 +160,7 @@ impl LoopState {
                 return;
             }
         };
-        let created = popup_mounts(&share_state.shares, &result);
+        let created = popup_mounts(share_state, &result);
         if !created.is_empty() {
             info!("created the following shares: {created:?}");
             let _ = self.popup.send(PopupEvent::Created(created));
