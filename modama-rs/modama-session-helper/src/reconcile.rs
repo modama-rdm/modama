@@ -204,11 +204,14 @@ pub(crate) mod tests {
         duplicates: DuplicateEntries::Keep,
     };
 
-    /// Entries by index (the handle); adding mounts at `/mnt/<name>`
+    /// Entries with a unique id (the handle); adding mounts at `/mnt/<name>`. Calls and
+    /// scripted removal errors name an entry as `name@path` (`-` for no path).
     struct MemoryTable {
         policy: Policy,
-        entries: Vec<(String, Option<PathBuf>)>,
+        entries: Vec<(usize, String, Option<PathBuf>)>,
+        next_id: usize,
         inventory_error: bool,
+        /// as `name@path`
         remove_errors: Vec<String>,
         /// by share name
         add_failures: HashMap<String, AddFailure>,
@@ -223,8 +226,10 @@ pub(crate) mod tests {
                 policy,
                 entries: entries
                     .iter()
-                    .map(|(name, path)| ((*name).to_owned(), path.map(PathBuf::from)))
+                    .enumerate()
+                    .map(|(id, (name, path))| (id, (*name).to_owned(), path.map(PathBuf::from)))
                     .collect(),
+                next_id: entries.len(),
                 inventory_error: false,
                 remove_errors: Vec::new(),
                 add_failures: HashMap::new(),
@@ -239,36 +244,35 @@ pub(crate) mod tests {
     }
 
     impl MountTable for MemoryTable {
-        type Handle = String;
+        type Handle = usize;
 
         fn policy(&self) -> Policy {
             self.policy
         }
 
-        fn entries(&mut self) -> Result<Vec<TableEntry<String>>, String> {
+        fn entries(&mut self) -> Result<Vec<TableEntry<usize>>, String> {
             if self.inventory_error {
                 return Err("no inventory".to_owned());
             }
             Ok(self
                 .entries
                 .iter()
-                .map(|(name, path)| TableEntry {
+                .map(|(id, name, path)| TableEntry {
                     share_name: name.clone(),
                     path: path.clone(),
-                    handle: format!("{name}@{}", path_str(path.as_ref())),
+                    handle: *id,
                 })
                 .collect())
         }
 
-        fn remove(&mut self, entry: &TableEntry<String>, force: bool) -> Result<(), String> {
+        fn remove(&mut self, entry: &TableEntry<usize>, force: bool) -> Result<(), String> {
+            let label = format!("{}@{}", entry.share_name, path_str(entry.path.as_ref()));
             let forced = if force { " (forced)" } else { "" };
-            self.calls.push(format!("remove {}{forced}", entry.handle));
-            if self.remove_errors.contains(&entry.handle) {
+            self.calls.push(format!("remove {label}{forced}"));
+            if self.remove_errors.contains(&label) {
                 return Err("busy".to_owned());
             }
-            self.entries.retain(|(name, path)| {
-                format!("{name}@{}", path_str(path.as_ref())) != entry.handle
-            });
+            self.entries.retain(|(id, _, _)| *id != entry.handle);
             Ok(())
         }
 
@@ -280,7 +284,8 @@ pub(crate) mod tests {
             }
             let path =
                 (!self.add_pathless.contains(name)).then(|| PathBuf::from(format!("/mnt/{name}")));
-            self.entries.push((name.clone(), path));
+            self.entries.push((self.next_id, name.clone(), path));
+            self.next_id += 1;
             Ok(())
         }
     }
@@ -424,6 +429,15 @@ pub(crate) mod tests {
             mounted(&state),
             vec![entry("a", Some("/a1")), entry("b", Some("/mnt/b"))]
         );
+        assert!(state.errors.is_empty());
+    }
+
+    #[test]
+    fn removing_a_duplicate_keeps_its_identical_twin() {
+        let mut table = MemoryTable::new(REMOVE_ALL, &[("a", Some("/a")), ("a", Some("/a"))]);
+        let state = table.pass(&[share("1", "a")]);
+        assert_eq!(table.calls, vec!["remove a@/a"]);
+        assert_eq!(mounted(&state), vec![entry("a", Some("/a"))]);
         assert!(state.errors.is_empty());
     }
 
