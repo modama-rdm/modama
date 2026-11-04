@@ -756,4 +756,55 @@ mod tests {
             Some(echo(report(&["a"]), &["a", "b"]))
         );
     }
+
+    #[test]
+    fn the_popup_matches_created_mounts_case_insensitively() {
+        let desired = Shares {
+            foreground_share_id: Some("b".to_owned()),
+            shares: vec![share("a"), share("b"), share("c")],
+        };
+        let result = PassResult {
+            state: SessionHelperState {
+                mounted_shares: vec![
+                    MountedShare {
+                        share_name: "SHARE-A".to_owned(),
+                        mount_path: Some("/mnt/a".into()),
+                    },
+                    // the first mount of that name has no path, the second has one
+                    MountedShare {
+                        share_name: "share-b".to_owned(),
+                        mount_path: None,
+                    },
+                    MountedShare {
+                        share_name: "Share-B".to_owned(),
+                        mount_path: Some("/mnt/b".into()),
+                    },
+                    // created, but without a path: nothing to open
+                    MountedShare {
+                        share_name: "share-c".to_owned(),
+                        mount_path: None,
+                    },
+                ],
+                errors: vec![],
+                reconciled_share_ids: None,
+            },
+            created: vec![
+                "share-a".to_owned(),
+                "SHARE-B".to_owned(),
+                "share-c".to_owned(),
+            ],
+        };
+        let mount = |id: &str| CreatedMount {
+            share_id: id.to_owned(),
+            mount: PopupMount {
+                project: "project".to_owned(),
+                session: id.to_owned(),
+                mount_path: format!("/mnt/{id}").into(),
+            },
+        };
+        assert_eq!(
+            popup_mounts(&desired, &result),
+            vec![mount("a"), mount("b")]
+        );
+    }
 }
