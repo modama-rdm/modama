@@ -323,6 +323,14 @@ impl LocalFanOut {
     pub fn connected_agents(&self) -> Option<ConnectedAgents> {
         self.state.borrow().connected_agents()
     }
+
+    /// Our mount status as smbdrop lists it back to us
+    #[cfg(test)]
+    pub(crate) fn own_status_at_smbdrop(&self) -> Option<AgentMountStatus> {
+        let state = self.state.borrow();
+        let own = state.own_connection?;
+        state.remote.as_ref()?.participant(own)?.status
+    }
 }
 
 /// A connected session helper; while it lives, its scope counts as having one

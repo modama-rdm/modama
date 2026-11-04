@@ -18,7 +18,7 @@ where
     let config = AgentConfig::from_file(&config_path).await?;
     info!("This is modama-agent `{:?}`", config.identity);
 
-    let state: Arc<Mutex<AgentState>> = AgentState::new(&config).await;
+    let state: Arc<Mutex<AgentState>> = AgentState::new(&config);
     let token_provider = config.make_token_provider().await?;
 
     let another_token_provider = Arc::clone(&token_provider);
