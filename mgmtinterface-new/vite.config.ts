@@ -6,7 +6,8 @@ import tailwindcss from '@tailwindcss/vite'
 // Single source of truth for the app version: package.json. Read it here and
 // inject it as the `__APP_VERSION__` global (see `define` below) so the UI never
 // keeps a second copy that can drift. Bump `version` in package.json in the same
-// commit as a feature and add a matching CHANGELOG.md entry.
+// commit as a feature and add a matching CHANGELOG.md entry; a test in
+// src/lib/changelog.test.ts fails when the two disagree.
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8')) as {version: string}
 
 // https://vite.dev/config/

@@ -1,13 +1,29 @@
+import {lazy, Suspense} from 'react'
 import {Link} from 'react-router-dom'
 import {Card} from '../components/ui/Card'
 import {ArrowLeftIcon} from '../components/ui/icons'
 import {CHANGELOG} from '../lib/changelog'
 
+// The Markdown renderer loads on first use, as for a description (see
+// RenderedDescription), so it stays out of the app's main bundle.
+const InlineMarkdown = lazy(() =>
+    import('../components/Markdown').then((module) => ({default: module.InlineMarkdown})),
+)
+
+/** One bullet of a release: its text as it is until the renderer has loaded. */
+function Change({text}: { text: string }) {
+    return (
+        <Suspense fallback={text}>
+            <InlineMarkdown>{text}</InlineMarkdown>
+        </Suspense>
+    )
+}
+
 /**
- * What's-new / changelog screen. Renders the typed history from
- * `lib/changelog.ts` (the single source), newest-first, so the team can follow
- * progress while the new UI runs alongside the legacy portal. Reachable from the
- * version badge in the footer.
+ * What's-new / changelog screen. Renders CHANGELOG.md, parsed by
+ * `lib/changelog.ts`, newest-first, so the team can follow progress while the
+ * new UI runs alongside the legacy portal. Reachable from the version badge in
+ * the footer.
  */
 export function Changelog() {
     return (
@@ -49,7 +65,7 @@ export function Changelog() {
                             </div>
                             <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm text-fg-muted marker:text-fg-faint">
                                 {entry.changes.map((change, i) => (
-                                    <li key={i}>{change}</li>
+                                    <li key={i}><Change text={change}/></li>
                                 ))}
                             </ul>
                         </Card>

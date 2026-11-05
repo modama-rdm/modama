@@ -68,6 +68,28 @@ const components: Components = {
     td: ({children}) => <td className="border border-default px-2.5 py-1.5">{children}</td>,
 }
 
+/** Inline elements only, so a short text renders without a block around it. */
+const inlineComponents: Components = {...components, p: ({children}) => <>{children}</>}
+const INLINE_ELEMENTS = ['p', 'a', 'code', 'strong', 'em', 'del']
+
+/**
+ * One short text rendered from inline Markdown (code, links, emphasis), with
+ * the same styles as `Markdown`, and no paragraph around it. Anything else in
+ * the text, a heading or a list, shows as its plain content.
+ */
+export function InlineMarkdown({children}: { children: string }) {
+    return (
+        <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={inlineComponents}
+            allowedElements={INLINE_ELEMENTS}
+            unwrapDisallowed
+        >
+            {children}
+        </ReactMarkdown>
+    )
+}
+
 /**
  * A description rendered from Markdown, with GitHub's extensions (tables, task
  * lists, strikethrough, autolinks). Raw HTML in the text is shown as text, not
