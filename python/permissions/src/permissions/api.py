@@ -126,7 +126,11 @@ def check_valid_dataset(name: str):
 # The service runs as root inside folders that members can write to, so the
 # file is never trusted to be what its name says: it is opened without
 # following symlinks and without blocking, and only a regular file counts. A
-# FIFO named README.md would otherwise hang every project listing. A hard link
+# FIFO named README.md would otherwise hang every project listing. Nor is the
+# folder: a member can put a symlink where a session folder would be, and root
+# would then read the README.md of whatever folder it points at, including
+# ones the member may not open. So the folder is opened first, again without
+# following a symlink, and the file is opened inside it. A hard link
 # is read like any other file: with `protected_hardlinks` set (see README.rst),
 # nobody can link a file they could not read and write already.
 
@@ -143,13 +147,21 @@ def read_readme(folder: str) -> str | None:
     The description kept in `folder`, or None if there is none.
 
     Reads at most :data:`README_MAX_CHARS` characters. Anything but a regular
-    file, and any error on the way, reads as no description.
+    file, a `folder` that is a symlink, and any error on the way read as no
+    description.
     """
-    path = os.path.join(folder, README_NAME)
     try:
-        fd = os.open(path, os.O_RDONLY | _OPEN_EXISTING)
+        dir_fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | _OPEN_EXISTING)
     except OSError:
         return None
+    try:
+        # Relative to the folder just opened, so swapping the folder for a
+        # symlink after that changes nothing.
+        fd = os.open(README_NAME, os.O_RDONLY | _OPEN_EXISTING, dir_fd=dir_fd)
+    except OSError:
+        return None
+    finally:
+        os.close(dir_fd)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
@@ -807,6 +819,21 @@ if __name__ == "__main__":
         ],
         check=True,
     )
+    # A symlink in place of a session folder lists as a session, but its
+    # README.md is not read, here not even that of a session in the same
+    # project.
+    subprocess.run(
+        [
+            "sudo",
+            "-u",
+            "testdieter",
+            "ln",
+            "-s",
+            os.path.join(myproj.path, "helloworld"),
+            f"{myproj.path}/alias",
+        ],
+        check=True,
+    )
     # A long one is cut off after README_MAX_CHARS characters, not in the
     # middle of one.
     myproj.add_dataset("long", "testdieter")
@@ -819,6 +846,8 @@ if __name__ == "__main__":
     assert described["fifo"] is None and described["link"] is None
     assert described["hardlink"] == "linked text"
     assert described["long"] == "ä" * README_MAX_CHARS
+    assert described["helloworld"] == "# Run 1\nalignment"
+    assert described["alias"] is None
 
     # A dataset may not take the project README's name.
     try:
