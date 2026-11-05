@@ -8,7 +8,8 @@ use modama_common::{
     logging::init_logging,
 };
 use smbdrop::{
-    events::start_event_server,
+    event_hub::EventHub,
+    events::start_event_channel,
     mount_manager::LinuxMountBackend,
     process_manager::SambaProcessManager,
     readiness::SmbShareReadiness,
@@ -71,11 +72,12 @@ async fn main() -> AnyResult<()> {
     let tls_config = load_tls_server_config(&args.ca_cert, &args.chain, &args.privkey, false)?;
     let secret_key = get_private_key(&args.privkey)?;
 
-    let (_event_server_task, state_updates_tx, _event_server_port) = start_event_server(
+    let event_hub = EventHub::new(initial_state.shares);
+    let (_event_server_task, _event_server_port) = start_event_channel(
         &args.ws_listen,
         tls_config,
         secret_key.secret_der(),
-        &initial_state,
+        event_hub.clone(),
     )
     .await
     .context("start event server")?;
@@ -83,7 +85,7 @@ async fn main() -> AnyResult<()> {
     let readiness = Arc::new(SmbShareReadiness::default());
 
     let api_state: ApiState<DefaultUserProvider, LinuxMountBackend, SambaProcessManager> =
-        ApiState::new(sm, state_updates_tx, readiness);
+        ApiState::new(sm, event_hub, readiness);
 
     let api_listen = args.api_listen.clone();
     let (smbdrop_join_handle, _port) = spawn_smbdrop_task(api_state, &api_listen).await?;
