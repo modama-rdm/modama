@@ -25,7 +25,6 @@ jobs:
           - { name: mgmtinterface, dockerfile: deploy/mgmtinterface/Dockerfile, context: . }
           - { name: mgmtinterface-api, dockerfile: deploy/mgmtinterface-api/Dockerfile, context: . }
           - { name: wsgidav, dockerfile: deploy/wsgidav/Dockerfile, context: deploy/wsgidav }
-          - { name: tsm-client, dockerfile: deploy/tsm-client/Dockerfile, context: deploy/tsm-client }
           - { name: mgmtinterface-new, dockerfile: mgmtinterface-new/Dockerfile, context: . }
     env:
       # Push from this repository only: not from pull requests out of forks, whose token can't
