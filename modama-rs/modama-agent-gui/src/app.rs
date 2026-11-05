@@ -8,14 +8,14 @@ use crate::{
     actions::{Action, LoginDestination, RetryAction, TaskFailure},
     components::toast::{ToastAction, ToastState},
     footer::show_footer,
-    foreground_monitor::{ForegroundMonitor, ForegroundMonitorUpdate, events_url},
+    foreground_monitor::{ForegroundMonitor, events_url},
     helper_launch::ProcessLauncher,
     navigation_progress::NavigationProgress,
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
     },
     service::{AgentService, HttpAgentService, StubAgentService},
-    state::AgentAppState,
+    state::{AgentAppState, AgentView},
     styles,
     top_bar::TopBar,
 };
@@ -293,24 +293,6 @@ impl AgentGuiApp {
                     self.handle_task_failure(failure);
                 }
             }
-            Action::ForegroundChanged(foreground) => {
-                self.app_state.observe_foreground(foreground);
-            }
-            Action::OtherMountsChanged(other_mounts) => {
-                self.app_state.observe_other_mounts(other_mounts);
-            }
-            Action::ConnectedAgentsChanged(connected_agents) => {
-                self.app_state.agent.connected_agents = connected_agents;
-            }
-            Action::ConnectionDropped => {
-                self.app_state.agent.connection_dropped = true;
-            }
-            Action::ConnectionRestored => {
-                self.app_state.agent.connection_dropped = false;
-            }
-            Action::HandOffBlocked(blocked) => {
-                self.app_state.agent.hand_off_blocked = blocked;
-            }
             Action::ForceRelease => {
                 if let Some(monitor) = &self.foreground_monitor {
                     monitor.force_release();
@@ -353,8 +335,11 @@ impl AgentGuiApp {
                 self.toast.clear();
                 self.page = self.overview_page();
                 self.app_state.identity = Some(identity);
-                self.app_state.agent.foreground = foreground;
-                self.app_state.agent.connection_dropped = false;
+                self.app_state.apply_agent_view(AgentView {
+                    foreground,
+                    connection_dropped: false,
+                    ..self.app_state.agent.clone()
+                });
             }
             Action::TaskFailed(failure) => self.handle_task_failure(failure),
         }
@@ -401,7 +386,7 @@ impl AgentGuiApp {
                 self.foreground_monitor = Some(ForegroundMonitor::start(
                     url,
                     Box::new(ProcessLauncher::new(agent_url.clone())),
-                    self.app_state.agent.foreground.clone(),
+                    self.app_state.agent.clone(),
                     ctx.clone(),
                 ));
             }
@@ -413,37 +398,12 @@ impl AgentGuiApp {
     }
 
     fn poll_foreground_monitor(&mut self) {
-        while let Some(result) = self
-            .foreground_monitor
-            .as_ref()
-            .map(ForegroundMonitor::try_recv)
-        {
-            match result {
-                Ok(ForegroundMonitorUpdate::ForegroundChanged(foreground)) => {
-                    self.handle_action(Action::ForegroundChanged(foreground));
-                }
-                Ok(ForegroundMonitorUpdate::OtherMountsChanged(other_mounts)) => {
-                    self.handle_action(Action::OtherMountsChanged(other_mounts));
-                }
-                Ok(ForegroundMonitorUpdate::ConnectedAgentsChanged(connected_agents)) => {
-                    self.handle_action(Action::ConnectedAgentsChanged(connected_agents));
-                }
-                Ok(ForegroundMonitorUpdate::ConnectionDropped) => {
-                    self.handle_action(Action::ConnectionDropped);
-                }
-                Ok(ForegroundMonitorUpdate::ConnectionRestored) => {
-                    self.handle_action(Action::ConnectionRestored);
-                }
-                Ok(ForegroundMonitorUpdate::HandOffBlocked(blocked)) => {
-                    self.handle_action(Action::HandOffBlocked(blocked));
-                }
+        while let Some(monitor) = &self.foreground_monitor {
+            match monitor.try_recv() {
+                Ok(view) => self.app_state.apply_agent_view(view),
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.foreground_monitor = None;
-                    self.handle_action(Action::HandOffBlocked(false));
-                    self.handle_action(Action::ConnectionDropped);
-                    break;
-                }
+                // started again in the next frame, which waits for a repaint or input
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.foreground_monitor = None,
             }
         }
     }
@@ -606,6 +566,14 @@ mod tests {
         }
     }
 
+    /// What the agent reports with `foreground` and nothing else
+    fn foreground_view(foreground: crate::state::ForegroundSession) -> AgentView {
+        AgentView {
+            foreground,
+            ..AgentView::default()
+        }
+    }
+
     fn start(app: &mut AgentGuiApp, share_id: &str) {
         let operation_id = OperationId::next();
         app.handle_action(Action::StartRequested {
@@ -708,9 +676,11 @@ mod tests {
     #[test]
     fn signing_in_to_close_a_listed_share_asks_to_confirm_it() {
         let mut app = AgentGuiApp::new();
-        app.app_state.agent.foreground =
-            crate::state::ForegroundSession::Mounted(own_mounted("new"));
-        app.app_state.observe_other_mounts(vec![own_mounted("old")]);
+        app.app_state.apply_agent_view(AgentView {
+            foreground: crate::state::ForegroundSession::Mounted(own_mounted("new")),
+            other_mounts: vec![own_mounted("old")],
+            ..AgentView::default()
+        });
         app.handle_action(Action::LoginSuccess {
             signed_in: signed_in(),
             destination: LoginDestination::ConfirmClose {
@@ -919,12 +889,11 @@ mod tests {
             session: pending.clone(),
         });
 
-        app.handle_action(Action::ForegroundChanged(
-            crate::state::ForegroundSession::Mounting(
+        app.app_state
+            .apply_agent_view(foreground_view(crate::state::ForegroundSession::Mounting(
                 pending.clone(),
                 "Waiting for the session helper to mount the share.".to_owned(),
-            ),
-        ));
+            )));
 
         assert_eq!(app.app_state.pending_start(), None);
         assert_eq!(
@@ -948,25 +917,13 @@ mod tests {
                 created_by: None,
             });
 
-        app.handle_action(Action::ForegroundChanged(
-            crate::state::ForegroundSession::None,
-        ));
+        app.app_state
+            .apply_agent_view(foreground_view(crate::state::ForegroundSession::None));
 
         assert_eq!(
             app.app_state.agent.foreground,
             crate::state::ForegroundSession::None
         );
-    }
-
-    #[test]
-    fn monitor_connection_events_track_the_latest_attempt() {
-        let mut app = AgentGuiApp::new();
-
-        app.handle_action(Action::ConnectionDropped);
-        assert!(app.app_state.agent.connection_dropped);
-
-        app.handle_action(Action::ConnectionRestored);
-        assert!(!app.app_state.agent.connection_dropped);
     }
 
     #[test]
@@ -987,9 +944,8 @@ mod tests {
                 created_by: None,
             },
         });
-        app.handle_action(Action::ForegroundChanged(
-            crate::state::ForegroundSession::None,
-        ));
+        app.app_state
+            .apply_agent_view(foreground_view(crate::state::ForegroundSession::None));
 
         assert_eq!(
             app.app_state
@@ -1020,9 +976,8 @@ mod tests {
             share_id: session.share_id.clone(),
         });
 
-        app.handle_action(Action::ForegroundChanged(
-            crate::state::ForegroundSession::None,
-        ));
+        app.app_state
+            .apply_agent_view(foreground_view(crate::state::ForegroundSession::None));
 
         assert_eq!(app.app_state.pending_close(), None);
         assert_eq!(
@@ -1055,14 +1010,14 @@ mod tests {
         });
 
         // The permanent monitor wins the race and observes the completed mount first.
-        app.handle_action(Action::ForegroundChanged(
-            crate::state::ForegroundSession::Mounted(mounted),
-        ));
+        app.app_state
+            .apply_agent_view(foreground_view(crate::state::ForegroundSession::Mounted(
+                mounted,
+            )));
 
         // The mounted share can disappear again before the page task is polled.
-        app.handle_action(Action::ForegroundChanged(
-            crate::state::ForegroundSession::None,
-        ));
+        app.app_state
+            .apply_agent_view(foreground_view(crate::state::ForegroundSession::None));
 
         // The late task completion must not recreate local pending state.
         app.handle_action(Action::IngestCreated {
@@ -1075,5 +1030,35 @@ mod tests {
             app.app_state.agent.foreground,
             crate::state::ForegroundSession::None
         );
+    }
+
+    #[test]
+    fn a_close_in_flight_stays_pending_while_its_share_moves_to_the_other_mounts() {
+        let mut app = AgentGuiApp::new();
+        let old = crate::state::ForegroundSession::Mounted(mounted_session("old"));
+        app.app_state.apply_agent_view(foreground_view(old));
+        let operation_id = OperationId::next();
+        app.handle_action(Action::CloseRequested {
+            operation_id,
+            share_id: "old".to_owned(),
+        });
+
+        // another share takes the foreground before the close is answered
+        let new = crate::state::ForegroundSession::Mounted(mounted_session("new"));
+        app.app_state.apply_agent_view(AgentView {
+            other_mounts: vec![mounted_session("old")],
+            ..foreground_view(new)
+        });
+        assert_eq!(app.app_state.pending_close(), Some("old"));
+
+        // so a failure is still shown
+        app.handle_action(Action::CloseFailed {
+            operation_id,
+            failure: TaskFailure::Stay {
+                message: "could not close".to_owned(),
+                retry: RetryAction::CloseSession,
+            },
+        });
+        assert!(app.toast.is_visible());
     }
 }

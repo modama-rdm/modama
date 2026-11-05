@@ -238,27 +238,38 @@ impl AgentAppState {
         Some(should_report)
     }
 
-    pub fn observe_foreground(&mut self, foreground: ForegroundSession) {
-        if let Some(operation) = self.session_operations.start.as_mut() {
-            if let Some(share_id) = foreground.share_id() {
-                operation.observed_share_ids.insert(share_id.to_owned());
-            }
-            if operation
-                .response
-                .as_ref()
-                .is_some_and(|pending| foreground.share_id() == Some(pending.share_id.as_str()))
-            {
-                self.session_operations.start = None;
-            }
+    /// Show a new view from the agent, and complete the start or close it shows done. The
+    /// foreground and the other mounts change together, so a share that moves between them
+    /// never looks gone.
+    pub fn apply_agent_view(&mut self, view: AgentView) {
+        let foreground_changed = view.foreground != self.agent.foreground;
+        let mounts_changed = foreground_changed || view.other_mounts != self.agent.other_mounts;
+        self.agent = view;
+        if foreground_changed {
+            self.observe_start();
         }
-
-        self.agent.foreground = foreground;
-        self.observe_close();
+        if mounts_changed {
+            self.observe_close();
+        }
     }
 
-    pub fn observe_other_mounts(&mut self, other_mounts: Vec<ActiveSession>) {
-        self.agent.other_mounts = other_mounts;
-        self.observe_close();
+    /// A start is done once its share is in the foreground, even if that happens before its
+    /// response arrives; it records every foreground share that appears while it runs
+    fn observe_start(&mut self) {
+        let Some(operation) = self.session_operations.start.as_mut() else {
+            return;
+        };
+        let foreground = self.agent.foreground.share_id();
+        if let Some(share_id) = foreground {
+            operation.observed_share_ids.insert(share_id.to_owned());
+        }
+        if operation
+            .response
+            .as_ref()
+            .is_some_and(|pending| foreground == Some(pending.share_id.as_str()))
+        {
+            self.session_operations.start = None;
+        }
     }
 
     /// A share being closed is gone once it is neither the foreground share nor another mount
@@ -340,20 +351,27 @@ mod tests {
         }
     }
 
+    fn view(foreground: ForegroundSession, other_mounts: Vec<ActiveSession>) -> AgentView {
+        AgentView {
+            foreground,
+            other_mounts,
+            ..AgentView::default()
+        }
+    }
+
     #[test]
     fn closing_a_listed_share_is_pending_until_it_leaves_the_list() {
         let mut state = AgentAppState::new();
-        state.observe_foreground(mounted("current"));
-        state.observe_other_mounts(vec![listed("old")]);
+        state.apply_agent_view(view(mounted("current"), vec![listed("old")]));
 
         let operation_id = OperationId::next();
         state.begin_close(operation_id, "old".to_owned());
         assert!(state.finish_close(operation_id));
         // closed at the agent, but still mounted; the foreground changing doesn't matter
-        state.observe_foreground(mounted("current"));
+        state.apply_agent_view(view(mounted("next"), vec![listed("old")]));
         assert_eq!(state.pending_close(), Some("old"));
 
-        state.observe_other_mounts(vec![]);
+        state.apply_agent_view(view(mounted("next"), vec![]));
         assert_eq!(state.pending_close(), None);
         assert!(state.session_operations.close.is_none());
     }
@@ -361,17 +379,26 @@ mod tests {
     #[test]
     fn a_previous_foreground_share_being_closed_is_still_pending_while_listed() {
         let mut state = AgentAppState::new();
-        state.observe_foreground(mounted("old"));
+        state.apply_agent_view(view(mounted("old"), vec![]));
         let operation_id = OperationId::next();
         state.begin_close(operation_id, "old".to_owned());
 
-        // the monitor reports the old share as another mount before the new foreground
-        state.observe_other_mounts(vec![listed("old")]);
-        state.observe_foreground(mounted("new"));
+        state.apply_agent_view(view(mounted("new"), vec![listed("old")]));
         assert_eq!(state.pending_close(), Some("old"));
 
-        state.observe_other_mounts(vec![]);
+        state.apply_agent_view(view(mounted("new"), vec![]));
         assert_eq!(state.pending_close(), None);
+    }
+
+    #[test]
+    fn a_listed_share_being_closed_is_still_pending_in_the_foreground() {
+        let mut state = AgentAppState::new();
+        state.apply_agent_view(view(mounted("current"), vec![listed("old")]));
+        let operation_id = OperationId::next();
+        state.begin_close(operation_id, "old".to_owned());
+
+        state.apply_agent_view(view(mounted("old"), vec![listed("current")]));
+        assert_eq!(state.pending_close(), Some("old"));
     }
 
     #[test]
@@ -412,8 +439,8 @@ mod tests {
         let mut state = AgentAppState::new();
         let operation_id = OperationId::next();
         state.begin_start(operation_id, "project".to_owned(), "session".to_owned());
-        state.observe_foreground(mounted("share"));
-        state.observe_foreground(ForegroundSession::None);
+        state.apply_agent_view(view(mounted("share"), vec![]));
+        state.apply_agent_view(view(ForegroundSession::None, vec![]));
 
         assert!(state.finish_start(operation_id, pending("share")));
         assert!(state.pending_start().is_none());
@@ -424,7 +451,7 @@ mod tests {
         let mut state = AgentAppState::new();
         let operation_id = OperationId::next();
         state.begin_start(operation_id, "project".to_owned(), "session".to_owned());
-        state.observe_foreground(mounted("other"));
+        state.apply_agent_view(view(mounted("other"), vec![]));
 
         assert!(state.finish_start(operation_id, pending("share")));
         assert_eq!(
@@ -442,7 +469,7 @@ mod tests {
         state.begin_start(operation_id, "project".to_owned(), "session".to_owned());
         assert!(state.finish_start(operation_id, pending("share")));
 
-        state.observe_foreground(mounted("share"));
+        state.apply_agent_view(view(mounted("share"), vec![]));
 
         assert!(state.pending_start().is_none());
     }
@@ -450,9 +477,10 @@ mod tests {
     #[test]
     fn observed_close_suppresses_a_late_failure() {
         let mut state = AgentAppState::new();
+        state.apply_agent_view(view(mounted("share"), vec![]));
         let operation_id = OperationId::next();
         state.begin_close(operation_id, "share".to_owned());
-        state.observe_foreground(ForegroundSession::None);
+        state.apply_agent_view(view(ForegroundSession::None, vec![]));
 
         assert_eq!(state.fail_close(operation_id), Some(false));
         assert!(state.pending_close().is_none());
@@ -461,9 +489,10 @@ mod tests {
     #[test]
     fn observed_close_is_not_restored_by_late_success() {
         let mut state = AgentAppState::new();
+        state.apply_agent_view(view(mounted("share"), vec![]));
         let operation_id = OperationId::next();
         state.begin_close(operation_id, "share".to_owned());
-        state.observe_foreground(ForegroundSession::None);
+        state.apply_agent_view(view(ForegroundSession::None, vec![]));
 
         assert!(state.finish_close(operation_id));
         assert!(state.pending_close().is_none());

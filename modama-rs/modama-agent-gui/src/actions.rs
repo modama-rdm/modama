@@ -1,5 +1,3 @@
-use modama_common::internal_api_types::ConnectedAgents;
-
 use crate::state::{
     ActiveSession, AgentIdentity, ForegroundSession, OperationId, PendingSession, SignedIn,
 };
@@ -67,12 +65,6 @@ pub enum Action {
         operation_id: OperationId,
         failure: Option<TaskFailure>,
     },
-    ForegroundChanged(ForegroundSession),
-    OtherMountsChanged(Vec<ActiveSession>),
-    ConnectedAgentsChanged(Option<ConnectedAgents>),
-    ConnectionDropped,
-    ConnectionRestored,
-    HandOffBlocked(bool),
     /// Release the previous user's drive that blocks the hand-off
     ForceRelease,
     GoToOverview,
