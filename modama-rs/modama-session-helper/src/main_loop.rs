@@ -195,6 +195,19 @@ impl LoopState {
             ..result.state
         };
         let failed = !report.errors.is_empty();
+        // each error once, not with every pass that still has it
+        let previous = self
+            .actual
+            .as_ref()
+            .map_or(&[][..], |actual| &actual.errors);
+        for error in report.errors.iter().filter(|e| !previous.contains(e)) {
+            let name = share_state
+                .shares
+                .iter()
+                .find(|share| share.share_id == error.share_id)
+                .map_or(error.share_id.as_str(), |share| share.share_name.as_str());
+            warn!("share {name}: {}", error.message);
+        }
         self.actual = Some(report.clone());
         self.publish_tray_state();
 
