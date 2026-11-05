@@ -325,6 +325,11 @@ impl LocalFanOut {
         ScopeView::new(desired.as_ref(), state.report(scope)).other_mounts()
     }
 
+    /// Whether we are connected to smbdrop: it welcomed us on the current connection
+    pub fn connected_to_smbdrop(&self) -> bool {
+        self.state.borrow().own_connection.is_some()
+    }
+
     /// The agents connected at the resource of our token; None until we are connected and
     /// smbdrop has told us
     pub fn connected_agents(&self) -> Option<ConnectedAgents> {

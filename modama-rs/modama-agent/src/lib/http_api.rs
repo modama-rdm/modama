@@ -310,15 +310,14 @@ async fn api_create_session_in_project(
     )
 )]
 async fn api_health(State(api_state): State<ApiState>) -> impl IntoResponse {
-    match api_state.state.lock().await.connection {
-        crate::agent_state::ConnectionState::Connecting
-        | crate::agent_state::ConnectionState::Authenticating => (
+    let fan_out = Arc::clone(&api_state.state.lock().await.fan_out);
+    if fan_out.connected_to_smbdrop() {
+        (StatusCode::OK, Json(APIHealthCheckResponse::Ok))
+    } else {
+        (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(APIHealthCheckResponse::NotAvailable),
-        ),
-        crate::agent_state::ConnectionState::Connected => {
-            (StatusCode::OK, Json(APIHealthCheckResponse::Ok))
-        }
+        )
     }
 }
 

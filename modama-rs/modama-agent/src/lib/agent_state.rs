@@ -5,14 +5,6 @@ use tokio::sync::Mutex;
 
 use crate::{config::AgentConfig, local_fan_out::LocalFanOut};
 
-#[derive(Debug, Default)]
-pub enum ConnectionState {
-    #[default]
-    Connecting,
-    Authenticating,
-    Connected,
-}
-
 #[derive(Debug, Clone)]
 pub struct ShareState<T>
 where
@@ -75,8 +67,6 @@ where
 
 #[derive(Debug)]
 pub struct AgentState {
-    pub connection: ConnectionState,
-
     /// What is fanned out to the session helpers and GUIs on this computer
     pub fan_out: Arc<LocalFanOut>,
 
@@ -87,7 +77,6 @@ pub struct AgentState {
 impl AgentState {
     pub fn new(config: &AgentConfig) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
-            connection: Default::default(),
             fan_out: Arc::new(LocalFanOut::new(config.identity.clone())),
             config: config.clone(),
         }))
