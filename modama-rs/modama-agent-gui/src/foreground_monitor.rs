@@ -8,7 +8,7 @@ use eframe::egui;
 use futures_util::{SinkExt as _, StreamExt as _};
 use modama_common::{
     foreground::ScopeView,
-    internal_api_types::{ConnectedAgents, ToAgentFromGui, ToSessionGui},
+    internal_api_types::{ToAgentFromGui, ToSessionGui},
 };
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -16,21 +16,8 @@ use url::Url;
 
 use crate::{
     helper_launch::HelperLauncher,
-    state::{ActiveSession, ForegroundSession},
+    state::{ActiveSession, AgentView, ForegroundSession},
 };
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ForegroundMonitorUpdate {
-    ForegroundChanged(ForegroundSession),
-    /// The desired shares besides the foreground one that are mounted for this user
-    OtherMountsChanged(Vec<ActiveSession>),
-    /// The agents connected at this agent's resource; None while the agent doesn't know them
-    ConnectedAgentsChanged(Option<ConnectedAgents>),
-    ConnectionDropped,
-    ConnectionRestored,
-    /// Whether a previous user's drive blocks the hand-off, so the GUI can offer to release it
-    HandOffBlocked(bool),
-}
 
 /// The agent must answer the websocket handshake within this time
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -57,46 +44,57 @@ pub fn events_url(agent_url: &str) -> Result<Url, String> {
 }
 
 pub struct ForegroundMonitor {
-    updates: mpsc::Receiver<ForegroundMonitorUpdate>,
+    views: mpsc::Receiver<AgentView>,
     force_release: tokio_mpsc::UnboundedSender<()>,
     stop: Option<oneshot::Sender<()>>,
 }
 
-/// Forwards updates to the app; false once the app is gone
-struct Updates {
-    tx: mpsc::Sender<ForegroundMonitorUpdate>,
+/// Sends the app each changed agent view, in order, so it sees every state, however brief
+struct Views {
+    tx: mpsc::Sender<AgentView>,
+    last: AgentView,
     ctx: egui::Context,
 }
 
-impl Updates {
-    fn send(&self, update: ForegroundMonitorUpdate) -> bool {
-        let sent = self.tx.send(update).is_ok();
+impl Views {
+    /// Send the view if it changed; false once the app is gone
+    fn publish(&mut self, view: AgentView) -> bool {
+        if view == self.last {
+            return true;
+        }
+        self.last = view.clone();
+        let sent = self.tx.send(view).is_ok();
         self.ctx.request_repaint();
         sent
+    }
+
+    /// Keep showing what the agent reported last, without the release offer: a release can't
+    /// be requested without a connection
+    fn publish_dropped(&mut self) -> bool {
+        self.publish(AgentView {
+            hand_off_blocked: false,
+            connection_dropped: true,
+            ..self.last.clone()
+        })
+    }
+}
+
+impl Drop for Views {
+    /// However the monitor stops, the app sees the connection as dropped
+    fn drop(&mut self) {
+        self.publish_dropped();
     }
 }
 
 struct MonitorState {
-    last: ForegroundSession,
-    last_other_mounts: Vec<ActiveSession>,
-    last_connected_agents: Option<ConnectedAgents>,
     /// Only Windows mappings block each other, so only there is a release offered
     offer_force_release: bool,
-    hand_off_blocked: bool,
-    connection_dropped: bool,
     last_launch: Option<Instant>,
     launcher: Box<dyn HelperLauncher>,
 }
 
 impl MonitorState {
-    fn on_message(&mut self, message: &ToSessionGui, updates: &Updates) -> bool {
-        if self.connection_dropped {
-            self.connection_dropped = false;
-            if !updates.send(ForegroundMonitorUpdate::ConnectionRestored) {
-                return false;
-            }
-        }
-
+    fn on_message(&mut self, message: &ToSessionGui, views: &mut Views) -> bool {
         if message.session_helper.is_none()
             && self
                 .last_launch
@@ -110,66 +108,24 @@ impl MonitorState {
             message.desired_shares.as_ref(),
             message.session_helper.as_ref(),
         );
-
-        let blocked = self.offer_force_release && view.hand_off_blocked();
-        if blocked != self.hand_off_blocked {
-            self.hand_off_blocked = blocked;
-            if !updates.send(ForegroundMonitorUpdate::HandOffBlocked(blocked)) {
-                return false;
-            }
-        }
-
-        // before the foreground: a share that moves from the foreground to the others has to
-        // be known as mounted when the foreground changes, or a close in flight for it would
-        // count as done
-        let other_mounts: Vec<ActiveSession> = view
-            .other_mounts()
-            .into_iter()
-            .map(ActiveSession::from)
-            .collect();
-        if other_mounts != self.last_other_mounts {
-            self.last_other_mounts = other_mounts.clone();
-            if !updates.send(ForegroundMonitorUpdate::OtherMountsChanged(other_mounts)) {
-                return false;
-            }
-        }
-
-        if message.connected_agents != self.last_connected_agents {
-            self.last_connected_agents = message.connected_agents.clone();
-            if !updates.send(ForegroundMonitorUpdate::ConnectedAgentsChanged(
-                message.connected_agents.clone(),
-            )) {
-                return false;
-            }
-        }
-
         let foreground = match view.foreground() {
             Ok(foreground) => ForegroundSession::from(foreground),
             Err(e) => {
                 log::warn!("ignoring foreground share: {e}");
-                return true;
+                views.last.foreground.clone()
             }
         };
-        if foreground != self.last {
-            self.last = foreground.clone();
-            return updates.send(ForegroundMonitorUpdate::ForegroundChanged(foreground));
-        }
-        true
-    }
-
-    fn on_disconnect(&mut self, updates: &Updates) -> bool {
-        if self.connection_dropped {
-            return true;
-        }
-        self.connection_dropped = true;
-        // a release can't be requested without a connection
-        if self.hand_off_blocked {
-            self.hand_off_blocked = false;
-            if !updates.send(ForegroundMonitorUpdate::HandOffBlocked(false)) {
-                return false;
-            }
-        }
-        updates.send(ForegroundMonitorUpdate::ConnectionDropped)
+        views.publish(AgentView {
+            foreground,
+            other_mounts: view
+                .other_mounts()
+                .into_iter()
+                .map(ActiveSession::from)
+                .collect(),
+            connected_agents: message.connected_agents.clone(),
+            hand_off_blocked: self.offer_force_release && view.hand_off_blocked(),
+            connection_dropped: false,
+        })
     }
 }
 
@@ -177,7 +133,7 @@ impl MonitorState {
 async fn run(
     events_url: Url,
     mut state: MonitorState,
-    updates: Updates,
+    mut views: Views,
     mut force_release: tokio_mpsc::UnboundedReceiver<()>,
     reconnect_delay: Duration,
 ) {
@@ -192,7 +148,7 @@ async fn run(
                             Some(Ok(Message::Text(text))) => {
                                 match serde_json::from_str::<ToSessionGui>(text.as_str()) {
                                     Ok(message) => {
-                                        if !state.on_message(&message, &updates) {
+                                        if !state.on_message(&message, &mut views) {
                                             return;
                                         }
                                     }
@@ -227,7 +183,7 @@ async fn run(
             Ok(Err(e)) => log::warn!("could not connect to the agent: {e}"),
             Err(_elapsed) => log::warn!("could not connect to the agent: timed out"),
         }
-        if !state.on_disconnect(&updates) {
+        if !views.publish_dropped() {
             return;
         }
         tokio::time::sleep(reconnect_delay).await;
@@ -235,10 +191,11 @@ async fn run(
 }
 
 impl ForegroundMonitor {
+    /// Follow the agent, starting from the view the app shows now
     pub fn start(
         events_url: Url,
         launcher: Box<dyn HelperLauncher>,
-        initial: ForegroundSession,
+        initial: AgentView,
         ctx: egui::Context,
     ) -> Self {
         Self::start_with(
@@ -254,21 +211,21 @@ impl ForegroundMonitor {
     fn start_with(
         events_url: Url,
         launcher: Box<dyn HelperLauncher>,
-        initial: ForegroundSession,
+        initial: AgentView,
         ctx: egui::Context,
         reconnect_delay: Duration,
         offer_force_release: bool,
     ) -> Self {
-        let (tx, updates) = mpsc::channel();
+        let (tx, views_rx) = mpsc::channel();
+        let views = Views {
+            tx,
+            last: initial,
+            ctx,
+        };
         let (force_release, force_release_rx) = tokio_mpsc::unbounded_channel();
         let (stop, stop_rx) = oneshot::channel();
         let state = MonitorState {
-            last: initial,
-            last_other_mounts: Vec::new(),
-            last_connected_agents: None,
             offer_force_release,
-            hand_off_blocked: false,
-            connection_dropped: false,
             last_launch: None,
             launcher,
         };
@@ -279,7 +236,7 @@ impl ForegroundMonitor {
             {
                 Ok(runtime) => runtime,
                 Err(e) => {
-                    // dropping `tx` makes the app treat the connection as dropped
+                    // returning drops `views`, which shows the connection as dropped
                     log::error!("could not start the agent monitor: {e}");
                     return;
                 }
@@ -289,7 +246,7 @@ impl ForegroundMonitor {
                     () = run(
                         events_url,
                         state,
-                        Updates { tx, ctx },
+                        views,
                         force_release_rx,
                         reconnect_delay,
                     ) => {}
@@ -298,7 +255,7 @@ impl ForegroundMonitor {
             });
         });
         Self {
-            updates,
+            views: views_rx,
             force_release,
             stop: Some(stop),
         }
@@ -310,8 +267,10 @@ impl ForegroundMonitor {
         let _ = self.force_release.send(());
     }
 
-    pub fn try_recv(&self) -> Result<ForegroundMonitorUpdate, mpsc::TryRecvError> {
-        self.updates.try_recv()
+    /// The next agent view; disconnected once the monitor stopped, which it does only if it
+    /// could not start or failed. Its last view shows the connection as dropped.
+    pub fn try_recv(&self) -> Result<AgentView, mpsc::TryRecvError> {
+        self.views.try_recv()
     }
 }
 
@@ -332,14 +291,13 @@ mod tests {
 
     use modama_common::{
         internal_api_types::{
-            ConnectedAgent, ConnectionDetails, MountedShare, SessionHelperState, ShareError, Shares,
+            ConnectedAgent, ConnectedAgents, ConnectionDetails, MountedShare, SessionHelperState,
+            ShareError, Shares,
         },
         messages::{ConnectionId, Share},
     };
     use tokio::net::{TcpListener, TcpStream};
     use tokio_tungstenite::{WebSocketStream, accept_async};
-
-    use crate::state::ActiveSession;
 
     use super::*;
 
@@ -373,7 +331,7 @@ mod tests {
             let monitor = ForegroundMonitor::start_with(
                 Url::parse(&format!("ws://{address}/")).unwrap(),
                 Box::new(launcher.clone()),
-                ForegroundSession::None,
+                AgentView::default(),
                 egui::Context::default(),
                 Duration::from_millis(10),
                 true,
@@ -393,12 +351,12 @@ mod tests {
             accept_async(tcp).await.unwrap()
         }
 
-        /// The next update, or None if none arrives within `wait`
-        async fn next_update(&self, wait: Duration) -> Option<ForegroundMonitorUpdate> {
+        /// The next published view, or None if none arrives within `wait`
+        async fn next_view(&self, wait: Duration) -> Option<AgentView> {
             let deadline = Instant::now() + wait;
             loop {
                 match self.monitor.try_recv() {
-                    Ok(update) => return Some(update),
+                    Ok(view) => return Some(view),
                     Err(mpsc::TryRecvError::Empty) if Instant::now() < deadline => {
                         tokio::time::sleep(Duration::from_millis(5)).await;
                     }
@@ -453,30 +411,6 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
-    async fn changed_foreground_is_forwarded_once() {
-        let setup = Setup::start().await;
-        let mut agent = setup.accept().await;
-
-        send(&mut agent, &mounted("a")).await;
-        assert_eq!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::ForegroundChanged(
-                ForegroundSession::Mounted(ActiveSession {
-                    share_id: "a".to_owned(),
-                    project: "project".to_owned(),
-                    session: "a".to_owned(),
-                    mount_path: Some("/mnt/a".to_owned()),
-                    created_by: None,
-                })
-            ))
-        );
-
-        send(&mut agent, &mounted("a")).await;
-        assert_eq!(setup.next_update(SHORT).await, None);
-        assert_eq!(setup.launcher.count(), 0);
-    }
-
     fn session(id: &str) -> ActiveSession {
         ActiveSession {
             share_id: id.to_owned(),
@@ -485,6 +419,26 @@ mod tests {
             mount_path: Some(format!("/mnt/{id}")),
             created_by: None,
         }
+    }
+
+    fn foreground(id: &str) -> AgentView {
+        AgentView {
+            foreground: ForegroundSession::Mounted(session(id)),
+            ..AgentView::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_changed_view_is_published_once() {
+        let setup = Setup::start().await;
+        let mut agent = setup.accept().await;
+
+        send(&mut agent, &mounted("a")).await;
+        assert_eq!(setup.next_view(LONG).await, Some(foreground("a")));
+
+        send(&mut agent, &mounted("a")).await;
+        assert_eq!(setup.next_view(SHORT).await, None);
+        assert_eq!(setup.launcher.count(), 0);
     }
 
     /// `old` and `new` both mounted, `new` in the foreground
@@ -509,35 +463,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn other_mounts_are_forwarded_once_and_before_the_foreground() {
+    async fn a_share_leaving_the_foreground_is_another_mount_in_the_same_view() {
         let setup = Setup::start().await;
         let mut agent = setup.accept().await;
 
         send(&mut agent, &mounted("old")).await;
-        assert_eq!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::ForegroundChanged(
-                ForegroundSession::Mounted(session("old"))
-            ))
-        );
+        assert_eq!(setup.next_view(LONG).await, Some(foreground("old")));
 
         // a new share takes the foreground; the old one stays mounted next to it
         send(&mut agent, &two_mounted()).await;
         assert_eq!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::OtherMountsChanged(vec![session(
-                "old"
-            )]))
-        );
-        assert_eq!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::ForegroundChanged(
-                ForegroundSession::Mounted(session("new"))
-            ))
+            setup.next_view(LONG).await,
+            Some(AgentView {
+                other_mounts: vec![session("old")],
+                ..foreground("new")
+            })
         );
 
         send(&mut agent, &two_mounted()).await;
-        assert_eq!(setup.next_update(SHORT).await, None);
+        assert_eq!(setup.next_view(SHORT).await, None);
     }
 
     fn connection(id: u8) -> ConnectionDetails {
@@ -549,15 +493,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connected_agents_are_forwarded_once_per_change() {
+    async fn connected_agents_are_published_once_per_change() {
         let setup = Setup::start().await;
         let mut agent = setup.accept().await;
 
         send(&mut agent, &mounted("a")).await;
-        assert!(matches!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::ForegroundChanged(_))
-        ));
+        assert_eq!(setup.next_view(LONG).await, Some(foreground("a")));
 
         let agents = ConnectedAgents {
             resource: "Holo".to_owned(),
@@ -578,43 +519,40 @@ mod tests {
         with_agents.connected_agents = Some(agents.clone());
         send(&mut agent, &with_agents).await;
         assert_eq!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::ConnectedAgentsChanged(Some(
-                agents
-            )))
+            setup.next_view(LONG).await,
+            Some(AgentView {
+                connected_agents: Some(agents),
+                ..foreground("a")
+            })
         );
 
         send(&mut agent, &with_agents).await;
-        assert_eq!(setup.next_update(SHORT).await, None);
+        assert_eq!(setup.next_view(SHORT).await, None);
     }
 
     #[tokio::test]
-    async fn dropped_connection_is_reported_once_and_recovers() {
+    async fn dropped_connection_is_published_once_and_recovers() {
         let setup = Setup::start().await;
         let agent = setup.accept().await;
         drop(agent);
 
-        assert_eq!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::ConnectionDropped)
-        );
-        // the reconnect attempt fails as well, without another update:
+        let dropped = AgentView {
+            connection_dropped: true,
+            ..AgentView::default()
+        };
+        assert_eq!(setup.next_view(LONG).await, Some(dropped));
+        // the reconnect attempt fails as well, without another view:
         let agent = setup.accept().await;
         drop(agent);
-        assert_eq!(setup.next_update(SHORT).await, None);
+        assert_eq!(setup.next_view(SHORT).await, None);
 
         let mut agent = setup.accept().await;
         send(&mut agent, &mounted("a")).await;
-        assert_eq!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::ConnectionRestored)
-        );
+        assert_eq!(setup.next_view(LONG).await, Some(foreground("a")));
     }
 
-    #[tokio::test]
-    async fn blocked_hand_off_is_reported_and_release_is_sent() {
-        let setup = Setup::start().await;
-        let mut agent = setup.accept().await;
+    /// The previous user's `old` is still mounted, which blocks `new`
+    fn blocked() -> ToSessionGui {
         let mut blocked = mounted("old");
         blocked.desired_shares = Some(Shares {
             foreground_share_id: Some("new".to_owned()),
@@ -626,12 +564,16 @@ mod tests {
                 message: "another user's drive is still connected".to_owned(),
             });
         }
+        blocked
+    }
 
-        send(&mut agent, &blocked).await;
-        assert_eq!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::HandOffBlocked(true))
-        );
+    #[tokio::test]
+    async fn blocked_hand_off_is_published_and_release_is_sent() {
+        let setup = Setup::start().await;
+        let mut agent = setup.accept().await;
+
+        send(&mut agent, &blocked()).await;
+        assert!(setup.next_view(LONG).await.unwrap().hand_off_blocked);
 
         setup.monitor.force_release();
         let message = tokio::time::timeout(LONG, agent.next())
@@ -643,6 +585,45 @@ mod tests {
             serde_json::from_str::<ToAgentFromGui>(message.to_text().unwrap()).unwrap(),
             ToAgentFromGui::ForceRelease
         );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_connection_keeps_the_shares_but_not_the_release_offer() {
+        let setup = Setup::start().await;
+        let mut agent = setup.accept().await;
+        send(&mut agent, &blocked()).await;
+        let blocked = setup.next_view(LONG).await.unwrap();
+        assert!(blocked.hand_off_blocked);
+
+        drop(agent);
+        assert_eq!(
+            setup.next_view(LONG).await,
+            Some(AgentView {
+                hand_off_blocked: false,
+                connection_dropped: true,
+                ..blocked
+            })
+        );
+    }
+
+    /// The monitor stops on its own only if its runtime can't be built or it panics, which a
+    /// test can't cause; so this drops the `Views` the monitor would drop
+    #[test]
+    fn a_stopped_monitor_leaves_the_connection_dropped() {
+        let (tx, rx) = mpsc::channel();
+        drop(Views {
+            tx,
+            last: foreground("a"),
+            ctx: egui::Context::default(),
+        });
+        assert_eq!(
+            rx.try_recv(),
+            Ok(AgentView {
+                connection_dropped: true,
+                ..foreground("a")
+            })
+        );
+        assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Disconnected));
     }
 
     #[tokio::test]
@@ -659,10 +640,7 @@ mod tests {
         send(&mut agent, &no_helper).await;
         send(&mut agent, &mounted("a")).await;
         // the last message changes the foreground, so all three have been processed then:
-        assert!(matches!(
-            setup.next_update(LONG).await,
-            Some(ForegroundMonitorUpdate::ForegroundChanged(_))
-        ));
+        assert_eq!(setup.next_view(LONG).await, Some(foreground("a")));
         assert_eq!(setup.launcher.count(), 1);
     }
 

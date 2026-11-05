@@ -7,7 +7,8 @@ use modama_agent_gui::{
     pages::{Page, PageConnecting, PageOverview},
     service::ConnectedAgent,
     state::{
-        ActiveSession, AgentIdentity, ForegroundSession, OperationId, PendingSession, SignedIn,
+        ActiveSession, AgentIdentity, AgentView, ForegroundSession, OperationId, PendingSession,
+        SignedIn,
     },
     styles,
 };
@@ -559,11 +560,11 @@ fn confirming_close_waits_for_the_authoritative_update() {
     );
     assert!(harness.query_by_label("Closing…").is_some());
 
-    harness
-        .state_mut()
-        .handle_action(modama_agent_gui::actions::Action::ForegroundChanged(
-            ForegroundSession::None,
-        ));
+    let app_state = &mut harness.state_mut().app_state;
+    app_state.apply_agent_view(AgentView {
+        foreground: ForegroundSession::None,
+        ..app_state.agent.clone()
+    });
     harness.run_steps(1);
 
     assert!(harness.query_by_label("Start Session").is_some());
@@ -699,11 +700,26 @@ fn other_mount(share_id: &str, session: &str) -> ActiveSession {
     }
 }
 
+/// The agent reports `other_mounts` next to the shown foreground share
+fn show_other_mounts(
+    harness: &mut Harness<'static, AgentGuiApp>,
+    other_mounts: Vec<ActiveSession>,
+) {
+    let app_state = &mut harness.state_mut().app_state;
+    app_state.apply_agent_view(AgentView {
+        other_mounts,
+        ..app_state.agent.clone()
+    });
+}
+
 fn with_other_mounts(harness: &mut Harness<'static, AgentGuiApp>) {
-    harness.state_mut().app_state.observe_other_mounts(vec![
-        other_mount("older-share", "2026-07-27-ingest"),
-        other_mount("old-share", "2026-07-28-ingest"),
-    ]);
+    show_other_mounts(
+        harness,
+        vec![
+            other_mount("older-share", "2026-07-27-ingest"),
+            other_mount("old-share", "2026-07-28-ingest"),
+        ],
+    );
     harness.run_steps(1);
 }
 
@@ -731,7 +747,8 @@ fn other_mounts_snapshots() {
 
     // the cards are taller than the window: they scroll below the heading
     let mut scrolled = overview_harness(false, true);
-    scrolled.state_mut().app_state.observe_other_mounts(
+    show_other_mounts(
+        &mut scrolled,
         (21..=28)
             .map(|day| other_mount(&format!("share-{day}"), &format!("2026-07-{day}-ingest")))
             .collect(),
