@@ -237,6 +237,10 @@ you can also do this via systemd, using the following configuration:
 ```
 [Unit]
 Description=Modama session helper (mounts ingest shares)
+# Skip display-manager greeters and other system users: they get a user
+# manager too, but have no shares to mount.
+ConditionUser=!@system
+ConditionUser=!gdm-greeter
 
 [Service]
 ExecStart=/usr/local/bin/modama-agent-gui --agent-url http://localhost:3003/ session-helper
@@ -250,6 +254,12 @@ WantedBy=default.target
 Together with `modama-agent`, this will automatically mount ingest shares for all users.
 Save this file as `/etc/systemd/user/modama-session-helper.service` and run
 `systemctl --global enable modama-session-helper.service` to enable it for all users.
+
+The `ConditionUser=` lines keep the helper from starting for the display manager's login
+screen, which runs its own user manager: `@system` covers greeter accounts in the system
+UID range (`Debian-gdm`, `lightdm`, `sddm`), and `gdm-greeter` covers the greeter account
+of newer GDM releases, whose UID lies outside that range. If another account still shows up as a session helper, add a
+`ConditionUser=!<name>` line for it.
 
 #### Windows
 
