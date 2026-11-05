@@ -358,6 +358,7 @@ impl MgmtApiConnection {
         let (client, jar) = http_client(&self.base, Some(session))?;
         let request = CreateSessionRequest {
             name: name.to_owned(),
+            description: None,
         };
         let result = client
             .add_session_mgmt_api_projects_project_sessions_post(project, API_VERSION, request)
