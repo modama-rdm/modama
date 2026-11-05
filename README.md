@@ -5,7 +5,7 @@
 This project uses git submodules. You can pull all of them automatically when cloning, like this:
 
 ```
-git clone --recursive gitlab@iffgit.fz-juelich.de:weber/data-management-system.git
+git clone --recursive https://github.com/modama-rdm/modama.git
 ```
 
 Or, after cloning, initialize and clone the submodules:

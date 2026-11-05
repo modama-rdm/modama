@@ -23,7 +23,7 @@ services:
     build:
       context: ../modama-rs/
       dockerfile: Dockerfile-ca-cli
-    image: iffregistry.fz-juelich.de/weber/data-management-system/ca:latest
+    image: ghcr.io/modama-rdm/ca:latest
     entrypoint: ["/bin/bash", "/init-testenv.sh"]
     command: ["init"]
     restart: "no"

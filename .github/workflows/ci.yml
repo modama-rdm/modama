@@ -225,7 +225,7 @@ jobs:
           -v "$PWD/modama-rs/ci:/ci:ro"
           docker.io/library/ubuntu:18.04 sh /ci/check-oldest-linux-runtime.sh /bin-under-test
 
-  # Images are built and pushed only after the tests passed, as the GitLab build stage did.
+  # Images are built and pushed only after the tests passed.
   images:
     needs:
       - unit-tests
