@@ -51,7 +51,7 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
 
         let mut app = AgentGuiApp::new();
         app.page = Page::Overview(PageOverview::new());
-        app.app_state.connected_agents = Some(representative_connected_agents(&[
+        app.app_state.agent.connected_agents = Some(representative_connected_agents(&[
             "detector-pc",
             "k2-gpu",
             "tem-camera",
@@ -60,7 +60,7 @@ fn overview_harness(dark: bool, logged_in: bool) -> Harness<'static, AgentGuiApp
             app.app_state.signed_in = Some(SignedIn {
                 username: "representative.user".to_string(),
             });
-            app.app_state.foreground = ForegroundSession::Mounted(ActiveSession {
+            app.app_state.agent.foreground = ForegroundSession::Mounted(ActiveSession {
                 share_id: "representative-share".to_owned(),
                 project: "representative-project".to_string(),
                 session: "2026-07-29-ingest".to_string(),
@@ -103,7 +103,9 @@ fn overview_snapshots() {
 
     // long mount paths wrap, preferably after a slash
     let mut long_path = overview_harness(false, true);
-    if let ForegroundSession::Mounted(session) = &mut long_path.state_mut().app_state.foreground {
+    if let ForegroundSession::Mounted(session) =
+        &mut long_path.state_mut().app_state.agent.foreground
+    {
         session.mount_path = Some(
             "/run/user/1000/gvfs/smb-share:server=modama-storage.example.org,share=representative-project-2026-07-29-ingest/incoming/detector-frames".to_owned(),
         );
@@ -124,7 +126,7 @@ fn overview_snapshots() {
     results.extend_harness(&mut logged_out);
 
     let mut mounting = overview_harness(false, false);
-    mounting.state_mut().app_state.foreground = ForegroundSession::Mounting(
+    mounting.state_mut().app_state.agent.foreground = ForegroundSession::Mounting(
         PendingSession {
             share_id: "mounting-share".to_owned(),
             project: "representative-project".to_owned(),
@@ -138,7 +140,7 @@ fn overview_snapshots() {
     results.extend_harness(&mut mounting);
 
     let mut hand_off_blocked = overview_harness(false, false);
-    hand_off_blocked.state_mut().app_state.foreground = ForegroundSession::Mounting(
+    hand_off_blocked.state_mut().app_state.agent.foreground = ForegroundSession::Mounting(
         PendingSession {
             share_id: "mounting-share".to_owned(),
             project: "representative-project".to_owned(),
@@ -147,7 +149,11 @@ fn overview_snapshots() {
         },
         "another user's drive is still connected; close their files or release it".to_owned(),
     );
-    hand_off_blocked.state_mut().app_state.hand_off_blocked = true;
+    hand_off_blocked
+        .state_mut()
+        .app_state
+        .agent
+        .hand_off_blocked = true;
     hand_off_blocked.run_steps(1);
     hand_off_blocked.snapshot("overview_hand_off_blocked");
     results.extend_harness(&mut hand_off_blocked);
@@ -205,7 +211,11 @@ fn overview_snapshots() {
     }
 
     let mut connection_dropped = overview_harness(false, true);
-    connection_dropped.state_mut().app_state.connection_dropped = true;
+    connection_dropped
+        .state_mut()
+        .app_state
+        .agent
+        .connection_dropped = true;
     connection_dropped.run_steps(2);
     connection_dropped.snapshot("overview_connection_dropped");
     results.extend_harness(&mut connection_dropped);
@@ -216,7 +226,7 @@ fn overview_snapshots() {
 #[test]
 fn dropped_connection_indicator_does_not_disable_controls() {
     let mut harness = overview_harness(false, true);
-    harness.state_mut().app_state.connection_dropped = true;
+    harness.state_mut().app_state.agent.connection_dropped = true;
     harness.run_steps(2);
 
     assert!(
@@ -443,7 +453,8 @@ fn top_bar_tab_order_follows_its_visual_order() {
 #[test]
 fn missing_agent_mount_path_is_explained() {
     let mut active = overview_harness(false, true);
-    let ForegroundSession::Mounted(session) = &mut active.state_mut().app_state.foreground else {
+    let ForegroundSession::Mounted(session) = &mut active.state_mut().app_state.agent.foreground
+    else {
         panic!("the harness should have an active session");
     };
     session.mount_path = None;
@@ -463,7 +474,7 @@ fn closing_requires_confirmation_and_can_be_cancelled() {
     harness.run();
 
     assert!(matches!(
-        harness.state().app_state.foreground,
+        harness.state().app_state.agent.foreground,
         ForegroundSession::Mounted(_)
     ));
     assert!(harness.query_by_label("Close ingest session?").is_some());
@@ -471,7 +482,7 @@ fn closing_requires_confirmation_and_can_be_cancelled() {
     harness.run();
 
     assert!(matches!(
-        harness.state().app_state.foreground,
+        harness.state().app_state.agent.foreground,
         ForegroundSession::Mounted(_)
     ));
     assert!(harness.query_by_label("Close ingest session?").is_none());
@@ -524,7 +535,7 @@ fn escape_dismisses_close_confirmation() {
     harness.run();
 
     assert!(matches!(
-        harness.state().app_state.foreground,
+        harness.state().app_state.agent.foreground,
         ForegroundSession::Mounted(_)
     ));
     assert!(harness.query_by_label("Close ingest session?").is_none());
@@ -620,7 +631,8 @@ fn started_by_is_shown_only_when_known() {
     assert!(known.query_by_label("Started by").is_some());
 
     let mut unknown = overview_harness(false, true);
-    if let ForegroundSession::Mounted(session) = &mut unknown.state_mut().app_state.foreground {
+    if let ForegroundSession::Mounted(session) = &mut unknown.state_mut().app_state.agent.foreground
+    {
         session.created_by = None;
     }
     unknown.run_steps(1);
@@ -644,7 +656,8 @@ fn start_while_open_snapshots() {
         agent_name: "k2".to_owned(),
         resource_name: "Holo".to_owned(),
     });
-    if let ForegroundSession::Mounted(session) = &mut others.state_mut().app_state.foreground {
+    if let ForegroundSession::Mounted(session) = &mut others.state_mut().app_state.agent.foreground
+    {
         session.created_by = Some("other.user".to_owned());
     }
     others.run_steps(1);
@@ -758,16 +771,17 @@ fn connected_agents_snapshots() {
 
     // more agents than the list shows: it scrolls on its own
     let mut scrolled = overview_harness(false, true);
-    scrolled.state_mut().app_state.connected_agents = Some(representative_connected_agents(&[
-        "detector-pc",
-        "eels-spectrometer",
-        "k2-gpu",
-        "merlin-detector",
-        "plasma-cleaner",
-        "stage-controller",
-        "tem-camera",
-        "tomography-pc",
-    ]));
+    scrolled.state_mut().app_state.agent.connected_agents =
+        Some(representative_connected_agents(&[
+            "detector-pc",
+            "eels-spectrometer",
+            "k2-gpu",
+            "merlin-detector",
+            "plasma-cleaner",
+            "stage-controller",
+            "tem-camera",
+            "tomography-pc",
+        ]));
     scrolled.run_steps(1);
     let list = scrolled.get_by_label("tomography-pc").rect();
     scrolled.event(egui::Event::PointerMoved(egui::pos2(
@@ -789,12 +803,13 @@ fn connected_agents_snapshots() {
 
     // one agent per mount status, scrolled to the last one, the pointer on its (unknown) ring
     let mut statuses = overview_harness(false, true);
-    statuses.state_mut().app_state.connected_agents = Some(representative_connected_agents(&[
-        "detector-pc",
-        "k2-gpu",
-        "merlin-detector",
-        "tem-camera",
-    ]));
+    statuses.state_mut().app_state.agent.connected_agents =
+        Some(representative_connected_agents(&[
+            "detector-pc",
+            "k2-gpu",
+            "merlin-detector",
+            "tem-camera",
+        ]));
     statuses.run_steps(1);
     let list = statuses.get_by_label("detector-pc").rect();
     statuses.event(egui::Event::PointerMoved(list.center()));
@@ -820,7 +835,7 @@ fn connected_agents_snapshots() {
     results.extend_harness(&mut statuses);
 
     let mut alone = overview_harness(false, true);
-    alone.state_mut().app_state.connected_agents = Some(representative_connected_agents(&[]));
+    alone.state_mut().app_state.agent.connected_agents = Some(representative_connected_agents(&[]));
     alone.run_steps(1);
     assert!(
         alone
@@ -840,7 +855,7 @@ fn connected_agents_snapshots() {
         status: Some(AgentMountStatus::Idle),
         connection: representative_connection(9, Some("k2")),
     };
-    anonymous.state_mut().app_state.connected_agents = Some(agents);
+    anonymous.state_mut().app_state.agent.connected_agents = Some(agents);
     // two frames: in the first, egui's debug build flags the own row's tag, whose ID changed
     // with the row's contents
     anonymous.run_steps(2);
@@ -859,7 +874,7 @@ fn connected_agents_snapshots() {
 #[test]
 fn connected_agents_are_shown_even_before_they_are_known() {
     let mut harness = overview_harness(false, true);
-    harness.state_mut().app_state.connected_agents = None;
+    harness.state_mut().app_state.agent.connected_agents = None;
     harness.run_steps(1);
     assert!(harness.query_by_label("Connected agents").is_some());
     assert!(
