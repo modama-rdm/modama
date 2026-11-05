@@ -3,8 +3,10 @@
 # (glibc 2.27, GLib 2.56.4), with nothing but GLib installed.
 #
 # LD_BIND_NOW makes the dynamic linker resolve every imported symbol at startup, so a glibc or
-# GLib function the old libraries lack fails the start right away, naming the symbol. `--help`
-# is answered before anything else runs, so no display, D-Bus or GVfs is needed.
+# GLib function the old libraries lack fails the start right away, naming the symbol.
+# `--version` is answered before anything else runs, so no display, D-Bus or GVfs is needed.
+# The check prints each binary's version and fails on "unknown", which a build without git
+# history reports.
 #
 # Usage, inside an ubuntu:18.04 container: check-oldest-linux-runtime.sh <folder with the binaries>
 # Locally, from modama-rs/ after `just -f ci.just linux-build-agent`:
@@ -19,9 +21,15 @@ DEBIAN_FRONTEND=noninteractive apt-get -qq install -y --no-install-recommends li
 echo "runtime: $(ldd --version | head -n 1), GLib $(dpkg-query -W -f '${Version}' libglib2.0-0)"
 
 for binary in modama-agent modama-agent-gui; do
-    if ! LD_BIND_NOW=1 "$dir/$binary" --help >/dev/null; then
+    if ! version="$(LD_BIND_NOW=1 "$dir/$binary" --version)"; then
         echo "$binary does not start on this distribution (see the loader's error above)" >&2
         exit 1
     fi
-    echo "$binary starts"
+    echo "$binary starts: $version"
+    case "$version" in
+    *unknown*)
+        echo "$binary was built without git history, so its version is unknown" >&2
+        exit 1
+        ;;
+    esac
 done
