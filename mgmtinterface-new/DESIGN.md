@@ -82,6 +82,10 @@ typography:
     fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace"
     fontSize: 0.875rem
     fontWeight: 500
+  mono-supporting:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace"
+    fontSize: 0.8125rem
+    fontWeight: 400
 
 spacing:
   unit: 4px
@@ -188,6 +192,8 @@ components:
     padding: 20px
   error-toast-padding-y:
     padding: 20px
+  footer:
+    height: 48px
 ---
 
 # Design Specification: ER-C Data Management UI
@@ -214,6 +220,54 @@ The interface follows a 4px base rhythm with named spacing tokens for component
 padding, form grouping, headers, and the application shell. The native
 application defaults to a 1024px × 768px window with 27px content padding.
 
+### Guides
+Every screen is laid out on four vertical guides, two on each side:
+
+- The **outer guides** run `app-window-margin-x` + `app-shell` padding (35px)
+  in from the window's left and right edges.
+- The **inner guides** run one **guide inset** further in: the
+  `standard-border` width plus 20px of horizontal padding (21px), so 56px
+  from the window edges.
+
+```text
+window  outer   inner                               inner   outer  window
+edge    guide   guide                               guide   guide    edge
+|       |       |                                       |       |       |
+| top bar: full width                                                   |
+|               logo                         [    Log in        ]       |
+|               Page heading                                            |
+|       [       card content, nested boxes, dividers            ]       |
+|                                    [ toast     message        ]       |
+| footer: full width                              v0.8.0                |
+|       |       |                                       |       |       |
+```
+
+(`[` and `]` are frame edges; text ends on the inner guide.)
+
+Elements line up on them as follows:
+
+- **Frames** that reach the side of the layout (content cards, full-width
+  inputs such as the project search, toasts, the outermost top-bar button) put their outer edge on the
+  outer guide. Their border and horizontal padding together equal the guide
+  inset, so their content lands on the inner guide. This is why
+  `content-card-padding-x`, `button-padding-x` and `error-toast-padding-x`
+  are all 20px; they change together or not at all.
+- **Unframed content** (the logo, page headings, flow navigation, labels
+  outside cards, the footer's version) aligns with the inner guide.
+- **Inside a card**, content, nested boxes and dividers span from inner guide
+  to inner guide.
+- The top bar and the footer run the full window width; only their content
+  follows the guides.
+
+Vertically, the content area runs between the top bar and the footer, inset
+by `app-window-margin-y` + `app-shell` padding at its top and bottom. Overlays
+anchored to the bottom, such as toasts, put their outer bottom edge on that
+bottom inset, above the footer, never over it.
+
+When you add something to a screen, place it on these guides. If a design
+genuinely needs a different alignment, describe it in this section before
+building it, so that the web UI and the native app stay consistent.
+
 ## Elevation & Depth
 Cards use a subtle one-pixel-offset shadow with a four-pixel blur. Borders and
 tonal surface differences carry most of the visual hierarchy in both themes.
@@ -239,6 +293,12 @@ with 27px content padding. Standard outlines and dividers use the 1px
 The persistent top bar is 56px high with 28px horizontal padding. Its logo,
 dividers, action controls, icons, avatar, and spacing use the corresponding
 `top-bar` component tokens.
+
+### Footer
+The footer closes every screen: `footer` height, `surface` background, a
+`standard-border` line in `outline` on top. It shows the app version in
+`mono-supporting` type and `on-surface-dim` color, right-aligned on the inner
+right guide.
 
 ### Button
 Supported variants:

@@ -47,8 +47,8 @@ impl ToastState {
             .fixed_pos(
                 ctx.viewport_rect().right_bottom()
                     + egui::vec2(
-                        -styles::toast_right_inset_from_window(),
-                        -styles::toast_bottom_inset_from_window(),
+                        -styles::outer_guide_inset(),
+                        -styles::bottom_overlay_inset(),
                     ),
             )
             .pivot(Align2::RIGHT_BOTTOM)

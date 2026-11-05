@@ -889,7 +889,7 @@ fn session_creation_hint(ui: &mut egui::Ui, session_date: Date) {
 }
 
 fn content_guide_widget_offset(horizontal_padding: f32) -> f32 {
-    (styles::content_card_inset() - horizontal_padding).max(0.0)
+    (styles::guide_inset() - horizontal_padding).max(0.0)
 }
 
 #[cfg(test)]

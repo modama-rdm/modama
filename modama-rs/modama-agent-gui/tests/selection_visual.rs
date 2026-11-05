@@ -852,7 +852,7 @@ fn project_toolbar_and_dynamic_list_follow_available_geometry() {
         let guide = harness.get_by_label("go to Overview").rect().left();
         let flow_overview = harness.get_by_label("Overview").rect();
         let heading = harness.get_by_label("Select a project").rect();
-        let card_outer_left = styles::content_card_outer_inset_from_window();
+        let card_outer_left = styles::outer_guide_inset();
         let card_border = styles::components::standard_border::width::EGUI_POINTS;
         assert!((heading.left() - guide).abs() <= 1.0);
         assert!((flow_overview.left() - guide).abs() <= 1.0);
@@ -1333,7 +1333,7 @@ fn session_list_follows_available_geometry_and_shared_guide() {
             .rect();
         let action = harness.get_by_label("Select Session").rect();
         let card_border = styles::components::standard_border::width::EGUI_POINTS;
-        let card_outer_left = styles::content_card_outer_inset_from_window();
+        let card_outer_left = styles::outer_guide_inset();
 
         assert!((heading.left() - guide).abs() <= 1.0);
         assert!((flow_overview.left() - guide).abs() <= 1.0);

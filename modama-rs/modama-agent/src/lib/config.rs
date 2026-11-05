@@ -11,6 +11,7 @@ use modama_common::{
     },
     config::{AgentConfigFile, AgentConfigFileClientCert},
     tokens::{TokenError, TokenFetcher, TokenProvider},
+    version::modama_git_version,
 };
 use thiserror::Error;
 use tokio::{io::AsyncReadExt, sync::OnceCell};
@@ -20,6 +21,7 @@ use url::Url;
 use crate::local_net_token_provider::{DiscoveryAddr, LocalNetTokenProvider};
 
 #[derive(Parser, Debug)]
+#[command(version = modama_git_version())]
 pub struct CliArgs {
     #[arg(long, global = true)]
     pub config_path: Option<PathBuf>,
@@ -32,6 +34,9 @@ pub struct CliArgs {
 pub enum Command {
     /// Run under an operating-system service manager.
     RunService,
+
+    /// Print the version.
+    Version,
 
     /// Install and start the Windows service.
     #[cfg(windows)]
@@ -301,6 +306,8 @@ impl AgentConfig {
 
 #[cfg(test)]
 mod cli_tests {
+    use clap::CommandFactory;
+
     use super::*;
 
     #[test]
@@ -321,6 +328,31 @@ mod cli_tests {
         ])?;
         assert!(matches!(args.command, Some(Command::RunService)));
         assert_eq!(args.config_path, Some(PathBuf::from("agent.toml")));
+        Ok(())
+    }
+
+    #[test]
+    fn cli_definition_is_consistent() {
+        CliArgs::command().debug_assert();
+    }
+
+    #[test]
+    fn version_flag_prints_the_git_version() {
+        for flag in ["--version", "-V"] {
+            let error = CliArgs::try_parse_from(["modama-agent", flag])
+                .expect_err("should print the version instead of running");
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+            assert_eq!(
+                error.to_string(),
+                format!("modama-agent {}\n", modama_git_version())
+            );
+        }
+    }
+
+    #[test]
+    fn version_subcommand_parses() -> Result<(), clap::Error> {
+        let args = CliArgs::try_parse_from(["modama-agent", "version"])?;
+        assert!(matches!(args.command, Some(Command::Version)));
         Ok(())
     }
 }

@@ -4,17 +4,21 @@
 
 use std::{error::Error, path::PathBuf, sync::Arc};
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use eframe::egui;
 use modama_agent_gui::{
     app::AgentGuiApp, config::load_config, mount_popup, service::HttpAgentService, styles,
     wgpu_setup,
 };
-use modama_common::logging::{init_logging, init_user_session_logging};
+use modama_common::{
+    logging::{init_logging, init_user_session_logging},
+    version::modama_git_version,
+};
 use url::Url;
 
 /// The Modama GUI, and the programs it runs in the user's session
 #[derive(Debug, Parser)]
+#[command(version = modama_git_version())]
 struct Cli {
     /// Load this configuration file instead of searching standard locations.
     #[arg(long, global = true)]
@@ -37,11 +41,19 @@ enum Command {
     /// The session helper's mount popup; talks to the helper over stdin/stdout
     #[command(hide = true)]
     MountPopup,
+
+    /// Print the version. On Windows, redirect the output to a file to see it, or read the
+    /// version in the window's footer.
+    Version,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     match cli.command {
+        Some(Command::Version) => {
+            print!("{}", Cli::command().render_version());
+            Ok(())
+        }
         Some(Command::SessionHelper) => {
             // the helper sets up its own logging (a file on Windows)
             let config = load_config(cli.config_path.as_deref(), cli.agent_url)?;
@@ -148,3 +160,33 @@ fn show_start_error(message: &str, log_path: Option<&std::path::Path>) {
 
 #[cfg(not(windows))]
 fn show_start_error(_message: &str, _log_path: Option<&std::path::Path>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_definition_is_consistent() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn version_flag_prints_the_git_version() {
+        for flag in ["--version", "-V"] {
+            let error = Cli::try_parse_from(["modama-agent-gui", flag])
+                .expect_err("should print the version instead of running");
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+            assert_eq!(
+                error.to_string(),
+                format!("modama-agent-gui {}\n", modama_git_version())
+            );
+        }
+    }
+
+    #[test]
+    fn version_subcommand_parses() -> Result<(), clap::Error> {
+        let cli = Cli::try_parse_from(["modama-agent-gui", "version"])?;
+        assert!(matches!(cli.command, Some(Command::Version)));
+        Ok(())
+    }
+}

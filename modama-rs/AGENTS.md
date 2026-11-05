@@ -28,8 +28,21 @@ rather keep them around for inspection and eventual acceptance.
 `modama-agent-gui/tests/snapshots/review/`; point the user there
 (`just review-snapshots` regathers them).
 
-In general, updating GUI snapshots should only be done after manual
-inspection of the differences.
+Accepting snapshot differences is the user's decision. After a change that
+alters snapshots, leave the review folder in place, tell the user which
+differences to expect and where to look, and run `just update-snapshots`
+(and `just clean`) only after they accepted. Looking at the review images
+yourself is helpful, but it doesn't replace the user's acceptance.
+
+## GUI layout
+
+Read "Layout › Guides" in `mgmtinterface-new/DESIGN.md` before placing
+anything in the GUI. Positions on the guides come from the guide helpers in
+`modama-agent-gui/src/styles.rs` (`outer_guide_inset`, `inner_guide_inset`,
+`guide_inset`, `bottom_overlay_inset`), never from new numbers. Every new
+element placed on a guide gets a geometry test, like
+`footer_version_sits_on_the_inner_right_guide` in
+`modama-agent-gui/tests/overview_visual.rs`.
 
 ## Dependencies
 

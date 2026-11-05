@@ -37,7 +37,7 @@ pub(crate) fn flow_navigation(
         .unwrap_or_default();
 
     ui.horizontal(|ui| {
-        ui.add_space(styles::content_card_inset());
+        ui.add_space(styles::guide_inset());
         ui.spacing_mut().item_spacing.x = styles::spacing::flow_navigation_gap::EGUI_POINTS;
 
         FlowStage::ALL

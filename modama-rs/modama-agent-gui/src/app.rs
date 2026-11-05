@@ -1,4 +1,5 @@
 use eframe::egui::{self, Margin, vec2};
+use modama_common::version::modama_git_version;
 use std::sync::Arc;
 
 #[cfg(feature = "autostart")]
@@ -6,6 +7,7 @@ use crate::components::autostart_offer::{AutostartOffer, AutostartOfferAction};
 use crate::{
     actions::{Action, LoginDestination, RetryAction, TaskFailure},
     components::toast::{ToastAction, ToastState},
+    footer::show_footer,
     foreground_monitor::{ForegroundMonitor, ForegroundMonitorUpdate, events_url},
     helper_launch::ProcessLauncher,
     navigation_progress::NavigationProgress,
@@ -31,7 +33,13 @@ pub struct AgentGuiApp {
     foreground_monitor: Option<ForegroundMonitor>,
     /// The agent's base URL, if the app should follow the agent's stream and launch helpers
     agent_url: Option<String>,
+    /// Shown in the footer
+    version: &'static str,
 }
+
+/// The version shown by an app on the stub service (tests, guide screenshots). It's fixed, so
+/// snapshots don't change with every commit, and it can't be mistaken for a release.
+pub const STUB_VERSION: &str = "v0.0.0-example";
 
 impl Default for AgentGuiApp {
     fn default() -> Self {
@@ -41,19 +49,23 @@ impl Default for AgentGuiApp {
 
 impl AgentGuiApp {
     pub fn new() -> Self {
-        Self::build(StubAgentService::shared(), None)
+        Self::build(StubAgentService::shared(), None, STUB_VERSION)
     }
 
     pub fn with_service(service: Arc<HttpAgentService>) -> Self {
         let agent_url = service.agent_url().to_owned();
-        Self::build(service, Some(agent_url))
+        Self::build(service, Some(agent_url), modama_git_version())
     }
 
     pub fn with_service_without_monitor(service: Arc<dyn AgentService>) -> Self {
-        Self::build(service, None)
+        Self::build(service, None, STUB_VERSION)
     }
 
-    fn build(service: Arc<dyn AgentService>, agent_url: Option<String>) -> Self {
+    fn build(
+        service: Arc<dyn AgentService>,
+        agent_url: Option<String>,
+        version: &'static str,
+    ) -> Self {
         Self {
             page: Page::Connecting(PageConnecting::with_service(Arc::clone(&service))),
             app_state: AgentAppState::new(),
@@ -65,6 +77,7 @@ impl AgentGuiApp {
             service,
             foreground_monitor: None,
             agent_url,
+            version,
         }
     }
 
@@ -516,6 +529,7 @@ impl eframe::App for AgentGuiApp {
             show_login_action,
         );
         self.handle_action(action);
+        show_footer(ui, self.version);
 
         let central_panel_frame =
             egui::Frame::central_panel(ui.style()).inner_margin(Margin::symmetric(
