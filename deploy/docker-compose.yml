@@ -28,7 +28,7 @@ services:
   nextcloud:
     hostname: nextcloud
     build: ./nextcloud
-    image: iffregistry.fz-juelich.de/weber/data-management-system/nextcloud:latest
+    image: ghcr.io/modama-rdm/nextcloud:latest
 
     environment:
       POSTGRES_HOST: "db"
@@ -67,7 +67,7 @@ services:
   webdav-backend:
     hostname: webdav-backend
     build: './wsgidav'
-    image: iffregistry.fz-juelich.de/weber/data-management-system/wsgidav:latest
+    image: ghcr.io/modama-rdm/wsgidav:latest
     restart: always
 
     volumes:
@@ -108,7 +108,7 @@ services:
     build:
       context: ..
       dockerfile: mgmtinterface-new/Dockerfile
-    image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-new:latest
+    image: ghcr.io/modama-rdm/mgmtinterface-new:latest
 
   mgmtinterface-api:  # new FastAPI API (#172), served at /mgmt-api/
     hostname: mgmtinterface-api
@@ -116,7 +116,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/mgmtinterface-api/Dockerfile
-    image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface-api:latest
+    image: ghcr.io/modama-rdm/mgmtinterface-api:latest
     # Refuses to start without a session secret: docker-compose.prod.yml mounts
     # it from the host, and the dev override sets one.
     volumes:
@@ -146,7 +146,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/permissions/Dockerfile
-    image: iffregistry.fz-juelich.de/weber/data-management-system/permissions:latest
+    image: ghcr.io/modama-rdm/permissions:latest
 
     volumes:
       - "ssspipes:/var/lib/sss/pipes/"
@@ -159,7 +159,7 @@ services:
   sssd:
     hostname: sssd
     build: './sssd'
-    image: iffregistry.fz-juelich.de/weber/data-management-system/sssd:latest
+    image: ghcr.io/modama-rdm/sssd:latest
     restart: always
     tmpfs:
       - /run
@@ -176,7 +176,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/watchdog/Dockerfile
-    image: iffregistry.fz-juelich.de/weber/data-management-system/watchdog:latest
+    image: ghcr.io/modama-rdm/watchdog:latest
 
   smbdrop:
     hostname: smbdrop
@@ -184,7 +184,7 @@ services:
     build:
       context: ../modama-rs/
       dockerfile: Dockerfile-smbdrop
-    image: iffregistry.fz-juelich.de/weber/data-management-system/smbdrop:latest
+    image: ghcr.io/modama-rdm/smbdrop:latest
     # cap_add:
     #   - SYS_ADMIN
     # security_opt:
@@ -204,7 +204,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/mgmtinterface/Dockerfile
-    image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface:latest
+    image: ghcr.io/modama-rdm/mgmtinterface:latest
     environment:
       - MGMTINTERFACE_SECRET=/mgmt_secret.py
     volumes:

@@ -26,7 +26,7 @@ authors = [
 ]
 
 [project.urls]
-repository = "https://iffgit.fz-juelich.de/weber/data-management-system"
+repository = "https://github.com/modama-rdm/modama"
 
 [tool.setuptools.dynamic]
 version = {attr = "modama_common.__version__"}

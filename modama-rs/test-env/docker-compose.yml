@@ -215,7 +215,7 @@ services:
     # build:
     #   context: ../../../
     #   dockerfile: er-c-data/mgmtinterface/Dockerfile
-    image: iffregistry.fz-juelich.de/weber/data-management-system/mgmtinterface:latest
+    image: ghcr.io/modama-rdm/mgmtinterface:latest
     environment:
       - MGMTINTERFACE_SECRET=/mgmt_secret.py
     volumes:
@@ -243,7 +243,7 @@ services:
       - type: bind
         source: "./testfolder/data/"
         target: "/data/"
-    image: iffregistry.fz-juelich.de/weber/data-management-system/permissions:latest
+    image: ghcr.io/modama-rdm/permissions:latest
     cap_add:
       - LINUX_IMMUTABLE
     networks:

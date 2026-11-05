@@ -131,7 +131,8 @@ How the pieces fit together:
   from `/usr/share/nginx/html/new` (`mgmtinterface-new/nginx.conf`), with SPA
   deep-link fallback to `index.html`. It builds from the **repo root** (so it can
   reach `branding/`) — see the `context`/`dockerfile` in `docker-compose.yml` and
-  the CI entry. Built and released by `.gitlab-ci.yml` like the other images.
+  its entry in `.github/workflows/images.yml`, which builds and publishes it
+  like the other images.
 - **`mgmtinterface-proxy`** (the mgmt-domain nginx) routes `^~ /new/` to the
   `mgmtinterface-new` container, `^~ /mgmt-api/` to the `mgmtinterface-api`
   container the SPA talks to, and everything else to the legacy Flask app.
