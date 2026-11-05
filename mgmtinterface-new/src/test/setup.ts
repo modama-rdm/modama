@@ -111,8 +111,24 @@ if (!window.matchMedia) {
     }) as unknown as MediaQueryList
 }
 
+/**
+ * jsdom lays nothing out, so it cannot scroll: `scrollY` is always 0 and
+ * `window.scrollTo` only reports "not implemented". React Router's
+ * `<ScrollRestoration/>` in the app shell reads the one and calls the other on
+ * every navigation. This stand-in only remembers the last position asked for,
+ * so a journey can scroll down, navigate, and check where the next page opens.
+ */
+let scrollTop = 0
+const scrollPosition = {configurable: true, get: () => scrollTop}
+Object.defineProperty(window, 'scrollY', scrollPosition)
+Object.defineProperty(window, 'pageYOffset', scrollPosition)
+window.scrollTo = ((xOrOptions?: number | ScrollToOptions, y?: number) => {
+    scrollTop = typeof xOrOptions === 'object' ? (xOrOptions.top ?? scrollTop) : (y ?? 0)
+}) as typeof window.scrollTo
+
 afterEach(() => {
     cleanup()
+    window.scrollTo(0, 0)
     sessionStorage.clear()
     localStorage.clear()
     document.documentElement.classList.remove('dark')

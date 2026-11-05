@@ -1,4 +1,4 @@
-import {Link, Outlet, useNavigate} from 'react-router-dom'
+import {Link, Outlet, ScrollRestoration, useNavigate} from 'react-router-dom'
 import {getCurrentUser, logout} from '../api/auth'
 import {useTheme} from '../hooks/useTheme'
 import {Footer} from './Footer'
@@ -66,6 +66,11 @@ export function AppShell() {
                 <Outlet/>
             </main>
             <Footer/>
+            {/* A page you open starts at the top, and Back returns you to where
+                you were. Without it every page kept the scroll offset of the one
+                before, so the changelog, opened from the footer, opened part way
+                down. Only navigations move the page: a sort or "Load more" stays. */}
+            <ScrollRestoration/>
         </div>
     )
 }
