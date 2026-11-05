@@ -1,13 +1,10 @@
-use std::{
-    collections::BTreeMap,
-    io,
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
-};
+use std::{io, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use crate::{
-    helpers::peer_agent_id, share_manager::SmbDropState, token_server::LocalTokenVerifier,
+    event_hub::{ConnectionRegistration, EventHub, ResourceUpdates},
+    helpers::peer_agent_id,
+    share_manager::SmbDropState,
+    token_server::LocalTokenVerifier,
 };
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
@@ -15,9 +12,9 @@ use modama_common::{
     agent::{AgentId, ClientCertError},
     cert_helpers::CertHelperError,
     messages::{
-        AgentMountStatus, ConnectionId, EVENT_CHANNEL_PROTOCOL, EventChannelInitialMessages,
-        EventChannelMessage, EventChannelRequests, MAX_ANONYMOUS_NAME_CHARS,
-        MIN_EVENT_CHANNEL_PROTOCOL, Participant, ParticipantIdentity, Share,
+        EVENT_CHANNEL_PROTOCOL, EventChannelInitialMessages, EventChannelMessage,
+        EventChannelRequests, MAX_ANONYMOUS_NAME_CHARS, MIN_EVENT_CHANNEL_PROTOCOL,
+        ParticipantIdentity,
     },
 };
 use rustls::ServerConfig;
@@ -77,102 +74,26 @@ enum HandlerError {
 
     #[error("Authentication failed: {0}")]
     Auth(String),
-
-    #[error("channel disconnected")]
-    Disconnected,
 }
 
-/// One open event-channel connection
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ConnectionEntry {
-    identity: ParticipantIdentity,
-
-    peer: SocketAddr,
-
-    /// The last mount status the agent reported on this connection
-    status: Option<AgentMountStatus>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct EventSystemState {
-    /// Shares and users updated from external (triggered via the HTTP API)
-    inner_state: SmbDropState,
-
-    /// The open connections, added and removed by `ConnectionRegistration`
-    connections: BTreeMap<ConnectionId, ConnectionEntry>,
-
-    /// The number for the next connection
-    next_connection: u64,
-}
-
-/// Lock the shared state. Nothing panics while holding the lock, and every update leaves the
-/// state consistent, so a poisoned lock is used as it is.
-fn lock_state(state: &Mutex<EventSystemState>) -> MutexGuard<'_, EventSystemState> {
-    state.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// A connection's entry in the shared state, for as long as this value lives: it removes the
-/// entry when dropped, whichever way the connection handler ends (return, error or
-/// cancellation), and tells every connection about the change.
-struct ConnectionRegistration {
-    id: ConnectionId,
-    state: Arc<Mutex<EventSystemState>>,
-    state_updates_tx: broadcast::Sender<SmbDropState>,
-}
-
-impl ConnectionRegistration {
-    fn register(
-        state: &Arc<Mutex<EventSystemState>>,
-        state_updates_tx: &broadcast::Sender<SmbDropState>,
-        identity: ParticipantIdentity,
-        peer: SocketAddr,
-    ) -> Self {
-        let mut locked = lock_state(state);
-        let id = ConnectionId(locked.next_connection);
-        locked.next_connection = locked.next_connection.wrapping_add(1);
-        locked.connections.insert(
-            id,
-            ConnectionEntry {
-                identity,
-                peer,
-                status: None,
-            },
-        );
-        broadcast_change(state_updates_tx, &locked);
-        Self {
-            id,
-            state: Arc::clone(state),
-            state_updates_tx: state_updates_tx.clone(),
-        }
-    }
-}
-
-impl Drop for ConnectionRegistration {
-    fn drop(&mut self) {
-        let mut locked = lock_state(&self.state);
-        locked.connections.remove(&self.id);
-        broadcast_change(&self.state_updates_tx, &locked);
-        info!("connection {} closed", self.id);
-    }
-}
-
-/// Make every connection send its agent an update, after a change to the connections or their
-/// mount status
-fn broadcast_change(state_updates_tx: &broadcast::Sender<SmbDropState>, state: &EventSystemState) {
-    // fails only without receivers, that is, without connections that could be told
-    if state_updates_tx.send(state.inner_state.clone()).is_err() {
-        debug!("no connections to tell about the change");
-    }
+async fn send_update(
+    ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
+    update: &EventChannelMessage,
+) -> Result<(), HandlerError> {
+    let json_msg = serde_json::to_string(update)?;
+    ws_stream
+        .send(tungstenite::Message::Text(json_msg.into()))
+        .await?;
+    Ok(())
 }
 
 async fn handle_ws_message(
     msg: &str,
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
-    last_state: &Mutex<EventSystemState>,
-    state_updates_tx: &broadcast::Sender<SmbDropState>,
-    connection: ConnectionId,
-    resource: &str,
+    registration: &ConnectionRegistration,
+    updates: &mut ResourceUpdates,
 ) -> Result<(), HandlerError> {
+    let connection = registration.id();
     // requests from newer agents that we don't know: keep the connection
     let msg: EventChannelRequests = match serde_json::from_str(msg) {
         Ok(msg) => msg,
@@ -184,125 +105,40 @@ async fn handle_ws_message(
 
     match msg {
         EventChannelRequests::ShareListUpdate => {
-            let state = lock_state(last_state).clone();
-            let msg = update_msg_from_state(&state, resource);
-            let json_msg = serde_json::to_string(&msg)?;
-            ws_stream
-                .send(tungstenite::Message::Text(json_msg.into()))
-                .await?;
+            send_update(ws_stream, &updates.current()).await?;
         }
         EventChannelRequests::ReportMountStatus { status } => {
-            let mut state = lock_state(last_state);
-            let Some(entry) = state.connections.get_mut(&connection) else {
-                return Err(HandlerError::Disconnected);
-            };
-            let previous = entry.status.replace(status);
-            // like connecting and disconnecting agents, a changed status is propagated by
-            // sending out the current shares and users again
-            if previous != Some(status) {
-                broadcast_change(state_updates_tx, &state);
-            }
+            registration.report_status(status);
         }
     }
 
     Ok(())
-}
-
-fn update_msg_from_state(state: &EventSystemState, resource: &str) -> EventChannelMessage {
-    let mut shares = share_list_from_state(state, resource);
-    shares.sort_by_key(|share| share.get_created_systime());
-
-    // FIXME: right now, the foreground share is always the latest share
-    // for the resource, by creation timestamp. This might need to be
-    // re-evaluated.
-    // only those at the receiver's resource: other resources are none of its business
-    let participants = state
-        .connections
-        .iter()
-        .filter(|(_, entry)| entry.identity.resource() == resource)
-        .map(|(connection, entry)| Participant {
-            connection: *connection,
-            identity: entry.identity.clone(),
-            peer: entry.peer,
-            status: entry.status,
-        })
-        .collect();
-    EventChannelMessage::UpdateShareList {
-        shares: shares.clone(),
-        foreground_share: shares.iter().last().cloned(),
-        participants,
-    }
-}
-
-async fn handle_state_update(
-    state: &EventSystemState,
-    ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
-    resource: &str,
-) -> Result<(), HandlerError> {
-    let msg = update_msg_from_state(state, resource);
-    let json_msg = serde_json::to_string(&msg)?;
-    ws_stream
-        .send(tungstenite::Message::Text(json_msg.into()))
-        .await?;
-
-    Ok(())
-}
-
-fn share_list_from_state(state: &EventSystemState, resource: &str) -> Vec<Share> {
-    state
-        .inner_state
-        .shares
-        .values()
-        .filter(|s| s.resource.as_ref().is_some_and(|res| res == resource))
-        .cloned()
-        .collect()
 }
 
 /// Take care of a single websocket connection. This function has two purposes:
 ///
 /// 1) Receive and reply to websockets sent to us from the agent on the other end
-/// 2) Send out state updates via the websocket as they come in from the
-///    internal broadcast channel
+/// 2) Send the agent the updates for its resource as the event hub changes
 async fn handle_connection(
     ws_stream: &mut WebSocketStream<TlsStream<TcpStream>>,
-    mut state_updates_rx: broadcast::Receiver<SmbDropState>,
-    state_updates_tx: &broadcast::Sender<SmbDropState>,
-    last_state: &Mutex<EventSystemState>,
-    connection: ConnectionId,
-    resource: &str,
+    registration: &ConnectionRegistration,
+    mut updates: ResourceUpdates,
 ) -> Result<(), HandlerError> {
+    let connection = registration.id();
     loop {
         select! {
             msg = ws_stream.next() => {
                 let msg = if let Some(msg) = msg { msg? } else { break };
                 if let Ok(msg) = msg.into_text() {
                     info!("connection {connection}: got ws message: {msg}");
-                    handle_ws_message(
-                        &msg,
-                        ws_stream,
-                        last_state,
-                        state_updates_tx,
-                        connection,
-                        resource,
-                    )
-                    .await?;
+                    handle_ws_message(&msg, ws_stream, registration, &mut updates).await?;
                 } else {
                     warn!("received non-text ws message or conversion failed");
                 }
             },
-            maybe_state = state_updates_rx.recv() => {
-                let new_state = maybe_state.map_err(|_| HandlerError::Disconnected)?;
-                // compose the update of shares and users with connected agents:
-                info!("propagating state update from channel: {new_state:?}");
-                let comp_state = {
-                    let last_state = lock_state(last_state);
-                    EventSystemState {
-                        inner_state: new_state,
-                        connections: last_state.connections.clone(),
-                        next_connection: last_state.next_connection,
-                    }
-                };
-                handle_state_update(&comp_state, ws_stream, resource).await?;
+            update = updates.next() => {
+                debug!("connection {connection}: sending update {update:?}");
+                send_update(ws_stream, &update).await?;
             }
         }
     }
@@ -332,11 +168,9 @@ async fn handle_authenticated_connection(
     client: ClientInfo<'_>,
     mut ws_stream: WebSocketStream<TlsStream<TcpStream>>,
     identity: ParticipantIdentity,
-    last_state: Arc<Mutex<EventSystemState>>,
-    state_updates_rx: broadcast::Receiver<SmbDropState>,
-    state_updates_tx: broadcast::Sender<SmbDropState>,
+    hub: &EventHub,
 ) -> Result<(), HandlerError> {
-    let resource = identity.resource().to_owned();
+    let updates = hub.subscribe(identity.resource());
     let description = match &identity {
         ParticipantIdentity::Certified { agent } => {
             format!("certified agent {}", agent.san_encoded)
@@ -350,9 +184,8 @@ async fn handle_authenticated_connection(
     };
 
     // from here on, the connection is listed until `registration` is dropped
-    let registration =
-        ConnectionRegistration::register(&last_state, &state_updates_tx, identity, peer);
-    let connection = registration.id;
+    let registration = hub.register(identity, peer);
+    let connection = registration.id();
     info!(
         "connection {connection} from {peer}: {description}, version {} protocol {}",
         client.version, client.protocol
@@ -369,16 +202,7 @@ async fn handle_authenticated_connection(
         ))
         .await?;
 
-    if let Err(e) = handle_connection(
-        &mut ws_stream,
-        state_updates_rx,
-        &state_updates_tx,
-        &last_state,
-        connection,
-        &resource,
-    )
-    .await
-    {
+    if let Err(e) = handle_connection(&mut ws_stream, &registration, updates).await {
         match e {
             HandlerError::WsError(tungstenite::Error::ConnectionClosed)
             | HandlerError::WsError(tungstenite::Error::Protocol(_))
@@ -471,9 +295,7 @@ async fn authenticate_agent_connection(
     peer: SocketAddr,
     stream: TlsStream<TcpStream>,
     token_verifier: &LocalTokenVerifier,
-    last_state: Arc<Mutex<EventSystemState>>,
-    state_updates_rx: broadcast::Receiver<SmbDropState>,
-    state_updates_tx: broadcast::Sender<SmbDropState>,
+    hub: &EventHub,
 ) -> Result<(), HandlerError> {
     let certificate = peer_agent_id(&stream);
     let mut ws_stream = accept_async(stream).await?;
@@ -525,9 +347,7 @@ async fn authenticate_agent_connection(
                 },
                 ws_stream,
                 identity,
-                last_state,
-                state_updates_rx,
-                state_updates_tx,
+                hub,
             )
             .await
         }
@@ -542,25 +362,14 @@ async fn accept_agent_connection(
     peer: SocketAddr,
     stream: TcpStream,
     acceptor: TlsAcceptor,
-    last_state: Arc<Mutex<EventSystemState>>,
-    state_updates_rx: broadcast::Receiver<SmbDropState>,
-    state_updates_tx: broadcast::Sender<SmbDropState>,
+    hub: EventHub,
     token_verifier: LocalTokenVerifier,
 ) -> Result<(), AcceptError> {
     let stream: TlsStream<TcpStream> = acceptor.accept(stream).await?;
 
     info!("connection from agent @ {peer}");
 
-    if let Err(e) = authenticate_agent_connection(
-        peer,
-        stream,
-        &token_verifier,
-        last_state,
-        state_updates_rx,
-        state_updates_tx,
-    )
-    .await
-    {
+    if let Err(e) = authenticate_agent_connection(peer, stream, &token_verifier, &hub).await {
         error!("error in agent connection: {e:?}");
     } else {
         info!("finished handling connection from {peer}")
@@ -569,44 +378,17 @@ async fn accept_agent_connection(
     Ok(())
 }
 
-/// Start a websocket server that informs agents about currently active ingest
-/// shares.
+/// Start a websocket server that informs agents about the shares and the connections in `hub`.
+/// Returns the server task and the port it listens on.
 ///
 /// The given certificate must be enrolled via the CA as a server certificate.
-///
-/// Callers should pass in the initial state as `state`, and then use the
-/// returned broadcast `Sender` to update the state when it changes.
-pub async fn start_event_server(
+pub async fn start_event_channel(
     listen_addr: &str,
     tls_config: ServerConfig,
     secret_key: &[u8],
-    state: &SmbDropState,
-) -> Result<(JoinHandle<()>, broadcast::Sender<SmbDropState>, u16), ServerStartError> {
-    let state = EventSystemState {
-        inner_state: state.clone(),
-        connections: BTreeMap::new(),
-        next_connection: 0,
-    };
-    let (tx, mut rx) = broadcast::channel::<SmbDropState>(16);
+    hub: EventHub,
+) -> Result<(JoinHandle<()>, u16), ServerStartError> {
     let token_verifier = LocalTokenVerifier::new(secret_key);
-
-    // the state we have seen last, which will be sent to newly connecting agents:
-    let last_state = Arc::new(Mutex::new(state));
-
-    // and a coroutine to keep it up to date via the messages from the broadcast channel:
-    let wr_last_state = Arc::clone(&last_state);
-    tokio::spawn(async move {
-        loop {
-            let maybe_state = rx.recv().await;
-            if let Ok(state) = maybe_state {
-                lock_state(&wr_last_state).inner_state = state;
-            } else if let Err(RecvError::Closed) = maybe_state {
-                break;
-            }
-        }
-    });
-
-    let result_tx = tx.clone();
     let listener = TcpListener::bind(&listen_addr).await.map_err(|e| {
         error!("listen error: {e}");
         ServerStartError::ListenError
@@ -620,20 +402,15 @@ pub async fn start_event_server(
         .port();
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
-    let moved_last_state = Arc::clone(&last_state);
-    let local_token_verifier = token_verifier.clone();
     let task = tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
             if let Ok(peer) = stream.peer_addr() {
-                let acc = acceptor.clone();
                 tokio::spawn(accept_agent_connection(
                     peer,
                     stream,
-                    acc,
-                    Arc::clone(&moved_last_state),
-                    tx.subscribe(),
-                    tx.clone(),
-                    local_token_verifier.clone(),
+                    acceptor.clone(),
+                    hub.clone(),
+                    token_verifier.clone(),
                 ));
             } else {
                 error!("no peer addr, dropping client");
@@ -641,7 +418,33 @@ pub async fn start_event_server(
         }
     });
 
-    Ok((task, result_tx, port))
+    Ok((task, port))
+}
+
+/// Like `start_event_channel`, for callers that publish the shares by sending each new state
+/// through the returned broadcast `Sender`; `state` is the initial state. Returns the server
+/// task, the `Sender` and the port the server listens on.
+pub async fn start_event_server(
+    listen_addr: &str,
+    tls_config: ServerConfig,
+    secret_key: &[u8],
+    state: &SmbDropState,
+) -> Result<(JoinHandle<()>, broadcast::Sender<SmbDropState>, u16), ServerStartError> {
+    let hub = EventHub::new(state.shares.clone());
+    let (tx, mut rx) = broadcast::channel::<SmbDropState>(16);
+    let forwarded_hub = hub.clone();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(state) => forwarded_hub.set_shares(state.shares),
+                // the next state is newer than those skipped
+                Err(RecvError::Lagged(_)) => (),
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+    let (task, port) = start_event_channel(listen_addr, tls_config, secret_key, hub).await?;
+    Ok((task, tx, port))
 }
 
 #[cfg(test)]
@@ -1335,7 +1138,8 @@ mod test {
         server.handle.abort();
     }
 
-    /// Every connection hears only of the participants at its own resource
+    /// Every connection hears only of the participants at its own resource, and only of changes
+    /// there
     #[tokio::test]
     async fn test_participants_are_listed_per_resource() {
         let server = make_test_event_server().await;
@@ -1363,10 +1167,8 @@ mod test {
             next_participants(&mut far).await,
             listed(&[("far-pc via remote", None)])
         );
-        assert_eq!(
-            next_participants(&mut here).await,
-            listed(&[("test_agent", None)])
-        );
+        // a connection elsewhere changes nothing here
+        assert_no_msg(&mut here).await;
         server.handle.abort();
     }
 

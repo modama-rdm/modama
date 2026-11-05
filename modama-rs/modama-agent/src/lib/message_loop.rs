@@ -459,9 +459,7 @@ mod tests {
         }
 
         /// A session helper connection that never reports. Returns once smbdrop lists our
-        /// status as `Reconciling`, which then no longer changes. Until then, every status report
-        /// makes smbdrop resend its share list, and an old list resent after a newer one would
-        /// replace it (see `modama-rs/TODO.md`, "smbdrop event channel").
+        /// status as `Reconciling`, which then no longer changes.
         async fn connect_helper(&self) -> (HelperPresence, HelperFeed) {
             let helper = self.fan_out.connect_helper(HelperScope::Uid(1000));
             wait_for_own_status(self, AgentMountStatus::Reconciling).await;
@@ -611,7 +609,8 @@ mod tests {
         test_setup.abort().await;
     }
 
-    /// smbdrop resends the shares when agents come and go; helpers only get actual changes
+    /// Older smbdrop versions resend unchanged shares when agents come and go; helpers only get
+    /// actual changes
     #[tokio::test]
     async fn test_unchanged_desired_state_is_not_forwarded() {
         let test_setup = MessageLoopTestSetup::start().await;
@@ -619,12 +618,24 @@ mod tests {
 
         let share_1 = test_share("test-id-1", 0);
         let mut state_1 = test_setup.initial_state.clone();
-        state_1.shares.insert(share_1.share_id.clone(), share_1);
+        state_1
+            .shares
+            .insert(share_1.share_id.clone(), share_1.clone());
         test_setup.event_queue.send(state_1.clone()).unwrap();
         wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
-        // the same again, then a change: the change is the next thing helpers see
-        test_setup.event_queue.send(state_1.clone()).unwrap();
+        // the same again, as older smbdrop versions send it (current ones don't), then a change:
+        // the change is the next thing helpers see
+        let repeat = EventChannelMessage::UpdateShareList {
+            shares: vec![share_1.clone()],
+            foreground_share: Some(share_1.clone()),
+            participants: vec![],
+        };
+        handle_message(
+            &test_setup.fan_out,
+            &serde_json::to_string(&repeat).unwrap(),
+        )
+        .unwrap();
         let share_2 = test_share("test-id-2", 1);
         let mut state_2 = state_1.clone();
         state_2.shares.insert(share_2.share_id.clone(), share_2);
