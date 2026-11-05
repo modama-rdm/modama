@@ -1,6 +1,5 @@
 pub mod config;
 
-pub mod agent_state;
 pub mod caller_scope;
 pub mod events_api;
 pub mod http_api;

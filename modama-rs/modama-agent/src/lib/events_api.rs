@@ -16,11 +16,12 @@ use modama_common::internal_api_types::{
     SessionHelperConfig, SessionHelperState, ToAgent, ToAgentFromGui, ToSessionHelper,
 };
 use serde::{Serialize, de::DeserializeOwned};
-use tokio::{select, sync::Mutex};
+use tokio::select;
 
 use crate::{
-    agent_state::AgentState,
     caller_scope::{ConnInfo, HelperScope},
+    config::AgentConfig,
+    local_fan_out::LocalFanOut,
     local_http_service::{ApiState, LocalAPIError},
 };
 
@@ -72,18 +73,15 @@ where
 }
 
 async fn handle_session_helper_websocket(
-    state: Arc<Mutex<AgentState>>,
+    config: &AgentConfig,
+    fan_out: &Arc<LocalFanOut>,
     mut socket: WebSocket,
     scope: HelperScope,
 ) -> Result<(), EventAPIError> {
-    let (fan_out, config) = {
-        let state = state.lock().await;
-        let config = SessionHelperConfig {
-            smb_hostname: state.config.smb_hostname.clone(),
-            smb_port: state.config.smb_port,
-            smb_domain: state.config.smb_domain.clone(),
-        };
-        (Arc::clone(&state.fan_out), config)
+    let config = SessionHelperConfig {
+        smb_hostname: config.smb_hostname.clone(),
+        smb_port: config.smb_port,
+        smb_domain: config.smb_domain.clone(),
     };
     // present until this connection ends; the first update is the current desired state
     let (presence, mut updates) = fan_out.connect_helper(scope);
@@ -117,11 +115,10 @@ async fn handle_session_helper_websocket(
 }
 
 async fn handle_gui_websocket(
-    state: Arc<Mutex<AgentState>>,
+    fan_out: &LocalFanOut,
     mut socket: WebSocket,
     scope: HelperScope,
 ) -> Result<(), EventAPIError> {
-    let fan_out = Arc::clone(&state.lock().await.fan_out);
     // the first view is what the GUI shows now
     let mut views = fan_out.subscribe_gui(scope);
 
@@ -175,7 +172,7 @@ pub async fn events_api_gui(
     };
 
     ws.on_upgrade(async move |socket| {
-        if let Err(e) = handle_gui_websocket(Arc::clone(&state.state), socket, scope).await {
+        if let Err(e) = handle_gui_websocket(&state.fan_out, socket, scope).await {
             error!("dropping websocket connection: {e}");
         }
     })
@@ -203,7 +200,7 @@ pub async fn events_api_session_helper(
 
     ws.on_upgrade(async move |socket| {
         if let Err(e) =
-            handle_session_helper_websocket(Arc::clone(&state.state), socket, scope).await
+            handle_session_helper_websocket(&state.config, &state.fan_out, socket, scope).await
         {
             error!("dropping websocket connection: {e}");
         }
@@ -259,7 +256,7 @@ mod tests {
 
     struct TestSetup {
         server_task: JoinHandle<()>,
-        shared_state: Arc<Mutex<AgentState>>,
+        fan_out: Arc<LocalFanOut>,
         scopes: Arc<QueueScopeResolver>,
         address: SocketAddr,
     }
@@ -289,11 +286,12 @@ mod tests {
                 ),
                 client_cert: None,
             };
-            let shared_state = AgentState::new(&config);
+            let fan_out = Arc::new(LocalFanOut::new(config.identity.clone()));
             let token_provider: Arc<dyn TokenProvider + Send + Sync> = Arc::new(DummyTokenProvider);
             let scopes = Arc::new(QueueScopeResolver::default());
             let api_state = ApiState {
-                state: Arc::clone(&shared_state),
+                config: Arc::new(config),
+                fan_out: Arc::clone(&fan_out),
                 token_provider,
                 jinja_env: Environment::new(),
                 scope_resolver: Arc::clone(&scopes) as Arc<dyn crate::caller_scope::ResolveScope>,
@@ -315,7 +313,7 @@ mod tests {
 
             Self {
                 server_task,
-                shared_state,
+                fan_out,
                 scopes,
                 address,
             }
@@ -345,15 +343,9 @@ mod tests {
             self.connect(&self.websocket_helper()).await
         }
 
-        async fn fan_out(&self) -> Arc<LocalFanOut> {
-            Arc::clone(&self.shared_state.lock().await.fan_out)
-        }
-
         /// smbdrop sends `shares`, `foreground` among them, and no participants
         async fn smbdrop_sends(&self, foreground: Option<Share>, shares: Vec<Share>) {
-            self.fan_out()
-                .await
-                .apply_share_list(shares, foreground, vec![]);
+            self.fan_out.apply_share_list(shares, foreground, vec![]);
         }
     }
 
@@ -485,7 +477,7 @@ mod tests {
         // no session helper counts as connected
         test_setup.smbdrop_sends(None, vec![]).await;
         assert_eq!(
-            test_setup.fan_out().await.mount_status(),
+            test_setup.fan_out.mount_status(),
             Some(AgentMountStatus::NoHelper)
         );
     }
@@ -528,10 +520,7 @@ mod tests {
         test_setup
             .smbdrop_sends(Some(foreground_share.clone()), desired_shares.clone())
             .await;
-        let (helper, _) = test_setup
-            .fan_out()
-            .await
-            .connect_helper(scope("desktop-1"));
+        let (helper, _) = test_setup.fan_out.connect_helper(scope("desktop-1"));
         helper.report(SessionHelperState {
             mounted_shares: vec![mounted_share.clone()],
             errors: vec![],
@@ -624,7 +613,7 @@ mod tests {
         let message: ToSessionGui = receive_message(&mut gui).await;
         assert_eq!(message.session_helper, None);
         assert_eq!(
-            test_setup.fan_out().await.mount_status(),
+            test_setup.fan_out.mount_status(),
             Some(AgentMountStatus::NoHelper)
         );
     }

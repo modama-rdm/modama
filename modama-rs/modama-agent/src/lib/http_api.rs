@@ -39,8 +39,7 @@ async fn api_shares_foreground(
     ConnectInfo(conn): ConnectInfo<ConnInfo>,
 ) -> Result<impl IntoResponse, LocalAPIError> {
     let scope = api_state.resolve_scope(conn).await?;
-    let fan_out = Arc::clone(&api_state.state.lock().await.fan_out);
-    Ok(Json(fan_out.foreground_for(scope)?))
+    Ok(Json(api_state.fan_out.foreground_for(scope)?))
 }
 
 #[utoipa::path(
@@ -51,7 +50,7 @@ async fn api_shares_foreground(
     responses((status = 200, description = "Local agent identity", body = APIAgentIdentity))
 )]
 async fn api_identity(State(api_state): State<ApiState>) -> Json<APIAgentIdentity> {
-    Json(match &api_state.state.lock().await.config.identity {
+    Json(match &api_state.config.identity {
         crate::config::MTLSIdentity::Anonymous { hostname } => APIAgentIdentity::Anonymous {
             hostname: hostname.clone(),
         },
@@ -84,13 +83,11 @@ async fn api_identity(State(api_state): State<ApiState>) -> Json<APIAgentIdentit
 )]
 async fn api_start_ingest(
     Path((project_name, session_name)): Path<(String, String)>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let sign_response = Arc::clone(&agent_state.token_provider)
-        .fetch_token()
-        .await?;
-    let share = agent_state
+    let sign_response = Arc::clone(&api_state.token_provider).fetch_token().await?;
+    let share = api_state
         .mgmt()
         .await?
         .open_ingest_share(
@@ -128,10 +125,10 @@ async fn api_start_ingest(
 )]
 async fn api_delete_share(
     Path(share_id): Path<String>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let closed = agent_state
+    let closed = api_state
         .mgmt()
         .await?
         .close_ingest_share(&session, &share_id)
@@ -154,10 +151,10 @@ async fn api_delete_share(
     )
 )]
 async fn api_login(
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     Json(request): Json<APILoginRequest>,
 ) -> Result<Response, LocalAPIError> {
-    let (username, session) = agent_state
+    let (username, session) = api_state
         .mgmt()
         .await?
         .login(&request.username, &request.password)
@@ -176,11 +173,11 @@ async fn api_login(
     responses((status = 204, description = "Signed out; the session cookie is removed"))
 )]
 async fn api_logout(
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     MaybeCallerSession(session): MaybeCallerSession,
 ) -> Response {
     if let Some(session) = session {
-        let result = match agent_state.mgmt().await {
+        let result = match api_state.mgmt().await {
             Ok(mgmt) => mgmt.logout(&session).await.map_err(LocalAPIError::from),
             Err(error) => Err(error),
         };
@@ -208,10 +205,10 @@ async fn api_logout(
     security(("session_cookie" = []))
 )]
 async fn api_list_projects(
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let projects = agent_state.mgmt().await?.projects(&session).await?;
+    let projects = api_state.mgmt().await?.projects(&session).await?;
     let response = Json(APIListProjectsResponse {
         projects: projects
             .value
@@ -245,10 +242,10 @@ async fn api_list_projects(
 )]
 async fn api_list_sessions_in_project(
     Path(project_name): Path<String>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let details = agent_state
+    let details = api_state
         .mgmt()
         .await?
         .project(&session, &project_name)
@@ -283,11 +280,11 @@ async fn api_list_sessions_in_project(
 )]
 async fn api_create_session_in_project(
     Path(project_name): Path<String>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
     Json(create_session_req): Json<APICreateSessionRequest>,
 ) -> Result<Response, LocalAPIError> {
-    let created = agent_state
+    let created = api_state
         .mgmt()
         .await?
         .create_session(&session, &project_name, &create_session_req.session)
@@ -310,8 +307,7 @@ async fn api_create_session_in_project(
     )
 )]
 async fn api_health(State(api_state): State<ApiState>) -> impl IntoResponse {
-    let fan_out = Arc::clone(&api_state.state.lock().await.fan_out);
-    if fan_out.connected_to_smbdrop() {
+    if api_state.fan_out.connected_to_smbdrop() {
         (StatusCode::OK, Json(APIHealthCheckResponse::Ok))
     } else {
         (

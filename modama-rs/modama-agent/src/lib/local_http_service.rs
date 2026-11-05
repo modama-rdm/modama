@@ -22,15 +22,14 @@ use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use time::{Date, OffsetDateTime};
-use tokio::sync::Mutex;
 use tower_http::csrf::CsrfLayer;
 
 use crate::{
-    agent_state::AgentState,
     caller_scope::{ConnInfo, HelperScope, PlatformScopeResolver, ResolveScope, ScopeError},
-    config::{ConfigError, MTLSIdentity},
+    config::{AgentConfig, ConfigError, MTLSIdentity},
     events_api::add_internal_api,
     http_api::add_api_routes,
+    local_fan_out::LocalFanOut,
     local_session::{
         CallerSession, MaybeCallerSession, SessionTracker, expired_session_cookie,
         with_refreshed_session,
@@ -292,7 +291,7 @@ fn message_page(
 }
 
 fn render_session_list(
-    agent_state: &ApiState,
+    api_state: &ApiState,
     status: StatusCode,
     project_name: &str,
     session_names: &[String],
@@ -311,7 +310,7 @@ fn render_session_list(
     let session_name_example = session_name_example(session_date);
 
     render_html(
-        &agent_state.jinja_env,
+        &api_state.jinja_env,
         "session_list.html",
         status,
         context! {
@@ -357,28 +356,31 @@ fn validate_session_name(input: &str) -> Result<String, &'static str> {
 }
 
 /// This agent's identity, and the agents connected at the resource of its token
-async fn local_snapshot(agent_state: &ApiState) -> (String, Option<ConnectedAgentsView>) {
-    let state = agent_state.state.lock().await;
-    let identity = match &state.config.identity {
+fn local_snapshot(api_state: &ApiState) -> (String, Option<ConnectedAgentsView>) {
+    let identity = match &api_state.config.identity {
         MTLSIdentity::Anonymous { hostname } => format!("Anonymous running on {hostname}"),
         MTLSIdentity::AgentId {
             agent_name,
             resource_name,
         } => format!("{agent_name} at {resource_name}"),
     };
-    (identity, state.fan_out.connected_agents().map(Into::into))
+    (
+        identity,
+        api_state.fan_out.connected_agents().map(Into::into),
+    )
 }
 
 /// The desired foreground share; mounted or not, this is what the user can close, and what
 /// prevents opening another ingest
-async fn desired_foreground(agent_state: &ApiState) -> Option<Share> {
-    agent_state.state.lock().await.fan_out.desired_foreground()
+fn desired_foreground(api_state: &ApiState) -> Option<Share> {
+    api_state.fan_out.desired_foreground()
 }
 
-/// Wrapper around the AgentState for the local API server
+/// What the handlers of the local API server share
 #[derive(Clone)]
 pub struct ApiState {
-    pub state: Arc<Mutex<AgentState>>,
+    pub config: Arc<AgentConfig>,
+    pub fan_out: Arc<LocalFanOut>,
     pub token_provider: Arc<dyn TokenProvider + Send + Sync>,
     pub jinja_env: Environment<'static>,
     pub scope_resolver: Arc<dyn ResolveScope>,
@@ -387,11 +389,13 @@ pub struct ApiState {
 
 impl ApiState {
     fn new(
-        state: &Arc<Mutex<AgentState>>,
+        config: &Arc<AgentConfig>,
+        fan_out: &Arc<LocalFanOut>,
         token_provider: &Arc<dyn TokenProvider + Send + Sync>,
     ) -> Self {
         Self {
-            state: Arc::clone(state),
+            config: Arc::clone(config),
+            fan_out: Arc::clone(fan_out),
             token_provider: Arc::clone(token_provider),
             jinja_env: create_env(),
             scope_resolver: Arc::new(PlatformScopeResolver),
@@ -401,8 +405,7 @@ impl ApiState {
 
     /// mgmtinterface-api below the configured `mgmt_api_url`
     pub async fn mgmt(&self) -> Result<MgmtApiConnection, LocalAPIError> {
-        let server = self.state.lock().await.config.mgmt_api_url.clone();
-        Ok(self.mgmt_api.connect(&server).await?)
+        Ok(self.mgmt_api.connect(&self.config.mgmt_api_url).await?)
     }
 
     /// Determine the helper scope of the client on the other end of `conn`
@@ -570,20 +573,15 @@ impl IntoResponse for LocalAPIError {
 
 #[debug_handler]
 async fn serve_index_page(
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     ConnectInfo(conn): ConnectInfo<ConnInfo>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
     let mut tracker = SessionTracker::new(session);
-    let (identity, connected_agents) = local_snapshot(&agent_state).await;
-    let scope = agent_state.resolve_scope(conn).await?;
-    let (foreground, other_mounts) = {
-        let state = agent_state.state.lock().await;
-        (
-            state.fan_out.foreground_for(scope)?,
-            state.fan_out.other_mounts_for(scope),
-        )
-    };
+    let (identity, connected_agents) = local_snapshot(&api_state);
+    let scope = api_state.resolve_scope(conn).await?;
+    let foreground = api_state.fan_out.foreground_for(scope)?;
+    let other_mounts = api_state.fan_out.other_mounts_for(scope);
     let other_mounts = other_mounts
         .into_iter()
         .map(|mount| OtherMountView {
@@ -593,7 +591,7 @@ async fn serve_index_page(
             mount_path: mount.mount_path,
         })
         .collect::<Vec<_>>();
-    let mgmt = agent_state.mgmt().await?;
+    let mgmt = api_state.mgmt().await?;
     let username = tracker.take(mgmt.signed_in_user(tracker.session()).await?);
     // the management API lists every project; offer the user's own
     let projects = tracker
@@ -609,7 +607,7 @@ async fn serve_index_page(
     let foreground = ForegroundView::new(&foreground);
 
     Ok(tracker.respond(render_html(
-        &agent_state.jinja_env,
+        &api_state.jinja_env,
         "index.html",
         StatusCode::OK,
         context! {
@@ -626,11 +624,11 @@ async fn serve_index_page(
 
 /// The session names of a project
 async fn session_names(
-    agent_state: &ApiState,
+    api_state: &ApiState,
     tracker: &mut SessionTracker,
     project_name: &str,
 ) -> Result<Vec<String>, LocalAPIError> {
-    let details = agent_state
+    let details = api_state
         .mgmt()
         .await?
         .project(tracker.session(), project_name)
@@ -645,15 +643,15 @@ async fn session_names(
 
 async fn start_ingest_step1(
     Path(project_name): Path<String>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
     let mut tracker = SessionTracker::new(session);
-    let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
+    let session_names = session_names(&api_state, &mut tracker, &project_name).await?;
     let session_date = today();
     let default_session_name = session_name_prefix(session_date);
     Ok(tracker.respond(render_session_list(
-        &agent_state,
+        &api_state,
         StatusCode::OK,
         &project_name,
         &session_names,
@@ -665,18 +663,18 @@ async fn start_ingest_step1(
 
 async fn create_session(
     Path(project_name): Path<String>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
     Form(form): Form<CreateSessionForm>,
 ) -> Result<Response, LocalAPIError> {
     let mut tracker = SessionTracker::new(session);
-    let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
+    let session_names = session_names(&api_state, &mut tracker, &project_name).await?;
 
     let session_name = match validate_session_name(&form.session_name) {
         Ok(session_name) => session_name,
         Err(message) => {
             return Ok(tracker.respond(render_session_list(
-                &agent_state,
+                &api_state,
                 StatusCode::BAD_REQUEST,
                 &project_name,
                 &session_names,
@@ -687,7 +685,7 @@ async fn create_session(
         }
     };
 
-    let created = agent_state
+    let created = api_state
         .mgmt()
         .await?
         .create_session(tracker.session(), &project_name, &session_name)
@@ -698,7 +696,7 @@ async fn create_session(
         Err(MgmtApiError::Backend { status, message }) if (400..500).contains(&status) => {
             let message = format!("Could not create the session: {message}");
             return Ok(tracker.respond(render_session_list(
-                &agent_state,
+                &api_state,
                 StatusCode::BAD_REQUEST,
                 &project_name,
                 &session_names,
@@ -716,21 +714,21 @@ async fn create_session(
 
 async fn start_ingest_step2(
     Path((project_name, session_name)): Path<(String, String)>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
     let mut tracker = SessionTracker::new(session);
-    let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
+    let session_names = session_names(&api_state, &mut tracker, &project_name).await?;
     if !session_names.contains(&session_name) {
         return Ok(tracker.respond(message_page(
-            &agent_state.jinja_env,
+            &api_state.jinja_env,
             StatusCode::NOT_FOUND,
             "Session not found",
             "The selected session does not exist in this project.",
         )?));
     }
 
-    let (res_name, instrument) = match &agent_state.state.lock().await.config.identity {
+    let (res_name, instrument) = match &api_state.config.identity {
         // TODO: name the resource an anonymous agent inherits from its token
         // (`LocalFanOut::logged_in`), like the connected agents on the index page
         MTLSIdentity::Anonymous { hostname } => (hostname.clone(), "this instrument".to_owned()),
@@ -740,12 +738,12 @@ async fn start_ingest_step2(
         } => (resource_name.clone(), resource_name.clone()),
     };
     // starting doesn't close the open share: say what happens to it
-    let current = match desired_foreground(&agent_state).await {
+    let current = match desired_foreground(&api_state) {
         Some(share) => {
             let (project, session) = project_and_session(&share.dest_path)?;
             let own = match &share.created_by {
                 Some(created_by) => {
-                    let mgmt = agent_state.mgmt().await?;
+                    let mgmt = api_state.mgmt().await?;
                     *created_by == tracker.take(mgmt.signed_in_user(tracker.session()).await?)
                 }
                 // smbdrop didn't record it: say it stays open, rather than guess
@@ -763,7 +761,7 @@ async fn start_ingest_step2(
     };
     let action = SafeLocalUrl::start_session(&project_name, &session_name);
     Ok(tracker.respond(render_html(
-        &agent_state.jinja_env,
+        &api_state.jinja_env,
         "start_confirm.html",
         StatusCode::OK,
         context! {
@@ -780,24 +778,22 @@ async fn start_ingest_step2(
 
 async fn start_ingest_step3(
     Path((project_name, session_name)): Path<(String, String)>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
     let mut tracker = SessionTracker::new(session);
-    let session_names = session_names(&agent_state, &mut tracker, &project_name).await?;
+    let session_names = session_names(&api_state, &mut tracker, &project_name).await?;
     if !session_names.contains(&session_name) {
         return Ok(tracker.respond(message_page(
-            &agent_state.jinja_env,
+            &api_state.jinja_env,
             StatusCode::NOT_FOUND,
             "Session not found",
             "The selected session does not exist in this project.",
         )?));
     }
 
-    let sign_response = Arc::clone(&agent_state.token_provider)
-        .fetch_token()
-        .await?;
-    let opened = agent_state
+    let sign_response = Arc::clone(&api_state.token_provider).fetch_token().await?;
+    let opened = api_state
         .mgmt()
         .await?
         .open_ingest_share(
@@ -819,15 +815,14 @@ async fn start_ingest_step3(
 
 async fn close_ingest_confirmation(
     Path(share_id): Path<String>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     _session: CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    let Some(foreground) = desired_foreground(&agent_state)
-        .await
-        .filter(|share| share.share_id == share_id)
+    let Some(foreground) =
+        desired_foreground(&api_state).filter(|share| share.share_id == share_id)
     else {
         return message_page(
-            &agent_state.jinja_env,
+            &api_state.jinja_env,
             StatusCode::CONFLICT,
             "Ingest cannot be closed",
             "This ingest is not the currently open foreground ingest.",
@@ -837,7 +832,7 @@ async fn close_ingest_confirmation(
     let action = SafeLocalUrl::close_ingest(&share_id);
 
     render_html(
-        &agent_state.jinja_env,
+        &api_state.jinja_env,
         "close_confirm.html",
         StatusCode::OK,
         context! {
@@ -851,15 +846,12 @@ async fn close_ingest_confirmation(
 
 async fn close_ingest(
     Path(share_id): Path<String>,
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     CallerSession(session): CallerSession,
 ) -> Result<Response, LocalAPIError> {
-    if desired_foreground(&agent_state)
-        .await
-        .is_none_or(|share| share.share_id != share_id)
-    {
+    if desired_foreground(&api_state).is_none_or(|share| share.share_id != share_id) {
         return message_page(
-            &agent_state.jinja_env,
+            &api_state.jinja_env,
             StatusCode::CONFLICT,
             "Ingest cannot be closed",
             "This ingest is not the currently open foreground ingest.",
@@ -867,7 +859,7 @@ async fn close_ingest(
     }
 
     let mut tracker = SessionTracker::new(session);
-    let closed = agent_state
+    let closed = api_state
         .mgmt()
         .await?
         .close_ingest_share(tracker.session(), &share_id)
@@ -919,14 +911,14 @@ fn is_dot_segment(segment: &str) -> bool {
 }
 
 fn login_page(
-    agent_state: &ApiState,
+    api_state: &ApiState,
     status: StatusCode,
     next: &str,
     username: &str,
     error: Option<&str>,
 ) -> Result<Response, LocalAPIError> {
     render_html(
-        &agent_state.jinja_env,
+        &api_state.jinja_env,
         "login.html",
         status,
         context! { title => "Sign in", next, username, error },
@@ -934,11 +926,11 @@ fn login_page(
 }
 
 async fn show_login(
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     Query(query): Query<LoginQuery>,
 ) -> Result<Response, LocalAPIError> {
     login_page(
-        &agent_state,
+        &api_state,
         StatusCode::OK,
         local_next(query.next.as_deref()),
         "",
@@ -947,11 +939,11 @@ async fn show_login(
 }
 
 async fn login(
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     Form(form): Form<LoginForm>,
 ) -> Result<Response, LocalAPIError> {
     let next = local_next(form.next.as_deref());
-    match agent_state
+    match api_state
         .mgmt()
         .await?
         .login(&form.username, &form.password)
@@ -959,7 +951,7 @@ async fn login(
     {
         Ok((_username, session)) => Ok(with_refreshed_session(Some(session), Redirect::to(next))),
         Err(MgmtApiError::Unauthorized) => login_page(
-            &agent_state,
+            &api_state,
             StatusCode::UNAUTHORIZED,
             next,
             &form.username,
@@ -970,11 +962,11 @@ async fn login(
 }
 
 async fn logout(
-    State(agent_state): State<ApiState>,
+    State(api_state): State<ApiState>,
     MaybeCallerSession(session): MaybeCallerSession,
 ) -> Response {
     if let Some(session) = session {
-        let result = match agent_state.mgmt().await {
+        let result = match api_state.mgmt().await {
             Ok(mgmt) => mgmt.logout(&session).await.map_err(LocalAPIError::from),
             Err(error) => Err(error),
         };
@@ -1015,20 +1007,22 @@ async fn redirect_unauthorized_to_login(request: axum::extract::Request, next: N
 }
 
 pub async fn serve_local_web_api(
-    state: Arc<Mutex<AgentState>>,
+    config: Arc<AgentConfig>,
+    fan_out: Arc<LocalFanOut>,
     listen_addr: &str,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) -> Result<(), LocalAPIError> {
     let listener = tokio::net::TcpListener::bind(listen_addr).await?;
-    serve_local_web_api_on(listener, state, token_provider).await
+    serve_local_web_api_on(listener, config, fan_out, token_provider).await
 }
 
 pub async fn serve_local_web_api_on(
     listener: tokio::net::TcpListener,
-    state: Arc<Mutex<AgentState>>,
+    config: Arc<AgentConfig>,
+    fan_out: Arc<LocalFanOut>,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) -> Result<(), LocalAPIError> {
-    let app = make_app(ApiState::new(&state, &token_provider))?;
+    let app = make_app(ApiState::new(&config, &fan_out, &token_provider))?;
 
     #[allow(clippy::unwrap_used)] // infallible
     axum::serve(
@@ -1083,6 +1077,7 @@ mod tests {
     use rustls::ClientConfig;
     use serde_json::Value;
     use std::path::PathBuf;
+    use tokio::sync::Mutex;
     use tokio_rustls::rustls::RootCertStore;
     use tower::ServiceExt;
     use url::Url;
@@ -1114,8 +1109,9 @@ mod tests {
 
     struct TestSetup {
         pub app: Router,
-        pub shared_state: Arc<Mutex<AgentState>>,
         fan_out: Arc<LocalFanOut>,
+        /// The management API the agent is pointed at, until a test takes it to add mocks
+        mgmt_server: Mutex<Option<mockito::ServerGuard>>,
         smbdrop: Mutex<SmbdropSays>,
         /// The session helper of the test scope, once it reported
         helper: Mutex<Option<HelperPresence>>,
@@ -1132,10 +1128,11 @@ mod tests {
 
         pub async fn start_as(identity: MTLSIdentity) -> Self {
             let root = RootCertStore::empty();
+            let mgmt_server = mockito::Server::new_async().await;
 
             let cfg = crate::config::AgentConfig {
                 events_api_url: Url::parse("http://localhost/").unwrap(),
-                mgmt_api_url: Url::parse("http://localhost/").unwrap(),
+                mgmt_api_url: Url::parse(&mgmt_server.url()).unwrap(),
                 smb_hostname: "host".to_string(),
                 smb_ip: tokio::sync::OnceCell::new(),
                 smb_port: 445,
@@ -1152,8 +1149,8 @@ mod tests {
                 ),
                 client_cert: None,
             };
-            let shared_state = crate::agent_state::AgentState::new(&cfg);
-            let fan_out = Arc::clone(&shared_state.lock().await.fan_out);
+            let cfg = Arc::new(cfg);
+            let fan_out = Arc::new(LocalFanOut::new(cfg.identity.clone()));
             fan_out.logged_in(modama_common::agent::AgentId {
                 resource: "res".to_string(),
                 agent: "agent-name".to_string(),
@@ -1191,7 +1188,7 @@ mod tests {
             ];
 
             let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(DummyTokenProvider);
-            let mut api_state = ApiState::new(&shared_state, &token_provider);
+            let mut api_state = ApiState::new(&cfg, &fan_out, &token_provider);
             api_state.scope_resolver = Arc::new(TestScope);
             let app = make_app(api_state)
                 .unwrap()
@@ -1202,8 +1199,8 @@ mod tests {
 
             let test_setup = Self {
                 app,
-                shared_state,
                 fan_out,
+                mgmt_server: Mutex::new(Some(mgmt_server)),
                 smbdrop: Mutex::new(SmbdropSays::default()),
                 helper: Mutex::new(None),
             };
@@ -2556,9 +2553,15 @@ mod tests {
 
     const UPSTREAM_SESSION: &str = "modama_session=abc";
 
-    /// A mock management API at /mgmt-api, which the agent is pointed at
+    /// The management API the agent is pointed at, mounted at /mgmt-api, with the caller
+    /// signed in as `testuser`
     async fn mgmt_api_server(test_setup: &TestSetup) -> mockito::ServerGuard {
-        let mut server = mockito::Server::new_async().await;
+        let mut server = test_setup
+            .mgmt_server
+            .lock()
+            .await
+            .take()
+            .expect("the management API server was taken already");
         server
             .mock("GET", "/api/versions")
             .with_status(404)
@@ -2576,8 +2579,6 @@ mod tests {
             .with_body(r#"{"username": "testuser", "persistent": false}"#)
             .create_async()
             .await;
-        test_setup.shared_state.lock().await.config.mgmt_api_url =
-            Url::parse(&server.url()).unwrap();
         server
     }
 
