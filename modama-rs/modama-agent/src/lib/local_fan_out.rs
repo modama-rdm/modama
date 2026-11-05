@@ -562,13 +562,10 @@ fn connected_agents_at(
     let resource = &token_identity?.resource;
     let own_connection = own_connection?;
     let remote = remote?;
-    let (name, verified) = match identity {
-        MTLSIdentity::AgentId { agent_name, .. } => (agent_name.clone(), true),
-        MTLSIdentity::Anonymous { hostname } => (hostname.clone(), false),
-    };
     let own = ConnectedAgent {
-        name,
-        verified,
+        name: identity.name().to_owned(),
+        // an enrolled agent has a resource of its own
+        verified: identity.resource().is_some(),
         status: own_status,
         connection: connection_details(remote.participant(own_connection)?),
     };
