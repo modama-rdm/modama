@@ -172,7 +172,7 @@ impl TopBar {
 fn content_layout_style(authenticated: bool) -> Style {
     // Taffy snaps the authenticated compound row to whole points. Account for that
     // one-point expansion so its trailing edge stays on the existing content guide.
-    let trailing_inset = styles::top_bar_card_edge_offset()
+    let trailing_inset = styles::top_bar_outer_guide_offset()
         - if authenticated {
             styles::components::standard_border::width::EGUI_POINTS
         } else {
@@ -190,7 +190,7 @@ fn content_layout_style(authenticated: bool) -> Style {
             height: percent(1.0_f32),
         },
         padding: taffy::Rect {
-            left: length(styles::top_bar_content_guide_offset()),
+            left: length(styles::top_bar_inner_guide_offset()),
             right: length(trailing_inset),
             top: length(0.0_f32),
             bottom: length(0.0_f32),

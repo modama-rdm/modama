@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use modama_agent::{
     config::{CliArgs, Command},
     runtime::run_agent,
@@ -35,6 +35,10 @@ fn main() -> Result<()> {
     let args = CliArgs::parse();
     match args.command {
         None => run_foreground(config_path(&args)?),
+        Some(Command::Version) => {
+            print!("{}", CliArgs::command().render_version());
+            Ok(())
+        }
         Some(Command::RunService) => {
             let path = config_path(&args)?;
             #[cfg(windows)]

@@ -27,7 +27,7 @@ pub(crate) fn display_error(ui: &mut egui::Ui, message: &str) {
 /// Render a page heading on the shared card-content guide.
 pub(crate) fn page_heading(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {
-        ui.add_space(styles::content_card_inset());
+        ui.add_space(styles::guide_inset());
         ui.add(egui::Label::new(
             RichText::new(text).font(styles::typography::heading::font_id()),
         ));

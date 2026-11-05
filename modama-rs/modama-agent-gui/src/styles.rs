@@ -252,29 +252,31 @@ pub fn pointer_cursor(response: egui::Response) -> egui::Response {
     }
 }
 
-/// Horizontal distance from a compact content card's outer edge to its content guide.
-pub fn content_card_inset() -> f32 {
+// The layout guides: see "Layout › Guides" in mgmtinterface-new/DESIGN.md.
+
+/// The guide inset: from an outer guide to its inner guide, the border and horizontal padding of
+/// a frame on the outer guide.
+pub fn guide_inset() -> f32 {
     components::standard_border::width::EGUI_POINTS
         + components::content_card_padding_x::padding::EGUI_POINTS
 }
 
-/// Horizontal distance from the window edge to a content card's outer edge.
-pub fn content_card_outer_inset_from_window() -> f32 {
+/// From the window's left or right edge to the outer guide on that side.
+pub fn outer_guide_inset() -> f32 {
     spacing::app_window_margin_x::EGUI_POINTS + components::app_shell::padding::EGUI_POINTS
 }
 
-/// Horizontal and vertical insets used by overlays aligned to the app shell.
-pub fn toast_right_inset_from_window() -> f32 {
-    content_card_outer_inset_from_window()
+/// From the window's left or right edge to the inner guide on that side.
+pub fn inner_guide_inset() -> f32 {
+    outer_guide_inset() + guide_inset()
 }
 
-pub fn toast_bottom_inset_from_window() -> f32 {
-    spacing::app_window_margin_y::EGUI_POINTS + components::app_shell::padding::EGUI_POINTS
-}
-
-/// Horizontal position of the shared content guide relative to the window.
-pub fn content_guide_from_window_left() -> f32 {
-    content_card_outer_inset_from_window() + content_card_inset()
+/// From the window's bottom edge to the outer bottom edge of bottom-anchored overlays (toasts,
+/// offers): above the footer, by the content area's bottom inset.
+pub fn bottom_overlay_inset() -> f32 {
+    components::footer::height::EGUI_POINTS
+        + spacing::app_window_margin_y::EGUI_POINTS
+        + components::app_shell::padding::EGUI_POINTS
 }
 
 /// Extra space needed after normal item spacing to reach the content-card top gap.
@@ -287,16 +289,16 @@ pub fn content_card_top_margin_adjustment() -> f32 {
     adjustment.max(0.0)
 }
 
-/// Additional leading space needed inside the padded top bar to reach the guide.
-pub fn top_bar_content_guide_offset() -> f32 {
-    let offset = content_guide_from_window_left() - components::top_bar::padding::EGUI_POINTS;
+/// Additional leading space needed inside the padded top bar to reach the inner guide.
+pub fn top_bar_inner_guide_offset() -> f32 {
+    let offset = inner_guide_inset() - components::top_bar::padding::EGUI_POINTS;
     debug_assert!(offset >= 0.0, "top-bar padding exceeds the content guide");
     offset
 }
 
-/// Additional trailing space needed inside the padded top bar to reach the card edge.
-pub fn top_bar_card_edge_offset() -> f32 {
-    let offset = content_card_outer_inset_from_window() - components::top_bar::padding::EGUI_POINTS;
+/// Additional trailing space needed inside the padded top bar to reach the outer guide.
+pub fn top_bar_outer_guide_offset() -> f32 {
+    let offset = outer_guide_inset() - components::top_bar::padding::EGUI_POINTS;
     debug_assert!(offset >= 0.0, "top-bar padding exceeds the card edge");
     offset
 }

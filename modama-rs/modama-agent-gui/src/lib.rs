@@ -6,6 +6,7 @@ pub mod async_state;
 pub mod autostart;
 pub mod components;
 pub mod config;
+mod footer;
 mod foreground_monitor;
 #[cfg(feature = "guide-screenshots")]
 pub mod guide_screenshots;
@@ -196,13 +197,28 @@ mod style_tests {
         assert_eq!(frame.shadow, styles::card_shadow(&egui::Visuals::light()));
     }
 
+    /// DESIGN.md › Layout › Guides: frames on an outer guide put their content on the inner
+    /// guide, so their horizontal paddings change together or not at all.
     #[test]
-    fn content_guide_uses_content_card_padding() {
-        assert_eq!(
-            styles::content_card_inset(),
-            styles::components::standard_border::width::EGUI_POINTS
-                + styles::components::content_card_padding_x::padding::EGUI_POINTS
-        );
+    fn frames_on_an_outer_guide_put_their_content_on_the_inner_guide() {
+        let border = styles::components::standard_border::width::EGUI_POINTS;
+        for (frame, padding) in [
+            (
+                "content card",
+                styles::components::content_card_padding_x::padding::EGUI_POINTS,
+            ),
+            ("button", styles::spacing::button_padding_x::EGUI_POINTS),
+            (
+                "error toast",
+                styles::components::error_toast_padding_x::padding::EGUI_POINTS,
+            ),
+        ] {
+            assert_eq!(
+                border + padding,
+                styles::guide_inset(),
+                "{frame}: border and horizontal padding must add up to the guide inset"
+            );
+        }
     }
 
     #[test]
@@ -215,15 +231,16 @@ mod style_tests {
     }
 
     #[test]
-    fn shared_content_guide_is_derived_from_layout_tokens() {
+    fn top_bar_content_sits_on_the_guides() {
         assert_eq!(
             styles::components::top_bar::padding::EGUI_POINTS
-                + styles::top_bar_content_guide_offset(),
-            styles::content_card_outer_inset_from_window() + styles::content_card_inset()
+                + styles::top_bar_inner_guide_offset(),
+            styles::outer_guide_inset() + styles::guide_inset()
         );
         assert_eq!(
-            styles::components::top_bar::padding::EGUI_POINTS + styles::top_bar_card_edge_offset(),
-            styles::content_card_outer_inset_from_window()
+            styles::components::top_bar::padding::EGUI_POINTS
+                + styles::top_bar_outer_guide_offset(),
+            styles::outer_guide_inset()
         );
     }
 

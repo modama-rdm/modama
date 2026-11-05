@@ -300,8 +300,8 @@ fn error_toast_aligns_with_the_app_shell_geometry() {
     let retry = harness.get_by_label("Retry").rect();
     let dismiss = harness.get_by_label("Dismiss").rect();
     let tolerance = styles::components::standard_border::width::EGUI_POINTS * 2.0;
-    let expected_right = VIEWPORT.x - styles::toast_right_inset_from_window();
-    let expected_bottom = VIEWPORT.y - styles::toast_bottom_inset_from_window();
+    let expected_right = VIEWPORT.x - styles::outer_guide_inset();
+    let expected_bottom = VIEWPORT.y - styles::bottom_overlay_inset();
     let controls_right = retry.right().max(dismiss.right());
 
     assert!((logo.left() - heading.left()).abs() <= tolerance);
@@ -326,6 +326,11 @@ fn error_toast_aligns_with_the_app_shell_geometry() {
         expected_bottom - styles::components::error_toast_padding_y::padding::EGUI_POINTS
     );
     assert!(retry.top() > logo.bottom());
+    let footer_top = VIEWPORT.y - styles::components::footer::height::EGUI_POINTS;
+    assert!(
+        expected_bottom < footer_top,
+        "the toast ends at {expected_bottom}, over the footer starting at {footer_top}"
+    );
 }
 
 #[test]
@@ -348,7 +353,7 @@ fn error_toast_retry_routes_back_to_the_failed_selection_page() {
 
 #[test]
 fn top_bar_session_action_shares_the_card_right_guide() {
-    let expected_right = VIEWPORT.x - styles::content_card_outer_inset_from_window();
+    let expected_right = VIEWPORT.x - styles::outer_guide_inset();
     let tolerance = styles::components::standard_border::width::EGUI_POINTS;
 
     let logged_out = overview_harness(false, false);
@@ -374,6 +379,28 @@ fn top_bar_session_action_shares_the_card_right_guide() {
     assert!(
         (username_rect.center().y - logout_rect.center().y).abs() <= tolerance,
         "username and logout must remain vertically centered on the same text line"
+    );
+}
+
+/// DESIGN.md › Layout › Guides and › Footer: the version ends on the inner right guide, the
+/// footer has its fixed height, and bottom-anchored overlays stay above it.
+#[test]
+fn footer_version_sits_on_the_inner_right_guide() {
+    let harness = overview_harness(false, false);
+    let tolerance = styles::components::standard_border::width::EGUI_POINTS;
+    let version = harness
+        .get_by_label(modama_agent_gui::app::STUB_VERSION)
+        .rect();
+    let expected_right = VIEWPORT.x - styles::inner_guide_inset();
+    assert!(
+        (version.right() - expected_right).abs() <= tolerance,
+        "version right edge {} does not match the inner guide {expected_right}",
+        version.right()
+    );
+    let footer_top = VIEWPORT.y - styles::components::footer::height::EGUI_POINTS;
+    assert!(
+        version.top() > footer_top && version.bottom() < VIEWPORT.y,
+        "version {version:?} is not inside the footer starting at {footer_top}"
     );
 }
 

@@ -178,7 +178,7 @@ impl PageSelectProject {
                             "Search",
                             TextEdit::singleline(&mut self.search_query)
                                 .hint_text("Search projects…"),
-                            styles::content_card_inset(),
+                            styles::guide_inset(),
                             styles::spacing::button_padding_x::EGUI_POINTS,
                         );
                         if self.focus_search_on_entry && response.enabled() {
@@ -562,7 +562,7 @@ fn centered_list_state(
 }
 
 fn content_guide_widget_offset(horizontal_padding: f32) -> f32 {
-    (styles::content_card_inset() - horizontal_padding).max(0.0)
+    (styles::guide_inset() - horizontal_padding).max(0.0)
 }
 
 fn additional_members_avatar(ui: &mut egui::Ui, count: usize) -> egui::Response {
