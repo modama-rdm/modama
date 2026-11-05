@@ -12,12 +12,14 @@ use modama_common::{
     tokens::TokenProvider,
     version::modama_git_version,
 };
-use tokio::sync::Mutex;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tungstenite::Message;
 
-use crate::{agent_state::AgentState, config::MTLSIdentity, local_fan_out::LocalFanOut};
+use crate::{
+    config::{AgentConfig, MTLSIdentity},
+    local_fan_out::LocalFanOut,
+};
 
 /// Handle one message from smbdrop; returns the protocol version if it was a `Welcome`
 fn handle_message(fan_out: &LocalFanOut, msg: &str) -> AnyResult<Option<u32>> {
@@ -144,15 +146,11 @@ impl StatusReporter {
 }
 
 pub async fn message_loop(
-    state: Arc<Mutex<AgentState>>,
+    config: Arc<AgentConfig>,
+    fan_out: Arc<LocalFanOut>,
     tls_config: Arc<ClientConfig>,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
 ) {
-    let (config, fan_out) = {
-        let state = state.lock().await;
-        (state.config.clone(), Arc::clone(&state.fan_out))
-    };
-
     loop {
         fan_out.smbdrop_disconnected();
         let (conn, _response) = match connect_async_tls_with_config(
@@ -381,8 +379,8 @@ mod tests {
             let anonymous = matches!(identity, MTLSIdentity::Anonymous { .. });
             let config = test_config(port, identity);
 
-            let state = AgentState::new(&config);
-            let fan_out = Arc::clone(&state.lock().await.fan_out);
+            let config = Arc::new(config);
+            let fan_out = Arc::new(LocalFanOut::new(config.identity.clone()));
 
             let client_cert = ca.client_cert("test-agent", "test_resource").unwrap();
             let client_chain: Vec<CertificateDer> = vec![
@@ -414,12 +412,13 @@ mod tests {
                 });
 
             // run message_loop in background
-            let message_loop_state = Arc::clone(&state);
+            let message_loop_fan_out = Arc::clone(&fan_out);
             let message_loop_task = tokio::spawn(async move {
                 // message_loop runs forever; it will return only if the connection loop ends
                 // we run it and let it process the single message from our server
                 message_loop(
-                    message_loop_state,
+                    config,
+                    message_loop_fan_out,
                     client_config,
                     Arc::clone(&token_provider),
                 )

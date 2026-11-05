@@ -21,12 +21,22 @@ use modama_common::{
 };
 use tokio::sync::watch;
 
-use crate::{agent_state::ShareState, caller_scope::HelperScope, config::MTLSIdentity};
+use crate::{caller_scope::HelperScope, config::MTLSIdentity};
 
 /// The fan-out to local session helpers and GUIs; see the module documentation
 #[derive(Debug)]
 pub struct LocalFanOut {
     state: watch::Sender<FanOutState>,
+}
+
+/// The shares smbdrop wants mounted
+#[derive(Debug, Clone, Default)]
+struct ShareState {
+    /// The current foreground share, if any
+    foreground_share: Option<Share>,
+
+    /// All shares, including the foreground share
+    shares: Vec<Share>,
 }
 
 /// What smbdrop told us last
@@ -35,7 +45,7 @@ struct RemoteInfo {
     /// The connections to smbdrop at our resource, ours included
     participants: Vec<Participant>,
 
-    desired_shares: ShareState<Share>,
+    desired_shares: ShareState,
 }
 
 impl RemoteInfo {
@@ -105,8 +115,8 @@ struct FanOutState {
 
 /// Whether two desired states are the same; the order of the shares doesn't matter, as
 /// smbdrop doesn't keep a stable order for shares created at the same time
-fn same_desired(a: &ShareState<Share>, b: &ShareState<Share>) -> bool {
-    let sorted = |state: &ShareState<Share>| {
+fn same_desired(a: &ShareState, b: &ShareState) -> bool {
+    let sorted = |state: &ShareState| {
         let mut shares = state.shares.clone();
         shares.sort_by(|s1, s2| s1.share_id.cmp(&s2.share_id));
         shares
