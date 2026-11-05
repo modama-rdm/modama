@@ -1,0 +1,62 @@
+name: Container images
+
+# Called from ci.yml after the tests passed.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gateway, dockerfile: deploy/gateway/Dockerfile, context: deploy/gateway }
+          - { name: nextcloud, dockerfile: deploy/nextcloud/Dockerfile, context: deploy/nextcloud }
+          - { name: permissions, dockerfile: deploy/permissions/Dockerfile, context: . }
+          - { name: sssd, dockerfile: deploy/sssd/Dockerfile, context: . }
+          - { name: watchdog, dockerfile: deploy/watchdog/Dockerfile, context: . }
+          - { name: smbdrop, dockerfile: modama-rs/Dockerfile-smbdrop, context: modama-rs }
+          - { name: ca, dockerfile: modama-rs/Dockerfile-ca-cli, context: modama-rs }
+          - { name: mgmtinterface, dockerfile: deploy/mgmtinterface/Dockerfile, context: . }
+          - { name: mgmtinterface-api, dockerfile: deploy/mgmtinterface-api/Dockerfile, context: . }
+          - { name: wsgidav, dockerfile: deploy/wsgidav/Dockerfile, context: deploy/wsgidav }
+          - { name: tsm-client, dockerfile: deploy/tsm-client/Dockerfile, context: deploy/tsm-client }
+          - { name: mgmtinterface-new, dockerfile: mgmtinterface-new/Dockerfile, context: . }
+    env:
+      # Push from this repository only: not from pull requests out of forks, whose token can't
+      # write packages anyway.
+      PUSH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          flavor: latest=false
+          tags: |
+            type=sha,format=long
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+      - if: env.PUSH == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          file: ${{ matrix.dockerfile }}
+          context: ${{ matrix.context }}
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

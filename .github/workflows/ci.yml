@@ -1,0 +1,286 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ["v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Jobs running in a container check out after installing git there: without git,
+# actions/checkout falls back to a tarball without history. The agent's version comes from
+# `git describe` (git-version crate, falls back to "unknown" silently), so the Rust jobs need the
+# full history with tags, and git must accept the workspace, which belongs to the runner's user
+# and not to root in the container (safe.directory).
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    container: debian:13-slim
+    steps:
+      - run: apt-get -y update && apt-get -y upgrade && apt-get -y install python3-full git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install
+        run: |
+          python3 -m venv /venv/
+          /venv/bin/pip install pytest httpx2
+          /venv/bin/pip install ./python/smbdrop-client
+          /venv/bin/pip install ./python/permissions-client
+          /venv/bin/pip install ./python/mgmtinterface-client
+          /venv/bin/pip install -e ./python/mgmtinterface
+          /venv/bin/pip install -e ./python/mgmtinterface-api
+      - run: /venv/bin/pytest tests
+        working-directory: python/mgmtinterface
+      - run: /venv/bin/pytest tests
+        working-directory: python/mgmtinterface-api
+
+  py-lint-and-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uvx ruff format --check --diff
+      - run: uvx ruff check
+
+  mgmtinterface-new-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mgmtinterface-new
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mgmtinterface-new/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+
+  rust-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ["1", "1.94"]
+    container: rust:${{ matrix.rust }}-slim-trixie
+    steps:
+      - run: >-
+          apt-get -y update && apt-get -y install curl git lld build-essential pkg-config
+          libglib2.0-dev libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: vulkaninfo --summary
+      - run: rustup component add clippy
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: modama-rs
+      - name: Check, clippy, test
+        working-directory: modama-rs
+        run: |
+          cargo check --workspace --all-targets --all-features --locked
+          cargo clippy --all-targets --all-features --locked -- -D warnings
+          cargo test --locked
+      - run: just visual-tests
+        working-directory: modama-rs
+      - name: Upload differing snapshots
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snapshot-review-rust-${{ matrix.rust }}
+          path: modama-rs/modama-agent-gui/tests/snapshots/review/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # the `ring` crate doesn't build on the gnu toolchain, so while we can still
+  # run clippy as a basic smoke test, the full build is not enabled here.
+  windows-clippy:
+    runs-on: ubuntu-latest
+    container: rust:1-slim-trixie
+    steps:
+      - run: apt-get -y update && apt-get -y install curl git gcc-mingw-w64-x86-64-win32
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: modama-rs
+      - run: just win7-install-toolchain
+        working-directory: modama-rs
+      - run: just win7-check-gnu
+        working-directory: modama-rs
+
+  windows-7-llvm:
+    runs-on: ubuntu-latest
+    container: rust:1-slim-trixie
+    steps:
+      - run: apt-get -y update && apt-get -y install curl git clang-tools-19 lld llvm
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just,xwin
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: modama-rs
+      - name: Build and check
+        working-directory: modama-rs
+        run: |
+          just win7-install-toolchain
+          just win7-xwin-splat
+          just win7-check-msvc
+          just win7-check-agent-imports
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-win7
+          path: |
+            modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent.exe
+            modama-rs/target/x86_64-win7-windows-msvc/release/modama-agent-gui.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  # zig is only used as the C compiler/linker for cargo-zigbuild, so the binaries
+  # only require glibc 2.17 (see `linux_glibc` in modama-rs/ci.just).
+  linux-agent:
+    runs-on: ubuntu-latest
+    container: rust:1-slim-trixie
+    env:
+      ZIG_VERSION: "0.15.2"
+      ZIG_SHA256: "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
+    steps:
+      - run: apt-get -y update && apt-get -y install curl git xz-utils binutils pkg-config libglib2.0-dev
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .zig/
+          key: zig-${{ env.ZIG_VERSION }}
+      - name: Install zig
+        run: |
+          if [ ! -x ".zig/$ZIG_VERSION/zig" ]; then
+            curl --fail -sSL -o zig.tar.xz "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
+            echo "$ZIG_SHA256  zig.tar.xz" | sha256sum -c -
+            rm -rf .zig && mkdir -p ".zig/$ZIG_VERSION"
+            tar -xJf zig.tar.xz -C ".zig/$ZIG_VERSION" --strip-components=1
+            rm zig.tar.xz
+          fi
+          echo "$GITHUB_WORKSPACE/.zig/$ZIG_VERSION" >> "$GITHUB_PATH"
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just,cargo-zigbuild
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: modama-rs
+      - run: just -f ci.just linux-check-agent-glibc
+        working-directory: modama-rs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-linux
+          path: |
+            modama-rs/target/x86_64-unknown-linux-gnu/release/modama-agent
+            modama-rs/target/x86_64-unknown-linux-gnu/release/modama-agent-gui
+          if-no-files-found: error
+          retention-days: 7
+
+  # The release binaries from linux-agent must start on the oldest supported distribution
+  # (Ubuntu 18.04: glibc 2.27, GLib 2.56); see the script for how this is checked. Not a
+  # `container:` job: the actions' Node runtime doesn't start on glibc 2.27.
+  linux-agent-oldest-runtime:
+    runs-on: ubuntu-latest
+    needs: [linux-agent]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: modama-rs/ci
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-linux
+          path: bin-under-test
+      # artifacts don't keep the executable bit
+      - run: chmod +x bin-under-test/*
+      - run: >-
+          docker run --rm
+          -v "$PWD/bin-under-test:/bin-under-test:ro"
+          -v "$PWD/modama-rs/ci:/ci:ro"
+          docker.io/library/ubuntu:18.04 sh /ci/check-oldest-linux-runtime.sh /bin-under-test
+
+  # Images are built and pushed only after the tests passed, as the GitLab build stage did.
+  images:
+    needs:
+      - unit-tests
+      - py-lint-and-format
+      - mgmtinterface-new-tests
+      - rust-tests
+      - windows-clippy
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+
+  # Maintainers create the release (tag + description) in the GitHub UI, so this only attaches
+  # the binaries to that release and leaves its name and description alone.
+  agent-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs:
+      - linux-agent
+      - linux-agent-oldest-runtime
+      - windows-7-llvm
+      # the builds don't wait for the tests, so don't release untested binaries
+      - rust-tests
+      - windows-clippy
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-linux
+          path: linux
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-win7
+          path: win7
+      - name: Collect binaries and checksums
+        run: |
+          mkdir dist
+          cp linux/modama-agent dist/modama-agent-linux-x86_64
+          cp linux/modama-agent-gui dist/modama-agent-gui-linux-x86_64
+          cp win7/modama-agent.exe dist/modama-agent-win7-x86_64.exe
+          cp win7/modama-agent-gui.exe dist/modama-agent-gui-win7-x86_64.exe
+          chmod +x dist/*
+          (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null; then
+            echo "::error::No release for $GITHUB_REF_NAME yet. Create it in the GitHub UI, then re-run this job."
+            exit 1
+          fi
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            "dist/modama-agent-linux-x86_64#modama-agent (Linux x86_64, glibc >= 2.17)" \
+            "dist/modama-agent-gui-linux-x86_64#modama-agent-gui (Linux x86_64, glibc >= 2.17)" \
+            "dist/modama-agent-win7-x86_64.exe#modama-agent (Windows 7+ x86_64)" \
+            "dist/modama-agent-gui-win7-x86_64.exe#modama-agent-gui (Windows 7+ x86_64)" \
+            "dist/SHA256SUMS#SHA256SUMS"
