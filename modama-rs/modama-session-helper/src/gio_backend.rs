@@ -19,10 +19,7 @@ use url::Url;
 
 use crate::{
     mount_backend::{EnumerationError, MountBackend, PassResult},
-    reconcile::{
-        AddFailure, DuplicateEntries, MountTable, PathlessEntries, Policy, TableEntry,
-        reconcile_pass,
-    },
+    reconcile::{AddFailure, MountTable, PathlessEntries, TableEntry, reconcile_pass},
 };
 
 /// Upper bound for a single mount or unmount operation
@@ -154,13 +151,10 @@ impl<A: GioApi> MountTable for GioTable<'_, A> {
 
     /// Remounting a mount without a local path would give one without a path again; it is
     /// kept, and the error points at the likely cause
-    fn policy(&self) -> Policy {
-        Policy {
-            pathless: PathlessEntries::KeepWithError(
-                "mounted, but without a local path (is gvfs-fuse installed?)",
-            ),
-            duplicates: DuplicateEntries::Keep,
-        }
+    fn pathless_entries(&self) -> PathlessEntries {
+        PathlessEntries::KeepWithError(
+            "mounted, but without a local path (is gvfs-fuse installed?)",
+        )
     }
 
     fn entries(&mut self) -> Result<Vec<TableEntry<A::Handle>>, String> {
@@ -659,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_mounts_are_kept_and_any_path_counts() {
+    fn duplicate_mounts_are_reduced_to_one_with_a_path() {
         let api = FakeGio {
             mounts: RefCell::new(vec![
                 ("smb://smb.example.test/a/".to_owned(), None),
@@ -671,8 +665,11 @@ mod tests {
             ..FakeGio::default()
         };
         let state = pass(&api, &[share("1", "a")]);
-        assert!(api.calls.borrow().is_empty());
-        assert_eq!(names(&state), vec!["A", "a"]);
+        assert_eq!(
+            *api.calls.borrow(),
+            vec!["unmount smb://smb.example.test/a/"]
+        );
+        assert_eq!(names(&state), vec!["A"]);
         assert!(state.errors.is_empty(), "{state:?}");
     }
 
