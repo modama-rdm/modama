@@ -519,6 +519,51 @@ mod tests {
         );
     }
 
+    /// Sessions whose names differ only in case are different shares: smbdrop appends the share
+    /// ID to each share name, so their names differ beyond case
+    #[test]
+    fn sessions_differing_only_in_case_are_separate_shares() {
+        let upper = "2026-10-SQL-123e4567e89b42d3a456426614174000";
+        let lower = "2026-10-sql-9f1c0d2ab7e44c1e8a0b5d3e6f7a8b9c";
+        let desired = Shares {
+            foreground_share_id: Some("lower".to_owned()),
+            shares: vec![
+                named_share("upper", upper, "2026-10-SQL"),
+                named_share("lower", lower, "2026-10-sql"),
+            ],
+        };
+        let helper = helper(
+            &[(upper, Some("/mnt/upper")), (lower, Some("/mnt/lower"))],
+            &[],
+        );
+        let view = ScopeView::new(Some(&desired), Some(&helper));
+
+        let mounts: Vec<_> = view
+            .desired()
+            .map(|(share, mount)| (share.share_id.as_str(), mount))
+            .collect();
+        assert_eq!(
+            mounts,
+            vec![
+                ("upper", ShareMount::Mounted(Path::new("/mnt/upper"))),
+                ("lower", ShareMount::Mounted(Path::new("/mnt/lower"))),
+            ]
+        );
+        assert_eq!(view.stale_mounts().count(), 0);
+        assert_eq!(view.foreground_mount_path(), Some(Path::new("/mnt/lower")));
+        assert_eq!(
+            view.other_mounts(),
+            vec![OtherMount {
+                share_id: "upper".to_owned(),
+                project: "project".to_owned(),
+                session: "2026-10-SQL".to_owned(),
+                created_by: Some("alice".to_owned()),
+                mount_path: "/mnt/upper".to_owned(),
+            }]
+        );
+        assert!(!view.actual_differs_from_desired());
+    }
+
     #[test]
     fn without_helper_the_message_says_how_to_start_one() {
         let desired = only(share("foreground"));

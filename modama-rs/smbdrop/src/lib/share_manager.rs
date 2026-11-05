@@ -1180,6 +1180,20 @@ mod tests {
         );
     }
 
+    /// Agents and session helpers match share names case-insensitively (SMB share names are),
+    /// so sessions whose names differ only in case must still get names that differ beyond case
+    #[test]
+    fn test_make_share_name_differs_beyond_case_for_sessions_differing_in_case() {
+        let upper_id = uuid::Uuid::parse_str("123e4567-e89b-42d3-a456-426614174000").unwrap();
+        let lower_id = uuid::Uuid::parse_str("9f1c0d2a-b7e4-4c1e-8a0b-5d3e6f7a8b9c").unwrap();
+        let upper = make_share_name(Path::new("/adhoc/project/2026-10-SQL/"), &upper_id);
+        let lower = make_share_name(Path::new("/adhoc/project/2026-10-sql/"), &lower_id);
+
+        assert_eq!(upper, "2026-10-SQL-123e4567e89b42d3a456426614174000");
+        assert_eq!(lower, "2026-10-sql-9f1c0d2ab7e44c1e8a0b5d3e6f7a8b9c");
+        assert_ne!(upper.to_lowercase(), lower.to_lowercase());
+    }
+
     #[tokio::test]
     async fn test_smbdrop_state_get_or_create_user() {
         let shares = HashMap::new();
