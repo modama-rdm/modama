@@ -38,6 +38,14 @@ pub struct LoopOptions {
 
     /// Wait this long before trying to reconnect to the agent
     pub reconnect_delay: Duration,
+
+    /// Reconcile this long after a new desired state, not at once: smbdrop asks Samba to reload
+    /// its configuration for a new share, but doesn't wait for it, and until then a connection
+    /// to the host we already have doesn't know the share (error 67 on Windows, for a few ms)
+    pub settle_delay: Duration,
+
+    /// After a pass that left errors, try again this soon, doubling up to `interval`
+    pub first_retry: Duration,
 }
 
 impl LoopOptions {
@@ -46,11 +54,26 @@ impl LoopOptions {
             events_url,
             interval: Duration::from_secs(30),
             reconnect_delay: Duration::from_secs(1),
+            settle_delay: Duration::from_millis(200),
+            first_retry: Duration::from_secs(1),
         }
     }
 
     fn next_pass(&self) -> Instant {
         Instant::now() + self.interval.mul_f64(rand::rng().random_range(0.8..=1.2))
+    }
+
+    /// When to pass next: soon after a pass that left errors, backing off to the interval
+    fn next_pass_after(&self, failed: bool, retry: &mut Option<Duration>) -> Instant {
+        *retry = match (failed, *retry) {
+            (false, _) => None,
+            (true, None) => Some(self.first_retry),
+            (true, Some(delay)) => Some((delay * 2).min(self.interval)),
+        };
+        match *retry {
+            Some(delay) if delay < self.interval => Instant::now() + delay,
+            _ => self.next_pass(),
+        }
     }
 }
 
@@ -131,15 +154,16 @@ impl LoopState {
         });
     }
 
-    /// One reconciliation pass, then report the result if it changed
-    async fn pass(&mut self, backend: &impl MountBackend, force: bool) {
+    /// One reconciliation pass, then report the result if it changed; true if shares are left
+    /// with errors
+    async fn pass(&mut self, backend: &impl MountBackend, force: bool) -> bool {
         let Some(desired) = &self.desired else {
-            return;
+            return false;
         };
         // None: the agent hasn't heard from smbdrop yet, so we don't know what should be
         // mounted; leave everything alone
         let Some(share_state) = &desired.share_state else {
-            return;
+            return false;
         };
         // before this pass's mounts, so the popup never shows a share that is gone already;
         // the popup task only stops with the helper
@@ -157,7 +181,7 @@ impl LoopState {
             Err(e) => {
                 // we don't know the actual state, so we don't claim anything
                 warn!("{e}");
-                return;
+                return false;
             }
         };
         let created = popup_mounts(share_state, &result);
@@ -170,14 +194,15 @@ impl LoopState {
             reconciled_share_ids: Some(desired_share_ids(share_state)),
             ..result.state
         };
+        let failed = !report.errors.is_empty();
         self.actual = Some(report.clone());
         self.publish_tray_state();
 
         let Some(sink) = &mut self.sink else {
-            return;
+            return failed;
         };
         if self.last_report.as_ref() == Some(&report) {
-            return;
+            return failed;
         }
         let msg = ToAgent::SessionUpdate {
             shares: report.mounted_shares.clone(),
@@ -188,7 +213,7 @@ impl LoopState {
             Ok(text) => text,
             Err(e) => {
                 error!("could not serialize report: {e}");
-                return;
+                return failed;
             }
         };
         match sink.send(Message::Text(text.into())).await {
@@ -198,6 +223,7 @@ impl LoopState {
                 self.disconnected();
             }
         }
+        failed
     }
 }
 
@@ -253,6 +279,10 @@ pub async fn session_helper_loop(
     };
     state.publish_tray_state();
     let mut next_pass = options.next_pass();
+    // the current wait after passes that left errors
+    let mut retry = None;
+    // forcing applies to the next pass only, not to later ones
+    let mut force = false;
     let mut next_connect = Instant::now();
     // connecting runs alongside the passes, so an agent that hangs during the handshake doesn't
     // stop reconciliation
@@ -267,14 +297,14 @@ pub async fn session_helper_loop(
                         match serde_json::from_str::<ToSessionHelper>(text.as_str()) {
                             Ok(desired) => {
                                 debug!("received desired state: {desired:?}");
-                                // forcing applies to this one pass only, not to later ones
-                                let force = desired.force_release_obsolete;
+                                force |= desired.force_release_obsolete;
                                 state.desired = Some(ToSessionHelper {
                                     force_release_obsolete: false,
                                     ..desired
                                 });
-                                state.pass(backend, force).await;
-                                next_pass = options.next_pass();
+                                // never later than a pass that is due anyway, so a stream of
+                                // updates can't put it off
+                                next_pass = next_pass.min(Instant::now() + options.settle_delay);
                             }
                             Err(e) => warn!("ignoring invalid message from the agent: {e}"),
                         }
@@ -294,8 +324,8 @@ pub async fn session_helper_loop(
                 }
             }
             _ = tokio::time::sleep_until(next_pass) => {
-                state.pass(backend, false).await;
-                next_pass = options.next_pass();
+                let failed = state.pass(backend, std::mem::take(&mut force)).await;
+                next_pass = options.next_pass_after(failed, &mut retry);
             }
             _ = tokio::time::sleep_until(next_connect), if idle => {
                 connecting = Some(connect(options.events_url.clone()));
@@ -402,14 +432,24 @@ mod tests {
 
     impl Setup {
         async fn start(result: Result<SessionHelperState, String>) -> Self {
+            Self::start_with(result, |_| {}).await
+        }
+
+        async fn start_with(
+            result: Result<SessionHelperState, String>,
+            adjust: impl FnOnce(&mut LoopOptions),
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let backend = FakeBackend::new(result);
-            let options = LoopOptions {
+            let mut options = LoopOptions {
                 events_url: Url::parse(&format!("ws://{address}/")).unwrap(),
                 interval: Duration::from_millis(30),
                 reconnect_delay: Duration::from_millis(10),
+                settle_delay: Duration::from_millis(10),
+                first_retry: Duration::from_millis(10),
             };
+            adjust(&mut options);
             let helper_backend = backend.clone();
             let (popup_tx, popup) = mpsc::unbounded_channel();
             let (tray_tx, tray) = watch::channel(TrayState::default());
@@ -755,6 +795,79 @@ mod tests {
             next_report(&mut agent, LONG).await,
             Some(echo(report(&["a"]), &["a", "b"]))
         );
+    }
+
+    #[tokio::test]
+    async fn new_desired_states_are_reconciled_once_after_the_settle_delay() {
+        let setup = Setup::start_with(Ok(report(&["b"])), |options| {
+            options.interval = Duration::from_secs(10);
+            options.settle_delay = Duration::from_millis(300);
+        })
+        .await;
+        let mut agent = setup.accept().await;
+
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+        send_desired(&mut agent, Some(vec![share("b")])).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(setup.backend.calls(), 0);
+
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&["b"]), &["b"]))
+        );
+        assert_eq!(*setup.backend.calls.lock().unwrap(), vec![vec!["b"]]);
+    }
+
+    #[tokio::test]
+    async fn passes_that_leave_errors_are_retried_soon_until_they_succeed() {
+        let mut failed = report(&[]);
+        failed.errors.push(ShareError {
+            share_id: "a".to_owned(),
+            message: "mount failed: The network name cannot be found. (error 67)".to_owned(),
+        });
+        let setup = Setup::start_with(Ok(failed.clone()), |options| {
+            options.interval = Duration::from_secs(10);
+            options.first_retry = Duration::from_millis(20);
+        })
+        .await;
+        let mut agent = setup.accept().await;
+        send_desired(&mut agent, Some(vec![share("a")])).await;
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(failed, &["a"]))
+        );
+
+        // after 20, 40 and 80 ms, long before the interval:
+        setup.wait_for_calls(4).await;
+        setup.backend.set_result(Ok(report(&["a"])));
+        assert_eq!(
+            next_report(&mut agent, LONG).await,
+            Some(echo(report(&["a"]), &["a"]))
+        );
+
+        // back to the interval
+        let calls = setup.backend.calls();
+        tokio::time::sleep(SHORT).await;
+        assert_eq!(setup.backend.calls(), calls);
+    }
+
+    #[test]
+    fn retries_double_up_to_the_interval_and_stop_after_a_pass_without_errors() {
+        let options = LoopOptions {
+            first_retry: Duration::from_secs(1),
+            ..LoopOptions::new(Url::parse("ws://localhost/").unwrap())
+        };
+        let mut retry = None;
+        let delays: Vec<_> = (0..7)
+            .map(|_| {
+                options.next_pass_after(true, &mut retry);
+                retry.unwrap().as_secs()
+            })
+            .collect();
+        assert_eq!(delays, [1, 2, 4, 8, 16, 30, 30]);
+
+        options.next_pass_after(false, &mut retry);
+        assert_eq!(retry, None);
     }
 
     #[test]
