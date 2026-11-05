@@ -215,16 +215,16 @@ impl PageOverview {
                     .as_ref()
                     .map(|signed_in| signed_in.username.as_str()));
                 self.show_mounting_session(ui, session, started_by, "Waiting for agent…", false);
-            } else if matches!(app_state.foreground, ForegroundSession::None) {
+            } else if matches!(app_state.agent.foreground, ForegroundSession::None) {
                 self.drop_foreground_close_confirmation();
                 start_clicked = self.show_create_section(ui);
-                show_connected_agents(ui, app_state.connected_agents.as_ref());
+                show_connected_agents(ui, app_state.agent.connected_agents.as_ref());
             } else {
                 let mut columns = Columns::new(ui);
                 action = self.show_foreground_section(columns.first(), app_state);
                 let second = columns.second(ui);
                 start_clicked = self.show_create_section(second);
-                show_connected_agents(second, app_state.connected_agents.as_ref());
+                show_connected_agents(second, app_state.agent.connected_agents.as_ref());
                 columns.finish(ui);
             }
         });
@@ -245,7 +245,7 @@ impl PageOverview {
     fn show_foreground_section(&mut self, ui: &mut egui::Ui, app_state: &AgentAppState) -> Action {
         let pending_close = app_state.pending_close();
         let signed_in = &app_state.signed_in;
-        match &app_state.foreground {
+        match &app_state.agent.foreground {
             ForegroundSession::Mounted(session) => {
                 let close_clicked =
                     self.show_active_session(ui, session, pending_close == Some(&session.share_id));
@@ -284,7 +284,7 @@ impl PageOverview {
                     session,
                     started_by,
                     message,
-                    app_state.hand_off_blocked,
+                    app_state.agent.hand_off_blocked,
                 ) {
                     return Action::ForceRelease;
                 }
@@ -296,7 +296,7 @@ impl PageOverview {
 
     /// "Start Session": straight to project selection, unless a share is open
     fn start_clicked(&mut self, app_state: &AgentAppState) -> Action {
-        if app_state.foreground.share_id().is_none() {
+        if app_state.agent.foreground.share_id().is_none() {
             return Action::CreateSession;
         }
         if app_state.signed_in.is_none() {
@@ -318,7 +318,7 @@ impl PageOverview {
         let kind = app_state
             .signed_in
             .as_ref()
-            .and_then(|signed_in| start_dialog_kind(&app_state.foreground, signed_in));
+            .and_then(|signed_in| start_dialog_kind(&app_state.agent.foreground, signed_in));
         let Some(kind) = kind else {
             // signed out, or the share is gone in the meantime
             self.start_dialog_open = false;
@@ -591,7 +591,7 @@ impl PageOverview {
 
     /// The compact list of the other shares mounted for this user, each with its own close
     fn show_other_mounts(&mut self, ui: &mut egui::Ui, app_state: &AgentAppState) -> Action {
-        if app_state.other_mounts.is_empty() {
+        if app_state.agent.other_mounts.is_empty() {
             if self.close_mount.take().is_some() {
                 self.close_confirmation_open = false;
             }
@@ -603,7 +603,7 @@ impl PageOverview {
         styles::content_card_frame(ui.visuals()).show(ui, |ui| {
             ui.set_width(ui.available_width());
             card_heading(ui, "Also mounted on this computer");
-            for mount in &app_state.other_mounts {
+            for mount in &app_state.agent.other_mounts {
                 ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
                 ui.horizontal(|ui| {
                     let mut name = format!("{} / {}", mount.project, mount.session);
@@ -1133,7 +1133,7 @@ mod tests {
         let mut app_state = AgentAppState::new();
         assert_eq!(page.start_clicked(&app_state), Action::CreateSession);
 
-        app_state.foreground = ForegroundSession::Mounted(open_share(Some("alice")));
+        app_state.agent.foreground = ForegroundSession::Mounted(open_share(Some("alice")));
         assert_eq!(
             page.start_clicked(&app_state),
             Action::GoToLogin {

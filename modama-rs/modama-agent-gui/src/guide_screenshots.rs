@@ -84,7 +84,7 @@ fn seed_identity(app: &mut AgentGuiApp) {
         agent_name: "k2".to_owned(),
         resource_name: "Holo".to_owned(),
     });
-    app.app_state.connected_agents = Some(representative_connected_agents(&[
+    app.app_state.agent.connected_agents = Some(representative_connected_agents(&[
         "detector-pc",
         "k2-gpu",
         "tem-camera",
@@ -200,7 +200,7 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
         }
         GuideScene::ActiveSession => {
             seed_logged_in(&mut app);
-            app.app_state.foreground = ForegroundSession::Mounted(ActiveSession {
+            app.app_state.agent.foreground = ForegroundSession::Mounted(ActiveSession {
                 share_id: "guide-share".to_owned(),
                 project: PROJECT.to_owned(),
                 session: SESSION.to_owned(),

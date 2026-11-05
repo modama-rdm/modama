@@ -111,6 +111,25 @@ pub struct SignedIn {
     pub username: String,
 }
 
+/// What the local agent reported last: the shares, the connected agents and the connection
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AgentView {
+    /// Foreground ingest state reported by the local agent
+    pub foreground: ForegroundSession,
+
+    /// Shares besides the foreground one that are mounted for this user (several on Linux)
+    pub other_mounts: Vec<ActiveSession>,
+
+    /// The agents connected at this agent's resource; None while the agent doesn't know them
+    pub connected_agents: Option<modama_common::internal_api_types::ConnectedAgents>,
+
+    /// Whether a previous user's drive blocks the foreground share (Windows only)
+    pub hand_off_blocked: bool,
+
+    /// Whether the connection to the agent is lost
+    pub connection_dropped: bool,
+}
+
 /// App state - general state of the whole app,
 /// such as credentials and the active ingest session.
 #[derive(Clone, Debug, Default)]
@@ -118,23 +137,11 @@ pub struct AgentAppState {
     /// if None, the user is logged out
     pub signed_in: Option<SignedIn>,
 
-    /// Foreground ingest state reported by the local agent.
-    pub foreground: ForegroundSession,
-
-    /// Whether the most recent background monitor cycle failed.
-    pub connection_dropped: bool,
-
-    /// Whether a previous user's drive blocks the foreground share (Windows only)
-    pub hand_off_blocked: bool,
+    /// What the local agent reported last
+    pub agent: AgentView,
 
     /// The user's own share to close once the session being started has been created
     pub close_after_start: Option<ActiveSession>,
-
-    /// Shares besides the foreground one that are mounted for this user (several on Linux)
-    pub other_mounts: Vec<ActiveSession>,
-
-    /// The agents connected at this agent's resource; None while the agent doesn't know them
-    pub connected_agents: Option<modama_common::internal_api_types::ConnectedAgents>,
 
     session_operations: SessionOperations,
 
@@ -245,12 +252,12 @@ impl AgentAppState {
             }
         }
 
-        self.foreground = foreground;
+        self.agent.foreground = foreground;
         self.observe_close();
     }
 
     pub fn observe_other_mounts(&mut self, other_mounts: Vec<ActiveSession>) {
-        self.other_mounts = other_mounts;
+        self.agent.other_mounts = other_mounts;
         self.observe_close();
     }
 
@@ -260,8 +267,9 @@ impl AgentAppState {
             return;
         };
         let share_id = operation.share_id.as_str();
-        let gone = self.foreground.share_id() != Some(share_id)
+        let gone = self.agent.foreground.share_id() != Some(share_id)
             && !self
+                .agent
                 .other_mounts
                 .iter()
                 .any(|mount| mount.share_id == share_id);

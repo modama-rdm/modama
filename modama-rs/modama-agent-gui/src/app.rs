@@ -209,12 +209,13 @@ impl AgentGuiApp {
                         let mut page = PageOverview::with_service(Arc::clone(&self.service));
                         let other_mount = self
                             .app_state
+                            .agent
                             .other_mounts
                             .iter()
                             .find(|mount| mount.share_id == share_id)
                             .cloned();
                         if matches!(
-                            &self.app_state.foreground,
+                            &self.app_state.agent.foreground,
                             crate::state::ForegroundSession::Mounted(session)
                                 if session.share_id == share_id
                         ) {
@@ -225,7 +226,7 @@ impl AgentGuiApp {
                         self.page = Page::Overview(page);
                     }
                     LoginDestination::StartSession => {
-                        if self.app_state.foreground.share_id().is_some() {
+                        if self.app_state.agent.foreground.share_id().is_some() {
                             let mut page = PageOverview::with_service(Arc::clone(&self.service));
                             page.open_start_dialog();
                             self.page = Page::Overview(page);
@@ -299,16 +300,16 @@ impl AgentGuiApp {
                 self.app_state.observe_other_mounts(other_mounts);
             }
             Action::ConnectedAgentsChanged(connected_agents) => {
-                self.app_state.connected_agents = connected_agents;
+                self.app_state.agent.connected_agents = connected_agents;
             }
             Action::ConnectionDropped => {
-                self.app_state.connection_dropped = true;
+                self.app_state.agent.connection_dropped = true;
             }
             Action::ConnectionRestored => {
-                self.app_state.connection_dropped = false;
+                self.app_state.agent.connection_dropped = false;
             }
             Action::HandOffBlocked(blocked) => {
-                self.app_state.hand_off_blocked = blocked;
+                self.app_state.agent.hand_off_blocked = blocked;
             }
             Action::ForceRelease => {
                 if let Some(monitor) = &self.foreground_monitor {
@@ -352,8 +353,8 @@ impl AgentGuiApp {
                 self.toast.clear();
                 self.page = self.overview_page();
                 self.app_state.identity = Some(identity);
-                self.app_state.foreground = foreground;
-                self.app_state.connection_dropped = false;
+                self.app_state.agent.foreground = foreground;
+                self.app_state.agent.connection_dropped = false;
             }
             Action::TaskFailed(failure) => self.handle_task_failure(failure),
         }
@@ -400,7 +401,7 @@ impl AgentGuiApp {
                 self.foreground_monitor = Some(ForegroundMonitor::start(
                     url,
                     Box::new(ProcessLauncher::new(agent_url.clone())),
-                    self.app_state.foreground.clone(),
+                    self.app_state.agent.foreground.clone(),
                     ctx.clone(),
                 ));
             }
@@ -572,7 +573,7 @@ impl eframe::App for AgentGuiApp {
         self.navigation_progress.show(
             ui.ctx(),
             self.page.is_busy(),
-            self.app_state.connection_dropped,
+            self.app_state.agent.connection_dropped,
         );
     }
 }
@@ -627,7 +628,7 @@ mod tests {
         let mut app = AgentGuiApp::new();
         app.app_state.signed_in = Some(signed_in());
         let previous = own_mounted("previous");
-        app.app_state.foreground = crate::state::ForegroundSession::Mounted(previous.clone());
+        app.app_state.agent.foreground = crate::state::ForegroundSession::Mounted(previous.clone());
         (app, previous)
     }
 
@@ -685,7 +686,7 @@ mod tests {
     #[test]
     fn signing_in_to_start_a_session_asks_first_if_a_share_is_open() {
         let mut app = AgentGuiApp::new();
-        app.app_state.foreground =
+        app.app_state.agent.foreground =
             crate::state::ForegroundSession::Mounted(own_mounted("previous"));
         app.handle_action(Action::LoginSuccess {
             signed_in: signed_in(),
@@ -707,7 +708,8 @@ mod tests {
     #[test]
     fn signing_in_to_close_a_listed_share_asks_to_confirm_it() {
         let mut app = AgentGuiApp::new();
-        app.app_state.foreground = crate::state::ForegroundSession::Mounted(own_mounted("new"));
+        app.app_state.agent.foreground =
+            crate::state::ForegroundSession::Mounted(own_mounted("new"));
         app.app_state.observe_other_mounts(vec![own_mounted("old")]);
         app.handle_action(Action::LoginSuccess {
             signed_in: signed_in(),
@@ -737,7 +739,7 @@ mod tests {
     #[test]
     fn close_login_success_reopens_confirmation_for_the_same_mounted_share() {
         let mut app = AgentGuiApp::new();
-        app.app_state.foreground =
+        app.app_state.agent.foreground =
             crate::state::ForegroundSession::Mounted(mounted_session("share"));
 
         app.handle_action(Action::LoginSuccess {
@@ -760,7 +762,7 @@ mod tests {
             crate::state::ForegroundSession::Mounted(mounted_session("other")),
         ] {
             let mut app = AgentGuiApp::new();
-            app.app_state.foreground = foreground;
+            app.app_state.agent.foreground = foreground;
 
             app.handle_action(Action::LoginSuccess {
                 signed_in: signed_in(),
@@ -802,7 +804,7 @@ mod tests {
         app.app_state.signed_in = Some(SignedIn {
             username: "user".to_string(),
         });
-        app.app_state.foreground =
+        app.app_state.agent.foreground =
             crate::state::ForegroundSession::Mounted(crate::state::ActiveSession {
                 share_id: "share".to_owned(),
                 project: "project".to_string(),
@@ -815,7 +817,7 @@ mod tests {
 
         assert!(app.app_state.signed_in.is_none());
         assert!(matches!(
-            app.app_state.foreground,
+            app.app_state.agent.foreground,
             crate::state::ForegroundSession::Mounted(_)
         ));
         assert!(matches!(app.page, Page::Overview(_)));
@@ -848,7 +850,7 @@ mod tests {
     fn test_close_session_waits_for_authoritative_update_and_stays_on_overview() {
         let mut app = AgentGuiApp::new();
         app.page = Page::Overview(PageOverview::new());
-        app.app_state.foreground =
+        app.app_state.agent.foreground =
             crate::state::ForegroundSession::Mounted(crate::state::ActiveSession {
                 share_id: "share".to_owned(),
                 project: "project".to_string(),
@@ -866,7 +868,7 @@ mod tests {
 
         assert_eq!(app.app_state.pending_close(), Some("share"));
         assert!(matches!(
-            app.app_state.foreground,
+            app.app_state.agent.foreground,
             crate::state::ForegroundSession::Mounted(_)
         ));
         assert!(matches!(app.page, Page::Overview(_)));
@@ -891,7 +893,7 @@ mod tests {
         });
 
         assert_eq!(
-            app.app_state.foreground,
+            app.app_state.agent.foreground,
             crate::state::ForegroundSession::Mounted(session)
         );
         assert!(matches!(app.page, Page::Overview(_)));
@@ -926,7 +928,7 @@ mod tests {
 
         assert_eq!(app.app_state.pending_start(), None);
         assert_eq!(
-            app.app_state.foreground,
+            app.app_state.agent.foreground,
             crate::state::ForegroundSession::Mounting(
                 pending,
                 "Waiting for the session helper to mount the share.".to_owned()
@@ -937,7 +939,7 @@ mod tests {
     #[test]
     fn monitor_update_detects_external_session_deletion() {
         let mut app = AgentGuiApp::new();
-        app.app_state.foreground =
+        app.app_state.agent.foreground =
             crate::state::ForegroundSession::Mounted(crate::state::ActiveSession {
                 share_id: "external".to_owned(),
                 project: "project".to_owned(),
@@ -951,7 +953,7 @@ mod tests {
         ));
 
         assert_eq!(
-            app.app_state.foreground,
+            app.app_state.agent.foreground,
             crate::state::ForegroundSession::None
         );
     }
@@ -961,10 +963,10 @@ mod tests {
         let mut app = AgentGuiApp::new();
 
         app.handle_action(Action::ConnectionDropped);
-        assert!(app.app_state.connection_dropped);
+        assert!(app.app_state.agent.connection_dropped);
 
         app.handle_action(Action::ConnectionRestored);
-        assert!(!app.app_state.connection_dropped);
+        assert!(!app.app_state.agent.connection_dropped);
     }
 
     #[test]
@@ -996,7 +998,7 @@ mod tests {
             Some("share")
         );
         assert_eq!(
-            app.app_state.foreground,
+            app.app_state.agent.foreground,
             crate::state::ForegroundSession::None
         );
     }
@@ -1011,7 +1013,7 @@ mod tests {
             mount_path: Some("/mnt/session".to_owned()),
             created_by: None,
         };
-        app.app_state.foreground = crate::state::ForegroundSession::Mounted(session.clone());
+        app.app_state.agent.foreground = crate::state::ForegroundSession::Mounted(session.clone());
         let operation_id = OperationId::next();
         app.handle_action(Action::CloseRequested {
             operation_id,
@@ -1024,7 +1026,7 @@ mod tests {
 
         assert_eq!(app.app_state.pending_close(), None);
         assert_eq!(
-            app.app_state.foreground,
+            app.app_state.agent.foreground,
             crate::state::ForegroundSession::None
         );
     }
@@ -1070,7 +1072,7 @@ mod tests {
 
         assert_eq!(app.app_state.pending_start(), None);
         assert_eq!(
-            app.app_state.foreground,
+            app.app_state.agent.foreground,
             crate::state::ForegroundSession::None
         );
     }
