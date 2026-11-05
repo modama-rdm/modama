@@ -424,6 +424,8 @@ pub async fn start_event_channel(
 /// Like `start_event_channel`, for callers that publish the shares by sending each new state
 /// through the returned broadcast `Sender`; `state` is the initial state. Returns the server
 /// task, the `Sender` and the port the server listens on.
+///
+/// Only modama-agent's tests use this; smbdrop sets the shares on its `EventHub`.
 pub async fn start_event_server(
     listen_addr: &str,
     tls_config: ServerConfig,
@@ -474,14 +476,14 @@ mod test {
         pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
         server::WebPkiClientVerifier,
     };
-    use tokio::{net, sync::broadcast::Sender, task::JoinHandle, time::timeout};
+    use tokio::{net, task::JoinHandle, time::timeout};
     use tokio_tungstenite::{
         Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
     };
     use tungstenite::{Message, protocol::frame::coding::CloseCode};
 
     use super::identify;
-    use crate::{events::start_event_server, share_manager::SmbDropState};
+    use crate::{event_hub::EventHub, events::start_event_channel};
 
     struct CertsForTesting {
         pub server_config: ServerConfig,
@@ -576,7 +578,7 @@ mod test {
     }
 
     struct TestEventServer {
-        pub event_queue: Sender<SmbDropState>,
+        pub hub: EventHub,
         pub ws_url: String,
         pub certs: CertsForTesting,
         pub handle: JoinHandle<()>,
@@ -584,20 +586,17 @@ mod test {
 
     async fn make_test_event_server() -> TestEventServer {
         let certs = CertsForTesting::generate();
-        let state = SmbDropState {
-            shares: HashMap::new(),
-            users: HashMap::new(),
-        };
-        let (task, event_server_queue, port) = start_event_server(
+        let hub = EventHub::new(HashMap::new());
+        let (task, port) = start_event_channel(
             "localhost:0",
             certs.server_config.clone(),
             &certs.server_secret,
-            &state,
+            hub.clone(),
         )
         .await
         .unwrap();
         TestEventServer {
-            event_queue: event_server_queue,
+            hub,
             ws_url: format!("wss://localhost:{port}"),
             certs,
             handle: task,
@@ -666,10 +665,6 @@ mod test {
         let server = make_test_event_server().await;
         let mut conn = connect_welcomed(&server, &server.certs.client_config_1, "test_agent").await;
 
-        let mut state = SmbDropState {
-            shares: HashMap::new(),
-            users: HashMap::new(),
-        };
         let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
         let share = Share {
             resource: Some("test_resource".to_owned()),
@@ -683,12 +678,9 @@ mod test {
             gid: 1001,
             created_by: None,
         };
-        state
-            .get_or_create_user(1001, share_id.clone())
-            .await
-            .unwrap();
-        state.add_share(share.clone()).await.unwrap();
-        server.event_queue.send(state).unwrap();
+        server
+            .hub
+            .set_shares(HashMap::from([(share_id, share.clone())]));
 
         // the share manager informs us about the change, and the new share is in the list:
         let EventChannelMessage::UpdateShareList {

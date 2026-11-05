@@ -12,42 +12,42 @@ use log::{error, info};
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
-use tokio::{net::TcpListener, sync::broadcast, task::JoinHandle};
+use tokio::{net::TcpListener, task::JoinHandle};
 
 use crate::{
+    event_hub::EventHub,
     mount::MountBackend,
     process_manager::ProcessManager,
     readiness::{ShareReadiness, ShareReadinessError},
-    share_manager::{ShareError, ShareManager, SmbDropState, UserProvider},
+    share_manager::{ShareError, ShareManager, UserProvider},
 };
 
 #[derive(Clone)]
 pub struct ApiState<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> {
     share_manager: Arc<ShareManager<U, M, P>>,
-    state_updates_tx: broadcast::Sender<SmbDropState>,
+    event_hub: EventHub,
     readiness: Arc<dyn ShareReadiness>,
 }
 
 impl<U: UserProvider, M: MountBackend, P: ProcessManager> ApiState<U, M, P> {
     pub fn new(
         share_manager: ShareManager<U, M, P>,
-        state_updates_tx: broadcast::Sender<SmbDropState>,
+        event_hub: EventHub,
         readiness: Arc<dyn ShareReadiness>,
     ) -> Self {
         Self {
             share_manager: Arc::new(share_manager),
-            state_updates_tx,
+            event_hub,
             readiness,
         }
     }
 
-    async fn send_state_update(&self) {
+    /// Tell the agents about the share manager's current shares
+    async fn publish_shares(&self) {
         match self.share_manager.get_state().await {
             Ok(new_state) => {
-                info!("sending state update: {:?}", new_state);
-                if self.state_updates_tx.send(new_state).is_err() {
-                    error!("tried to send state update but no one cared...");
-                };
+                info!("publishing state: {:?}", new_state);
+                self.event_hub.set_shares(new_state.shares);
             }
             Err(e) => {
                 error!("could not get share manager state (maybe corrupt config?): {e}")
@@ -209,7 +209,7 @@ async fn create_share<U: UserProvider, M: MountBackend, P: ProcessManager>(
         return Err(ShareAPIError::Readiness(readiness));
     }
 
-    state.send_state_update().await;
+    state.publish_shares().await;
     info!("created share {share:?}");
     Ok((StatusCode::OK, Json(CreateShareResponse::Ok { share })).into_response())
 }
@@ -225,7 +225,7 @@ async fn delete_share<U: UserProvider, M: MountBackend, P: ProcessManager>(
     extract::Path(share_id): extract::Path<String>,
 ) -> Result<impl IntoResponse, ShareAPIError> {
     state.share_manager.delete_share(&share_id).await?;
-    state.send_state_update().await;
+    state.publish_shares().await;
     Ok((
         StatusCode::OK,
         Json(DeleteResponse {
@@ -284,22 +284,36 @@ mod tests {
     use hyper::StatusCode;
     use itertools::Itertools;
     use modama_common::{
-        logging::init_logging, messages::Share, requests::CreateShareRequest, test_helpers::TempDir,
+        logging::init_logging,
+        messages::{EventChannelMessage, Share},
+        requests::CreateShareRequest,
+        test_helpers::TempDir,
     };
     use reqwest::ClientBuilder;
-    use tokio::{sync::broadcast, time::timeout};
+    use tokio::time::timeout;
     use url::Url;
 
     use crate::{
+        event_hub::EventHub,
         mount::BindMount,
         readiness::NoopShareReadiness,
         server::{
             ApiState, CreateShareResponse, HealthResponse, ShareAPIErrorResponse,
             spawn_smbdrop_task,
         },
-        share_manager::{ShareManager, SmbDropState, User, UserProvider},
+        share_manager::{ShareManager, User, UserProvider},
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
+
+    /// The shares the agents at `resource` are told about
+    fn published_shares(event_hub: &EventHub, resource: &str) -> Vec<Share> {
+        let EventChannelMessage::UpdateShareList { shares, .. } =
+            event_hub.subscribe(resource).current()
+        else {
+            panic!("expected an update");
+        };
+        shares
+    }
 
     async fn create_test_share(client: &reqwest::Client, api_base_url: &Url, path: &Path) -> Share {
         let request = CreateShareRequest {
@@ -348,7 +362,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, mut apistate_events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -367,7 +381,7 @@ mod tests {
 
         let api_state = ApiState::new(
             share_manager,
-            apistate_events_tx,
+            event_hub.clone(),
             Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
@@ -427,36 +441,8 @@ mod tests {
             }
         };
 
-        let mut events: Vec<SmbDropState> = Vec::new();
-
-        while let Ok(state) = timeout(Duration::from_millis(100), apistate_events_rx.recv()).await {
-            events.push(state.unwrap());
-        }
-
-        assert_eq!(events.len(), 1);
-
-        let e0 = events.first().unwrap();
-
-        let mut expected_event = SmbDropState::empty();
-        expected_event.add_share(resp_share.clone()).await.unwrap();
-        expected_event
-            .get_or_create_user_with_password(
-                1001,
-                resp_share.share_id.clone(),
-                Some(&e0.users.get("1001").unwrap().password),
-            )
-            .await
-            .unwrap();
-
-        println!("{e0:?}");
-        println!("{expected_event:?}");
-
-        assert_eq!(
-            e0.users.get("1001").unwrap().password,
-            expected_event.users.get("1001").unwrap().password
-        );
-
-        assert_eq!(e0, &expected_event);
+        // the agents at the share's resource are told about it
+        assert_eq!(published_shares(&event_hub, "holo"), vec![resp_share]);
 
         let health_response = reqwest::get(format!("http://127.0.0.1:{port}/health/"))
             .await
@@ -476,7 +462,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -495,7 +481,7 @@ mod tests {
 
         let api_state = ApiState::new(
             share_manager,
-            apistate_events_tx,
+            event_hub.clone(),
             Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
@@ -534,7 +520,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -553,7 +539,7 @@ mod tests {
 
         let api_state = ApiState::new(
             share_manager,
-            apistate_events_tx,
+            event_hub.clone(),
             Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
@@ -623,7 +609,7 @@ mod tests {
         let _dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -642,7 +628,7 @@ mod tests {
 
         let api_state = ApiState::new(
             share_manager,
-            apistate_events_tx,
+            event_hub.clone(),
             Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
@@ -679,7 +665,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -698,7 +684,7 @@ mod tests {
 
         let api_state = ApiState::new(
             share_manager,
-            apistate_events_tx,
+            event_hub.clone(),
             Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
@@ -746,7 +732,7 @@ mod tests {
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
         let dynamic_config_path = configs_path.join("smb_dynamic.conf");
 
-        let (events_tx, mut events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let mount_backend = Arc::new(MockMountBackend::new());
         let process_manager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
@@ -760,7 +746,11 @@ mod tests {
         .await;
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::new(share_manager, events_tx, Arc::new(NoopShareReadiness));
+        let api_state = ApiState::new(
+            share_manager,
+            event_hub.clone(),
+            Arc::new(NoopShareReadiness),
+        );
         let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0")
             .await
             .unwrap();
@@ -770,12 +760,6 @@ mod tests {
         let removed_share = create_test_share(&client, &api_base_url, &removed_dest_path).await;
         let failed_share = create_test_share(&client, &api_base_url, &shared_dest_path).await;
         let healthy_share = create_test_share(&client, &api_base_url, &shared_dest_path).await;
-        for _ in 0..3 {
-            timeout(Duration::from_millis(100), events_rx.recv())
-                .await
-                .unwrap()
-                .unwrap();
-        }
 
         let removed_mount = BindMount::from_share(&removed_share, &bind_mount_prefix);
         let failed_mount = BindMount::from_share(&failed_share, &bind_mount_prefix);
@@ -801,11 +785,9 @@ mod tests {
         assert!(persisted_state.shares.contains_key(&failed_share.share_id));
         assert!(persisted_state.shares.contains_key(&healthy_share.share_id));
 
-        let published_state = timeout(Duration::from_millis(100), events_rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(published_state, persisted_state);
+        let mut persisted_shares: Vec<Share> = persisted_state.shares.into_values().collect();
+        persisted_shares.sort_by_key(|share| (share.created_timestamp, share.share_id.clone()));
+        assert_eq!(published_shares(&event_hub, "holo"), persisted_shares);
 
         let dynamic_config = tokio::fs::read_to_string(dynamic_config_path)
             .await
@@ -826,7 +808,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (events_tx, mut events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let mount_backend = Arc::new(MockMountBackend::new());
         let process_manager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
@@ -840,17 +822,19 @@ mod tests {
         .await;
         share_manager.start().await.unwrap();
 
-        let api_state = ApiState::new(share_manager, events_tx, Arc::new(NoopShareReadiness));
+        let api_state = ApiState::new(
+            share_manager,
+            event_hub.clone(),
+            Arc::new(NoopShareReadiness),
+        );
         let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0")
             .await
             .unwrap();
         let api_base_url = Url::parse(&format!("http://127.0.0.1:{port}")).unwrap();
         let client = ClientBuilder::new().build().unwrap();
         let share = create_test_share(&client, &api_base_url, &dest_path).await;
-        timeout(Duration::from_millis(100), events_rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
+        let mut updates = event_hub.subscribe("holo");
+        updates.try_next().unwrap();
 
         mount_backend.set_fail_listing(true);
         let mut delete_url = api_base_url;
@@ -860,11 +844,7 @@ mod tests {
 
         let persisted_state = api_state.share_manager.get_state().await.unwrap();
         assert!(persisted_state.shares.contains_key(&share.share_id));
-        assert!(
-            timeout(Duration::from_millis(100), events_rx.recv())
-                .await
-                .is_err()
-        );
+        assert_eq!(updates.try_next(), None);
 
         handle.abort();
     }
@@ -876,7 +856,7 @@ mod tests {
         let configs_path = TempDir::new("share_manager_configs");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -932,7 +912,7 @@ mod tests {
 
         let api_state = ApiState::new(
             share_manager,
-            apistate_events_tx,
+            event_hub.clone(),
             Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0")
@@ -1002,7 +982,7 @@ mod tests {
         let dest_path = TempDir::new("dest_path_for_share");
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
 
-        let (apistate_events_tx, _apistate_events_rx) = broadcast::channel(1024);
+        let event_hub = EventHub::new(HashMap::new());
         let user_provider = MockUserProvider::new(vec![]);
         // let user_provider = MockUserProvider::new(vec![("testuser".to_owned(), 1001)]);
         let mount_backend: Arc<MockMountBackend> = Arc::new(MockMountBackend::new());
@@ -1042,7 +1022,7 @@ mod tests {
 
         let api_state = ApiState::new(
             share_manager,
-            apistate_events_tx,
+            event_hub.clone(),
             Arc::new(NoopShareReadiness),
         );
         let (handle, port) = spawn_smbdrop_task(api_state.clone(), "127.0.0.1:0")
