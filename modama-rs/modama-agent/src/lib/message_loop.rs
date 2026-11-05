@@ -17,11 +17,7 @@ use tokio_rustls::rustls::ClientConfig;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tungstenite::Message;
 
-use crate::{
-    agent_state::{AgentState, ConnectionState},
-    config::MTLSIdentity,
-    local_fan_out::LocalFanOut,
-};
+use crate::{agent_state::AgentState, config::MTLSIdentity, local_fan_out::LocalFanOut};
 
 /// Handle one message from smbdrop; returns the protocol version if it was a `Welcome`
 fn handle_message(fan_out: &LocalFanOut, msg: &str) -> AnyResult<Option<u32>> {
@@ -158,7 +154,6 @@ pub async fn message_loop(
     };
 
     loop {
-        state.lock().await.connection = ConnectionState::Connecting;
         fan_out.smbdrop_disconnected();
         let (conn, _response) = match connect_async_tls_with_config(
             &config.events_api_url.to_string(),
@@ -180,7 +175,6 @@ pub async fn message_loop(
             }
         };
 
-        state.lock().await.connection = ConnectionState::Authenticating;
         let (mut ws_write, mut ws_read) = conn.split();
 
         let token = match Arc::clone(&token_provider).fetch_token().await {
@@ -232,7 +226,6 @@ pub async fn message_loop(
             continue;
         }
 
-        state.lock().await.connection = ConnectionState::Connected;
         fan_out.logged_in(token_identity);
         let mut reporter = StatusReporter::default();
         let mut mount_statuses = fan_out.mount_status_feed();
@@ -530,6 +523,22 @@ mod tests {
             .wait_for_desired(&["test-id-1"], Some("test-id-1"))
             .await;
         wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
+
+        test_setup.abort().await;
+    }
+
+    /// After smbdrop's `Welcome`, the fan-out knows the agent is connected
+    #[tokio::test]
+    async fn the_agent_is_connected_once_smbdrop_welcomed_it() {
+        let test_setup = MessageLoopTestSetup::start().await;
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !test_setup.fan_out.connected_to_smbdrop() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("smbdrop's Welcome did not arrive");
 
         test_setup.abort().await;
     }

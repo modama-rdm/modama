@@ -1496,6 +1496,52 @@ mod tests {
         assert_eq!(got["type"], "None");
     }
 
+    /// The status and body of `/api/health/`
+    async fn health(app: &Router) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .uri("/api/health/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn health_is_ok_once_smbdrop_welcomed_us() {
+        let test_setup = TestSetup::start().await;
+
+        let (status, body) = health(&test_setup.app).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["type"], "Ok");
+    }
+
+    #[tokio::test]
+    async fn health_is_unavailable_until_smbdrop_welcomes_us() {
+        let test_setup = TestSetup::start().await;
+        // the steps of the message loop's next connection
+        test_setup.fan_out.smbdrop_disconnected();
+        let (status, body) = health(&test_setup.app).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["type"], "NotAvailable");
+
+        test_setup.fan_out.logged_in(modama_common::agent::AgentId {
+            resource: "res".to_string(),
+            agent: "agent-name".to_string(),
+            san_encoded: "x-modama-agent://res#agent-name".to_string(),
+        });
+        let (status, _) = health(&test_setup.app).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+
+        test_setup.fan_out.welcomed(ConnectionId(5));
+        let (status, body) = health(&test_setup.app).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["type"], "Ok");
+    }
+
     #[tokio::test]
     async fn test_identity_is_unauthenticated() {
         let test_setup = TestSetup::start().await;
