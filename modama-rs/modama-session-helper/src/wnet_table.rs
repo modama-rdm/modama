@@ -14,10 +14,7 @@ use modama_common::{internal_api_types::SessionHelperConfig, messages::Share};
 
 use crate::{
     mount_backend::{EnumerationError, PassResult},
-    reconcile::{
-        AddFailure, DuplicateEntries, MountTable, PathlessEntries, Policy, TableEntry,
-        reconcile_pass,
-    },
+    reconcile::{AddFailure, MountTable, PathlessEntries, TableEntry, reconcile_pass},
 };
 
 /// A network connection of this logon session
@@ -153,13 +150,10 @@ impl<'a, A: WNetApi> WNetTable<'a, A> {
 impl<A: WNetApi> MountTable for WNetTable<'_, A> {
     type Handle = Connection;
 
-    /// One drive mapping per desired share. A deviceless connection is never a mount: it offers
-    /// no path, and its credentials would block our mappings with error 1219.
-    fn policy(&self) -> Policy {
-        Policy {
-            pathless: PathlessEntries::Remove,
-            duplicates: DuplicateEntries::RemoveAllButOne,
-        }
+    /// A deviceless connection is never a mount: it offers no path, and its credentials would
+    /// block our mappings with error 1219.
+    fn pathless_entries(&self) -> PathlessEntries {
+        PathlessEntries::Remove
     }
 
     fn entries(&mut self) -> Result<Vec<TableEntry<Connection>>, String> {

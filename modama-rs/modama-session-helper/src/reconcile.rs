@@ -2,8 +2,9 @@
 //! our mounts, remove what isn't desired, add what's missing, list again and report.
 //!
 //! The tables (WNet drive mappings on Windows, GVfs mounts on Linux) decide which mounts are
-//! ours, how a share is added and how errors read; where the platforms need different
-//! behaviour from the pass itself, the table says so with its [`Policy`].
+//! ours, how a share is added and how errors read. The platforms need the pass itself to
+//! behave differently in one place, for mounts without a local path; the table says how with
+//! [`MountTable::pathless_entries`].
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -35,7 +36,8 @@ pub enum AddFailure {
     Failed(String),
 }
 
-/// What a pass does with a desired share's entry that offers no path
+/// What a pass does with a desired share's entry that offers no path, if the share has no
+/// entry with a path
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathlessEntries {
     /// Remove it and add the share again, as if it weren't there
@@ -44,26 +46,14 @@ pub enum PathlessEntries {
     KeepWithError(&'static str),
 }
 
-/// What a pass does with a second entry of the same desired share
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DuplicateEntries {
-    RemoveAllButOne,
-    Keep,
-}
-
-/// Where the platforms need the pass to behave differently
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Policy {
-    pub pathless: PathlessEntries,
-    pub duplicates: DuplicateEntries,
-}
-
-/// The mounts one platform manages, from the configured host
+/// The mounts one platform manages, from the configured host. All of them belong to this
+/// helper: a pass keeps one entry per desired share and removes every other.
 pub trait MountTable {
     type Handle;
 
-    fn policy(&self) -> Policy;
-    /// Our mounts, and only ours; an error means nothing is known, so nothing is changed
+    fn pathless_entries(&self) -> PathlessEntries;
+    /// Our mounts, and only ours. A pass lists them before and after its changes: if the first
+    /// listing fails, the pass changes nothing; if either fails, it reports nothing.
     fn entries(&mut self) -> Result<Vec<TableEntry<Self::Handle>>, String>;
     /// With `force`, even if files are open on it
     fn remove(&mut self, entry: &TableEntry<Self::Handle>, force: bool) -> Result<(), String>;
@@ -76,22 +66,42 @@ pub fn reconcile_pass<T: MountTable>(
     shares: &[Share],
     force: bool,
 ) -> Result<PassResult, EnumerationError> {
-    let policy = table.policy();
+    let pathless = table.pathless_entries();
     let before = table.entries().map_err(EnumerationError)?;
     let (desired, mut errors) = unique_by_name(shares);
     let is_desired = |name: &str| desired.iter().any(|s| same_share(&s.share_name, name));
 
+    // per desired share, the one entry to keep: the first with a path, or else, if the table
+    // keeps those, the first without
+    let keep: Vec<usize> = desired
+        .iter()
+        .filter_map(|share| {
+            let mut of_share = before
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| same_share(&e.share_name, &share.share_name));
+            let with_path = of_share.clone().find(|(_, e)| e.path.is_some());
+            let keep = match pathless {
+                PathlessEntries::Remove => with_path,
+                PathlessEntries::KeepWithError(_) => with_path.or_else(|| of_share.next()),
+            };
+            keep.map(|(index, _)| index)
+        })
+        .collect();
+    let kept: Vec<&str> = keep
+        .iter()
+        .map(|&index| before[index].share_name.as_str())
+        .collect();
+
     // removal first: frees resources (on Windows, the credentials that would block our mappings)
-    let mut kept: Vec<&str> = Vec::new();
-    for entry in &before {
-        let name = entry.share_name.as_str();
-        let usable = entry.path.is_some() || policy.pathless != PathlessEntries::Remove;
-        let duplicate = policy.duplicates == DuplicateEntries::RemoveAllButOne
-            && kept.iter().any(|k| same_share(k, name));
-        if is_desired(name) && usable && !duplicate {
-            kept.push(name);
+    for (index, entry) in before.iter().enumerate() {
+        if keep.contains(&index) {
             continue;
         }
+        let name = entry.share_name.as_str();
+        // only a share that is no longer desired is released by force; another entry of a
+        // desired share is removed only if nothing is open on it
+        let force = force && !is_desired(name);
         debug!("removing share {name}");
         if let Err(e) = table.remove(entry, force) {
             // it stays in the report, so the scope reads as not converged; the next pass retries
@@ -124,7 +134,7 @@ pub fn reconcile_pass<T: MountTable>(
         if entries.iter().any(|e| e.path.is_some()) {
             continue;
         }
-        let message = match policy.pathless {
+        let message = match pathless {
             PathlessEntries::KeepWithError(message) if !entries.is_empty() => message.to_owned(),
             _ => add_errors
                 .remove(&share.share_id)
@@ -199,15 +209,12 @@ pub(crate) mod tests {
             .collect()
     }
 
-    const KEEP_ALL: Policy = Policy {
-        pathless: PathlessEntries::KeepWithError("no path"),
-        duplicates: DuplicateEntries::Keep,
-    };
+    const KEEP_PATHLESS: PathlessEntries = PathlessEntries::KeepWithError("no path");
 
     /// Entries with a unique id (the handle); adding mounts at `/mnt/<name>`. Calls and
     /// scripted removal errors name an entry as `name@path` (`-` for no path).
     struct MemoryTable {
-        policy: Policy,
+        pathless: PathlessEntries,
         entries: Vec<(usize, String, Option<PathBuf>)>,
         next_id: usize,
         inventory_error: bool,
@@ -221,9 +228,9 @@ pub(crate) mod tests {
     }
 
     impl MemoryTable {
-        fn new(policy: Policy, entries: &[(&str, Option<&str>)]) -> Self {
+        fn new(pathless: PathlessEntries, entries: &[(&str, Option<&str>)]) -> Self {
             Self {
-                policy,
+                pathless,
                 entries: entries
                     .iter()
                     .enumerate()
@@ -246,8 +253,8 @@ pub(crate) mod tests {
     impl MountTable for MemoryTable {
         type Handle = usize;
 
-        fn policy(&self) -> Policy {
-            self.policy
+        fn pathless_entries(&self) -> PathlessEntries {
+            self.pathless
         }
 
         fn entries(&mut self) -> Result<Vec<TableEntry<usize>>, String> {
@@ -296,7 +303,10 @@ pub(crate) mod tests {
 
     #[test]
     fn removes_undesired_before_adding_missing_and_keeps_desired() {
-        let mut table = MemoryTable::new(KEEP_ALL, &[("keep", Some("/k")), ("stale", Some("/s"))]);
+        let mut table = MemoryTable::new(
+            KEEP_PATHLESS,
+            &[("keep", Some("/k")), ("stale", Some("/s"))],
+        );
         let state = table.pass(&[share("1", "new"), share("2", "KEEP")]);
         assert_eq!(table.calls, vec!["remove stale@/s", "add new"]);
         assert_eq!(
@@ -308,29 +318,33 @@ pub(crate) mod tests {
 
     #[test]
     fn inventory_error_fails_the_pass_and_changes_nothing() {
-        let mut table = MemoryTable::new(KEEP_ALL, &[("stale", Some("/s"))]);
+        let mut table = MemoryTable::new(KEEP_PATHLESS, &[("stale", Some("/s"))]);
         table.inventory_error = true;
         assert!(reconcile_pass(&mut table, &[share("1", "a")], false).is_err());
         assert!(table.calls.is_empty());
     }
 
     #[test]
-    fn force_applies_to_removals() {
+    fn force_applies_only_to_shares_that_are_no_longer_desired() {
         for force in [false, true] {
-            let mut table = MemoryTable::new(KEEP_ALL, &[("old", Some("/o"))]);
-            reconcile_pass(&mut table, &[], force).unwrap();
-            let expected = if force {
+            let mut table = MemoryTable::new(
+                KEEP_PATHLESS,
+                &[("old", Some("/o")), ("a", Some("/a1")), ("a", Some("/a2"))],
+            );
+            reconcile_pass(&mut table, &[share("1", "a")], force).unwrap();
+            let old = if force {
                 "remove old@/o (forced)"
             } else {
                 "remove old@/o"
             };
-            assert_eq!(table.calls, vec![expected]);
+            // the second entry of a desired share is never forced
+            assert_eq!(table.calls, vec![old, "remove a@/a2"]);
         }
     }
 
     #[test]
     fn created_lists_only_what_this_pass_added() {
-        let mut table = MemoryTable::new(KEEP_ALL, &[("keep", Some("/k"))]);
+        let mut table = MemoryTable::new(KEEP_PATHLESS, &[("keep", Some("/k"))]);
         // someone else mounted "raced" first: not ours to announce
         table
             .add_failures
@@ -346,7 +360,7 @@ pub(crate) mod tests {
 
     #[test]
     fn duplicate_desired_names_get_an_error() {
-        let mut table = MemoryTable::new(KEEP_ALL, &[]);
+        let mut table = MemoryTable::new(KEEP_PATHLESS, &[]);
         let state = table.pass(&[share("1", "a"), share("2", "A")]);
         assert_eq!(table.calls, vec!["add a"]);
         assert_eq!(
@@ -357,7 +371,7 @@ pub(crate) mod tests {
 
     #[test]
     fn failed_removal_stays_in_the_report() {
-        let mut table = MemoryTable::new(KEEP_ALL, &[("busy", Some("/b")), ("gone", None)]);
+        let mut table = MemoryTable::new(KEEP_PATHLESS, &[("busy", Some("/b")), ("gone", None)]);
         table.remove_errors = vec!["busy@/b".to_owned(), "gone@-".to_owned()];
         let state = table.pass(&[]);
         assert_eq!(
@@ -368,7 +382,7 @@ pub(crate) mod tests {
 
     #[test]
     fn add_failures_are_reported_per_share() {
-        let mut table = MemoryTable::new(KEEP_ALL, &[]);
+        let mut table = MemoryTable::new(KEEP_PATHLESS, &[]);
         table.add_failures = HashMap::from([
             (
                 "a".to_owned(),
@@ -385,34 +399,38 @@ pub(crate) mod tests {
         assert_eq!(mounted(&state), vec![entry("c", Some("/mnt/c"))]);
     }
 
+    /// An entry without a path is kept only if its share has none with a path, even when it is
+    /// listed first
     #[test]
-    fn keep_policy_keeps_pathless_and_duplicate_entries_and_reports_them() {
-        let mut table = MemoryTable::new(KEEP_ALL, &[("a", None), ("A", Some("/a")), ("b", None)]);
+    fn keeping_pathless_entries_prefers_one_with_a_path() {
+        let mut table = MemoryTable::new(
+            KEEP_PATHLESS,
+            &[("a", None), ("A", Some("/a")), ("b", None)],
+        );
         let state = table.pass(&[share("1", "a"), share("2", "b")]);
-        assert!(table.calls.is_empty());
-        // one usable entry is enough for "a"
+        assert_eq!(table.calls, vec!["remove a@-"]);
         assert_eq!(errors(&state), vec![("2", "no path")]);
-        assert_eq!(mounted(&state).len(), 3);
+        assert_eq!(
+            mounted(&state),
+            vec![entry("A", Some("/a")), entry("b", None)]
+        );
     }
 
     #[test]
     fn keep_policy_reports_a_share_added_without_path() {
-        let mut table = MemoryTable::new(KEEP_ALL, &[]);
+        let mut table = MemoryTable::new(KEEP_PATHLESS, &[]);
         table.add_pathless = vec!["a".to_owned()];
         let state = table.pass(&[share("1", "a")]);
         assert_eq!(errors(&state), vec![("1", "no path")]);
         assert_eq!(mounted(&state), vec![entry("a", None)]);
     }
 
-    const REMOVE_ALL: Policy = Policy {
-        pathless: PathlessEntries::Remove,
-        duplicates: DuplicateEntries::RemoveAllButOne,
-    };
+    const REMOVE_PATHLESS: PathlessEntries = PathlessEntries::Remove;
 
     #[test]
-    fn remove_policy_keeps_one_usable_entry_per_share() {
+    fn removing_pathless_entries_keeps_one_with_a_path_per_share() {
         let mut table = MemoryTable::new(
-            REMOVE_ALL,
+            REMOVE_PATHLESS,
             &[
                 ("a", None),
                 ("a", Some("/a1")),
@@ -434,7 +452,7 @@ pub(crate) mod tests {
 
     #[test]
     fn removing_a_duplicate_keeps_its_identical_twin() {
-        let mut table = MemoryTable::new(REMOVE_ALL, &[("a", Some("/a")), ("a", Some("/a"))]);
+        let mut table = MemoryTable::new(REMOVE_PATHLESS, &[("a", Some("/a")), ("a", Some("/a"))]);
         let state = table.pass(&[share("1", "a")]);
         assert_eq!(table.calls, vec!["remove a@/a"]);
         assert_eq!(mounted(&state), vec![entry("a", Some("/a"))]);
@@ -442,8 +460,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn remove_policy_does_not_count_a_pathless_entry_as_mounted() {
-        let mut table = MemoryTable::new(REMOVE_ALL, &[("a", None)]);
+    fn removing_pathless_entries_does_not_count_one_as_mounted() {
+        let mut table = MemoryTable::new(REMOVE_PATHLESS, &[("a", None)]);
         table.remove_errors = vec!["a@-".to_owned()];
         table
             .add_failures
