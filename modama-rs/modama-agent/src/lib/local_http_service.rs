@@ -26,7 +26,7 @@ use tower_http::csrf::CsrfLayer;
 
 use crate::{
     caller_scope::{ConnInfo, HelperScope, PlatformScopeResolver, ResolveScope, ScopeError},
-    config::{AgentConfig, ConfigError, MTLSIdentity},
+    config::{AgentConfig, ConfigError},
     events_api::add_internal_api,
     http_api::add_api_routes,
     local_fan_out::LocalFanOut,
@@ -357,15 +357,8 @@ fn validate_session_name(input: &str) -> Result<String, &'static str> {
 
 /// This agent's identity, and the agents connected at the resource of its token
 fn local_snapshot(api_state: &ApiState) -> (String, Option<ConnectedAgentsView>) {
-    let identity = match &api_state.config.identity {
-        MTLSIdentity::Anonymous { hostname } => format!("Anonymous running on {hostname}"),
-        MTLSIdentity::AgentId {
-            agent_name,
-            resource_name,
-        } => format!("{agent_name} at {resource_name}"),
-    };
     (
-        identity,
+        api_state.config.identity.to_string(),
         api_state.fan_out.connected_agents().map(Into::into),
     )
 }
@@ -728,15 +721,11 @@ async fn start_ingest_step2(
         )?));
     }
 
-    let (res_name, instrument) = match &api_state.config.identity {
-        // TODO: name the resource an anonymous agent inherits from its token
-        // (`LocalFanOut::logged_in`), like the connected agents on the index page
-        MTLSIdentity::Anonymous { hostname } => (hostname.clone(), "this instrument".to_owned()),
-        MTLSIdentity::AgentId {
-            agent_name: _,
-            resource_name,
-        } => (resource_name.clone(), resource_name.clone()),
-    };
+    let identity = &api_state.config.identity;
+    // TODO: name the resource an anonymous agent inherits from its token
+    // (`LocalFanOut::logged_in`), like the connected agents on the index page
+    let res_name = identity.resource().unwrap_or(identity.name());
+    let instrument = identity.resource().unwrap_or("this instrument");
     // starting doesn't close the open share: say what happens to it
     let current = match desired_foreground(&api_state) {
         Some(share) => {
@@ -1065,6 +1054,7 @@ fn make_app(state: ApiState) -> Result<Router, LocalAPIError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MTLSIdentity;
     use crate::local_fan_out::{HelperPresence, LocalFanOut};
     use axum::body::Body;
     use axum::extract::connect_info::MockConnectInfo;

@@ -50,18 +50,7 @@ async fn api_shares_foreground(
     responses((status = 200, description = "Local agent identity", body = APIAgentIdentity))
 )]
 async fn api_identity(State(api_state): State<ApiState>) -> Json<APIAgentIdentity> {
-    Json(match &api_state.config.identity {
-        crate::config::MTLSIdentity::Anonymous { hostname } => APIAgentIdentity::Anonymous {
-            hostname: hostname.clone(),
-        },
-        crate::config::MTLSIdentity::AgentId {
-            agent_name,
-            resource_name,
-        } => APIAgentIdentity::AgentId {
-            agent_name: agent_name.clone(),
-            resource_name: resource_name.clone(),
-        },
-    })
+    Json((&api_state.config.identity).into())
 }
 
 #[utoipa::path(

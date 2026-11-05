@@ -10,6 +10,7 @@ use modama_common::{
         CertHelperError, cert_chain_from_reader, get_root_cert_store, private_key_from_reader,
     },
     config::{AgentConfigFile, AgentConfigFileClientCert},
+    local_api_messages::APIAgentIdentity,
     tokens::{TokenError, TokenFetcher, TokenProvider},
     version::modama_git_version,
 };
@@ -71,6 +72,48 @@ pub enum MTLSIdentity {
         /// A short name of the resouce this agent belongs to, for example "Holo"
         resource_name: String,
     },
+}
+
+impl MTLSIdentity {
+    /// The name this agent goes by: its agent name, or the hostname of an anonymous agent
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Anonymous { hostname } => hostname,
+            Self::AgentId { agent_name, .. } => agent_name,
+        }
+    }
+
+    /// The resource of an enrolled agent; None for an anonymous one, whose resource comes with
+    /// the token it borrows
+    pub fn resource(&self) -> Option<&str> {
+        match self {
+            Self::Anonymous { .. } => None,
+            Self::AgentId { resource_name, .. } => Some(resource_name),
+        }
+    }
+}
+
+/// How the HTML pages introduce this agent: "DLD at Holo", or "Anonymous running on pc-17"
+impl std::fmt::Display for MTLSIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.resource() {
+            Some(resource) => write!(f, "{} at {resource}", self.name()),
+            None => write!(f, "Anonymous running on {}", self.name()),
+        }
+    }
+}
+
+impl From<&MTLSIdentity> for APIAgentIdentity {
+    fn from(identity: &MTLSIdentity) -> Self {
+        let name = identity.name().to_owned();
+        match identity.resource() {
+            Some(resource) => Self::AgentId {
+                agent_name: name,
+                resource_name: resource.to_owned(),
+            },
+            None => Self::Anonymous { hostname: name },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -354,5 +397,39 @@ mod cli_tests {
         let args = CliArgs::try_parse_from(["modama-agent", "version"])?;
         assert!(matches!(args.command, Some(Command::Version)));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use modama_common::local_api_messages::APIAgentIdentity;
+
+    use super::MTLSIdentity;
+
+    #[test]
+    fn identities_are_named_for_the_pages_and_the_api() {
+        let enrolled = MTLSIdentity::AgentId {
+            agent_name: "DLD".to_owned(),
+            resource_name: "Holo".to_owned(),
+        };
+        let anonymous = MTLSIdentity::Anonymous {
+            hostname: "pc-17".to_owned(),
+        };
+
+        assert_eq!(enrolled.to_string(), "DLD at Holo");
+        assert_eq!(anonymous.to_string(), "Anonymous running on pc-17");
+        assert_eq!(
+            APIAgentIdentity::from(&enrolled),
+            APIAgentIdentity::AgentId {
+                agent_name: "DLD".to_owned(),
+                resource_name: "Holo".to_owned(),
+            }
+        );
+        assert_eq!(
+            APIAgentIdentity::from(&anonymous),
+            APIAgentIdentity::Anonymous {
+                hostname: "pc-17".to_owned(),
+            }
+        );
     }
 }
