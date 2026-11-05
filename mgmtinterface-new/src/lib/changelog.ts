@@ -23,6 +23,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
     {
+        version: '0.19.1',
+        date: '2026-11-05',
+        title: 'Pages open at the top',
+        changes: [
+            'A page you open now starts at the top. Each page used to open at the scroll position of the page before it, so the changelog, opened from the version in the footer, opened part way down. Back still takes you to where you were.',
+        ],
+    },
+    {
         version: '0.19.0',
         date: '2026-11-03',
         title: 'Descriptions for projects and sessions',

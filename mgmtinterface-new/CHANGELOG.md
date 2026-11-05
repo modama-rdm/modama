@@ -11,6 +11,14 @@ planned for the cutover.
 > from `src/lib/changelog.ts`. Keep the two in sync when you add an entry, and bump
 > `version` in `package.json` in the same commit - the footer badge reads that value.
 
+## [0.19.1] - 2026-11-05
+
+### Fixed
+
+- A page you open now starts at the top. Each page used to open at the scroll
+  position of the page before it, so the changelog, opened from the version in
+  the footer, opened part way down. Back still takes you to where you were.
+
 ## [0.19.0] - 2026-11-03
 
 ### Added
