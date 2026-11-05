@@ -1,3 +1,4 @@
+pub mod event_hub;
 pub mod events;
 pub mod helpers;
 pub mod mount;
