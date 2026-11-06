@@ -1,11 +1,11 @@
-//! mgmtinterface-api, as the agent uses it: finds where the API is mounted, and carries the
-//! caller's session.
+//! mgmtinterface-api, as the agent uses it: finds where the API is mounted, and passes on the
+//! sign-in of the agent's HTTP client.
 //!
-//! The agent keeps no session of its own. A caller logs in once and gets an
-//! [`UpstreamSession`] back (the API's session cookie, as a `Cookie` header value), which it
-//! passes into every later call. The API re-issues the cookie now and then, which moves its idle
-//! timeout; a call returns the re-issued session in [`Authed::refreshed`], and the caller has to
-//! keep that one from then on.
+//! The agent keeps no sign-in of its own. Its HTTP client (such as a browser showing its pages,
+//! or the agent GUI) signs in through the agent and gets a [`SignIn`] (the API's session cookie)
+//! that the agent passes on with every later call. The API renews the cookie now and then, which
+//! moves its idle timeout; the call then replaces the [`SignIn`] it was given with the renewed
+//! one, and the client has to keep that one from then on.
 
 use std::sync::Arc;
 
@@ -67,33 +67,47 @@ impl MgmtApiError {
     }
 }
 
-/// The caller's session with mgmtinterface-api: the value of the `Cookie` header to send.
-/// Opaque to everyone but this module.
-#[derive(Clone, PartialEq, Eq)]
-pub struct UpstreamSession(String);
+/// An HTTP client's sign-in with mgmtinterface-api: its session cookie, as the value of the
+/// `Cookie` header to send. Opaque to everyone but this module.
+#[derive(Clone)]
+pub struct SignIn {
+    cookie: String,
+    changed: bool,
+}
 
-impl UpstreamSession {
-    pub fn from_token(token: &str) -> Self {
-        Self(token.to_owned())
+impl SignIn {
+    /// The sign-in the client brought
+    pub fn from_cookie(cookie: &str) -> Self {
+        Self {
+            cookie: cookie.to_owned(),
+            changed: false,
+        }
     }
 
-    pub fn token(&self) -> &str {
-        &self.0
+    pub fn cookie(&self) -> &str {
+        &self.cookie
+    }
+
+    /// Whether the client doesn't have this sign-in yet: it is from a login, or the management
+    /// API renewed it
+    pub fn changed(&self) -> bool {
+        self.changed
     }
 }
 
-impl std::fmt::Debug for UpstreamSession {
+/// Two sign-ins are the same if their cookies are, whether the client has them or not
+impl PartialEq for SignIn {
+    fn eq(&self, other: &Self) -> bool {
+        self.cookie == other.cookie
+    }
+}
+
+impl Eq for SignIn {}
+
+impl std::fmt::Debug for SignIn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("UpstreamSession([REDACTED])")
+        f.write_str("SignIn([REDACTED])")
     }
-}
-
-/// The answer to an authenticated call, and the session to use from now on if the API
-/// re-issued it
-#[derive(Debug)]
-pub struct Authed<T> {
-    pub value: T,
-    pub refreshed: Option<UpstreamSession>,
 }
 
 /// Finds and remembers where mgmtinterface-api is mounted. Shared by all requests.
@@ -195,15 +209,15 @@ async fn discover(server: &Url) -> Result<Url, MgmtApiError> {
     Err(error)
 }
 
-/// A client for one call, with a fresh cookie jar holding `session`
+/// An HTTP client for one call, with a fresh cookie jar holding `sign_in`
 fn http_client(
     base: &Url,
-    session: Option<&UpstreamSession>,
+    sign_in: Option<&SignIn>,
 ) -> Result<(HttpClient, Arc<Jar>), MgmtApiError> {
     install_rustls_crypto_provider();
     let jar = Arc::new(Jar::default());
-    if let Some(session) = session {
-        for cookie in session.0.split("; ") {
+    if let Some(sign_in) = sign_in {
+        for cookie in sign_in.cookie.split("; ") {
             jar.add_cookie_str(&format!("{cookie}; Path=/"), base);
         }
     }
@@ -216,12 +230,9 @@ fn http_client(
     Ok((client, jar))
 }
 
-fn session_in(jar: &Jar, base: &Url) -> Option<UpstreamSession> {
+fn sign_in_from_jar(jar: &Jar, base: &Url) -> Option<SignIn> {
     let cookies = jar.cookies(base)?;
-    cookies
-        .to_str()
-        .ok()
-        .map(|cookies| UpstreamSession(cookies.to_owned()))
+    cookies.to_str().ok().map(SignIn::from_cookie)
 }
 
 fn map_error<E: std::fmt::Debug>(error: ApiOpError<E>) -> MgmtApiError {
@@ -269,25 +280,34 @@ impl MgmtApiConnection {
         result
     }
 
+    /// The value of an authenticated call; if the API renewed the sign-in with it, `sign_in`
+    /// becomes the renewed one
     async fn authed<T, E: std::fmt::Debug>(
         &self,
-        session: &UpstreamSession,
+        sign_in: &mut SignIn,
         jar: &Jar,
         result: Result<T, ApiOpError<E>>,
-    ) -> Result<Authed<T>, MgmtApiError> {
+    ) -> Result<T, MgmtApiError> {
         let value = self.finish(result).await?;
-        let current = session_in(jar, &self.base);
-        let refreshed = current.filter(|current| current != session);
-        Ok(Authed { value, refreshed })
+        if let Some(current) = sign_in_from_jar(jar, &self.base)
+            && current != *sign_in
+        {
+            *sign_in = SignIn {
+                changed: true,
+                ..current
+            };
+        }
+        Ok(value)
     }
 
-    /// Open a session (a normal one: agents run on shared computers, so no "keep me logged in").
-    /// `persistent` is sent explicitly rather than left to the server's default.
+    /// Sign in, with a normal session at the API rather than a persistent one: agents run on
+    /// shared computers, so no "keep me logged in". `persistent` is sent explicitly rather than
+    /// left to the server's default.
     pub async fn login(
         &self,
         username: &str,
         password: &str,
-    ) -> Result<(String, UpstreamSession), MgmtApiError> {
+    ) -> Result<(String, SignIn), MgmtApiError> {
         let (client, jar) = http_client(&self.base, None)?;
         let request = LoginRequest {
             username: username.to_owned(),
@@ -301,61 +321,61 @@ impl MgmtApiConnection {
                     .await,
             )
             .await?;
-        let session = session_in(&jar, &self.base).ok_or_else(|| {
+        let sign_in = sign_in_from_jar(&jar, &self.base).ok_or_else(|| {
             MgmtApiError::InvalidResponse("the login answer carries no session cookie".to_owned())
         })?;
-        Ok((info.username, session))
+        Ok((
+            info.username,
+            SignIn {
+                changed: true,
+                ..sign_in
+            },
+        ))
     }
 
-    pub async fn logout(&self, session: &UpstreamSession) -> Result<(), MgmtApiError> {
-        let (client, _jar) = http_client(&self.base, Some(session))?;
+    pub async fn logout(&self, sign_in: &SignIn) -> Result<(), MgmtApiError> {
+        let (client, _jar) = http_client(&self.base, Some(sign_in))?;
         self.finish(client.logout_mgmt_api_auth_logout_post(API_VERSION).await)
             .await
     }
 
-    /// Who `session` belongs to
-    pub async fn signed_in_user(
-        &self,
-        session: &UpstreamSession,
-    ) -> Result<Authed<String>, MgmtApiError> {
-        let (client, jar) = http_client(&self.base, Some(session))?;
+    /// Who `sign_in` belongs to
+    pub async fn signed_in_user(&self, sign_in: &mut SignIn) -> Result<String, MgmtApiError> {
+        let (client, jar) = http_client(&self.base, Some(sign_in))?;
         let result = client
             .read_session_mgmt_api_auth_session_get(API_VERSION)
             .await
             .map(|info| info.username);
-        self.authed(session, &jar, result).await
+        self.authed(sign_in, &jar, result).await
     }
 
-    pub async fn projects(
-        &self,
-        session: &UpstreamSession,
-    ) -> Result<Authed<ProjectList>, MgmtApiError> {
-        let (client, jar) = http_client(&self.base, Some(session))?;
+    pub async fn projects(&self, sign_in: &mut SignIn) -> Result<ProjectList, MgmtApiError> {
+        let (client, jar) = http_client(&self.base, Some(sign_in))?;
         let result = client
             .read_projects_mgmt_api_projects_get(API_VERSION)
             .await;
-        self.authed(session, &jar, result).await
+        self.authed(sign_in, &jar, result).await
     }
 
     pub async fn project(
         &self,
-        session: &UpstreamSession,
+        sign_in: &mut SignIn,
         project: &str,
-    ) -> Result<Authed<ProjectDetails>, MgmtApiError> {
-        let (client, jar) = http_client(&self.base, Some(session))?;
+    ) -> Result<ProjectDetails, MgmtApiError> {
+        let (client, jar) = http_client(&self.base, Some(sign_in))?;
         let result = client
             .read_project_mgmt_api_projects_project_get(project, API_VERSION)
             .await;
-        self.authed(session, &jar, result).await
+        self.authed(sign_in, &jar, result).await
     }
 
     pub async fn create_session(
         &self,
-        session: &UpstreamSession,
+        sign_in: &mut SignIn,
         project: &str,
         name: &str,
-    ) -> Result<Authed<()>, MgmtApiError> {
-        let (client, jar) = http_client(&self.base, Some(session))?;
+    ) -> Result<(), MgmtApiError> {
+        let (client, jar) = http_client(&self.base, Some(sign_in))?;
         let request = CreateSessionRequest {
             name: name.to_owned(),
             description: None,
@@ -364,20 +384,20 @@ impl MgmtApiConnection {
             .add_session_mgmt_api_projects_project_sessions_post(project, API_VERSION, request)
             .await
             .map(|_| ());
-        self.authed(session, &jar, result).await
+        self.authed(sign_in, &jar, result).await
     }
 
-    /// Open an ingest share bound to this agent's instrument; an open one for the same user,
-    /// session and instrument is returned instead of a second one
+    /// Open an ingest share bound to this agent's resource; an open one for the same user,
+    /// session and resource is returned instead of a second one
     pub async fn open_ingest_share(
         &self,
-        session: &UpstreamSession,
+        sign_in: &mut SignIn,
         project: &str,
         session_name: &str,
         resource: &str,
         agent_token: &str,
-    ) -> Result<Authed<IngestShare>, MgmtApiError> {
-        let (client, jar) = http_client(&self.base, Some(session))?;
+    ) -> Result<IngestShare, MgmtApiError> {
+        let (client, jar) = http_client(&self.base, Some(sign_in))?;
         let request = CreateIngestShareRequest {
             project: project.to_owned(),
             session: session_name.to_owned(),
@@ -386,19 +406,19 @@ impl MgmtApiConnection {
         let result = client
             .add_ingest_share_mgmt_api_ingest_shares_post(Some(agent_token), API_VERSION, request)
             .await;
-        self.authed(session, &jar, result).await
+        self.authed(sign_in, &jar, result).await
     }
 
     pub async fn close_ingest_share(
         &self,
-        session: &UpstreamSession,
+        sign_in: &mut SignIn,
         share_id: &str,
-    ) -> Result<Authed<()>, MgmtApiError> {
-        let (client, jar) = http_client(&self.base, Some(session))?;
+    ) -> Result<(), MgmtApiError> {
+        let (client, jar) = http_client(&self.base, Some(sign_in))?;
         let result = client
             .close_ingest_share_mgmt_api_ingest_shares_share_id_delete(share_id, API_VERSION)
             .await;
-        self.authed(session, &jar, result).await
+        self.authed(sign_in, &jar, result).await
     }
 }
 
@@ -409,7 +429,7 @@ mod tests {
     use mockito::{Matcher, Server, ServerGuard};
     use url::Url;
 
-    use super::{API_VERSION, MgmtApi, MgmtApiError, UpstreamSession};
+    use super::{API_VERSION, MgmtApi, MgmtApiError, SignIn};
 
     #[test]
     fn the_api_version_is_a_bare_integer() {
@@ -418,7 +438,7 @@ mod tests {
     }
 
     const VERSIONS: &str = r#"{"supported": [1], "latest": 1, "deprecated": []}"#;
-    const SESSION: &str = "modama_session=abc";
+    const MGMT_COOKIE: &str = "modama_session=abc";
 
     fn server_url(server: &ServerGuard) -> Url {
         Url::parse(&server.url()).unwrap()
@@ -460,7 +480,7 @@ mod tests {
         let api = Arc::new(MgmtApi::new());
         let connection = api.connect(&server_url(&server)).await.unwrap();
         connection
-            .projects(&UpstreamSession::from_token(SESSION))
+            .projects(&mut SignIn::from_cookie(MGMT_COOKIE))
             .await
             .unwrap();
         projects.assert_async().await;
@@ -549,26 +569,28 @@ mod tests {
             .await;
 
         let connection = api.connect(&server_url(&server)).await.unwrap();
-        let (username, session) = connection.login("alice", "secret").await.unwrap();
+        let (username, sign_in) = connection.login("alice", "secret").await.unwrap();
         login.assert_async().await;
         assert_eq!(username, "alice");
-        assert_eq!(session.token(), SESSION);
+        assert_eq!(sign_in.cookie(), MGMT_COOKIE);
+        // the client doesn't have it yet
+        assert!(sign_in.changed());
     }
 
     #[tokio::test]
-    async fn calls_send_the_session_and_return_a_reissued_one() {
+    async fn calls_send_the_sign_in_and_return_a_renewed_one() {
         let mut server = Server::new_async().await;
         let api = api_at_mgmt_api(&mut server).await;
         server
             .mock("GET", "/mgmt-api/projects")
-            .match_header("cookie", SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .match_header("x-modama-api-version", "1")
             .with_body(r#"{"projects": []}"#)
             .create_async()
             .await;
         server
             .mock("GET", "/mgmt-api/projects/p")
-            .match_header("cookie", SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_header(
                 "set-cookie",
                 "modama_session=def; HttpOnly; Path=/; SameSite=lax",
@@ -581,18 +603,17 @@ mod tests {
             .await;
 
         let connection = api.connect(&server_url(&server)).await.unwrap();
-        let session = UpstreamSession::from_token(SESSION);
-        let unchanged = connection.projects(&session).await.unwrap();
-        assert_eq!(unchanged.refreshed, None);
-        let reissued = connection.project(&session, "p").await.unwrap();
-        assert_eq!(
-            reissued.refreshed,
-            Some(UpstreamSession::from_token("modama_session=def"))
-        );
+        let mut sign_in = SignIn::from_cookie(MGMT_COOKIE);
+        connection.projects(&mut sign_in).await.unwrap();
+        assert_eq!(sign_in.cookie(), MGMT_COOKIE);
+        assert!(!sign_in.changed());
+        connection.project(&mut sign_in, "p").await.unwrap();
+        assert_eq!(sign_in.cookie(), "modama_session=def");
+        assert!(sign_in.changed());
     }
 
     #[tokio::test]
-    async fn open_ingest_share_binds_the_share_to_the_instrument() {
+    async fn open_ingest_share_binds_the_share_to_the_resource() {
         let mut server = Server::new_async().await;
         let api = api_at_mgmt_api(&mut server).await;
         let open = server
@@ -614,7 +635,7 @@ mod tests {
         let connection = api.connect(&server_url(&server)).await.unwrap();
         let share = connection
             .open_ingest_share(
-                &UpstreamSession::from_token(SESSION),
+                &mut SignIn::from_cookie(MGMT_COOKIE),
                 "p",
                 "s",
                 "holo",
@@ -623,8 +644,8 @@ mod tests {
             .await
             .unwrap();
         open.assert_async().await;
-        assert_eq!(share.value.share_id, "id");
-        assert_eq!(share.value.created_by, Some(Some("alice".to_owned())));
+        assert_eq!(share.share_id, "id");
+        assert_eq!(share.created_by, Some(Some("alice".to_owned())));
     }
 
     #[tokio::test]
@@ -651,12 +672,12 @@ mod tests {
             .await;
 
         let connection = api.connect(&server_url(&server)).await.unwrap();
-        let session = UpstreamSession::from_token(SESSION);
+        let mut sign_in = SignIn::from_cookie(MGMT_COOKIE);
         assert!(matches!(
-            connection.projects(&session).await,
+            connection.projects(&mut sign_in).await,
             Err(MgmtApiError::Unauthorized)
         ));
-        match connection.close_ingest_share(&session, "theirs").await {
+        match connection.close_ingest_share(&mut sign_in, "theirs").await {
             Err(MgmtApiError::Forbidden { code, message }) => {
                 assert_eq!(
                     (code.as_str(), message.as_str()),
@@ -665,7 +686,7 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
-        match connection.project(&session, "nope").await {
+        match connection.project(&mut sign_in, "nope").await {
             Err(MgmtApiError::Missing { code, .. }) => assert_eq!(code, "project_not_found"),
             other => panic!("unexpected: {other:?}"),
         }
@@ -685,7 +706,7 @@ mod tests {
 
         let connection = api.connect(&server_url(&server)).await.unwrap();
         let error = connection
-            .projects(&UpstreamSession::from_token(SESSION))
+            .projects(&mut SignIn::from_cookie(MGMT_COOKIE))
             .await
             .err()
             .unwrap();
@@ -705,7 +726,7 @@ mod tests {
             .await;
         let connection = api.connect(&server_url(&server)).await.unwrap();
         connection
-            .projects(&UpstreamSession::from_token(SESSION))
+            .projects(&mut SignIn::from_cookie(MGMT_COOKIE))
             .await
             .unwrap();
         projects.assert_async().await;
