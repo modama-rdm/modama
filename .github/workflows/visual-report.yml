@@ -1,0 +1,60 @@
+name: Visual test report
+
+# Shows the failing visual tests of a pull request in a PR comment, with their images, and
+# keeps the branch ci-snapshot-review that hosts those images (.github/scripts/snapshot_review.py).
+#
+# All triggers below run this file from the default branch, never from the pull request, and
+# get a write token also for pull requests from forks. So these jobs must never check out or run
+# code from a pull request: they only read the CI run's artifacts, as data. That's why the zizmor
+# findings dangerous-triggers are ignored below.
+
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: [CI]
+    types: [completed]
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [closed]
+  schedule:
+    # Mondays: remove the images of closed pull requests, also if no closing event got through.
+    - cron: "17 5 * * 1"
+
+permissions: {}
+
+jobs:
+  report:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Publish images and comment
+        run: python3 .github/scripts/snapshot_review.py report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+
+  prune:
+    if: github.event_name != 'workflow_run'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Remove images of closed pull requests
+        run: python3 .github/scripts/snapshot_review.py prune
+        env:
+          GH_TOKEN: ${{ github.token }}

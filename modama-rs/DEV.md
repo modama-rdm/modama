@@ -30,6 +30,11 @@ Check the `justfile`:
 - `just update-snapshots`  # updates snapshots and compresses PNGs via oxipng
 - `just clean`             # remove .old.png .new.png .diff.png snapshot files
 
+In a pull request, CI comments with up to five failing snapshots per suite
+(difference, accepted and new image). The artifact linked in the comment holds
+all of them. Changes to committed snapshots show up in the PR's "Files changed"
+tab. `.github/scripts/snapshot_review.py` describes how a test suite takes part.
+
 ## Linting and formatting
 
 - `just fmt`               # run the correct `cargo fmt` command on the whole workspace

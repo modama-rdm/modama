@@ -50,6 +50,8 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: uvx ruff format --check --diff
       - run: uvx ruff check
+      - name: Test the visual test report script
+        run: uv run --no-project --with pytest pytest .github/scripts
 
   mgmtinterface-new-tests:
     runs-on: ubuntu-latest
@@ -97,13 +99,32 @@ jobs:
           cargo check --workspace --all-targets --all-features --locked
           cargo clippy --all-targets --all-features --locked -- -D warnings
           cargo test --locked
-      - run: just visual-tests
+      - id: visual-tests
+        run: just visual-tests
         working-directory: modama-rs
-      - name: Upload differing snapshots
-        if: failure()
+      # The "Visual test report" workflow (visual-report.yml) shows failing snapshots of a pull
+      # request in a PR comment; .github/scripts/snapshot_review.py describes the artifact.
+      # Snapshots render the same with both toolchains, so only one of them reports.
+      - name: Write the visual test report
+        if: ${{ !cancelled() && steps.visual-tests.outcome != 'skipped' && matrix.rust == '1' }}
+        env:
+          OUTCOME: ${{ steps.visual-tests.outcome }}
+          REVIEW_DIR: modama-rs/modama-agent-gui/tests/snapshots/review
+        run: |
+          mkdir -p "$REVIEW_DIR"
+          printf '{"version": 1, "suite": "Agent GUI", "outcome": "%s"}\n' "$OUTCOME" > "$REVIEW_DIR/report.json"
+      - name: Upload the visual test report and differing snapshots
+        if: ${{ !cancelled() && steps.visual-tests.outcome != 'skipped' && matrix.rust == '1' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: snapshot-review-rust-${{ matrix.rust }}
+          name: snapshot-review-agent-gui
+          path: modama-rs/modama-agent-gui/tests/snapshots/review/
+          retention-days: 7
+      - name: Upload differing snapshots
+        if: ${{ failure() && matrix.rust != '1' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-test-failures-rust-${{ matrix.rust }}
           path: modama-rs/modama-agent-gui/tests/snapshots/review/
           if-no-files-found: ignore
           retention-days: 7
