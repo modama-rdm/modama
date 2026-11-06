@@ -4,6 +4,9 @@ guide_image_dir := "../docs/guide/src/user/images/agent"
 review_dir := snapshot_dir + "/review"
 design_spec := "../mgmtinterface-new/DESIGN.md"
 win7_toolchain := "nightly-2025-12-11"
+# Output flags for the cargo calls in the win7-* recipes. CI sets WIN7_CARGO_FLAGS=--timings to
+# get the per-crate log and a timing report instead of quiet output.
+win7_cargo_flags := env("WIN7_CARGO_FLAGS", "-q")
 xwin_cache := justfile_directory() + "/.xwin-cache"
 xwin_sdk := xwin_cache + "/splat"
 xwin_cflags := "/imsvc" + xwin_sdk + "/crt/include /imsvc" + xwin_sdk + "/sdk/include/ucrt /imsvc" + xwin_sdk + "/sdk/include/shared /imsvc" + xwin_sdk + "/sdk/include/um"
@@ -135,9 +138,9 @@ win7-check-msvc:
     export AR_x86_64_win7_windows_msvc=llvm-lib
     export CFLAGS_x86_64_win7_windows_msvc="{{ xwin_cflags }}"
     export RUSTFLAGS="--cfg windows_slim_errors -C panic=abort -C target-feature=+crt-static -L native={{ xwin_sdk }}/crt/lib/x86_64 -L native={{ xwin_sdk }}/sdk/lib/um/x86_64 -L native={{ xwin_sdk }}/sdk/lib/ucrt/x86_64"
-    cargo +{{ win7_toolchain }} check -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-common --lib --locked
-    cargo +{{ win7_toolchain }} clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent --lib --bins --all-features --locked -- -D warnings
-    cargo +{{ win7_toolchain }} clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent-gui --lib --bins --locked -- -D warnings
+    cargo +{{ win7_toolchain }} check {{ win7_cargo_flags }} -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-common --lib --locked
+    cargo +{{ win7_toolchain }} clippy {{ win7_cargo_flags }} -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent --lib --bins --all-features --locked -- -D warnings
+    cargo +{{ win7_toolchain }} clippy {{ win7_cargo_flags }} -Z build-std=std,panic_abort --target x86_64-win7-windows-msvc -p modama-agent-gui --lib --bins --locked -- -D warnings
 
 # Build the production Windows 7 SP1 x64 agent with the dedicated Tier 3 target.
 win7-build-agent:
@@ -150,8 +153,8 @@ win7-build-agent:
     export AR_x86_64_win7_windows_msvc=llvm-lib
     export CFLAGS_x86_64_win7_windows_msvc="{{ xwin_cflags }}"
     export RUSTFLAGS="--cfg windows_slim_errors -C panic=abort -C target-feature=+crt-static -L native={{ xwin_sdk }}/crt/lib/x86_64 -L native={{ xwin_sdk }}/sdk/lib/um/x86_64 -L native={{ xwin_sdk }}/sdk/lib/ucrt/x86_64"
-    cargo +{{ win7_toolchain }} build -q -Z build-std=std,panic_abort -p modama-agent --bin modama-agent --target x86_64-win7-windows-msvc --release --locked
-    cargo +{{ win7_toolchain }} build -q -Z build-std=std,panic_abort -p modama-agent-gui --bin modama-agent-gui --target x86_64-win7-windows-msvc --release --locked
+    cargo +{{ win7_toolchain }} build {{ win7_cargo_flags }} -Z build-std=std,panic_abort -p modama-agent --bin modama-agent --target x86_64-win7-windows-msvc --release --locked
+    cargo +{{ win7_toolchain }} build {{ win7_cargo_flags }} -Z build-std=std,panic_abort -p modama-agent-gui --bin modama-agent-gui --target x86_64-win7-windows-msvc --release --locked
 
 # Require both binaries' DLL imports to belong to the reviewed Windows 7 allowlist.
 win7-check-agent-imports: win7-build-agent
@@ -180,7 +183,7 @@ win7-check-gnu:
     # needs gcc-mingw-w64-x86-64-win32
     set -euo pipefail
     export RUSTFLAGS="--cfg windows_slim_errors -C target-feature=+crt-static"
-    cargo +{{ win7_toolchain }} clippy -q -Z build-std=std,panic_abort --target x86_64-win7-windows-gnu -p modama-agent -p modama-agent-gui --lib --bins --all-features --locked -- -D warnings
+    cargo +{{ win7_toolchain }} clippy {{ win7_cargo_flags }} -Z build-std=std,panic_abort --target x86_64-win7-windows-gnu -p modama-agent -p modama-agent-gui --lib --bins --all-features --locked -- -D warnings
 
 # Backwards-compatible name retained for existing local invocations.
 win-clippy-gnu: win7-check-gnu

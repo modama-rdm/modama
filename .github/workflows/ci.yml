@@ -16,6 +16,12 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+# The repository's Actions caches share a 10 GB limit, and GitHub deletes the least recently
+# used entries beyond it. A Rust job's cache is 1-1.5 GB, so only master writes the large caches
+# (rust-cache, and the Docker build cache in images.yml); other branches and pull requests restore
+# master's caches without saving their own. Container jobs that use a cache install zstd: without
+# it, the cache actions fall back to gzip, which packs and unpacks much more slowly.
+
 # Jobs running in a container check out after installing git there: without git,
 # actions/checkout falls back to a tarball without history. The agent's version comes from
 # `git describe` (git-version crate, falls back to "unknown" silently), so the Rust jobs need the
@@ -79,7 +85,7 @@ jobs:
     container: rust:${{ matrix.rust }}-slim-trixie
     steps:
       - run: >-
-          apt-get -y update && apt-get -y install curl git lld build-essential pkg-config
+          apt-get -y update && apt-get -y install curl git zstd lld build-essential pkg-config
           libglib2.0-dev libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,6 +99,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: modama-rs
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Check, clippy, test
         working-directory: modama-rs
         run: |
@@ -108,7 +115,7 @@ jobs:
     container: rust:1-slim-trixie
     steps:
       - run: >-
-          apt-get -y update && apt-get -y install curl git lld build-essential pkg-config
+          apt-get -y update && apt-get -y install curl git zstd lld build-essential pkg-config
           libglib2.0-dev libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -122,6 +129,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: modama-rs
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - id: visual-tests
         run: just visual-tests
         working-directory: modama-rs
@@ -148,25 +156,50 @@ jobs:
   windows-clippy:
     runs-on: ubuntu-latest
     container: rust:1-slim-trixie
+    env:
+      WIN7_CARGO_FLAGS: --timings
+      # see windows-7-llvm
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
-      - run: apt-get -y update && apt-get -y install curl git gcc-mingw-w64-x86-64-win32
+      - run: apt-get -y update && apt-get -y install curl git zstd gcc-mingw-w64-x86-64-win32
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - id: win7
+        uses: ./.github/actions/win7-toolchain
         with:
-          workspaces: modama-rs
-      - run: just win7-install-toolchain
+          key-prefix: win7-gnu-target
+      - name: Clippy
         working-directory: modama-rs
-      - run: just win7-check-gnu
-        working-directory: modama-rs
+        run: just win7-check-gnu
+      - if: github.ref == 'refs/heads/master' && steps.win7.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # the same paths as in .github/actions/win7-toolchain
+          path: |
+            modama-rs/target
+            !modama-rs/target/cargo-timings
+          key: ${{ steps.win7.outputs.key }}
+      - name: Upload cargo timing reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cargo-timings-win7-gnu
+          path: modama-rs/target/cargo-timings/
+          if-no-files-found: ignore
+          retention-days: 7
 
   windows-7-llvm:
     runs-on: ubuntu-latest
     container: rust:1-slim-trixie
+    env:
+      WIN7_CARGO_FLAGS: --timings
+      # Check and clippy don't need debug info in build scripts and proc macros; leaving it out
+      # keeps the cached target directory small.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
-      - run: apt-get -y update && apt-get -y install curl git clang-tools-19 lld llvm
+      - run: apt-get -y update && apt-get -y install curl git zstd clang-tools-19 lld llvm
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -174,16 +207,45 @@ jobs:
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just,xwin
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - id: win7
+        uses: ./.github/actions/win7-toolchain
         with:
-          workspaces: modama-rs
-      - name: Build and check
+          key-prefix: win7-target
+      # The CRT and SDK download from Microsoft is about 300 MB. The cache also pins the
+      # versions: xwin takes the newest ones only when the key changes or the cache expires.
+      - id: xwin
+        run: echo "version=$(xwin --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+      - id: xwin-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: modama-rs/.xwin-cache/splat
+          key: xwin-splat-x86_64-${{ steps.xwin.outputs.version }}
+      - name: Download the Microsoft CRT and Windows SDK
+        if: steps.xwin-cache.outputs.cache-hit != 'true'
         working-directory: modama-rs
-        run: |
-          just win7-install-toolchain
-          just win7-xwin-splat
-          just win7-check-msvc
-          just win7-check-agent-imports
+        run: just win7-xwin-splat
+      - name: Check and clippy
+        working-directory: modama-rs
+        run: just win7-check-msvc
+      - name: Build and check DLL imports
+        working-directory: modama-rs
+        run: just win7-check-agent-imports
+      - if: github.ref == 'refs/heads/master' && steps.win7.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # the same paths as in .github/actions/win7-toolchain
+          path: |
+            modama-rs/target
+            !modama-rs/target/cargo-timings
+          key: ${{ steps.win7.outputs.key }}
+      - name: Upload cargo timing reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cargo-timings-win7
+          path: modama-rs/target/cargo-timings/
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-win7
@@ -202,7 +264,7 @@ jobs:
       ZIG_VERSION: "0.15.2"
       ZIG_SHA256: "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
     steps:
-      - run: apt-get -y update && apt-get -y install curl git xz-utils binutils pkg-config libglib2.0-dev
+      - run: apt-get -y update && apt-get -y install curl git zstd xz-utils binutils pkg-config libglib2.0-dev
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -227,6 +289,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: modama-rs
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: just -f ci.just linux-check-agent-glibc
         working-directory: modama-rs
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

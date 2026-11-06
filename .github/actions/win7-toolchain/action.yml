@@ -1,0 +1,57 @@
+name: Windows 7 toolchain and build cache
+description: >-
+  Install the nightly toolchain for the Windows 7 targets and restore the build cache. The job
+  saves the cache itself at its end with actions/cache/save, using the outputs `key` and
+  `cache-hit` and the same paths as below.
+
+inputs:
+  key-prefix:
+    description: Prefix of the target/ cache key; one per job, since each job builds different targets.
+    required: true
+
+outputs:
+  key:
+    description: Key under which the job saves target/.
+    value: ${{ steps.target-key.outputs.key }}
+  cache-hit:
+    description: '"true" when target/ was restored from an exact key match, so there is nothing to save.'
+    value: ${{ steps.target-cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # rustup gives the std sources the install time as their modification time, so cargo would
+    # treat the std in the cached target/ as outdated and rebuild it, and with it every crate.
+    # A fixed time keeps the cached std valid; a different toolchain still rebuilds it.
+    - name: Install the Windows 7 toolchain
+      shell: bash
+      working-directory: modama-rs
+      run: |
+        just win7-install-toolchain
+        sysroot="$(rustc "+$(just --evaluate win7_toolchain)" --print sysroot)"
+        find "$sysroot/lib/rustlib/src" -exec touch -h -d 2000-01-01T00:00:00Z {} +
+    # rust-cache deletes the std crates that -Z build-std compiles into target/, and a rebuilt
+    # std makes cargo recompile every crate. So rust-cache only keeps the cargo registry here,
+    # and actions/cache keeps target/. Nothing deletes outdated crates from that copy, so the
+    # month in the key starts a fresh one every month.
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        workspaces: modama-rs
+        cache-targets: false
+        save-if: ${{ github.ref == 'refs/heads/master' }}
+    - id: target-key
+      shell: bash
+      working-directory: modama-rs
+      run: |
+        prefix="${{ inputs.key-prefix }}-$(just --evaluate win7_toolchain)-$(date -u +%Y-%m)"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=$prefix-${{ hashFiles('modama-rs/Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+    - id: target-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        # the jobs' save steps must list the same paths
+        path: |
+          modama-rs/target
+          !modama-rs/target/cargo-timings
+        key: ${{ steps.target-key.outputs.key }}
+        restore-keys: ${{ steps.target-key.outputs.prefix }}-
