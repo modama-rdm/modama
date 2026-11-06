@@ -30,11 +30,8 @@ use crate::{
     events_api::add_internal_api,
     http_api::add_api_routes,
     local_fan_out::LocalFanOut,
-    local_session::{
-        CallerSession, MaybeCallerSession, SessionTracker, expired_session_cookie,
-        with_refreshed_session,
-    },
-    mgmt_api::{MgmtApi, MgmtApiConnection, MgmtApiError},
+    local_sign_in::{ClientSignIn, MaybeClientSignIn, expired_sign_in_cookie},
+    mgmt_api::{MgmtApi, MgmtApiConnection, MgmtApiError, SignIn},
 };
 
 fn create_env() -> Environment<'static> {
@@ -421,7 +418,7 @@ pub enum LocalAPIError {
     Token(#[from] TokenError),
 
     #[error("not signed in")]
-    NoSession,
+    NotSignedIn,
 
     #[error("management API: {0}")]
     Mgmt(#[from] MgmtApiError),
@@ -460,10 +457,10 @@ impl IntoResponse for LocalAPIError {
                 )
                     .into_response()
             }
-            LocalAPIError::NoSession | LocalAPIError::Mgmt(MgmtApiError::Unauthorized) => (
+            LocalAPIError::NotSignedIn | LocalAPIError::Mgmt(MgmtApiError::Unauthorized) => (
                 StatusCode::UNAUTHORIZED,
                 [
-                    (header::SET_COOKIE, expired_session_cookie()),
+                    (header::SET_COOKIE, expired_sign_in_cookie()),
                     (
                         header::CONTENT_TYPE,
                         header::HeaderValue::from_static("text/plain"),
@@ -484,7 +481,7 @@ impl IntoResponse for LocalAPIError {
                 message,
             )
                 .into_response(),
-            // the caller's request was refused, e.g. an invalid session name
+            // the request was refused, e.g. an invalid session name
             LocalAPIError::Mgmt(MgmtApiError::Backend { status, message })
                 if (400..500).contains(&status) =>
             {
@@ -568,9 +565,8 @@ impl IntoResponse for LocalAPIError {
 async fn serve_index_page(
     State(api_state): State<ApiState>,
     ConnectInfo(conn): ConnectInfo<ConnInfo>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
-    let mut tracker = SessionTracker::new(session);
     let (identity, connected_agents) = local_snapshot(&api_state);
     let scope = api_state.resolve_scope(conn).await?;
     let foreground = api_state.fan_out.foreground_for(scope)?;
@@ -585,10 +581,11 @@ async fn serve_index_page(
         })
         .collect::<Vec<_>>();
     let mgmt = api_state.mgmt().await?;
-    let username = tracker.take(mgmt.signed_in_user(tracker.session()).await?);
+    let username = mgmt.signed_in_user(&mut sign_in).await?;
     // the management API lists every project; offer the user's own
-    let projects = tracker
-        .take(mgmt.projects(tracker.session()).await?)
+    let projects = mgmt
+        .projects(&mut sign_in)
+        .await?
         .projects
         .into_iter()
         .filter(|project| project.members.contains(&username) || project.owner == username)
@@ -599,7 +596,7 @@ async fn serve_index_page(
         .collect::<Vec<_>>();
     let foreground = ForegroundView::new(&foreground);
 
-    Ok(tracker.respond(render_html(
+    Ok(sign_in.respond(render_html(
         &api_state.jinja_env,
         "index.html",
         StatusCode::OK,
@@ -618,16 +615,15 @@ async fn serve_index_page(
 /// The session names of a project
 async fn session_names(
     api_state: &ApiState,
-    tracker: &mut SessionTracker,
+    sign_in: &mut SignIn,
     project_name: &str,
 ) -> Result<Vec<String>, LocalAPIError> {
     let details = api_state
         .mgmt()
         .await?
-        .project(tracker.session(), project_name)
+        .project(sign_in, project_name)
         .await?;
-    Ok(tracker
-        .take(details)
+    Ok(details
         .sessions
         .into_iter()
         .map(|session| session.name)
@@ -637,13 +633,12 @@ async fn session_names(
 async fn start_ingest_step1(
     Path(project_name): Path<String>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
-    let mut tracker = SessionTracker::new(session);
-    let session_names = session_names(&api_state, &mut tracker, &project_name).await?;
+    let session_names = session_names(&api_state, &mut sign_in, &project_name).await?;
     let session_date = today();
     let default_session_name = session_name_prefix(session_date);
-    Ok(tracker.respond(render_session_list(
+    Ok(sign_in.respond(render_session_list(
         &api_state,
         StatusCode::OK,
         &project_name,
@@ -657,16 +652,15 @@ async fn start_ingest_step1(
 async fn create_session(
     Path(project_name): Path<String>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
     Form(form): Form<CreateSessionForm>,
 ) -> Result<Response, LocalAPIError> {
-    let mut tracker = SessionTracker::new(session);
-    let session_names = session_names(&api_state, &mut tracker, &project_name).await?;
+    let session_names = session_names(&api_state, &mut sign_in, &project_name).await?;
 
     let session_name = match validate_session_name(&form.session_name) {
         Ok(session_name) => session_name,
         Err(message) => {
-            return Ok(tracker.respond(render_session_list(
+            return Ok(sign_in.respond(render_session_list(
                 &api_state,
                 StatusCode::BAD_REQUEST,
                 &project_name,
@@ -681,14 +675,14 @@ async fn create_session(
     let created = api_state
         .mgmt()
         .await?
-        .create_session(tracker.session(), &project_name, &session_name)
+        .create_session(&mut sign_in, &project_name, &session_name)
         .await;
     match created {
-        Ok(created) => tracker.take(created),
+        Ok(()) => {}
         // the management API refused the name, or the session exists already
         Err(MgmtApiError::Backend { status, message }) if (400..500).contains(&status) => {
             let message = format!("Could not create the session: {message}");
-            return Ok(tracker.respond(render_session_list(
+            return Ok(sign_in.respond(render_session_list(
                 &api_state,
                 StatusCode::BAD_REQUEST,
                 &project_name,
@@ -702,18 +696,17 @@ async fn create_session(
     }
 
     let confirmation_url = SafeLocalUrl::start_session(&project_name, &session_name);
-    Ok(tracker.respond(Redirect::to(confirmation_url.as_str())))
+    Ok(sign_in.respond(Redirect::to(confirmation_url.as_str())))
 }
 
 async fn start_ingest_step2(
     Path((project_name, session_name)): Path<(String, String)>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
-    let mut tracker = SessionTracker::new(session);
-    let session_names = session_names(&api_state, &mut tracker, &project_name).await?;
+    let session_names = session_names(&api_state, &mut sign_in, &project_name).await?;
     if !session_names.contains(&session_name) {
-        return Ok(tracker.respond(message_page(
+        return Ok(sign_in.respond(message_page(
             &api_state.jinja_env,
             StatusCode::NOT_FOUND,
             "Session not found",
@@ -733,7 +726,7 @@ async fn start_ingest_step2(
             let own = match &share.created_by {
                 Some(created_by) => {
                     let mgmt = api_state.mgmt().await?;
-                    *created_by == tracker.take(mgmt.signed_in_user(tracker.session()).await?)
+                    *created_by == mgmt.signed_in_user(&mut sign_in).await?
                 }
                 // smbdrop didn't record it: say it stays open, rather than guess
                 None => true,
@@ -749,7 +742,7 @@ async fn start_ingest_step2(
         None => None,
     };
     let action = SafeLocalUrl::start_session(&project_name, &session_name);
-    Ok(tracker.respond(render_html(
+    Ok(sign_in.respond(render_html(
         &api_state.jinja_env,
         "start_confirm.html",
         StatusCode::OK,
@@ -768,12 +761,11 @@ async fn start_ingest_step2(
 async fn start_ingest_step3(
     Path((project_name, session_name)): Path<(String, String)>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
-    let mut tracker = SessionTracker::new(session);
-    let session_names = session_names(&api_state, &mut tracker, &project_name).await?;
+    let session_names = session_names(&api_state, &mut sign_in, &project_name).await?;
     if !session_names.contains(&session_name) {
-        return Ok(tracker.respond(message_page(
+        return Ok(sign_in.respond(message_page(
             &api_state.jinja_env,
             StatusCode::NOT_FOUND,
             "Session not found",
@@ -782,30 +774,29 @@ async fn start_ingest_step3(
     }
 
     let sign_response = Arc::clone(&api_state.token_provider).fetch_token().await?;
-    let opened = api_state
+    api_state
         .mgmt()
         .await?
         .open_ingest_share(
-            tracker.session(),
+            &mut sign_in,
             &project_name,
             &session_name,
             &sign_response.resource,
             &sign_response.token,
         )
         .await?;
-    tracker.take(opened);
 
     // there's a good chance the ingest share is available within 300ms; with this delay
     // the user doesn't have to refresh the overview page (hopefully in most cases!)
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    Ok(tracker.respond(Redirect::to("/")))
+    Ok(sign_in.respond(Redirect::to("/")))
 }
 
 async fn close_ingest_confirmation(
     Path(share_id): Path<String>,
     State(api_state): State<ApiState>,
-    _session: CallerSession,
+    _session: ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
     let Some(foreground) =
         desired_foreground(&api_state).filter(|share| share.share_id == share_id)
@@ -836,7 +827,7 @@ async fn close_ingest_confirmation(
 async fn close_ingest(
     Path(share_id): Path<String>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
     if desired_foreground(&api_state).is_none_or(|share| share.share_id != share_id) {
         return message_page(
@@ -847,14 +838,12 @@ async fn close_ingest(
         );
     }
 
-    let mut tracker = SessionTracker::new(session);
-    let closed = api_state
+    api_state
         .mgmt()
         .await?
-        .close_ingest_share(tracker.session(), &share_id)
+        .close_ingest_share(&mut sign_in, &share_id)
         .await?;
-    tracker.take(closed);
-    Ok(tracker.respond(Redirect::to("/")))
+    Ok(sign_in.respond(Redirect::to("/")))
 }
 
 #[derive(Deserialize)]
@@ -938,7 +927,7 @@ async fn login(
         .login(&form.username, &form.password)
         .await
     {
-        Ok((_username, session)) => Ok(with_refreshed_session(Some(session), Redirect::to(next))),
+        Ok((_username, sign_in)) => Ok(sign_in.respond(Redirect::to(next))),
         Err(MgmtApiError::Unauthorized) => login_page(
             &api_state,
             StatusCode::UNAUTHORIZED,
@@ -952,11 +941,11 @@ async fn login(
 
 async fn logout(
     State(api_state): State<ApiState>,
-    MaybeCallerSession(session): MaybeCallerSession,
+    MaybeClientSignIn(sign_in): MaybeClientSignIn,
 ) -> Response {
-    if let Some(session) = session {
+    if let Some(sign_in) = sign_in {
         let result = match api_state.mgmt().await {
-            Ok(mgmt) => mgmt.logout(&session).await.map_err(LocalAPIError::from),
+            Ok(mgmt) => mgmt.logout(&sign_in).await.map_err(LocalAPIError::from),
             Err(error) => Err(error),
         };
         // signed out here either way; the management API's cookie just expires
@@ -965,13 +954,13 @@ async fn logout(
         }
     }
     (
-        [(header::SET_COOKIE, expired_session_cookie())],
+        [(header::SET_COOKIE, expired_sign_in_cookie())],
         Redirect::to("/login/"),
     )
         .into_response()
 }
 
-/// On the pages, "not signed in" (no cookie, or the management API ended the session) leads to
+/// On the pages, "not signed in" (no cookie, or the management API ended the sign-in) leads to
 /// the login page, which comes back here afterwards
 async fn redirect_unauthorized_to_login(request: axum::extract::Request, next: Next) -> Response {
     let target = request
@@ -1369,7 +1358,7 @@ mod tests {
     async fn mock_project_details(server: &mut mockito::ServerGuard, session_names: &[&str]) {
         server
             .mock("GET", "/mgmt-api/projects/the-project")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_header("content-type", "application/json")
             .with_body(project_details_json(session_names))
             .create_async()
@@ -1381,7 +1370,7 @@ mod tests {
         let request = Request::builder()
             .uri(uri)
             .method(method)
-            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION));
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE));
         match form {
             Some(form) => request
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
@@ -1661,7 +1650,7 @@ mod tests {
         let mut server = mgmt_api_server(&test_setup).await;
         server
             .mock("GET", "/mgmt-api/projects")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_header("content-type", "application/json")
             .with_body(
                 serde_json::json!({"projects": [
@@ -1944,7 +1933,7 @@ mod tests {
         mock_project_details(&mut server, &["existing"]).await;
         let create = server
             .mock("POST", "/mgmt-api/projects/the-project/sessions")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .match_body(mockito::Matcher::Json(
                 serde_json::json!({"name": "new-session"}),
             ))
@@ -2134,7 +2123,7 @@ mod tests {
         mock_project_details(&mut server, &["test-session"]).await;
         let open = server
             .mock("POST", "/mgmt-api/ingest-shares")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .match_header("x-agent-token", "dummy-token")
             .match_body(mockito::Matcher::Json(serde_json::json!({
                 "project": "the-project", "session": "test-session", "resource": "resource",
@@ -2316,7 +2305,7 @@ mod tests {
         let mut server = mgmt_api_server(&test_setup).await;
         let delete = server
             .mock("DELETE", "/mgmt-api/ingest-shares/share-123")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_status(204)
             .create_async()
             .await;
@@ -2359,7 +2348,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pages_without_a_session_lead_to_the_login_page_and_back() {
+    async fn pages_without_a_sign_in_lead_to_the_login_page_and_back() {
         let test_setup = TestSetup::start().await;
         let req = Request::builder()
             .uri("/start-ingest/the-project/")
@@ -2376,7 +2365,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_page_whose_session_ended_upstream_leads_to_the_login_page() {
+    async fn a_page_whose_sign_in_ended_leads_to_the_login_page() {
         let test_setup = TestSetup::start().await;
         let mut server = mgmt_api_server(&test_setup).await;
         server
@@ -2454,7 +2443,7 @@ mod tests {
             resp.headers().get(header::LOCATION).unwrap(),
             "/start-ingest/the-project/"
         );
-        assert!(set_cookies(&resp)[0].starts_with(&signed_in_cookie(UPSTREAM_SESSION)));
+        assert!(set_cookies(&resp)[0].starts_with(&signed_in_cookie(MGMT_COOKIE)));
     }
 
     #[tokio::test]
@@ -2520,12 +2509,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn signing_out_removes_the_session_and_shows_the_login_page() {
+    async fn signing_out_removes_the_cookie_and_shows_the_login_page() {
         let test_setup = TestSetup::start().await;
         let mut server = mgmt_api_server(&test_setup).await;
         let logout = server
             .mock("POST", "/mgmt-api/auth/logout")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_status(204)
             .create_async()
             .await;
@@ -2541,9 +2530,9 @@ mod tests {
         logout.assert_async().await;
     }
 
-    const UPSTREAM_SESSION: &str = "modama_session=abc";
+    const MGMT_COOKIE: &str = "modama_session=abc";
 
-    /// The management API the agent is pointed at, mounted at /mgmt-api, with the caller
+    /// The management API the agent is pointed at, mounted at /mgmt-api, with the user
     /// signed in as `testuser`
     async fn mgmt_api_server(test_setup: &TestSetup) -> mockito::ServerGuard {
         let mut server = test_setup
@@ -2564,7 +2553,7 @@ mod tests {
             .await;
         server
             .mock("GET", "/mgmt-api/auth/session")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_header("content-type", "application/json")
             .with_body(r#"{"username": "testuser", "persistent": false}"#)
             .create_async()
@@ -2572,10 +2561,10 @@ mod tests {
         server
     }
 
-    /// The `Cookie` header of a caller signed in with `upstream`
-    fn signed_in_cookie(upstream: &str) -> String {
-        let set_cookie = crate::local_session::session_cookie(
-            &crate::mgmt_api::UpstreamSession::from_token(upstream),
+    /// The `Cookie` header of a client signed in with the management API cookie `mgmt_cookie`
+    fn signed_in_cookie(mgmt_cookie: &str) -> String {
+        let set_cookie = crate::local_sign_in::sign_in_cookie(
+            &crate::mgmt_api::SignIn::from_cookie(mgmt_cookie),
         );
         set_cookie
             .to_str()
@@ -2595,7 +2584,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_api_login_sets_the_session_cookie() {
+    async fn local_api_login_sets_the_sign_in_cookie() {
         let test_setup = TestSetup::start().await;
         let mut server = mgmt_api_server(&test_setup).await;
         let login = server
@@ -2625,7 +2614,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let cookies = set_cookies(&resp);
         assert_eq!(cookies.len(), 1);
-        assert!(cookies[0].starts_with(&signed_in_cookie(UPSTREAM_SESSION)));
+        assert!(cookies[0].starts_with(&signed_in_cookie(MGMT_COOKIE)));
         assert!(cookies[0].contains("HttpOnly"));
         assert!(cookies[0].contains("SameSite=Strict"));
         assert!(!cookies[0].contains("Max-Age"));
@@ -2641,7 +2630,7 @@ mod tests {
         let mut server = mgmt_api_server(&test_setup).await;
         let mock = server
             .mock("GET", "/mgmt-api/projects")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_header("content-type", "application/json")
             .with_body(
                 r#"{"projects": [{"relpath": "project", "name": "Project One",
@@ -2654,13 +2643,13 @@ mod tests {
             .uri("/api/projects/")
             .method("GET")
             .header("X-API-Version", "1.0.0")
-            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
             .body(Body::empty())
             .unwrap();
 
         let resp = test_setup.app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        // the management API didn't re-issue the session, so neither does the agent:
+        // the management API didn't renew the sign-in, so the agent sets no cookie:
         assert!(set_cookies(&resp).is_empty());
         let got: Value =
             serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
@@ -2672,12 +2661,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reissued_management_session_is_passed_on_to_the_caller() {
+    async fn a_renewed_sign_in_is_passed_on_to_the_client() {
         let test_setup = TestSetup::start().await;
         let mut server = mgmt_api_server(&test_setup).await;
         server
             .mock("GET", "/mgmt-api/projects/p")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_header(
                 "set-cookie",
                 "modama_session=def; HttpOnly; Path=/; SameSite=lax",
@@ -2694,7 +2683,7 @@ mod tests {
             .uri("/api/projects/p/sessions/")
             .method("GET")
             .header("X-API-Version", "1.0.0")
-            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
             .body(Body::empty())
             .unwrap();
 
@@ -2706,7 +2695,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_ended_management_session_ends_the_local_one() {
+    async fn an_ended_sign_in_removes_the_cookie() {
         let test_setup = TestSetup::start().await;
         let mut server = mgmt_api_server(&test_setup).await;
         server
@@ -2719,7 +2708,7 @@ mod tests {
             .uri("/api/projects/")
             .method("GET")
             .header("X-API-Version", "1.0.0")
-            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
             .body(Body::empty())
             .unwrap();
 
@@ -2744,7 +2733,7 @@ mod tests {
             .uri("/api/shares/theirs/")
             .method("DELETE")
             .header("X-API-Version", "1.0.0")
-            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
             .body(Body::empty())
             .unwrap();
 
@@ -2760,7 +2749,7 @@ mod tests {
         let mut server = mgmt_api_server(&test_setup).await;
         let logout = server
             .mock("POST", "/mgmt-api/auth/logout")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_status(204)
             .create_async()
             .await;
@@ -2768,7 +2757,7 @@ mod tests {
             .uri("/api/logout/")
             .method("POST")
             .header("X-API-Version", "1.0.0")
-            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
             .body(Body::empty())
             .unwrap();
 
@@ -2784,7 +2773,7 @@ mod tests {
         let mut server = mgmt_api_server(&test_setup).await;
         let mock = server
             .mock("DELETE", "/mgmt-api/ingest-shares/share-123")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_status(204)
             .create_async()
             .await;
@@ -2792,7 +2781,7 @@ mod tests {
             .uri("/api/shares/share-123/")
             .method("DELETE")
             .header("X-API-Version", "1.0.0")
-            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
             .body(Body::empty())
             .unwrap();
 
@@ -2816,7 +2805,7 @@ mod tests {
         let open = server
             .mock("POST", "/mgmt-api/ingest-shares")
             .match_header("x-agent-token", "dummy-token")
-            .match_header("cookie", UPSTREAM_SESSION)
+            .match_header("cookie", MGMT_COOKIE)
             .with_status(201)
             .with_header("content-type", "application/json")
             .with_body(
@@ -2833,7 +2822,7 @@ mod tests {
             .uri("/api/projects/project/sessions/session/start-ingest/")
             .method("POST")
             .header("X-API-Version", "1.0.0")
-            .header(header::COOKIE, signed_in_cookie(UPSTREAM_SESSION))
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
             .body(Body::empty())
             .unwrap();
 

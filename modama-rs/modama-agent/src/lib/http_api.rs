@@ -14,10 +14,7 @@ use versioned::{VersionedRouterBuilder, semver::Version, versioned_route, versio
 use crate::{
     caller_scope::ConnInfo,
     local_http_service::{ApiState, LocalAPIError},
-    local_session::{
-        CallerSession, MaybeCallerSession, SESSION_COOKIE, expired_session_cookie,
-        with_refreshed_session,
-    },
+    local_sign_in::{ClientSignIn, MaybeClientSignIn, SIGN_IN_COOKIE, expired_sign_in_cookie},
 };
 
 use modama_common::local_api_messages::{
@@ -73,14 +70,14 @@ async fn api_identity(State(api_state): State<ApiState>) -> Json<APIAgentIdentit
 async fn api_start_ingest(
     Path((project_name, session_name)): Path<(String, String)>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
     let sign_response = Arc::clone(&api_state.token_provider).fetch_token().await?;
     let share = api_state
         .mgmt()
         .await?
         .open_ingest_share(
-            &session,
+            &mut sign_in,
             &project_name,
             &session_name,
             &sign_response.resource,
@@ -88,12 +85,12 @@ async fn api_start_ingest(
         )
         .await?;
     let response = Json(APICreateShareResponse {
-        share_id: share.value.share_id,
-        project: share.value.project,
-        session: share.value.session,
-        dest_path: share.value.dest_path,
+        share_id: share.share_id,
+        project: share.project,
+        session: share.session,
+        dest_path: share.dest_path,
     });
-    Ok(with_refreshed_session(share.refreshed, response))
+    Ok(sign_in.respond(response))
 }
 
 #[utoipa::path(
@@ -115,17 +112,14 @@ async fn api_start_ingest(
 async fn api_delete_share(
     Path(share_id): Path<String>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
-    let closed = api_state
+    api_state
         .mgmt()
         .await?
-        .close_ingest_share(&session, &share_id)
+        .close_ingest_share(&mut sign_in, &share_id)
         .await?;
-    Ok(with_refreshed_session(
-        closed.refreshed,
-        StatusCode::NO_CONTENT,
-    ))
+    Ok(sign_in.respond(StatusCode::NO_CONTENT))
 }
 
 #[utoipa::path(
@@ -143,15 +137,12 @@ async fn api_login(
     State(api_state): State<ApiState>,
     Json(request): Json<APILoginRequest>,
 ) -> Result<Response, LocalAPIError> {
-    let (username, session) = api_state
+    let (username, sign_in) = api_state
         .mgmt()
         .await?
         .login(&request.username, &request.password)
         .await?;
-    Ok(with_refreshed_session(
-        Some(session),
-        Json(APILoginResponse { username }),
-    ))
+    Ok(sign_in.respond(Json(APILoginResponse { username })))
 }
 
 #[utoipa::path(
@@ -163,21 +154,21 @@ async fn api_login(
 )]
 async fn api_logout(
     State(api_state): State<ApiState>,
-    MaybeCallerSession(session): MaybeCallerSession,
+    MaybeClientSignIn(sign_in): MaybeClientSignIn,
 ) -> Response {
-    if let Some(session) = session {
+    if let Some(sign_in) = sign_in {
         let result = match api_state.mgmt().await {
-            Ok(mgmt) => mgmt.logout(&session).await.map_err(LocalAPIError::from),
+            Ok(mgmt) => mgmt.logout(&sign_in).await.map_err(LocalAPIError::from),
             Err(error) => Err(error),
         };
-        // the session is gone here either way; the management API's cookie just expires
+        // the sign-in is gone here either way; the management API's cookie just expires
         if let Err(error) = result {
             warn!("signing out at the management API failed: {error}");
         }
     }
     (
         StatusCode::NO_CONTENT,
-        [(header::SET_COOKIE, expired_session_cookie())],
+        [(header::SET_COOKIE, expired_sign_in_cookie())],
     )
         .into_response()
 }
@@ -195,12 +186,11 @@ async fn api_logout(
 )]
 async fn api_list_projects(
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
-    let projects = api_state.mgmt().await?.projects(&session).await?;
+    let projects = api_state.mgmt().await?.projects(&mut sign_in).await?;
     let response = Json(APIListProjectsResponse {
         projects: projects
-            .value
             .projects
             .into_iter()
             .map(|project| APIProjectSummary {
@@ -211,7 +201,7 @@ async fn api_list_projects(
             })
             .collect(),
     });
-    Ok(with_refreshed_session(projects.refreshed, response))
+    Ok(sign_in.respond(response))
 }
 
 #[utoipa::path(
@@ -232,23 +222,22 @@ async fn api_list_projects(
 async fn api_list_sessions_in_project(
     Path(project_name): Path<String>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
     let details = api_state
         .mgmt()
         .await?
-        .project(&session, &project_name)
+        .project(&mut sign_in, &project_name)
         .await?;
     let response = Json(APIListSessionsResponse {
         project: project_name,
         sessions: details
-            .value
             .sessions
             .into_iter()
             .map(|session| session.name)
             .collect(),
     });
-    Ok(with_refreshed_session(details.refreshed, response))
+    Ok(sign_in.respond(response))
 }
 
 #[utoipa::path(
@@ -270,19 +259,19 @@ async fn api_list_sessions_in_project(
 async fn api_create_session_in_project(
     Path(project_name): Path<String>,
     State(api_state): State<ApiState>,
-    CallerSession(session): CallerSession,
+    ClientSignIn(mut sign_in): ClientSignIn,
     Json(create_session_req): Json<APICreateSessionRequest>,
 ) -> Result<Response, LocalAPIError> {
-    let created = api_state
+    api_state
         .mgmt()
         .await?
-        .create_session(&session, &project_name, &create_session_req.session)
+        .create_session(&mut sign_in, &project_name, &create_session_req.session)
         .await?;
     let response = Json(APICreateSessionResponse {
         project: project_name,
         session: create_session_req.session,
     });
-    Ok(with_refreshed_session(created.refreshed, response))
+    Ok(sign_in.respond(response))
 }
 
 #[utoipa::path(
@@ -338,7 +327,7 @@ fn customize_openapi(mut openapi: utoipa::openapi::OpenApi) -> utoipa::openapi::
     if let Some(components) = openapi.components.as_mut() {
         components.add_security_scheme(
             "session_cookie",
-            SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new(SESSION_COOKIE))),
+            SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new(SIGN_IN_COOKIE))),
         );
     }
     openapi
