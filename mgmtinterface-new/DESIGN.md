@@ -168,6 +168,8 @@ components:
     width: 400px
   dialog:
     width: 400px
+  wide-dialog:
+    width: 640px
   card-shadow-offset-y:
     size: 1px
   card-shadow-blur:

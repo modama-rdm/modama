@@ -2,6 +2,7 @@
 pub mod autostart_offer;
 pub mod avatar;
 pub mod buttons;
+pub mod copy_field;
 pub mod dialogs;
 pub mod dropdown;
 pub mod flow_navigation;
