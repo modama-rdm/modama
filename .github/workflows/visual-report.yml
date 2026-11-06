@@ -6,16 +6,18 @@ name: Visual test report
 # All triggers below run this file from the default branch, never from the pull request, and
 # get a write token also for pull requests from forks. So these jobs must never check out or run
 # code from a pull request: they only read the CI run's artifacts, as data. That's why the zizmor
-# findings dangerous-triggers are ignored below.
+# finding dangerous-triggers is ignored below.
+#
+# Images of closed pull requests are removed by every report run and every Monday. There's no
+# trigger on closing a pull request: that would need pull_request_target, which GitHub blocks
+# by default in public repositories from December 2026.
 
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [CI]
     types: [completed]
-  pull_request_target: # zizmor: ignore[dangerous-triggers]
-    types: [closed]
   schedule:
-    # Mondays: remove the images of closed pull requests, also if no closing event got through.
+    # Mondays: remove the images of closed pull requests, also when no pull request had a CI run.
     - cron: "17 5 * * 1"
 
 permissions: {}
@@ -44,7 +46,7 @@ jobs:
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
 
   prune:
-    if: github.event_name != 'workflow_run'
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: write
