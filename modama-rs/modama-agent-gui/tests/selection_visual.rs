@@ -125,7 +125,7 @@ fn completed_flow_stages_navigate_back() {
     project_page.available_projects = representative_projects();
     let mut projects = selection_harness(Page::SelectProject(project_page));
     projects.run_steps(3);
-    projects.get_by_label("Overview").click();
+    projects.get_by_label("Ingest").click();
     projects.run_steps(1);
     assert!(matches!(projects.state().page, Page::Overview(_)));
 
@@ -849,8 +849,8 @@ fn project_toolbar_and_dynamic_list_follow_available_geometry() {
             "consecutive project rows must meet at the separator: first={first_row:?}, second={second_row:?}"
         );
         let action = harness.get_by_label("Select Project").rect();
-        let guide = harness.get_by_label("go to Overview").rect().left();
-        let flow_overview = harness.get_by_label("Overview").rect();
+        let guide = harness.get_by_label("go to Ingest").rect().left();
+        let flow_overview = harness.get_by_label("Ingest").rect();
         let heading = harness.get_by_label("Select a project").rect();
         let card_outer_left = styles::outer_guide_inset();
         let card_border = styles::components::standard_border::width::EGUI_POINTS;
@@ -1322,8 +1322,8 @@ fn session_list_follows_available_geometry_and_shared_guide() {
         );
         harness.run_steps(3);
 
-        let guide = harness.get_by_label("go to Overview").rect().left();
-        let flow_overview = harness.get_by_label("Overview").rect();
+        let guide = harness.get_by_label("go to Ingest").rect().left();
+        let flow_overview = harness.get_by_label("Ingest").rect();
         let heading = harness
             .get_by_label("Select or create a session in project 'Project Alpha'")
             .rect();

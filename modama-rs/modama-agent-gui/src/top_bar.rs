@@ -221,7 +221,7 @@ fn show_brand(
                 let logo = egui::Button::image(
                     egui::Image::new(egui::include_image!("../assets/modama-tint.svg"))
                         .tint(styles::color::on_surface::VALUE.resolve(ui.visuals()))
-                        .alt_text("go to Overview")
+                        .alt_text("go to Ingest")
                         .max_height(styles::components::top_bar_logo::height::EGUI_POINTS),
                 )
                 .frame(false)
