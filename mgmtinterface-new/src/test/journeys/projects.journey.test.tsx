@@ -106,7 +106,7 @@ describe('journey: projects list', () => {
             expect(header('My Projects', 'Project')).toHaveAttribute('aria-sort', 'descending')
         })
 
-        it('a header in one table sorts all of them, by owner with ties by name', async () => {
+        it('a header sorts its own table only, by owner with ties by name', async () => {
             const {user} = renderApp({route: '/projects'})
             await screen.findByText('My Projects')
 
@@ -114,22 +114,35 @@ describe('journey: projects list', () => {
 
             // user6 before user15 (numbers compare as numbers), user15's two by name.
             expect(namesIn('Shared with me')).toEqual(['ecspzl-u-aidtht', 'eiidjlv-sywdhdjdnp', 'zpxe-wqb'])
+            expect(header('Shared with me', 'Owner')).toHaveAttribute('aria-sort', 'ascending')
+            // The other two tables keep their own order, newest first.
+            expect(namesIn('My Projects')).toEqual(OWN_RECENT)
+            expect(header('My Projects', 'Last modified')).toHaveAttribute('aria-sort', 'descending')
+            expect(header('All projects', 'Last modified')).toHaveAttribute('aria-sort', 'descending')
+            expect(header('All projects', 'Owner')).not.toHaveAttribute('aria-sort')
+
+            await user.click(within(header('All projects', 'Owner')).getByRole('button'))
+
             // Bare numeric UIDs come before usernames.
             expect(namesIn('All projects').slice(0, 3)).toEqual(['yekr', 'xlzyki', 'ztr'])
-            // My Projects has no Owner column; one owner throughout, so A - Z.
-            expect(namesIn('My Projects')).toEqual(OWN_AZ)
+            // Shared with me is still by owner, not moved by the other table.
+            expect(header('Shared with me', 'Owner')).toHaveAttribute('aria-sort', 'ascending')
+            expect(namesIn('My Projects')).toEqual(OWN_RECENT)
         })
 
-        it('remembers the sort on the next visit', async () => {
+        it('remembers each table\'s sort on the next visit', async () => {
             const first = renderApp({route: '/projects'})
             await screen.findByText('My Projects')
             await first.user.click(within(header('My Projects', 'Project')).getByRole('button'))
+            await first.user.click(within(header('Shared with me', 'Owner')).getByRole('button'))
             first.unmount()
 
             renderApp({route: '/projects'})
             await screen.findByText('My Projects')
             expect(namesIn('My Projects')).toEqual(OWN_AZ)
             expect(header('My Projects', 'Project')).toHaveAttribute('aria-sort', 'ascending')
+            expect(header('Shared with me', 'Owner')).toHaveAttribute('aria-sort', 'ascending')
+            expect(header('All projects', 'Last modified')).toHaveAttribute('aria-sort', 'descending')
         })
     })
 
