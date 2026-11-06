@@ -10,8 +10,10 @@ import {HeartIcon} from './ui/icons'
  */
 export function Footer() {
     return (
-        <footer className="border-t border-default bg-surface px-7 py-4">
-            <div className="flex flex-col items-center justify-between gap-2 text-[13px] text-fg-subtle sm:flex-row">
+        <footer className="border-t border-default bg-surface py-4">
+            {/* The same column as the header: both line up with the edges of the cards. */}
+            <div
+                className="mx-auto flex max-w-270 flex-col items-center justify-between gap-2 px-6 text-[13px] text-fg-subtle sm:flex-row">
                 <span className="inline-flex items-center gap-1.5">
                     Made with
                     <HeartIcon className="h-3.5 w-3.5 text-danger"/>
