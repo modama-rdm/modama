@@ -3,7 +3,6 @@ use std::{io, net::SocketAddr, path::PathBuf, sync::Arc};
 use crate::{
     event_hub::{ConnectionRegistration, EventHub, ResourceUpdates},
     helpers::peer_agent_id,
-    share_manager::SmbDropState,
     token_server::LocalTokenVerifier,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -21,7 +20,6 @@ use rustls::ServerConfig;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::broadcast::{self, error::RecvError},
     task::JoinHandle,
 };
 use tokio_rustls::{TlsAcceptor, rustls::server::VerifierBuilderError, server::TlsStream};
@@ -419,34 +417,6 @@ pub async fn start_event_channel(
     });
 
     Ok((task, port))
-}
-
-/// Like `start_event_channel`, for callers that publish the shares by sending each new state
-/// through the returned broadcast `Sender`; `state` is the initial state. Returns the server
-/// task, the `Sender` and the port the server listens on.
-///
-/// Only modama-agent's tests use this; smbdrop sets the shares on its `EventHub`.
-pub async fn start_event_server(
-    listen_addr: &str,
-    tls_config: ServerConfig,
-    secret_key: &[u8],
-    state: &SmbDropState,
-) -> Result<(JoinHandle<()>, broadcast::Sender<SmbDropState>, u16), ServerStartError> {
-    let hub = EventHub::new(state.shares.clone());
-    let (tx, mut rx) = broadcast::channel::<SmbDropState>(16);
-    let forwarded_hub = hub.clone();
-    tokio::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(state) => forwarded_hub.set_shares(state.shares),
-                // the next state is newer than those skipped
-                Err(RecvError::Lagged(_)) => (),
-                Err(RecvError::Closed) => break,
-            }
-        }
-    });
-    let (task, port) = start_event_channel(listen_addr, tls_config, secret_key, hub).await?;
-    Ok((task, tx, port))
 }
 
 #[cfg(test)]

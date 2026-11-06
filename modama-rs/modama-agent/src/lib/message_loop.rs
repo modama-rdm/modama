@@ -279,19 +279,17 @@ mod tests {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::{ClientConfig, RootCertStore, server::WebPkiClientVerifier};
-    use smbdrop::events::start_event_server;
-    use smbdrop::share_manager::SmbDropState;
+    use smbdrop::{event_hub::EventHub, events::start_event_channel};
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::sync::broadcast::Sender;
     use tokio::task::JoinHandle;
     use url::Url;
 
     struct MessageLoopTestSetup {
         message_loop_task: JoinHandle<()>,
         event_server_task: JoinHandle<()>,
-        pub initial_state: SmbDropState,
-        pub event_queue: Sender<SmbDropState>,
+        /// The state smbdrop's event channel tells the agent about
+        hub: EventHub,
         pub fan_out: Arc<LocalFanOut>,
     }
 
@@ -363,18 +361,15 @@ mod tests {
                 .with_single_cert(server_chain, server_pk_der.clone_key())
                 .unwrap();
 
-            let initial_state = SmbDropState {
-                shares: std::collections::HashMap::new(),
-                users: std::collections::HashMap::new(),
-            };
-            let (event_server_task, event_queue, port) = start_event_server(
+            let hub = EventHub::new(std::collections::HashMap::new());
+            let (event_server_task, port) = start_event_channel(
                 "localhost:0",
                 server_config,
                 server_pk_der.secret_der(),
-                &initial_state,
+                hub.clone(),
             )
             .await
-            .expect("start_event_server");
+            .expect("start_event_channel");
 
             let anonymous = matches!(identity, MTLSIdentity::Anonymous { .. });
             let config = test_config(port, identity);
@@ -428,10 +423,19 @@ mod tests {
             Self {
                 message_loop_task,
                 event_server_task,
-                initial_state,
-                event_queue,
+                hub,
                 fan_out,
             }
+        }
+
+        /// Make smbdrop's event channel publish `shares`, and only those
+        fn smbdrop_publishes(&self, shares: &[messages::Share]) {
+            self.hub.set_shares(
+                shares
+                    .iter()
+                    .map(|share| (share.share_id.clone(), share.clone()))
+                    .collect(),
+            );
         }
 
         /// Wait until the desired shares in the agent state match the given share IDs
@@ -512,11 +516,7 @@ mod tests {
         let test_setup = MessageLoopTestSetup::start().await;
         let (_helper, mut feed) = test_setup.connect_helper().await;
 
-        // send a state update via the event server's broadcast channel
-        let share = test_share("test-id-1", 0);
-        let mut new_state = test_setup.initial_state.clone();
-        new_state.shares.insert(share.share_id.clone(), share);
-        test_setup.event_queue.send(new_state).unwrap();
+        test_setup.smbdrop_publishes(&[test_share("test-id-1", 0)]);
 
         test_setup
             .wait_for_desired(&["test-id-1"], Some("test-id-1"))
@@ -552,10 +552,7 @@ mod tests {
         .await;
         let (_helper, mut feed) = test_setup.connect_helper().await;
 
-        let share = test_share("test-id-1", 0);
-        let mut new_state = test_setup.initial_state.clone();
-        new_state.shares.insert(share.share_id.clone(), share);
-        test_setup.event_queue.send(new_state).unwrap();
+        test_setup.smbdrop_publishes(&[test_share("test-id-1", 0)]);
         wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
         test_setup.abort().await;
@@ -566,21 +563,15 @@ mod tests {
         let test_setup = MessageLoopTestSetup::start().await;
         let (_helper, mut feed) = test_setup.connect_helper().await;
 
-        let share = test_share("test-id-1", 0);
-        let mut new_state = test_setup.initial_state.clone();
-        new_state.shares.insert(share.share_id.clone(), share);
-        test_setup.event_queue.send(new_state).unwrap();
+        test_setup.smbdrop_publishes(&[test_share("test-id-1", 0)]);
 
         test_setup
             .wait_for_desired(&["test-id-1"], Some("test-id-1"))
             .await;
         wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
-        // now remove again (back to initial state):
-        test_setup
-            .event_queue
-            .send(test_setup.initial_state.clone())
-            .unwrap();
+        // now remove it again
+        test_setup.smbdrop_publishes(&[]);
 
         test_setup.wait_for_desired(&[], None).await;
         wait_for_forwarded(&mut feed, &[], None).await;
@@ -594,9 +585,7 @@ mod tests {
         let (_helper, mut feed) = test_setup.connect_helper().await;
 
         let share_1 = test_share("test-id-1", 0);
-        let mut new_state_1 = test_setup.initial_state.clone();
-        new_state_1.shares.insert(share_1.share_id.clone(), share_1);
-        test_setup.event_queue.send(new_state_1.clone()).unwrap();
+        test_setup.smbdrop_publishes(std::slice::from_ref(&share_1));
 
         test_setup
             .wait_for_desired(&["test-id-1"], Some("test-id-1"))
@@ -604,10 +593,7 @@ mod tests {
         wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
         // one more share, created later => it becomes the foreground share
-        let share_2 = test_share("test-id-2", 1);
-        let mut new_state_2 = new_state_1.clone();
-        new_state_2.shares.insert(share_2.share_id.clone(), share_2);
-        test_setup.event_queue.send(new_state_2).unwrap();
+        test_setup.smbdrop_publishes(&[share_1, test_share("test-id-2", 1)]);
 
         test_setup
             .wait_for_desired(&["test-id-1", "test-id-2"], Some("test-id-2"))
@@ -625,11 +611,7 @@ mod tests {
         let (_helper, mut feed) = test_setup.connect_helper().await;
 
         let share_1 = test_share("test-id-1", 0);
-        let mut state_1 = test_setup.initial_state.clone();
-        state_1
-            .shares
-            .insert(share_1.share_id.clone(), share_1.clone());
-        test_setup.event_queue.send(state_1.clone()).unwrap();
+        test_setup.smbdrop_publishes(std::slice::from_ref(&share_1));
         wait_for_forwarded(&mut feed, &["test-id-1"], Some("test-id-1")).await;
 
         // the same again, as older smbdrop versions send it (current ones don't), then a change:
@@ -644,10 +626,7 @@ mod tests {
             &serde_json::to_string(&repeat).unwrap(),
         )
         .unwrap();
-        let share_2 = test_share("test-id-2", 1);
-        let mut state_2 = state_1.clone();
-        state_2.shares.insert(share_2.share_id.clone(), share_2);
-        test_setup.event_queue.send(state_2).unwrap();
+        test_setup.smbdrop_publishes(&[share_1, test_share("test-id-2", 1)]);
 
         let next = tokio::time::timeout(Duration::from_secs(2), feed.next())
             .await
@@ -762,10 +741,7 @@ mod tests {
         wait_for_own_status(&test_setup, AgentMountStatus::Idle).await;
 
         // a share is desired: its pass is still to come
-        let share = test_share("test-id-1", 0);
-        let mut new_state = test_setup.initial_state.clone();
-        new_state.shares.insert(share.share_id.clone(), share);
-        test_setup.event_queue.send(new_state).unwrap();
+        test_setup.smbdrop_publishes(&[test_share("test-id-1", 0)]);
         wait_for_own_status(&test_setup, AgentMountStatus::Reconciling).await;
 
         // the helper goes away
