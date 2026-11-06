@@ -61,8 +61,9 @@ diffractometer, together with all the instrument computers that belong to it.
 _Avoid_: Instrument (when the whole set of computers is meant), microscope, device
 
 **Instrument computer**:
-A computer at a resource that records data, for example the one of a camera or detector;
-not necessarily a desktop PC.
+A computer that belongs to a resource and works with its data: one that records data, such as
+the computer of a camera or detector, or one that manages, processes or analyzes it there. Not
+necessarily a desktop PC.
 _Avoid_: Instrument PC, PC, producer, data generating system, client
 
 ### Getting data in
