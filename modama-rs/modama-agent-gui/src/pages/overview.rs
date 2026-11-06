@@ -352,8 +352,8 @@ impl PageOverview {
             } => (
                 format!(
                     "{user} started the ingest share for session {session} in project {project}. \
-                     If you start a new ingest, new data at {instrument} goes to yours; {user} \
-                     can keep using theirs until it is stopped."
+                     Starting a new ingest makes it no longer available at {instrument}. Please \
+                     coordinate with {user} first."
                 ),
                 vec![DialogChoice {
                     label: "Continue",
@@ -441,7 +441,7 @@ impl PageOverview {
         card_description(
             ui,
             "Choose a project and session to create an ingest share for new data from this \
-             PC.",
+             computer.",
         );
         ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
         let response = ui.add(primary_button("Start Ingest", ui));
@@ -499,11 +499,11 @@ impl PageOverview {
         }
         session_detail(
             ui,
-            "Mount path on this PC",
+            "Mount path on this computer",
             session
                 .mount_path
                 .as_deref()
-                .unwrap_or("Not available on this PC"),
+                .unwrap_or("Not available on this computer"),
         );
 
         ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);

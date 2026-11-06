@@ -6,7 +6,7 @@
 {% if current.own %}
 <p>Your ingest share for session {{ current.session }} in project {{ current.project }} is still running, and keeps running next to the new one. If you don't need it anymore, <a href="{{ current.close_href }}">stop it</a> first.</p>
 {% else %}
-<p>{{ current.created_by }} started the ingest share for session {{ current.session }} in project {{ current.project }}. If you start this ingest, new data at {{ instrument }} goes to yours; {{ current.created_by }} can keep using theirs until it is stopped.</p>
+<p>{{ current.created_by }} started the ingest share for session {{ current.session }} in project {{ current.project }}. Starting this ingest makes it no longer available at {{ instrument }}. Please coordinate with {{ current.created_by }} first.</p>
 {% endif %}
 {% endif %}
 <form action="{{ action }}" method="post">
