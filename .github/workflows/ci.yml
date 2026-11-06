@@ -130,8 +130,11 @@ jobs:
   windows-7-llvm:
     runs-on: ubuntu-latest
     container: rust:1-slim-trixie
+    env:
+      WIN7_CARGO_FLAGS: --timings
     steps:
-      - run: apt-get -y update && apt-get -y install curl git clang-tools-19 lld llvm
+      # zstd lets actions/cache compress with zstd instead of gzip
+      - run: apt-get -y update && apt-get -y install curl git clang-tools-19 lld llvm zstd
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -139,16 +142,39 @@ jobs:
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just,xwin
+      - name: Install the Windows 7 toolchain
+        working-directory: modama-rs
+        run: just win7-install-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: modama-rs
-      - name: Build and check
+      # The CRT and SDK download from Microsoft is about 300 MB. The cache also pins the
+      # versions: xwin takes the newest ones only when the key changes or the cache expires.
+      - id: xwin
+        run: echo "version=$(xwin --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+      - id: xwin-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: modama-rs/.xwin-cache/splat
+          key: xwin-splat-x86_64-${{ steps.xwin.outputs.version }}
+      - name: Download the Microsoft CRT and Windows SDK
+        if: steps.xwin-cache.outputs.cache-hit != 'true'
         working-directory: modama-rs
-        run: |
-          just win7-install-toolchain
-          just win7-xwin-splat
-          just win7-check-msvc
-          just win7-check-agent-imports
+        run: just win7-xwin-splat
+      - name: Check and clippy
+        working-directory: modama-rs
+        run: just win7-check-msvc
+      - name: Build and check DLL imports
+        working-directory: modama-rs
+        run: just win7-check-agent-imports
+      - name: Upload cargo timing reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cargo-timings-win7
+          path: modama-rs/target/cargo-timings/
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-win7
