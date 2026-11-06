@@ -3,6 +3,7 @@ pub mod config;
 pub mod caller_scope;
 pub mod events_api;
 pub mod http_api;
+pub mod ingest_actions;
 pub mod local_fan_out;
 pub mod local_http_service;
 pub mod local_net_common;
