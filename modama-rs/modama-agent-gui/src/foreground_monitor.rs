@@ -146,7 +146,7 @@ impl MonitorState {
         let foreground = match view.foreground() {
             Ok(foreground) => ForegroundSession::from(foreground),
             Err(e) => {
-                log::warn!("ignoring foreground share: {e}");
+                log::warn!("ignoring foreground ingest share: {e}");
                 return true;
             }
         };
@@ -623,7 +623,7 @@ mod tests {
         if let Some(helper) = &mut blocked.session_helper {
             helper.errors.push(ShareError {
                 share_id: "new".to_owned(),
-                message: "another user's drive is still connected".to_owned(),
+                message: "another user's ingest share is still connected".to_owned(),
             });
         }
 

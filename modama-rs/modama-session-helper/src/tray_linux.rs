@@ -83,7 +83,7 @@ impl ksni::Tray for ModamaTray {
             }
             .into(),
             StandardItem {
-                label: "Open network drive".into(),
+                label: "Open ingest share".into(),
                 enabled: self.state.network_drive.is_some(),
                 activate: Box::new(|tray: &mut Self| tray.request(TrayAction::OpenNetworkDrive)),
                 ..Default::default()

@@ -13,13 +13,13 @@
     <h1>Create session in project "{{ project['name'] }}"</h1>
 
     {% include '_flash.html.j2' %}
-    <p>Sessions are top-level directories within a project that contain a <code>raw</code> subfolder.
+    <p>Sessions are folders directly inside a project folder that contain a <code>raw</code> subfolder.
     They offer two features that are important for managing microscopy data:
     <ul>
-      <li>They can be mapped as network drives on microscope computers using the Ingest Tool
+      <li>Their ingest shares can be mapped on instrument computers using modama-agent
       to facilitate saving data with the correct ownership and access rights for a project.</li>
       <li>They can be sealed, which means that the <code>raw</code> subfolder and its contents are
-      write-protected. It is strongly recommended to place microscopy data and important notes in the
+      immutable: nobody can change, rename or delete them. It is strongly recommended to place microscopy data and important notes in the
       <code>raw</code> subfolder and seal sessions in a timely manner to prevent data loss through
       user error or malicious software.</li>
     </ul>

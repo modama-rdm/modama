@@ -164,7 +164,7 @@ export function Projects() {
                     <div
                         className="mb-2.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
                         <UploadIcon className="h-3.5 w-3.5"/>
-                        Active upload{shares.length === 1 ? '' : 's'} in progress
+                        Active ingest
                     </div>
                     <div className="flex flex-col gap-3">
                         {/* Each share names its project and session (#172); nothing to parse. */}
@@ -180,7 +180,7 @@ export function Projects() {
                                         <span className="font-mono">{s.session}</span>
                                     </div>
                                     <div className="mt-0.5 text-xs text-amber-800 dark:text-amber-200">
-                                        Ingest share is open — data is being uploaded to this session
+                                        Ingest share is running — users can upload data into this session
                                     </div>
                                 </div>
                                 <div className="flex shrink-0 gap-2">

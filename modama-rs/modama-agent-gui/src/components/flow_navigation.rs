@@ -14,7 +14,7 @@ impl FlowStage {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Overview => "Overview",
+            Self::Overview => "Ingest",
             Self::Project => "Project",
             Self::Session => "Session",
         }

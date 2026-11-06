@@ -27,7 +27,7 @@ from ..shares import (
 from ..versioning import VERSION_ERROR_RESPONSES
 
 # "Ingest share" is the UI's word for an smbdrop share: a temporary Samba share
-# of one session with one-time credentials, which an instrument PC maps to
+# of one session with one-time credentials, which an instrument computer maps to
 # write data straight into the session as the user who opened it.
 router = APIRouter(
     prefix="/ingest-shares",
@@ -38,10 +38,10 @@ router = APIRouter(
 
 class IngestShare(BaseModel):
     """
-    An active share. The fields smbdrop reports, plus the project and session
+    An ingest share. The fields smbdrop reports, plus the project and session
     it belongs to, so that a client does not parse `dest_path`, and the host
     and workgroup the web interface shows a person who connects by hand.
-    modama-agent does not use those two: an instrument PC may reach the Samba
+    modama-agent does not use those two: an instrument computer may reach the Samba
     server another way than the intranet does, so the agent mounts with the
     host, port and domain from its own configuration file.
     """
@@ -57,7 +57,7 @@ class IngestShare(BaseModel):
     uid: int = Field(description="Unix uid the share writes as.")
     gid: int = Field(description="Unix gid the share writes as.")
     resource: str | None = Field(
-        description="The instrument the share was opened for, if an agent opened it."
+        description="The resource the share was opened for, if an agent opened it."
     )
     created_by: str | None = Field(
         default=None,
@@ -94,9 +94,9 @@ class CreateIngestShareRequest(BaseModel):
         default=None,
         min_length=1,
         description=(
-            "The instrument to bind the share to. modama-agent sends it "
+            "The resource to bind the share to. modama-agent sends it "
             "together with `X-Agent-Token`, which must have been issued for "
-            "this instrument; other clients leave both out."
+            "this resource; other callers leave both out."
         ),
     )
 
@@ -109,7 +109,7 @@ AgentToken = Annotated[
         alias="X-Agent-Token",
         description=(
             "Token from smbdrop's token service, which modama-agent fetches with "
-            "its client certificate. It says which instrument the request comes "
+            "its client certificate. It says which resource the request comes "
             "from; the session still says who the user is. Sent together with "
             "`resource` in the body, or not at all."
         ),
@@ -136,7 +136,7 @@ def _ingest_share(
     responses={
         **AUTH_ERROR_RESPONSES,
         **error_responses(
-            {502: "The share service or the account service is unavailable."}
+            {502: "The ingest share service or the account service is unavailable."}
         ),
     },
 )
@@ -170,10 +170,10 @@ def read_ingest_shares(
             {
                 403: "The share was opened by someone else.",
                 404: (
-                    "There is no open share with that id. A share that was "
-                    "closed already answers this too."
+                    "There is no open ingest share with that id. An ingest "
+                    "share that was closed already answers this too."
                 ),
-                502: "The share service or the account service is unavailable.",
+                502: "The ingest share service or the account service is unavailable.",
             }
         ),
     },
@@ -213,7 +213,7 @@ def close_ingest_share(
     responses={
         200: {
             "model": IngestShare,
-            "description": "You already have a share open for this session.",
+            "description": "You already have an ingest share open for this session.",
         },
         **AUTH_ERROR_RESPONSES,
         **CSRF_ERROR_RESPONSES,
@@ -227,7 +227,7 @@ def close_ingest_share(
                 ),
                 404: "There is no such project, or no such session in it.",
                 502: (
-                    "The share service, the account service or the agent token "
+                    "The ingest share service, the account service or the agent token "
                     "service is unavailable."
                 ),
             }

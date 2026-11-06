@@ -38,7 +38,7 @@ pub enum TrayStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TrayState {
     pub status: TrayStatus,
-    /// Where the current foreground share is mounted, for "Open network drive"
+    /// Where the current foreground share is mounted, for "Open ingest share"
     pub network_drive: Option<PathBuf>,
 }
 
@@ -284,12 +284,12 @@ mod tests {
         let mut actual = mounted("a");
         actual.errors.push(ShareError {
             share_id: "b".to_owned(),
-            message: "another user's drive is still connected".to_owned(),
+            message: "another user's ingest share is still connected".to_owned(),
         });
         let state = tray_state(true, Some(&desired), Some(&actual));
         assert_eq!(
             state.label(),
-            "Working: another user's drive is still connected"
+            "Working: another user's ingest share is still connected"
         );
         assert_eq!(state.network_drive, None);
 

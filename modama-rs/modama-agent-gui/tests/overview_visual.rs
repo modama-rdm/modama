@@ -27,7 +27,7 @@ fn enabled_top_bar_controls_use_pointing_hand_cursor() {
     let mut harness = overview_harness(false, false);
     harness.run_steps(3);
 
-    harness.get_by_label("go to Overview").hover();
+    harness.get_by_label("go to Ingest").hover();
     harness.run_steps(1);
     assert_eq!(
         harness.output().platform_output.cursor_icon,
@@ -36,7 +36,7 @@ fn enabled_top_bar_controls_use_pointing_hand_cursor() {
 
     harness.remove_cursor();
     harness.run_steps(1);
-    harness.get_by_label("Start Session").hover();
+    harness.get_by_label("Start Ingest").hover();
     harness.run_steps(1);
     assert_eq!(
         harness.output().platform_output.cursor_icon,
@@ -119,6 +119,28 @@ fn overview_snapshots() {
     narrow.snapshot("overview_narrow");
     results.extend_harness(&mut narrow);
 
+    for (dark, name) in [
+        (false, "overview_scripts_dialog"),
+        (true, "overview_scripts_dialog_dark"),
+    ] {
+        let mut dialog = overview_harness(dark, true);
+        dialog.get_by_label("Use in scripts and notebooks").click();
+        dialog.run();
+        dialog.snapshot(name);
+        results.extend_harness(&mut dialog);
+    }
+
+    // narrower than the dialog: it shrinks, and the code scrolls sideways
+    let mut narrow_dialog = overview_harness(false, true);
+    narrow_dialog.set_size(egui::vec2(520.0, VIEWPORT.y));
+    narrow_dialog.run_steps(3);
+    narrow_dialog
+        .get_by_label("Use in scripts and notebooks")
+        .click();
+    narrow_dialog.run();
+    narrow_dialog.snapshot("overview_scripts_dialog_narrow");
+    results.extend_harness(&mut narrow_dialog);
+
     let mut logged_out = overview_harness(false, false);
     logged_out.snapshot("overview_logged_out");
     results.extend_harness(&mut logged_out);
@@ -131,7 +153,7 @@ fn overview_snapshots() {
             session: "2026-07-29-ingest".to_owned(),
             created_by: Some("representative.user".to_owned()),
         },
-        "Waiting for the session helper to mount the share.".to_owned(),
+        "Waiting for the session helper to mount the ingest share.".to_owned(),
     );
     mounting.run_steps(1);
     mounting.snapshot("overview_mounting");
@@ -145,7 +167,8 @@ fn overview_snapshots() {
             session: "2026-07-29-ingest".to_owned(),
             created_by: Some("representative.user".to_owned()),
         },
-        "another user's drive is still connected; close their files or release it".to_owned(),
+        "another user's ingest share is still connected; close their files or release it"
+            .to_owned(),
     );
     hand_off_blocked.state_mut().app_state.hand_off_blocked = true;
     hand_off_blocked.run_steps(1);
@@ -153,7 +176,7 @@ fn overview_snapshots() {
     results.extend_harness(&mut hand_off_blocked);
 
     let mut close_confirmation = overview_harness(false, true);
-    close_confirmation.get_by_label("Close Session").click();
+    close_confirmation.get_by_label("Stop Ingest").click();
     close_confirmation.run();
     close_confirmation.snapshot("overview_close_confirmation");
     results.extend_harness(&mut close_confirmation);
@@ -227,7 +250,7 @@ fn dropped_connection_indicator_does_not_disable_controls() {
             )
             .is_some()
     );
-    for label in ["go to Overview", "Close Session", "Log out"] {
+    for label in ["go to Ingest", "Stop Ingest", "Log out"] {
         assert!(
             harness
                 .query_by(|node| node.label().as_deref() == Some(label) && !node.is_disabled())
@@ -239,26 +262,70 @@ fn dropped_connection_indicator_does_not_disable_controls() {
 #[test]
 fn overview_entry_focuses_primary_session_action() {
     let logged_out = overview_harness(false, false);
-    assert!(logged_out.get_by_label("Start Session").is_focused());
+    assert!(logged_out.get_by_label("Start Ingest").is_focused());
 
     let logged_in = overview_harness(false, true);
-    assert!(logged_in.get_by_label("Close Session").is_focused());
+    assert!(logged_in.get_by_label("Stop Ingest").is_focused());
 }
 
 #[test]
 fn another_session_can_be_started_while_one_is_active() {
     let active = overview_harness(false, true);
-    assert!(active.query_by_label("Close Session").is_some());
-    assert!(active.query_by_label("Start Session").is_some());
+    assert!(active.query_by_label("Stop Ingest").is_some());
+    assert!(active.query_by_label("Start Ingest").is_some());
 
     let inactive = overview_harness(false, false);
-    assert!(inactive.query_by_label("Start Session").is_some());
-    assert!(inactive.query_by_label("Close Session").is_none());
+    assert!(inactive.query_by_label("Start Ingest").is_some());
+    assert!(inactive.query_by_label("Stop Ingest").is_none());
     assert!(
         inactive
             .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
             .is_none()
     );
+}
+
+/// The text the last frame put on the clipboard, if any
+fn copied_text(harness: &Harness<'static, AgentGuiApp>) -> Option<String> {
+    harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        })
+}
+
+#[test]
+fn the_code_icon_opens_the_mount_path_and_notebook_code_to_copy() {
+    let mut active = overview_harness(false, true);
+    assert!(active.query_by_label("Python code").is_none());
+    active.get_by_label("Use in scripts and notebooks").click();
+    active.run();
+    assert!(active.query_by_label("Python code").is_some());
+
+    active
+        .get_by_label("Copy mount path on this computer")
+        .click();
+    active.step();
+    assert_eq!(
+        copied_text(&active).as_deref(),
+        Some("/mnt/modama/representative-project/2026-07-29-ingest")
+    );
+
+    active.get_by_label("Copy python code").click();
+    active.step();
+    let code = copied_text(&active).expect("the code goes to the clipboard");
+    assert!(code.contains("/api/shares/foreground/"), "{code}");
+    assert!(
+        code.contains("session_folder = share[\"mount_path\"]"),
+        "{code}"
+    );
+
+    active.get_by_label("Close").click();
+    active.run();
+    assert!(active.query_by_label("Python code").is_none());
 }
 
 #[test]
@@ -277,9 +344,12 @@ fn active_session_details_include_the_agent_mount_path() {
 #[test]
 fn overview_logo_heading_and_card_content_share_a_left_guide() {
     let active = overview_harness(false, true);
-    let logo_x = active.get_by_label("go to Overview").rect().left();
-    let heading_x = active.get_by_label("Overview").rect().left();
-    let card_content_x = active.get_by_label("Active ingest session").rect().left();
+    let logo_x = active.get_by_label("go to Ingest").rect().left();
+    let heading_x = active
+        .get_by_label("Ingest for this resource")
+        .rect()
+        .left();
+    let card_content_x = active.get_by_label("Foreground ingest").rect().left();
     let tolerance = styles::components::standard_border::width::EGUI_POINTS;
 
     assert!((logo_x - heading_x).abs() <= tolerance);
@@ -295,8 +365,8 @@ fn error_toast_aligns_with_the_app_shell_geometry() {
     );
     harness.run_steps(2);
 
-    let logo = harness.get_by_label("go to Overview").rect();
-    let heading = harness.get_by_label("Overview").rect();
+    let logo = harness.get_by_label("go to Ingest").rect();
+    let heading = harness.get_by_label("Ingest for this resource").rect();
     let retry = harness.get_by_label("Retry").rect();
     let dismiss = harness.get_by_label("Dismiss").rect();
     let tolerance = styles::components::standard_border::width::EGUI_POINTS * 2.0;
@@ -419,12 +489,12 @@ fn top_bar_tab_order_follows_its_visual_order() {
         let mut harness = overview_harness(false, logged_in);
 
         if logged_in {
-            // focus starts on "Close Session"; "Start Session" below it comes next
+            // focus starts on "Stop Ingest"; "Start Ingest" below it comes next
             press_tab(&mut harness, false);
-            assert!(harness.get_by_label("Start Session").is_focused());
+            assert!(harness.get_by_label("Start Ingest").is_focused());
         }
         press_tab(&mut harness, false);
-        assert!(harness.get_by_label("go to Overview").is_focused());
+        assert!(harness.get_by_label("go to Ingest").is_focused());
 
         press_tab(&mut harness, false);
         assert!(harness.get_by_label("Switch to dark theme").is_focused());
@@ -436,7 +506,7 @@ fn top_bar_tab_order_follows_its_visual_order() {
         assert!(harness.get_by_label("Switch to dark theme").is_focused());
 
         press_tab(&mut harness, true);
-        assert!(harness.get_by_label("go to Overview").is_focused());
+        assert!(harness.get_by_label("go to Ingest").is_focused());
     }
 }
 
@@ -451,7 +521,7 @@ fn missing_agent_mount_path_is_explained() {
 
     assert!(
         active
-            .query_by_label("Not available on this agent")
+            .query_by_label("Not available on this computer")
             .is_some()
     );
 }
@@ -459,14 +529,14 @@ fn missing_agent_mount_path_is_explained() {
 #[test]
 fn closing_requires_confirmation_and_can_be_cancelled() {
     let mut harness = overview_harness(false, true);
-    harness.get_by_label("Close Session").click();
+    harness.get_by_label("Stop Ingest").click();
     harness.run();
 
     assert!(matches!(
         harness.state().app_state.foreground,
         ForegroundSession::Mounted(_)
     ));
-    assert!(harness.query_by_label("Close ingest session?").is_some());
+    assert!(harness.query_by_label("Stop ingest?").is_some());
     harness.get_by_label("Cancel").click();
     harness.run();
 
@@ -474,18 +544,18 @@ fn closing_requires_confirmation_and_can_be_cancelled() {
         harness.state().app_state.foreground,
         ForegroundSession::Mounted(_)
     ));
-    assert!(harness.query_by_label("Close ingest session?").is_none());
+    assert!(harness.query_by_label("Stop ingest?").is_none());
 }
 
 #[test]
 fn logged_out_close_authenticates_before_showing_confirmation() {
     let mut harness = active_logged_out_harness();
 
-    harness.get_by_label("Close Session").click();
+    harness.get_by_label("Stop Ingest").click();
     harness.run_steps(2);
 
     assert!(matches!(harness.state().page, Page::Login(_)));
-    assert!(harness.query_by_label("Close ingest session?").is_none());
+    assert!(harness.query_by_label("Stop ingest?").is_none());
 
     if let Page::Login(login) = &mut harness.state_mut().page {
         login.login_task = AsyncState::Ready {
@@ -497,28 +567,28 @@ fn logged_out_close_authenticates_before_showing_confirmation() {
     harness.run_steps(2);
 
     assert!(matches!(harness.state().page, Page::Overview(_)));
-    assert!(harness.query_by_label("Close ingest session?").is_some());
+    assert!(harness.query_by_label("Stop ingest?").is_some());
     assert!(harness.get_by_label("Cancel").is_focused());
 }
 
 #[test]
 fn backing_out_of_close_login_discards_the_confirmation_destination() {
     let mut harness = active_logged_out_harness();
-    harness.get_by_label("Close Session").click();
+    harness.get_by_label("Stop Ingest").click();
     harness.run_steps(2);
 
     harness.get_by_label("← Back to overview").click();
     harness.run_steps(2);
 
     assert!(matches!(harness.state().page, Page::Overview(_)));
-    assert!(harness.query_by_label("Close ingest session?").is_none());
-    assert!(harness.query_by_label("Close Session").is_some());
+    assert!(harness.query_by_label("Stop ingest?").is_none());
+    assert!(harness.query_by_label("Stop Ingest").is_some());
 }
 
 #[test]
 fn escape_dismisses_close_confirmation() {
     let mut harness = overview_harness(false, true);
-    harness.get_by_label("Close Session").click();
+    harness.get_by_label("Stop Ingest").click();
     harness.run();
     harness.key_press(egui::Key::Escape);
     harness.run();
@@ -527,16 +597,16 @@ fn escape_dismisses_close_confirmation() {
         harness.state().app_state.foreground,
         ForegroundSession::Mounted(_)
     ));
-    assert!(harness.query_by_label("Close ingest session?").is_none());
+    assert!(harness.query_by_label("Stop ingest?").is_none());
 }
 
 #[test]
 fn confirming_close_waits_for_the_authoritative_update() {
     let mut harness = overview_harness(false, true);
-    harness.get_by_label("Close Session").click();
+    harness.get_by_label("Stop Ingest").click();
     harness.run();
     harness
-        .get_all_by_label("Close Session")
+        .get_all_by_label("Stop Ingest")
         .last()
         .expect("confirmation button was not found")
         .click();
@@ -546,7 +616,7 @@ fn confirming_close_waits_for_the_authoritative_update() {
         harness.state().app_state.pending_close(),
         Some("representative-share")
     );
-    assert!(harness.query_by_label("Closing…").is_some());
+    assert!(harness.query_by_label("Stopping…").is_some());
 
     harness
         .state_mut()
@@ -555,8 +625,8 @@ fn confirming_close_waits_for_the_authoritative_update() {
         ));
     harness.run_steps(1);
 
-    assert!(harness.query_by_label("Start Session").is_some());
-    assert!(harness.query_by_label("Close Session").is_none());
+    assert!(harness.query_by_label("Start Ingest").is_some());
+    assert!(harness.query_by_label("Stop Ingest").is_none());
 }
 
 #[test]
@@ -596,7 +666,7 @@ fn connecting_snapshot() {
     assert!(
         harness
             .query_by(|node| {
-                node.label().as_deref() == Some("go to Overview") && node.is_disabled()
+                node.label().as_deref() == Some("go to Ingest") && node.is_disabled()
             })
             .is_some()
     );
@@ -633,7 +703,7 @@ fn start_while_open_snapshots() {
 
     // the user's own share is open: keep it, or close it once the new one has started
     let mut own = overview_harness(false, true);
-    own.get_by_label("Start Session").click();
+    own.get_by_label("Start Ingest").click();
     own.run();
     own.snapshot("overview_start_while_own_share_open");
     results.extend_harness(&mut own);
@@ -648,7 +718,7 @@ fn start_while_open_snapshots() {
         session.created_by = Some("other.user".to_owned());
     }
     others.run_steps(1);
-    others.get_by_label("Start Session").click();
+    others.get_by_label("Start Ingest").click();
     others.run();
     others.snapshot("overview_start_while_others_share_open");
     results.extend_harness(&mut others);
@@ -705,14 +775,25 @@ fn other_mounts_snapshots() {
 
     let mut confirm = overview_harness(false, true);
     with_other_mounts(&mut confirm);
-    // labels match exactly: these are the list's buttons, not "Close Session"
-    assert_eq!(confirm.get_all_by_label("Close").count(), 2);
+    // labels match exactly: these are the list's buttons, not "Stop Ingest"
+    assert_eq!(confirm.get_all_by_label("Stop").count(), 2);
+    // the list may start below the window's edge
     confirm
-        .get_all_by_label("Close")
+        .get_all_by_label("Stop")
         .next()
-        .expect("the list has a close button")
+        .expect("the list has a stop button")
+        .scroll_to_me();
+    confirm.run();
+    confirm
+        .get_all_by_label("Stop")
+        .next()
+        .expect("the list has a stop button")
         .click();
     confirm.run();
+    assert!(
+        confirm.query_by_label("Stop ingest?").is_some(),
+        "the click should open the confirmation"
+    );
     confirm.snapshot("overview_other_mount_close_confirmation");
     results.extend_harness(&mut confirm);
 
@@ -783,7 +864,7 @@ fn connected_agents_snapshots() {
     // scrolling is animated
     scrolled.run_steps(30);
     // the page itself didn't scroll
-    assert!(scrolled.query_by_label("Start Session").is_some());
+    assert!(scrolled.query_by_label("Start Ingest").is_some());
     scrolled.snapshot("overview_connected_agents_scrolled");
     results.extend_harness(&mut scrolled);
 

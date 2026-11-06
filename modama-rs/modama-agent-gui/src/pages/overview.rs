@@ -1,4 +1,4 @@
-use eframe::egui::{self, Label, RichText};
+use eframe::egui::{self, Align, Label, Layout, RichText};
 use modama_common::{
     internal_api_types::{ConnectedAgent, ConnectedAgents},
     messages::AgentMountStatus,
@@ -9,13 +9,17 @@ use crate::{
     actions::{Action, LoginDestination, RetryAction, TaskFailure},
     async_state::AsyncState,
     components::{
-        buttons::{ButtonVariant, danger_outline_button, loading_button, primary_button},
+        buttons::{
+            ButtonVariant, danger_outline_button, loading_button, primary_button, secondary_button,
+        },
+        copy_field::{copy_field, icon_font},
         dialogs::{
             ChoiceDialogAction, ConfirmationDialogAction, DialogChoice, choice_dialog,
             destructive_confirmation_dialog,
         },
         page_heading,
     },
+    notebook_snippet::python_snippet,
     service::{AgentService, ServiceError, StubAgentService},
     state::{
         ActiveSession, AgentAppState, ForegroundSession, OperationId, PendingSession, SignedIn,
@@ -26,6 +30,7 @@ use crate::{
 
 const CLOSE_CONFIRMATION_ID: &str = "close-session-confirmation";
 const START_DIALOG_ID: &str = "start-session-while-open";
+const PATHS_DIALOG_ID: &str = "mount-path-and-code";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StartChoice {
@@ -72,6 +77,28 @@ pub(crate) fn start_dialog_kind(
     }
 }
 
+/// What starting another ingest does to the running ingest share, shown before the user
+/// clicks;
+/// None while signed out, when it depends on who signs in
+fn start_hint(app_state: &AgentAppState) -> Option<String> {
+    let signed_in = app_state.signed_in.as_ref()?;
+    Some(match start_dialog_kind(&app_state.foreground, signed_in)? {
+        StartDialog::OwnShare { previous } if previous.created_by.is_some() => format!(
+            "Your ingest share for session {} keeps running, unless you choose to stop it.",
+            previous.session
+        ),
+        StartDialog::OwnShare { previous } => format!(
+            "The ingest share for session {} keeps running, unless you choose to stop it.",
+            previous.session
+        ),
+        StartDialog::OthersShare { session, user, .. } => format!(
+            "{user}'s ingest share for session {session} will no longer be available at {}. \
+             Please coordinate with {user} first.",
+            instrument_name(app_state.identity.as_ref())
+        ),
+    })
+}
+
 pub struct PageOverview {
     pub close_task: AsyncState<Result<(), ServiceError>>,
     close_confirmation_open: bool,
@@ -87,6 +114,9 @@ pub struct PageOverview {
     /// The share from the "Also mounted" list the close confirmation is for; None while it
     /// is for the foreground share
     close_mount: Option<ActiveSession>,
+    /// The dialog with the mount path and the notebook code
+    paths_dialog_open: bool,
+    focus_paths_close: bool,
 }
 
 impl Default for PageOverview {
@@ -113,6 +143,8 @@ impl PageOverview {
             focus_start_cancel: false,
             close_previous: None,
             close_mount: None,
+            paths_dialog_open: false,
+            focus_paths_close: false,
         }
     }
 
@@ -149,7 +181,13 @@ impl PageOverview {
         _frame: &mut eframe::Frame,
         app_state: &AgentAppState,
     ) -> Action {
-        page_heading(ui, "Overview");
+        page_heading(
+            ui,
+            &format!(
+                "Ingest for {}",
+                instrument_name(app_state.identity.as_ref())
+            ),
+        );
         // the scroll area clips at its edges: inside it, the first card's border needs room;
         // that room comes out of the gap above, so the cards stay where they were before
         let top_room = styles::components::standard_border::width::EGUI_POINTS;
@@ -203,6 +241,7 @@ impl PageOverview {
     /// The session card, with the start action next to the session, and the other mounts
     fn show_cards(&mut self, ui: &mut egui::Ui, app_state: &AgentAppState) -> Action {
         let pending_start = app_state.pending_start();
+        let resource = instrument_name(app_state.identity.as_ref());
         let mut action = Action::None;
         let mut start_clicked = false;
         styles::content_card_frame(ui.visuals()).show(ui, |ui| {
@@ -217,13 +256,14 @@ impl PageOverview {
                 self.show_mounting_session(ui, session, started_by, "Waiting for agent…", false);
             } else if matches!(app_state.foreground, ForegroundSession::None) {
                 self.drop_foreground_close_confirmation();
-                start_clicked = self.show_create_section(ui);
+                start_clicked = self.show_create_section(ui, resource, None);
                 show_connected_agents(ui, app_state.connected_agents.as_ref());
             } else {
                 let mut columns = Columns::new(ui);
                 action = self.show_foreground_section(columns.first(), app_state);
                 let second = columns.second(ui);
-                start_clicked = self.show_create_section(second);
+                let hint = start_hint(app_state);
+                start_clicked = self.show_create_section(second, resource, hint.as_deref());
                 show_connected_agents(second, app_state.connected_agents.as_ref());
                 columns.finish(ui);
             }
@@ -294,7 +334,7 @@ impl PageOverview {
         Action::None
     }
 
-    /// "Start Session": straight to project selection, unless a share is open
+    /// "Start Ingest": straight to project selection, unless a share is open
     fn start_clicked(&mut self, app_state: &AgentAppState) -> Action {
         if app_state.foreground.share_id().is_none() {
             return Action::CreateSession;
@@ -328,18 +368,18 @@ impl PageOverview {
         let (message, choices) = match &kind {
             StartDialog::OwnShare { previous } => (
                 format!(
-                    "Session {} in project {} is open. Keep it open next to the new one, or \
-                     close it once the new session has started?",
+                    "Your ingest share for session {} in project {} is still running. Keep it \
+                     next to the new one, or stop it once the new ingest has started?",
                     previous.session, previous.project
                 ),
                 vec![
                     DialogChoice {
-                        label: "Keep it open",
+                        label: "Keep it",
                         variant: ButtonVariant::Primary,
                         value: StartChoice::KeepOpen,
                     },
                     DialogChoice {
-                        label: "Close it after starting",
+                        label: "Stop it after starting",
                         variant: ButtonVariant::DangerOutline,
                         value: StartChoice::ClosePrevious,
                     },
@@ -351,8 +391,9 @@ impl PageOverview {
                 user,
             } => (
                 format!(
-                    "Session {session} in project {project} was started by {user}. Starting a \
-                     new session detaches it from {instrument}; it stays open for {user}."
+                    "{user} started the ingest share for session {session} in project {project}. \
+                     Starting a new ingest makes it no longer available at {instrument}. Please \
+                     coordinate with {user} first."
                 ),
                 vec![DialogChoice {
                     label: "Continue",
@@ -365,7 +406,7 @@ impl PageOverview {
             ui.ctx(),
             ui.visuals(),
             START_DIALOG_ID,
-            "Start another ingest session?",
+            "Start another ingest?",
             &message,
             &choices,
             self.focus_start_cancel,
@@ -403,7 +444,7 @@ impl PageOverview {
                         Err(error) => {
                             log::error!("close-session failed: {error}");
                             self.close_failed(TaskFailure::Stay {
-                                message: "Could not close the ingest session.".to_owned(),
+                                message: "Could not stop the ingest share.".to_owned(),
                                 retry: RetryAction::CloseSession,
                             })
                         }
@@ -415,7 +456,7 @@ impl PageOverview {
             Err(error) => {
                 log::error!("close-session task failed: {error}");
                 self.close_failed(TaskFailure::Stay {
-                    message: "Could not close the ingest session.".to_owned(),
+                    message: "Could not stop the ingest share.".to_owned(),
                     retry: RetryAction::CloseSession,
                 })
             }
@@ -435,15 +476,26 @@ impl PageOverview {
         }
     }
 
-    fn show_create_section(&mut self, ui: &mut egui::Ui) -> bool {
-        card_heading(ui, "Start an ingest session");
+    /// `hint` says what starting does to the running ingest share, if there is one
+    fn show_create_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        resource: &str,
+        hint: Option<&str>,
+    ) -> bool {
+        card_heading(ui, "Start ingest");
         card_description(
             ui,
-            "Choose a project and session to open an ingest share for incoming data on this \
-             agent.",
+            &format!(
+                "Choose a project and session to create an ingest share for new data from \
+                 {resource}."
+            ),
         );
+        if let Some(hint) = hint {
+            card_description(ui, hint);
+        }
         ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-        let response = ui.add(primary_button("Start Session", ui));
+        let response = ui.add(primary_button("Start Ingest", ui));
         if self.focus_on_entry && response.enabled() {
             response.request_focus();
             self.focus_on_entry = false;
@@ -451,7 +503,7 @@ impl PageOverview {
         response.clicked()
     }
 
-    /// True if the user asked to release the previous user's drive (offered if `blocked`)
+    /// True if the user asked to release the previous user's ingest share (offered if `blocked`)
     fn show_mounting_session(
         &mut self,
         ui: &mut egui::Ui,
@@ -460,7 +512,7 @@ impl PageOverview {
         status: &str,
         blocked: bool,
     ) -> bool {
-        card_heading(ui, "Preparing ingest session");
+        card_heading(ui, "Preparing ingest");
         session_detail(ui, "Project", &session.project);
         session_detail(ui, "Session", &session.session);
         if let Some(started_by) = started_by {
@@ -474,7 +526,7 @@ impl PageOverview {
         if blocked {
             ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
             ui.add(danger_outline_button(
-                "Disconnect previous user's drive",
+                "Disconnect previous user's ingest share",
                 ui,
             ))
             .clicked()
@@ -490,47 +542,102 @@ impl PageOverview {
         awaiting_close: bool,
     ) -> bool {
         let is_closing = self.close_task.is_pending() || awaiting_close;
-        card_heading(ui, "Active ingest session");
+        card_heading(ui, "Foreground ingest");
         session_detail(ui, "Project", &session.project);
         session_detail(ui, "Session", &session.session);
         if let Some(started_by) = &session.created_by {
             session_detail(ui, "Started by", started_by);
         }
-        session_detail(
-            ui,
-            "Mount path on this agent",
-            session
-                .mount_path
-                .as_deref()
-                .unwrap_or("Not available on this agent"),
-        );
+        match session.mount_path.as_deref() {
+            Some(mount_path) => {
+                if mount_path_detail(ui, mount_path) {
+                    self.paths_dialog_open = true;
+                    self.focus_paths_close = true;
+                }
+                if self.paths_dialog_open {
+                    self.show_paths_dialog(ui, mount_path);
+                }
+            }
+            None => session_detail(
+                ui,
+                "Mount path on this computer",
+                "Not available on this computer",
+            ),
+        }
 
         ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
         ui.separator();
         ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
 
-        card_heading(ui, "Close the ingest session");
+        card_heading(ui, "Stop ingest");
         card_description(
             ui,
-            "Stop the ingest share when you are finished transferring data. Existing project \
-             and session data will remain available.",
+            "Stop the ingest share when you are finished transferring data.",
         );
         ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
         let response = if is_closing {
             loading_button(
                 ui,
-                "Closing…",
+                "Stopping…",
                 egui::Vec2::ZERO,
                 ButtonVariant::DangerOutline,
             )
         } else {
-            ui.add(danger_outline_button("Close Session", ui))
+            ui.add(danger_outline_button("Stop Ingest", ui))
         };
         if self.focus_on_entry && response.enabled() {
             response.request_focus();
             self.focus_on_entry = false;
         }
         response.clicked()
+    }
+
+    /// The mount path and the notebook code, each with a copy button
+    fn show_paths_dialog(&mut self, ui: &egui::Ui, mount_path: &str) {
+        let ctx = ui.ctx();
+        let snippet = python_snippet(self.service.agent_url());
+        let response = egui::Modal::new(egui::Id::new(PATHS_DIALOG_ID))
+            .frame(styles::card_frame(ui.visuals()))
+            .show(ctx, |ui| {
+                // in a narrow window, the dialog keeps the outer guides' distance to its edges;
+                // the frame's padding and border come on top of the content width
+                let frame = styles::spacing::card_padding_x::EGUI_POINTS
+                    + styles::components::standard_border::width::EGUI_POINTS;
+                let width = styles::components::wide_dialog::width::EGUI_POINTS
+                    .min(ctx.content_rect().width() - 2.0 * (styles::outer_guide_inset() + frame));
+                ui.set_width(width);
+                ui.add(
+                    Label::new(
+                        RichText::new("Use in scripts and notebooks")
+                            .font(styles::typography::section_heading::font_id()),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+                copy_field(ui, "Mount path on this computer", mount_path);
+                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+                card_description(
+                    ui,
+                    "The session folder for new data changes whenever someone starts a new \
+                     ingest. This Python code asks the modama agent on this computer for the \
+                     current one, for example in a Jupyter notebook running here.",
+                );
+                ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
+                copy_field(ui, "Python code", &snippet);
+                ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let close = ui.add(secondary_button("Close", ui));
+                    if self.focus_paths_close {
+                        close.request_focus();
+                        self.focus_paths_close = false;
+                    }
+                    close.clicked()
+                })
+                .inner
+            });
+        if response.inner || response.should_close() {
+            self.paths_dialog_open = false;
+        }
     }
 
     fn show_close_confirmation(
@@ -548,9 +655,9 @@ impl PageOverview {
             ui.ctx(),
             ui.visuals(),
             CLOSE_CONFIRMATION_ID,
-            "Close ingest session?",
+            "Stop ingest?",
             &message,
-            "Close Session",
+            "Stop Ingest",
             self.focus_confirmation_cancel,
         );
         self.focus_confirmation_cancel = false;
@@ -617,7 +724,7 @@ impl PageOverview {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if pending_close == Some(mount.share_id.as_str()) {
                             ui.add(Label::new(
-                                RichText::new("Closing…")
+                                RichText::new("Stopping…")
                                     .font(styles::typography::supporting_text::font_id())
                                     .color(
                                         styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
@@ -990,7 +1097,7 @@ fn card_description(ui: &mut egui::Ui, text: &str) {
 /// shares; deliberately less prominent than the cards' buttons
 fn compact_close_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
     let button = egui::Button::new(
-        RichText::new("Close")
+        RichText::new("Stop")
             .font(styles::typography::supporting_text::font_id())
             .color(styles::color::error::VALUE.resolve(ui.visuals())),
     )
@@ -998,6 +1105,42 @@ fn compact_close_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
     let response = ui.add_enabled(enabled, button);
     styles::paint_focus_ring(ui, &response);
     response
+}
+
+/// The mount path like a [`session_detail`], with an icon next to its label that opens the
+/// dialog for scripts and notebooks; true if it was clicked
+fn mount_path_detail(ui: &mut egui::Ui, mount_path: &str) -> bool {
+    ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
+    let clicked = ui
+        .horizontal(|ui| {
+            ui.add(Label::new(
+                RichText::new("Mount path on this computer")
+                    .font(styles::typography::supporting_text::font_id())
+                    .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+            ));
+            let label = "Use in scripts and notebooks";
+            let response = ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(egui_phosphor::regular::CODE)
+                            .font(icon_font(&styles::typography::supporting_text::font_id()))
+                            .color(styles::color::primary::VALUE.resolve(ui.visuals())),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text(label);
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+            });
+            styles::paint_focus_ring(ui, &response);
+            response.clicked()
+        })
+        .inner;
+    ui.add(
+        Label::new(RichText::new(mount_path).font(styles::typography::mono_medium::font_id()))
+            .wrap(),
+    );
+    clicked
 }
 
 fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
@@ -1017,6 +1160,7 @@ fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::AgentIdentity;
 
     #[test]
     fn hover_text_says_how_an_agent_is_connected() {
@@ -1145,6 +1289,45 @@ mod tests {
         app_state.signed_in = Some(alice());
         assert_eq!(page.start_clicked(&app_state), Action::None);
         assert!(page.start_dialog_is_open());
+    }
+
+    #[test]
+    fn the_start_hint_says_what_happens_to_the_open_share() {
+        let mut app_state = AgentAppState::new();
+        app_state.foreground = ForegroundSession::Mounted(open_share(Some("bob")));
+        // signed out, it depends on who signs in:
+        assert_eq!(start_hint(&app_state), None);
+
+        app_state.signed_in = Some(alice());
+        app_state.identity = Some(AgentIdentity::AgentId {
+            agent_name: "DLD".to_owned(),
+            resource_name: "Holo".to_owned(),
+        });
+        assert_eq!(
+            start_hint(&app_state).as_deref(),
+            Some(
+                "bob's ingest share for session session will no longer be available at Holo. \
+                 Please coordinate with bob first."
+            )
+        );
+
+        app_state.foreground = ForegroundSession::Mounted(open_share(Some("alice")));
+        assert_eq!(
+            start_hint(&app_state).as_deref(),
+            Some(
+                "Your ingest share for session session keeps running, unless you choose to stop it."
+            )
+        );
+        app_state.foreground = ForegroundSession::Mounted(open_share(None));
+        assert_eq!(
+            start_hint(&app_state).as_deref(),
+            Some(
+                "The ingest share for session session keeps running, unless you choose to stop it."
+            )
+        );
+
+        app_state.foreground = ForegroundSession::None;
+        assert_eq!(start_hint(&app_state), None);
     }
 
     #[test]

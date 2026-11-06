@@ -111,7 +111,7 @@ def check_valid_dataset(name: str):
     # Restrictive positive list to avoid "funny business" from user input
     if not re.fullmatch("[-a-zA-Z0-9_. ]*", name):
         raise ValidationError(
-            "Dataset name can only contain characters a-z, A-Z, 0-9, '_', '-', ' ' and '.'."
+            "Session name can only contain characters a-z, A-Z, 0-9, '_', '-', ' ' and '.'."
         )
 
 
@@ -355,7 +355,7 @@ class AdhocProject:
         if username in self.members:
             return
         raise ValidationError(
-            f'User "{username}" cannot seal dataset {dataset} in project {self.name}: Not an owner or member.'
+            f'User "{username}" cannot seal session {dataset} in project {self.name}: Not an owner or member.'
         )
 
     @staticmethod
@@ -606,7 +606,7 @@ class AdhocProject:
         check_valid_dataset(name)
         if name.lower() == README_NAME.lower():
             # It would collide with the project's own README.md.
-            raise ValidationError(f'A dataset cannot be named "{name}".')
+            raise ValidationError(f'A session cannot be named "{name}".')
         check_can_create(user, self.adhoc_group)
         target_base_path = os.path.join(self.path, name)
         target_raw_path = os.path.join(target_base_path, "raw")

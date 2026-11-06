@@ -1070,7 +1070,7 @@
         "tags": [
           "sessions"
         ],
-        "summary": "Seal a session: make its raw data read-only for good",
+        "summary": "Seal a session: make its raw data immutable",
         "description": "Make the `raw/` folder of a session and everything in it immutable. This\ncannot be undone through the API.\n\nIdempotent: a session that is already sealed is answered with 200 and its\ncurrent state, without asking the permissions service again. The rest of\nthe session folder stays writable; only `raw/` is sealed.",
         "operationId": "seal_mgmt_api_projects__project__sessions__session__seal_post",
         "security": [
@@ -1376,7 +1376,7 @@
             }
           },
           "502": {
-            "description": "The share service or the account service is unavailable.",
+            "description": "The ingest share service or the account service is unavailable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1423,10 +1423,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Token from smbdrop's token service, which modama-agent fetches with its client certificate. It says which instrument the request comes from; the session still says who the user is. Sent together with `resource` in the body, or not at all.",
+              "description": "Token from smbdrop's token service, which modama-agent fetches with its client certificate. It says which resource the request comes from; the session still says who the user is. Sent together with `resource` in the body, or not at all.",
               "title": "X-Agent-Token"
             },
-            "description": "Token from smbdrop's token service, which modama-agent fetches with its client certificate. It says which instrument the request comes from; the session still says who the user is. Sent together with `resource` in the body, or not at all."
+            "description": "Token from smbdrop's token service, which modama-agent fetches with its client certificate. It says which resource the request comes from; the session still says who the user is. Sent together with `resource` in the body, or not at all."
           },
           {
             "name": "X-Modama-API-Version",
@@ -1475,7 +1475,7 @@
             }
           },
           "200": {
-            "description": "You already have a share open for this session.",
+            "description": "You already have an ingest share open for this session.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1515,7 +1515,7 @@
             }
           },
           "502": {
-            "description": "The share service, the account service or the agent token service is unavailable.",
+            "description": "The ingest share service, the account service or the agent token service is unavailable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1612,7 +1612,7 @@
             }
           },
           "404": {
-            "description": "There is no open share with that id. A share that was closed already answers this too.",
+            "description": "There is no open ingest share with that id. An ingest share that was closed already answers this too.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1622,7 +1622,7 @@
             }
           },
           "502": {
-            "description": "The share service or the account service is unavailable.",
+            "description": "The ingest share service or the account service is unavailable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1985,7 +1985,7 @@
               }
             ],
             "title": "Resource",
-            "description": "The instrument to bind the share to. modama-agent sends it together with `X-Agent-Token`, which must have been issued for this instrument; other clients leave both out."
+            "description": "The resource to bind the share to. modama-agent sends it together with `X-Agent-Token`, which must have been issued for this resource; other callers leave both out."
           }
         },
         "type": "object",
@@ -2319,7 +2319,7 @@
               }
             ],
             "title": "Resource",
-            "description": "The instrument the share was opened for, if an agent opened it."
+            "description": "The resource the share was opened for, if an agent opened it."
           },
           "created_by": {
             "anyOf": [
@@ -2361,7 +2361,7 @@
           "workgroup"
         ],
         "title": "IngestShare",
-        "description": "An active share. The fields smbdrop reports, plus the project and session\nit belongs to, so that a client does not parse `dest_path`, and the host\nand workgroup the web interface shows a person who connects by hand.\nmodama-agent does not use those two: an instrument PC may reach the Samba\nserver another way than the intranet does, so the agent mounts with the\nhost, port and domain from its own configuration file."
+        "description": "An ingest share. The fields smbdrop reports, plus the project and session\nit belongs to, so that a client does not parse `dest_path`, and the host\nand workgroup the web interface shows a person who connects by hand.\nmodama-agent does not use those two: an instrument computer may reach the Samba\nserver another way than the intranet does, so the agent mounts with the\nhost, port and domain from its own configuration file."
       },
       "IngestShareList": {
         "properties": {
@@ -2684,7 +2684,7 @@
           "immutable": {
             "type": "boolean",
             "title": "Immutable",
-            "description": "True once the session has been sealed: its `raw/` folder is read-only."
+            "description": "True once the session has been sealed: its `raw/` folder is immutable."
           },
           "ctime": {
             "type": "number",

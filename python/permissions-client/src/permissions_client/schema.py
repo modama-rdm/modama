@@ -73,7 +73,7 @@ CREATE_PROJECT_REQUEST_SCHEMA = {
             },
             "minItems": 0,
             "uniqueItems": True,
-            "description": "Usernames of the members of this ad-hoc group",
+            "description": "Usernames of the members of this project",
         },
     },
     "required": ["name", "owner", "members"],
@@ -95,7 +95,7 @@ CREATE_DATASET_REQUEST_SCHEMA = {
     "properties": {
         "name": {
             "type": "string",
-            "description": "Name of the dataset, which will be used as directory name",
+            "description": "Name of the session, which is also the name of its session folder",
         },
         "owner": {
             "type": "string",
@@ -155,7 +155,7 @@ CHANGE_PROJECT_MEMBERS_REQUEST_SCHEMA = {
             },
             "minItems": 1,
             "uniqueItems": True,
-            "description": "Usernames of the members to add or remove from this group",
+            "description": "Usernames of the members to add to or remove from this project",
         },
         "user": {
             "type": "string",

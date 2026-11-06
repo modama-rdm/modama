@@ -13,7 +13,7 @@ CREATE_SHARE_REQUEST_SCHEMA = {
         },
         "dataset": {
             "type": "string",
-            "description": "Dataset within the project",
+            "description": "Session within the project",
         },
         "resource": {
             "type": "string",

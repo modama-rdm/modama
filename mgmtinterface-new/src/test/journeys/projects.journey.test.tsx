@@ -173,7 +173,7 @@ describe('journey: projects list', () => {
         installApiMock(baseWorld({shares: [share]}))
         const {user} = renderApp({route: '/projects'})
 
-        const banner = (await screen.findByText('Active upload in progress')).closest('div')!.parentElement!
+        const banner = (await screen.findByText('Active ingest')).closest('div')!.parentElement!
         expect(within(banner).getByText(FIXTURE_PROJECT.name)).toBeInTheDocument()
         expect(within(banner).getByText('create by hand')).toBeInTheDocument()
 

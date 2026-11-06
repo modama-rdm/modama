@@ -45,6 +45,10 @@ pub enum ServiceError {
 }
 
 pub trait AgentService: Send + Sync {
+    /// The local agent's base URL, for code that runs next to the GUI (notebooks)
+    fn agent_url(&self) -> &str {
+        crate::config::DEFAULT_AGENT_URL
+    }
     fn connect(&self) -> Result<ConnectedAgent, ServiceError>;
     fn health(&self) -> Result<(), ServiceError>;
     fn foreground(&self) -> Result<ForegroundSession, ServiceError>;
@@ -230,6 +234,10 @@ fn map_api_error<E: std::fmt::Debug>(error: ApiOpError<E>) -> ServiceError {
 }
 
 impl AgentService for HttpAgentService {
+    fn agent_url(&self) -> &str {
+        &self.agent_url
+    }
+
     fn connect(&self) -> Result<ConnectedAgent, ServiceError> {
         let identity = self
             .runtime
@@ -352,7 +360,7 @@ impl AgentService for HttpAgentService {
         )?;
         if response.project != project || response.session != session {
             return Err(ServiceError::InvalidResponse(
-                "started share does not match the requested project and session".to_owned(),
+                "started ingest share does not match the requested project and session".to_owned(),
             ));
         }
         Ok(PendingSession {

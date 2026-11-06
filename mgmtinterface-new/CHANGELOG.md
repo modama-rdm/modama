@@ -15,6 +15,21 @@ planned for the cutover.
 > parentheses. Bump `version` in `package.json` in the same commit: the footer
 > badge reads it, and a test checks that it matches the newest release here.
 
+## [0.19.3] - 2026-11-06 - Clearer names for ingest and sealing
+
+### Changed
+
+- A session with an ingest share is now marked “Ingest live” instead of
+  “Sharing”, so it isn’t mistaken for data shared with other people.
+- The banner on the projects list says “Active ingest” instead of “Active
+  upload in progress”: the portal knows that an ingest share is running, not
+  whether someone is uploading right now.
+- On the ingest share page, “Close share” is now “Stop ingest”, and the texts
+  speak of instrument computers instead of microscope computers.
+- Sealing a session explains what it does: the files in `raw/` become
+  immutable, so nobody can change, rename or delete them, and only
+  administrators can undo it. The dialog used to say it can’t be undone.
+
 ## [0.19.2] - 2026-11-06 - Each projects table sorts on its own
 
 ### Changed

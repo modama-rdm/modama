@@ -10,8 +10,8 @@ BASE="${BASE_URL:?set BASE_URL, e.g. http://localhost:5001 (via the VM SSH tunne
 TOKEN_FILE="${TOKEN_FILE:?set TOKEN_FILE to a chmod-600 file holding base64(username:password)}"
 OUT="$(dirname "$0")/raw"
 
-PROJECT="${1:?usage: BASE_URL=... TOKEN_FILE=... capture-share.sh <project-name> <dataset-name>}"
-DATASET="${2:?usage: BASE_URL=... TOKEN_FILE=... capture-share.sh <project-name> <dataset-name>}"
+PROJECT="${1:?usage: BASE_URL=... TOKEN_FILE=... capture-share.sh <project-name> <session-name>}"
+DATASET="${2:?usage: BASE_URL=... TOKEN_FILE=... capture-share.sh <project-name> <session-name>}"
 
 [ -r "$TOKEN_FILE" ] || { echo "missing $TOKEN_FILE" >&2; exit 1; }
 mkdir -p "$OUT"
