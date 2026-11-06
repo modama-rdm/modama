@@ -15,9 +15,7 @@ import {
     groupProjects,
     PROJECT_SORT,
     sortProjects,
-    type ProjectSortKey,
 } from '../lib/projectsUtil.ts'
-import type {Sort} from '../lib/sort'
 import type {ProjectsLoaderData} from './projects.loader'
 
 function MemberAvatars({owner, members}: { owner: string; members: string[] }) {
@@ -47,21 +45,26 @@ function MemberAvatars({owner, members}: { owner: string; members: string[] }) {
 const thClass =
     'px-5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-fg-faint'
 
+/**
+ * One of the projects tables, with its own sort: a header orders this table
+ * only, and the order is remembered under `sortKey`.
+ */
 function ProjectsSection({
                              title,
+                             sortKey,
                              projects,
                              showOwner,
-                             sort,
-                             onSort,
                              onOpen,
                          }: {
     title: string
+    /** Where this table's sort is remembered in the browser. */
+    sortKey: string
     projects: SerializedProject[]
     showOwner?: boolean
-    sort: Sort<ProjectSortKey>
-    onSort: (key: ProjectSortKey) => void
     onOpen: (name: string) => void
 }) {
+    const [sort, onSort] = useStoredSort(sortKey, PROJECT_SORT)
+    const sorted = useMemo(() => sortProjects(projects, sort), [projects, sort])
     if (projects.length === 0) return null
     return (
         <section className="mb-8">
@@ -80,11 +83,11 @@ function ProjectsSection({
                         <SortHeader label="Last modified" column="mtime" sort={sort} onSort={onSort} className={thClass}/>
                     </tr>
                     </thead>
-                    {/* A sort moves the rows of all three tables (#222). Kept out of the
-                        browser's scroll anchoring, or a row of the table above, anchored at
-                        the top of the window, drags the page along to its new place. */}
+                    {/* A sort moves this table's rows. Kept out of the browser's scroll
+                        anchoring, or a row anchored at the top of the window drags the
+                        page along to its new place. */}
                     <tbody className="[overflow-anchor:none]">
-                    {projects.map((p) => (
+                    {sorted.map((p) => (
                         <tr
                             key={p.name}
                             onClick={() => onOpen(p.name)}
@@ -122,16 +125,12 @@ export function Projects() {
     const {currentUser, projects, shares} = useLoaderData() as ProjectsLoaderData
     const navigate = useNavigate()
     const [query, setQuery] = useState('')
-    const [sort, sortBy] = useStoredSort('erc-projects-sort', PROJECT_SORT)
 
-    const grouped = useMemo(() => {
-        const g = groupProjects(filterProjects(projects, query), currentUser)
-        return {
-            own: sortProjects(g.own, sort),
-            member: sortProjects(g.member, sort),
-            other: sortProjects(g.other, sort),
-        }
-    }, [query, sort, currentUser, projects])
+    // Grouped only: each table sorts its own group (ProjectsSection).
+    const grouped = useMemo(
+        () => groupProjects(filterProjects(projects, query), currentUser),
+        [query, currentUser, projects],
+    )
 
     const visibleCount =
         grouped.own.length + grouped.member.length + grouped.other.length
@@ -208,28 +207,24 @@ export function Projects() {
                 </div>
             )}
 
-            {/* One sort for all three tables, whichever one's header was clicked. */}
             <ProjectsSection
                 title="My Projects"
+                sortKey="erc-projects-sort-own"
                 projects={grouped.own}
-                sort={sort}
-                onSort={sortBy}
                 onOpen={openProject}
             />
             <ProjectsSection
                 title="Shared with me"
+                sortKey="erc-projects-sort-member"
                 projects={grouped.member}
                 showOwner
-                sort={sort}
-                onSort={sortBy}
                 onOpen={openProject}
             />
             <ProjectsSection
                 title="All projects"
+                sortKey="erc-projects-sort-other"
                 projects={grouped.other}
                 showOwner
-                sort={sort}
-                onSort={sortBy}
                 onOpen={openProject}
             />
 
