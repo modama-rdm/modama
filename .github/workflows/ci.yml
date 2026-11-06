@@ -99,14 +99,36 @@ jobs:
           cargo check --workspace --all-targets --all-features --locked
           cargo clippy --all-targets --all-features --locked -- -D warnings
           cargo test --locked
+
+  # A job of its own: `cargo test -p modama-agent-gui --features visual-tests` resolves features
+  # for that package alone, unlike the workspace-wide `cargo test`, so about 40 % of the crates
+  # build again with other features. Here that build has its own cache and runs in parallel.
+  visual-tests:
+    runs-on: ubuntu-latest
+    container: rust:1-slim-trixie
+    steps:
+      - run: >-
+          apt-get -y update && apt-get -y install curl git lld build-essential pkg-config
+          libglib2.0-dev libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 vulkan-tools
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: vulkaninfo --summary
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: modama-rs
       - id: visual-tests
         run: just visual-tests
         working-directory: modama-rs
       # The "Visual test report" workflow (visual-report.yml) shows failing snapshots of a pull
       # request in a PR comment; .github/scripts/snapshot_review.py describes the artifact.
-      # Snapshots render the same with both toolchains, so only one of them reports.
       - name: Write the visual test report
-        if: ${{ !cancelled() && steps.visual-tests.outcome != 'skipped' && matrix.rust == '1' }}
+        if: ${{ !cancelled() && steps.visual-tests.outcome != 'skipped' }}
         env:
           OUTCOME: ${{ steps.visual-tests.outcome }}
           REVIEW_DIR: modama-rs/modama-agent-gui/tests/snapshots/review
@@ -114,19 +136,11 @@ jobs:
           mkdir -p "$REVIEW_DIR"
           printf '{"version": 1, "suite": "Agent GUI", "outcome": "%s"}\n' "$OUTCOME" > "$REVIEW_DIR/report.json"
       - name: Upload the visual test report and differing snapshots
-        if: ${{ !cancelled() && steps.visual-tests.outcome != 'skipped' && matrix.rust == '1' }}
+        if: ${{ !cancelled() && steps.visual-tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: snapshot-review-agent-gui
           path: modama-rs/modama-agent-gui/tests/snapshots/review/
-          retention-days: 7
-      - name: Upload differing snapshots
-        if: ${{ failure() && matrix.rust != '1' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: visual-test-failures-rust-${{ matrix.rust }}
-          path: modama-rs/modama-agent-gui/tests/snapshots/review/
-          if-no-files-found: ignore
           retention-days: 7
 
   # the `ring` crate doesn't build on the gnu toolchain, so while we can still
@@ -253,6 +267,7 @@ jobs:
       - py-lint-and-format
       - mgmtinterface-new-tests
       - rust-tests
+      - visual-tests
       - windows-clippy
     uses: ./.github/workflows/images.yml
     permissions:
@@ -270,6 +285,7 @@ jobs:
       - windows-7-llvm
       # the builds don't wait for the tests, so don't release untested binaries
       - rust-tests
+      - visual-tests
       - windows-clippy
     permissions:
       contents: write
