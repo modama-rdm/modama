@@ -2314,7 +2314,10 @@ mod tests {
             .unwrap();
         let body = body_text(resp).await;
         assert!(body.contains("other.user started the ingest share"));
-        assert!(body.contains("new data at res goes to yours; other.user can keep using theirs"));
+        assert!(body.contains(
+            "Starting this ingest makes it no longer available at res. Please coordinate with \
+             other.user first."
+        ));
         assert!(!body.contains("href=\"/close-ingest/"));
     }
 

@@ -462,7 +462,11 @@ fn missing_agent_mount_path_is_explained() {
     session.mount_path = None;
     active.run_steps(1);
 
-    assert!(active.query_by_label("Not available on this PC").is_some());
+    assert!(
+        active
+            .query_by_label("Not available on this computer")
+            .is_some()
+    );
 }
 
 #[test]

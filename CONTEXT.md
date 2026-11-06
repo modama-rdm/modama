@@ -57,39 +57,47 @@ immutable.
 
 **Resource**:
 A data-producing instrument, such as an electron microscope, a FIB or an X-ray
-diffractometer, together with all the instrument PCs that belong to it.
-_Avoid_: Instrument (when the whole set of PCs is meant), microscope, device
+diffractometer, together with all the instrument computers that belong to it.
+_Avoid_: Instrument (when the whole set of computers is meant), microscope, device
 
-**Instrument PC**:
-A computer at a resource that records data, for example the PC of one camera or detector.
-_Avoid_: Producer, data generating system, client
+**Instrument computer**:
+A computer at a resource that records data, for example the one of a camera or detector;
+not necessarily a desktop PC.
+_Avoid_: Instrument PC, PC, producer, data generating system, client
 
 ### Getting data in
 
 **Ingest**:
-Getting data from the instrument PCs into a session folder. Users upload data into an ingest
-share; ingest is the whole process.
+Getting data from the instrument computers into a session folder. Users upload data into an
+ingest share; ingest is the whole process.
 _Avoid_: Import, upload (as the name of the process)
 
 **Ingest share**:
-A temporary network share that writes into one session as the user who opened it, with
-credentials that are only valid while it exists. A user has at most one ingest share per
+A temporary network share that writes into one session as the user who started it, with
+credentials that are only valid until it is stopped. A user has at most one ingest share per
 session; other users can have their own for the same session.
-_Avoid_: Share (in user-facing text), network drive, drop
+_Avoid_: Share (in user-facing text), network drive, drop, opening or closing (for starting
+or stopping it)
 
 **Ingest live**:
 The status of a session that has at least one ingest share, whether or not it is sealed.
 Not to be confused with sharing data with other people.
 
 **Foreground ingest**:
-The ingest share that new data at a resource should go to; at most one per resource. Creating
-a new ingest share at a resource makes it the foreground share, while the previous one stays
-usable until it is stopped.
+The ingest share that new data at a resource should go to; at most one per resource. Starting
+an ingest at a resource makes its share the foreground ingest; the user's earlier ingest
+shares stay available at the resource until they are stopped.
 _Avoid_: Current share, active share
 
+**Hand-off**:
+Starting an ingest at a resource whose ingest shares belong to another user: a resource has
+the ingest shares of one user at a time. The other user's ingest shares are no longer
+available at the resource, but are not stopped, so they keep working anywhere else.
+_Avoid_: Detaching, closing (for what happens to the other user's ingest shares)
+
 **Agent**:
-The background program on an instrument PC that mounts the ingest shares of its resource and
-lets users create them.
+The background program on an instrument computer that mounts the ingest shares of its resource
+and lets users create them.
 _Avoid_: Client, ingest client, daemon
 
 **Enrolled agent**:
@@ -110,7 +118,7 @@ The part of an agent that runs inside each user's login session and mounts the i
 there.
 
 **Login session**:
-A user being logged in to an instrument PC, at the desktop or remotely.
+A user being logged in to an instrument computer, at the desktop or remotely.
 _Avoid_: Session (that word means a modama session)
 
 ### Trust

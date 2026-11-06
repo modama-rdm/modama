@@ -25,7 +25,7 @@ planned for the cutover.
   upload in progress”: the portal knows that an ingest share is running, not
   whether someone is uploading right now.
 - On the ingest share page, “Close share” is now “Stop ingest”, and the texts
-  speak of instrument PCs instead of microscope computers.
+  speak of instrument computers instead of microscope computers.
 - Sealing a session explains what it does: the files in `raw/` become
   immutable, so nobody can change, rename or delete them, and only
   administrators can undo it. The dialog used to say it can’t be undone.
