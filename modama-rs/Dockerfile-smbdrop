@@ -1,14 +1,35 @@
 # syntax=docker/dockerfile:1.4
 
-FROM rust:slim-trixie AS builder
+FROM rust:slim-trixie AS chef
 
 WORKDIR /usr/src/modama-rs/
 
 RUN --mount=type=cache,sharing=locked,target=/var/cache/apt apt-get update && apt-get -y install clang lld
 
+RUN cargo install cargo-chef --locked --version 0.1.78
+
+# The recipe holds the workspace's manifests and lockfile, so the dependency build below stays
+# cached, also in CI, until one of those changes. target/ and the cargo registry are not cache
+# mounts: the dependency build has to land in an image layer, which CI caches.
+FROM chef AS planner
+
 COPY . .
 
-RUN --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ --mount=type=cache,sharing=locked,target=/usr/src/modama-rs/target/ cargo build --release --bin smbdrop && cp target/release/smbdrop /usr/bin/smbdrop
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+
+COPY --from=planner /usr/src/modama-rs/recipe.json recipe.json
+
+# The recipe has only workspace members, but the [patch.crates-io] paths in Cargo.toml must exist
+# for cargo to resolve the workspace.
+COPY vendor/ vendor/
+
+RUN cargo chef cook --release --locked --bin smbdrop --recipe-path recipe.json
+
+COPY . .
+
+RUN cargo build --release --locked --bin smbdrop && cp target/release/smbdrop /usr/bin/smbdrop
 
 FROM debian:trixie-slim
 
