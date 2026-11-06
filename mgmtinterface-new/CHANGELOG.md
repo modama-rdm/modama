@@ -15,6 +15,16 @@ planned for the cutover.
 > parentheses. Bump `version` in `package.json` in the same commit: the footer
 > badge reads it, and a test checks that it matches the newest release here.
 
+## [0.19.2] - 2026-11-06 - Each projects table sorts on its own
+
+### Changed
+
+- On the projects list, a column header now sorts only its own table. “My
+  Projects”, “Shared with me” and “All projects” each keep their own order, and
+  each order is remembered separately. A click in one table used to sort all
+  three. A sort you chose before this version is not carried over: each table
+  starts newest first once.
+
 ## [0.19.1] - 2026-11-05 - Pages open at the top
 
 ### Fixed
