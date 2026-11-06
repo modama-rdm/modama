@@ -72,25 +72,16 @@ async fn api_start_ingest(
     State(api_state): State<ApiState>,
     ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
-    let sign_response = Arc::clone(&api_state.token_provider).fetch_token().await?;
     let share = api_state
-        .mgmt()
-        .await?
-        .open_ingest_share(
-            &mut sign_in,
-            &project_name,
-            &session_name,
-            &sign_response.resource,
-            &sign_response.token,
-        )
+        .actions()
+        .start_ingest(&mut sign_in, &project_name, &session_name)
         .await?;
-    let response = Json(APICreateShareResponse {
+    Ok(sign_in.respond(Json(APICreateShareResponse {
         share_id: share.share_id,
         project: share.project,
         session: share.session,
         dest_path: share.dest_path,
-    });
-    Ok(sign_in.respond(response))
+    })))
 }
 
 #[utoipa::path(
@@ -115,9 +106,8 @@ async fn api_delete_share(
     ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
     api_state
-        .mgmt()
-        .await?
-        .close_ingest_share(&mut sign_in, &share_id)
+        .actions()
+        .stop_ingest(&mut sign_in, &share_id)
         .await?;
     Ok(sign_in.respond(StatusCode::NO_CONTENT))
 }
@@ -263,15 +253,13 @@ async fn api_create_session_in_project(
     Json(create_session_req): Json<APICreateSessionRequest>,
 ) -> Result<Response, LocalAPIError> {
     api_state
-        .mgmt()
-        .await?
+        .actions()
         .create_session(&mut sign_in, &project_name, &create_session_req.session)
         .await?;
-    let response = Json(APICreateSessionResponse {
+    Ok(sign_in.respond(Json(APICreateSessionResponse {
         project: project_name,
         session: create_session_req.session,
-    });
-    Ok(sign_in.respond(response))
+    })))
 }
 
 #[utoipa::path(

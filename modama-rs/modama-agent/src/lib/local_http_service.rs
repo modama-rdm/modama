@@ -29,6 +29,7 @@ use crate::{
     config::{AgentConfig, ConfigError},
     events_api::add_internal_api,
     http_api::add_api_routes,
+    ingest_actions::{ActionError, IngestActions, Missing},
     local_fan_out::LocalFanOut,
     local_sign_in::{ClientSignIn, MaybeClientSignIn, expired_sign_in_cookie},
     mgmt_api::{MgmtApi, MgmtApiConnection, MgmtApiError, SignIn},
@@ -393,6 +394,15 @@ impl ApiState {
         }
     }
 
+    /// Create sessions, open and stop ingest shares
+    pub fn actions(&self) -> IngestActions<'_> {
+        IngestActions {
+            mgmt_api: &self.mgmt_api,
+            mgmt_api_url: &self.config.mgmt_api_url,
+            token_provider: &self.token_provider,
+        }
+    }
+
     /// mgmtinterface-api below the configured `mgmt_api_url`
     pub async fn mgmt(&self) -> Result<MgmtApiConnection, LocalAPIError> {
         Ok(self.mgmt_api.connect(&self.config.mgmt_api_url).await?)
@@ -422,6 +432,9 @@ pub enum LocalAPIError {
 
     #[error("management API: {0}")]
     Mgmt(#[from] MgmtApiError),
+
+    #[error("{0}")]
+    Action(#[from] ActionError),
 
     #[error("template error: {0}")]
     Template(#[from] minijinja::Error),
@@ -457,60 +470,10 @@ impl IntoResponse for LocalAPIError {
                 )
                     .into_response()
             }
-            LocalAPIError::NotSignedIn | LocalAPIError::Mgmt(MgmtApiError::Unauthorized) => (
-                StatusCode::UNAUTHORIZED,
-                [
-                    (header::SET_COOKIE, expired_sign_in_cookie()),
-                    (
-                        header::CONTENT_TYPE,
-                        header::HeaderValue::from_static("text/plain"),
-                    ),
-                ],
-                "not signed in, or the session has ended",
-            )
-                .into_response(),
-            LocalAPIError::Mgmt(MgmtApiError::Forbidden { message, .. }) => (
-                StatusCode::FORBIDDEN,
-                [(header::CONTENT_TYPE, "text/plain")],
-                message,
-            )
-                .into_response(),
-            LocalAPIError::Mgmt(MgmtApiError::Missing { message, .. }) => (
-                StatusCode::NOT_FOUND,
-                [(header::CONTENT_TYPE, "text/plain")],
-                message,
-            )
-                .into_response(),
-            // the request was refused, e.g. an invalid session name
-            LocalAPIError::Mgmt(MgmtApiError::Backend { status, message })
-                if (400..500).contains(&status) =>
-            {
-                (
-                    StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
-                    [(header::CONTENT_TYPE, "text/plain")],
-                    message,
-                )
-                    .into_response()
-            }
-            LocalAPIError::Mgmt(error) => {
-                error!("management API: {error}");
-                (
-                    StatusCode::BAD_GATEWAY,
-                    [(header::CONTENT_TYPE, "text/plain")],
-                    error.to_string(),
-                )
-                    .into_response()
-            }
-            LocalAPIError::Token(token_error) => {
-                error!("token error: {token_error}");
-                // content-type? status code? could be internal server error in some cases, ...?
-                (
-                    StatusCode::BAD_REQUEST,
-                    [(header::CONTENT_TYPE, "text/plain")],
-                    "bad request",
-                )
-                    .into_response()
-            }
+            LocalAPIError::NotSignedIn => action_error_response(ActionError::NotSignedIn),
+            LocalAPIError::Mgmt(error) => action_error_response(error.into()),
+            LocalAPIError::Token(error) => action_error_response(error.into()),
+            LocalAPIError::Action(error) => action_error_response(error),
             LocalAPIError::Template(error) => {
                 error!("template error: {error}");
                 // FIXME: json/text depending on accept?
@@ -557,6 +520,63 @@ impl IntoResponse for LocalAPIError {
                 )
                     .into_response()
             }
+        }
+    }
+}
+
+/// How the pages and the JSON API answer when something failed: the user isn't signed in,
+/// the management API refused or couldn't be reached, or this agent has no token
+fn action_error_response(error: ActionError) -> Response {
+    match error {
+        ActionError::NotSignedIn => (
+            StatusCode::UNAUTHORIZED,
+            [
+                (header::SET_COOKIE, expired_sign_in_cookie()),
+                (
+                    header::CONTENT_TYPE,
+                    header::HeaderValue::from_static("text/plain"),
+                ),
+            ],
+            "not signed in, or the session has ended",
+        )
+            .into_response(),
+        ActionError::Forbidden { message } => (
+            StatusCode::FORBIDDEN,
+            [(header::CONTENT_TYPE, "text/plain")],
+            message,
+        )
+            .into_response(),
+        ActionError::NotFound { message, .. } => (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/plain")],
+            message,
+        )
+            .into_response(),
+        // the request was refused, e.g. an invalid session name
+        ActionError::Refused { status, message } => (
+            StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+            [(header::CONTENT_TYPE, "text/plain")],
+            message,
+        )
+            .into_response(),
+        ActionError::Failed(error) => {
+            error!("management API: {error}");
+            (
+                StatusCode::BAD_GATEWAY,
+                [(header::CONTENT_TYPE, "text/plain")],
+                error.to_string(),
+            )
+                .into_response()
+        }
+        ActionError::Token(token_error) => {
+            error!("token error: {token_error}");
+            // content-type? status code? could be internal server error in some cases, ...?
+            (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "text/plain")],
+                "bad request",
+            )
+                .into_response()
         }
     }
 }
@@ -673,14 +693,13 @@ async fn create_session(
     };
 
     let created = api_state
-        .mgmt()
-        .await?
+        .actions()
         .create_session(&mut sign_in, &project_name, &session_name)
         .await;
     match created {
         Ok(()) => {}
-        // the management API refused the name, or the session exists already
-        Err(MgmtApiError::Backend { status, message }) if (400..500).contains(&status) => {
+        // the management API refused the name
+        Err(ActionError::Refused { message, .. }) => {
             let message = format!("Could not create the session: {message}");
             return Ok(sign_in.respond(render_session_list(
                 &api_state,
@@ -763,28 +782,25 @@ async fn start_ingest_step3(
     State(api_state): State<ApiState>,
     ClientSignIn(mut sign_in): ClientSignIn,
 ) -> Result<Response, LocalAPIError> {
-    let session_names = session_names(&api_state, &mut sign_in, &project_name).await?;
-    if !session_names.contains(&session_name) {
-        return Ok(sign_in.respond(message_page(
-            &api_state.jinja_env,
-            StatusCode::NOT_FOUND,
-            "Session not found",
-            "The selected session does not exist in this project.",
-        )?));
+    let started = api_state
+        .actions()
+        .start_ingest(&mut sign_in, &project_name, &session_name)
+        .await;
+    match started {
+        Ok(_) => {}
+        Err(ActionError::NotFound {
+            what: Missing::Session,
+            ..
+        }) => {
+            return Ok(sign_in.respond(message_page(
+                &api_state.jinja_env,
+                StatusCode::NOT_FOUND,
+                "Session not found",
+                "The selected session does not exist in this project.",
+            )?));
+        }
+        Err(error) => return Err(error.into()),
     }
-
-    let sign_response = Arc::clone(&api_state.token_provider).fetch_token().await?;
-    api_state
-        .mgmt()
-        .await?
-        .open_ingest_share(
-            &mut sign_in,
-            &project_name,
-            &session_name,
-            &sign_response.resource,
-            &sign_response.token,
-        )
-        .await?;
 
     // there's a good chance the ingest share is available within 300ms; with this delay
     // the user doesn't have to refresh the overview page (hopefully in most cases!)
@@ -839,9 +855,8 @@ async fn close_ingest(
     }
 
     api_state
-        .mgmt()
-        .await?
-        .close_ingest_share(&mut sign_in, &share_id)
+        .actions()
+        .stop_ingest(&mut sign_in, &share_id)
         .await?;
     Ok(sign_in.respond(Redirect::to("/")))
 }
@@ -2120,7 +2135,6 @@ mod tests {
     async fn test_ingest_step3() {
         let test_setup = TestSetup::start().await;
         let mut server = mgmt_api_server(&test_setup).await;
-        mock_project_details(&mut server, &["test-session"]).await;
         let open = server
             .mock("POST", "/mgmt-api/ingest-shares")
             .match_header("cookie", MGMT_COOKIE)
@@ -2156,13 +2170,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ingest_step3_invalid_session_name() {
+    async fn starting_an_unknown_session_shows_session_not_found() {
         let test_setup = TestSetup::start().await;
         let mut server = mgmt_api_server(&test_setup).await;
-        mock_project_details(&mut server, &["test-session"]).await;
         let open = server
             .mock("POST", "/mgmt-api/ingest-shares")
-            .expect(0)
+            .with_status(404)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"code": "session_not_found",
+                    "message": "There is no session named 'invalid-session'."}"#,
+            )
             .create_async()
             .await;
 
@@ -2177,6 +2195,40 @@ mod tests {
             .unwrap();
         open.assert_async().await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = body_text(resp).await;
+        assert!(body.contains("Session not found"));
+        assert!(body.contains("The selected session does not exist in this project."));
+    }
+
+    #[tokio::test]
+    async fn starting_in_an_unknown_project_says_so() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("POST", "/mgmt-api/ingest-shares")
+            .with_status(404)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"code": "project_not_found",
+                    "message": "There is no project named 'invalid-project'."}"#,
+            )
+            .create_async()
+            .await;
+
+        let resp = test_setup
+            .app
+            .oneshot(page_request(
+                "POST",
+                "/start-ingest/invalid-project/test-session/",
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            body_text(resp).await,
+            "There is no project named 'invalid-project'."
+        );
     }
 
     #[tokio::test]
@@ -2269,7 +2321,6 @@ mod tests {
         let test_setup = TestSetup::start().await;
         set_open_foreground(&test_setup, "current-share").await;
         let mut server = mgmt_api_server(&test_setup).await;
-        mock_project_details(&mut server, &["test-session"]).await;
         let open = server
             .mock("POST", "/mgmt-api/ingest-shares")
             .with_status(201)
@@ -2838,6 +2889,112 @@ mod tests {
         assert!(got.get("password").is_none());
         assert!(got.get("share").is_none());
         open.assert_async().await;
+    }
+
+    /// A signed-in request to the JSON API
+    fn api_request(method: &str, uri: &str, json: Option<&str>) -> Request<Body> {
+        let request = Request::builder()
+            .uri(uri)
+            .method(method)
+            .header("X-API-Version", "1.0.0")
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE));
+        match json {
+            Some(json) => request
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json.to_owned())),
+            None => request.body(Body::empty()),
+        }
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn local_api_creates_a_session_with_the_name_as_given() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        // the management API checks the name, not the agent
+        let create = server
+            .mock("POST", "/mgmt-api/projects/the-project/sessions")
+            .match_header("cookie", MGMT_COOKIE)
+            .match_body(mockito::Matcher::Json(
+                serde_json::json!({"name": " new session "}),
+            ))
+            .with_status(201)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"name": " new session ", "immutable": false, "ctime": 1.0, "mtime": 1.0}"#,
+            )
+            .create_async()
+            .await;
+
+        let resp = test_setup
+            .app
+            .oneshot(api_request(
+                "POST",
+                "/api/projects/the-project/sessions/",
+                Some(r#"{"session": " new session "}"#),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got: Value = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(got["project"], "the-project");
+        assert_eq!(got["session"], " new session ");
+        create.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn local_api_passes_a_refused_session_name_on() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("POST", "/mgmt-api/projects/the-project/sessions")
+            .with_status(422)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"code": "invalid_name", "message": "Not a valid session name."}"#)
+            .create_async()
+            .await;
+
+        let resp = test_setup
+            .app
+            .oneshot(api_request(
+                "POST",
+                "/api/projects/the-project/sessions/",
+                Some(r#"{"session": "a/b"}"#),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body_text(resp).await, "Not a valid session name.");
+    }
+
+    #[tokio::test]
+    async fn local_api_start_for_an_unknown_session_is_not_found() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        server
+            .mock("POST", "/mgmt-api/ingest-shares")
+            .with_status(404)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"code": "session_not_found", "message": "There is no session named 's'."}"#,
+            )
+            .create_async()
+            .await;
+
+        let resp = test_setup
+            .app
+            .oneshot(api_request(
+                "POST",
+                "/api/projects/p/sessions/s/start-ingest/",
+                None,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(body_text(resp).await, "There is no session named 's'.");
     }
 
     #[tokio::test]
