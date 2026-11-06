@@ -1,4 +1,4 @@
-import {useCallback, useMemo, useRef, useState, type ReactNode} from 'react'
+import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react'
 import {ToastContext, type ToastType} from './toast-context'
 import {CheckCircleIcon, XCircleIcon} from './icons'
 
@@ -13,13 +13,27 @@ const AUTO_DISMISS_MS = 3500
 export function ToastProvider({children}: { children: ReactNode }) {
     const [toasts, setToasts] = useState<ToastItem[]>([])
     const nextId = useRef(1)
+    const timers = useRef(new Set<ReturnType<typeof setTimeout>>())
+
+    // Cancel the dismiss timers still running when the provider goes away, so
+    // none of them sets state afterwards. In the tests that is after each one,
+    // and a timer left over can fire once jsdom is already gone.
+    useEffect(() => {
+        const pending = timers.current
+        return () => {
+            pending.forEach(clearTimeout)
+            pending.clear()
+        }
+    }, [])
 
     const notify = useCallback((message: string, type: ToastType = 'success') => {
         const id = nextId.current++
         setToasts((prev) => [...prev, {id, type, message}])
-        setTimeout(() => {
+        const timer = setTimeout(() => {
+            timers.current.delete(timer)
             setToasts((prev) => prev.filter((t) => t.id !== id))
         }, AUTO_DISMISS_MS)
+        timers.current.add(timer)
     }, [])
 
     const api = useMemo(() => ({notify}), [notify])
