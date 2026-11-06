@@ -384,7 +384,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The ingest share: a new one, or the caller's open one for this session",
+            "description": "The ingest share: a new one, or the caller's existing one for this session",
             "content": {
               "application/json": {
                 "schema": {
@@ -423,7 +423,7 @@
     },
     "/api/shares/foreground/": {
       "get": {
-        "summary": "Query for the current foreground share",
+        "summary": "Query for the foreground ingest",
         "operationId": "get_foreground_share",
         "parameters": [
           {
@@ -438,7 +438,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Current foreground share",
+            "description": "The foreground ingest",
             "content": {
               "application/json": {
                 "schema": {
@@ -477,7 +477,7 @@
           {
             "name": "share_id",
             "in": "path",
-            "description": "Share identifier",
+            "description": "Ingest share identifier",
             "required": true,
             "schema": {
               "type": "string"
@@ -486,7 +486,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Share closed"
+            "description": "Ingest share stopped"
           },
           "400": {
             "description": "Version negotiation failed",
@@ -502,10 +502,10 @@
             "description": "Not signed in, or the session has ended"
           },
           "403": {
-            "description": "The share belongs to someone else"
+            "description": "The ingest share belongs to someone else"
           },
           "404": {
-            "description": "Share not found"
+            "description": "Ingest share not found"
           }
         },
         "security": [
@@ -635,7 +635,7 @@
           },
           {
             "type": "object",
-            "description": "A foreground share is desired, but it can't be used in the caller's session (yet).",
+            "description": "A foreground share is desired, but it can't be used in the caller's login session (yet).",
             "required": [
               "share_id",
               "project",

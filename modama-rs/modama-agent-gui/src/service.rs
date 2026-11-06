@@ -352,7 +352,7 @@ impl AgentService for HttpAgentService {
         )?;
         if response.project != project || response.session != session {
             return Err(ServiceError::InvalidResponse(
-                "started share does not match the requested project and session".to_owned(),
+                "started ingest share does not match the requested project and session".to_owned(),
             ));
         }
         Ok(PendingSession {

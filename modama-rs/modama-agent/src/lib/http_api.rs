@@ -31,9 +31,9 @@ use modama_common::local_api_messages::{
     path = "/api/shares/foreground/",
     operation_id = "get_foreground_share",
     params(("X-API-Version" = String, Header, description = "API version")),
-    responses((status = 200, description = "Current foreground share", body = APICurrentForegroundShare))
+    responses((status = 200, description = "The foreground ingest", body = APICurrentForegroundShare))
 )]
-/// Query for the current foreground share
+/// Query for the foreground ingest
 async fn api_shares_foreground(
     State(api_state): State<ApiState>,
     ConnectInfo(conn): ConnectInfo<ConnInfo>,
@@ -75,7 +75,7 @@ async fn api_identity(State(api_state): State<ApiState>) -> Json<APIAgentIdentit
         ("session_name" = String, Path, description = "Session name")
     ),
     responses(
-        (status = 200, description = "The ingest share: a new one, or the caller's open one for this session", body = APICreateShareResponse),
+        (status = 200, description = "The ingest share: a new one, or the caller's existing one for this session", body = APICreateShareResponse),
         (status = 401, description = "Not signed in, or the session has ended"),
         (status = 403, description = "Not a member of the project"),
         (status = 404, description = "Project or session not found")
@@ -116,13 +116,13 @@ async fn api_start_ingest(
     operation_id = "delete_share",
     params(
         ("X-API-Version" = String, Header, description = "API version"),
-        ("share_id" = String, Path, description = "Share identifier")
+        ("share_id" = String, Path, description = "Ingest share identifier")
     ),
     responses(
-        (status = 204, description = "Share closed"),
+        (status = 204, description = "Ingest share stopped"),
         (status = 401, description = "Not signed in, or the session has ended"),
-        (status = 403, description = "The share belongs to someone else"),
-        (status = 404, description = "Share not found")
+        (status = 403, description = "The ingest share belongs to someone else"),
+        (status = 404, description = "Ingest share not found")
     ),
     security(("session_cookie" = []))
 )]

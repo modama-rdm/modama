@@ -16,7 +16,7 @@ use modama_common::{
 };
 use url::Url;
 
-/// The Modama GUI, and the programs it runs in the user's session
+/// The Modama GUI, and the programs it runs in the user's login session
 #[derive(Debug, Parser)]
 #[command(version = modama_git_version())]
 struct Cli {

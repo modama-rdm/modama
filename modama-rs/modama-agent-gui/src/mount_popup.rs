@@ -98,9 +98,9 @@ impl eframe::App for MountPopupApp {
             };
             ui.add(Label::new(
                 RichText::new(if content.mounts.len() == 1 {
-                    "Network drive connected"
+                    "Ingest share connected"
                 } else {
-                    "Network drives connected"
+                    "Ingest shares connected"
                 })
                 .font(styles::typography::section_heading::font_id()),
             ));
@@ -124,7 +124,7 @@ impl eframe::App for MountPopupApp {
             // top-aligned: a centered row would take all the height there is, and the window,
             // which follows the content, could never shrink when mounts leave the popup
             let buttons = ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
-                let open = ui.add(primary_button("Open network drive", ui)).clicked();
+                let open = ui.add(primary_button("Open ingest share", ui)).clicked();
                 let dismiss = ui.add(secondary_button("Dismiss", ui)).clicked();
                 if open {
                     Some(PopupChoice::Open)

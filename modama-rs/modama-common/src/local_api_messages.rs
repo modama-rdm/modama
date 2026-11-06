@@ -23,7 +23,7 @@ pub enum APICurrentForegroundShare {
     /// No foreground share is desired.
     None,
 
-    /// A foreground share is desired, but it can't be used in the caller's session (yet).
+    /// A foreground share is desired, but it can't be used in the caller's login session (yet).
     Unavailable {
         /// Stable identifier used to close this share.
         share_id: String,

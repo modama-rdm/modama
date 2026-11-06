@@ -1,4 +1,4 @@
-//! Show a mounted share in the file manager, for the mount popup's "Open network drive".
+//! Show a mounted share in the file manager, for the mount popup's "Open ingest share".
 //!
 //! Windows: Explorer, started by its absolute path. Linux: the desktop's file manager through
 //! `org.freedesktop.FileManager1`; `xdg-open` only if that interface definitely isn't there,

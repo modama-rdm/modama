@@ -920,7 +920,7 @@ mod tests {
         app.handle_action(Action::ForegroundChanged(
             crate::state::ForegroundSession::Mounting(
                 pending.clone(),
-                "Waiting for the session helper to mount the share.".to_owned(),
+                "Waiting for the session helper to mount the ingest share.".to_owned(),
             ),
         ));
 
@@ -929,7 +929,7 @@ mod tests {
             app.app_state.foreground,
             crate::state::ForegroundSession::Mounting(
                 pending,
-                "Waiting for the session helper to mount the share.".to_owned()
+                "Waiting for the session helper to mount the ingest share.".to_owned()
             )
         );
     }
