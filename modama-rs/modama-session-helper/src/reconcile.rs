@@ -102,10 +102,10 @@ pub fn reconcile_pass<T: MountTable>(
         // only a share that is no longer desired is released by force; another entry of a
         // desired share is removed only if nothing is open on it
         let force = force && !is_desired(name);
-        debug!("removing share {name}");
+        debug!("removing ingest share {name}");
         if let Err(e) = table.remove(entry, force) {
             // it stays in the report, so the scope reads as not converged; the next pass retries
-            warn!("could not remove share {name}: {e}");
+            warn!("could not remove ingest share {name}: {e}");
         }
     }
 
@@ -115,7 +115,7 @@ pub fn reconcile_pass<T: MountTable>(
         if kept.iter().any(|k| same_share(k, &share.share_name)) {
             continue;
         }
-        debug!("adding share {}", share.share_name);
+        debug!("adding ingest share {}", share.share_name);
         match table.add(share) {
             Ok(()) => created.push(share.share_name.clone()),
             Err(AddFailure::AlreadyMounted) => {}
@@ -365,7 +365,7 @@ pub(crate) mod tests {
         assert_eq!(table.calls, vec!["add a"]);
         assert_eq!(
             errors(&state),
-            vec![("2", "another desired share has the same name")]
+            vec![("2", "another desired ingest share has the same name")]
         );
     }
 

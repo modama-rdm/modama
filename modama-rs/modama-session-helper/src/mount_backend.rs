@@ -55,7 +55,7 @@ pub fn unique_by_name(shares: &[Share]) -> (Vec<&Share>, Vec<ShareError>) {
         {
             errors.push(ShareError {
                 share_id: share.share_id.clone(),
-                message: "another desired share has the same name".to_owned(),
+                message: "another desired ingest share has the same name".to_owned(),
             });
         } else {
             unique.push(share);

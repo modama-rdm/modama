@@ -15,13 +15,13 @@
 {% endif %}
 <h2>Foreground ingest</h2>
 {% if foreground.kind == "none" %}
-<p>No ingest is open.</p>
+<p>No foreground ingest.</p>
 {% else %}
 <p>Status: {{ foreground.kind }}.</p>
 <p>Project: {{ foreground.project }}<br>Session: {{ foreground.session }}{% if foreground.created_by %}<br>Started by: {{ foreground.created_by }}{% endif %}</p>
 {% if foreground.message %}<p>{{ foreground.message }}</p>{% endif %}
 {% if foreground.refresh_status %}<p><a href="/">Reload this page</a> to refresh the status.</p>{% endif %}
-{% if foreground.close_href %}<p><a href="{{ foreground.close_href }}">Close this ingest</a></p>{% endif %}
+{% if foreground.close_href %}<p><a href="{{ foreground.close_href }}">Stop this ingest</a></p>{% endif %}
 {% endif %}
 {% if other_mounts %}
 <h2>Also mounted on this computer</h2>

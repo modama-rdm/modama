@@ -35,7 +35,7 @@
                 </td>
                 <td>{{ d.mtime|format_unixtime }}</td>
                 <td>
-                  {% if d.immutable %}sealed{% else %}writable{% endif %}{% if d.shared %}, ingest active{% endif %}
+                  {% if d.immutable %}sealed{% else %}open{% endif %}{% if d.shared %}, ingest live{% endif %}
                 </td>
                 <td>
                 {% if not d.immutable and (current_user.user_id in project.members or current_user.user_id == project.owner) %}

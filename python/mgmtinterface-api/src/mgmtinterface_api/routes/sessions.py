@@ -87,7 +87,7 @@ class Session(BaseModel):
 
     name: str
     immutable: bool = Field(
-        description="True once the session has been sealed: its `raw/` folder is read-only."
+        description="True once the session has been sealed: its `raw/` folder is immutable."
     )
     ctime: float
     mtime: float
@@ -224,7 +224,7 @@ def add_session(
 
 @router.post(
     "/{session}/seal",
-    summary="Seal a session: make its raw data read-only for good",
+    summary="Seal a session: make its raw data immutable",
     responses={
         **AUTH_ERROR_RESPONSES,
         **CSRF_ERROR_RESPONSES,

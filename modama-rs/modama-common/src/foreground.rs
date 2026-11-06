@@ -51,7 +51,7 @@ pub const NO_HELPER_MESSAGE: &str = "No session helper is running for you. Open 
                                  GUI, which starts it, or run `modama-agent-gui session-helper`.";
 
 /// Shown while the helper is there, but hasn't mounted the share (and hasn't reported an error)
-pub const WAITING_MESSAGE: &str = "Waiting for the session helper to mount the share.";
+pub const WAITING_MESSAGE: &str = "Waiting for the session helper to mount the ingest share.";
 
 /// Where one desired share stands, according to the session helper
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,7 +176,7 @@ impl<'a> ScopeView<'a> {
                     let lossy = mount_path.to_string_lossy();
                     warn!("Mount path {lossy} contains invalid unicode, cannot report it");
                     unavailable(format!(
-                        "The share is mounted at {lossy}, but that path can't be represented \
+                        "The ingest share is mounted at {lossy}, but that path can't be represented \
                          as text."
                     ))
                 }
@@ -212,7 +212,10 @@ impl<'a> ScopeView<'a> {
                 let (project, session) = match project_and_session(&share.dest_path) {
                     Ok(names) => names,
                     Err(error) => {
-                        warn!("not listing mounted share {}: {error}", share.share_id);
+                        warn!(
+                            "not listing mounted ingest share {}: {error}",
+                            share.share_id
+                        );
                         return None;
                     }
                 };
@@ -717,7 +720,7 @@ mod tests {
         let desired = only(share("new"));
         let stale = ("old-share", Some("Z:\\"));
         let current = ("SHARE", Some("Y:\\"));
-        let error = ("new", "another user's drive is still connected");
+        let error = ("new", "another user's ingest share is still connected");
         let blocked = |mounted: &[(&str, Option<&str>)], errors: &[(&str, &str)]| {
             ScopeView::new(Some(&desired), Some(&helper(mounted, errors))).hand_off_blocked()
         };
@@ -742,7 +745,7 @@ mod tests {
         };
         let report = helper(
             &[("share", Some("/mnt/a")), ("old-share", Some("/mnt/old"))],
-            &[("second", "another desired share has the same name")],
+            &[("second", "another desired ingest share has the same name")],
         );
         let view = ScopeView::new(Some(&desired), Some(&report));
         assert_eq!(view.stale_mounts().count(), 1);
