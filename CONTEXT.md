@@ -75,12 +75,11 @@ credentials that are only valid while it exists. A user has at most one ingest s
 session; other users can have their own for the same session.
 _Avoid_: Share (in user-facing text), network drive, drop
 
-**Sharing**:
+**Ingest live**:
 The status of a session that has at least one ingest share, whether or not it is sealed.
 Not to be confused with sharing data with other people.
-_Replacement candidate_: Live
 
-**Foreground share**:
+**Foreground ingest**:
 The ingest share that new data at a resource should go to; at most one per resource. Creating
 a new ingest share at a resource makes it the foreground share, while the previous one stays
 usable until it is stopped.
