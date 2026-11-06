@@ -67,7 +67,7 @@ describe('journey: ingest share', () => {
         await user.click(await screen.findByRole('button', {name: /create ingest share/i}))
 
         expect(await screen.findByText('Ingest share is live')).toBeInTheDocument()
-        expect(screen.getByRole('status')).toHaveTextContent(/already had an ingest share open/i)
+        expect(screen.getByRole('status')).toHaveTextContent(/already have an ingest share/i)
         expect(screen.queryByText('Done!')).not.toBeInTheDocument()
     })
 
@@ -123,10 +123,10 @@ describe('journey: ingest share', () => {
         const {user} = renderApp({route})
 
         expect(await screen.findByText('Ingest share is live')).toBeInTheDocument()
-        await user.click(screen.getByRole('button', {name: /close share/i}))
+        await user.click(screen.getByRole('button', {name: /stop ingest/i}))
 
         expect(await screen.findByRole('button', {name: /create ingest share/i})).toBeInTheDocument()
-        expect(screen.getByText(`Ingest share for "${dataset}" closed.`)).toBeInTheDocument()
+        expect(screen.getByText(`Ingest share for "${dataset}" stopped.`)).toBeInTheDocument()
         expect(recorder.matching('DELETE', close)).toHaveLength(1)
     })
 
@@ -148,10 +148,10 @@ describe('journey: ingest share', () => {
         ])
         const {user} = renderApp({route})
 
-        await user.click(await screen.findByRole('button', {name: /close share/i}))
+        await user.click(await screen.findByRole('button', {name: /stop ingest/i}))
 
         expect(await screen.findByRole('button', {name: /create ingest share/i})).toBeInTheDocument()
-        expect(screen.getByText(`Ingest share for "${dataset}" was already closed.`)).toBeInTheDocument()
+        expect(screen.getByText(`Ingest share for "${dataset}" was already stopped.`)).toBeInTheDocument()
     })
 
     it("shows the API's reason when a share cannot be closed", async () => {
@@ -173,13 +173,13 @@ describe('journey: ingest share', () => {
         ])
         const {user} = renderApp({route})
 
-        await user.click(await screen.findByRole('button', {name: /close share/i}))
+        await user.click(await screen.findByRole('button', {name: /stop ingest/i}))
 
         expect(
             await screen.findByText('The ingest share service is unavailable. Please try again shortly.'),
         ).toBeInTheDocument()
         // Still live: nothing was closed.
-        expect(screen.getByRole('button', {name: /close share/i})).toBeInTheDocument()
+        expect(screen.getByRole('button', {name: /stop ingest/i})).toBeInTheDocument()
     })
 
     it('blocks a non-member from managing the ingest share', async () => {

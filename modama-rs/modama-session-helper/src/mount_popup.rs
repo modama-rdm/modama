@@ -107,7 +107,7 @@ pub async fn run_popup_task(
                 if shown.is_empty() {
                     // dropping the window ends the popup process
                     if window.take().is_some() {
-                        info!("closing the mount popup: its shares are no longer desired");
+                        info!("closing the mount popup: its ingest shares are no longer desired");
                     }
                     continue;
                 }

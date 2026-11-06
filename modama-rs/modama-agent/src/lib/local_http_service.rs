@@ -737,7 +737,7 @@ async fn start_ingest_step2(
     // TODO: name the resource an anonymous agent inherits from its token
     // (`LocalFanOut::logged_in`), like the connected agents on the index page
     let res_name = identity.resource().unwrap_or(identity.name());
-    let instrument = identity.resource().unwrap_or("this instrument");
+    let instrument = identity.resource().unwrap_or("this resource");
     // starting doesn't close the open share: say what happens to it
     let current = match desired_foreground(&api_state) {
         Some(share) => {
@@ -1823,7 +1823,7 @@ mod tests {
             project: "the-project".to_owned(),
             session: "test-session".to_owned(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
-            message: "Waiting for the session helper to mount the share.".to_owned(),
+            message: "Waiting for the session helper to mount the ingest share.".to_owned(),
             created_by: Some("alice".to_owned()),
         };
 
@@ -1846,7 +1846,7 @@ mod tests {
                 .unwrap();
 
             assert!(rendered.contains("Status: unavailable."));
-            assert!(rendered.contains("Waiting for the session helper to mount the share."));
+            assert!(rendered.contains("Waiting for the session helper to mount the ingest share."));
             assert!(rendered.contains("<a href=\"/\">Reload this page</a>"));
             assert!(rendered.contains("to refresh the status."));
             // an unavailable ingest can still be closed, e.g. when no helper is running:
@@ -2285,7 +2285,9 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = body_text(resp).await;
-        assert!(body.contains("Session test-session in project the-project is open"));
+        assert!(body.contains(
+            "Your ingest share for session test-session in project the-project is still running"
+        ));
         assert!(body.contains("href=\"/close-ingest/current%2Dshare/\""));
 
         // someone else's is detached from this resource
@@ -2311,8 +2313,8 @@ mod tests {
             .await
             .unwrap();
         let body = body_text(resp).await;
-        assert!(body.contains("was started by other.user"));
-        assert!(body.contains("detaches it from res; it stays open for other.user"));
+        assert!(body.contains("other.user started the ingest share"));
+        assert!(body.contains("new data at res goes to yours; other.user can keep using theirs"));
         assert!(!body.contains("href=\"/close-ingest/"));
     }
 

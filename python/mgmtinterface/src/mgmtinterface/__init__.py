@@ -682,7 +682,7 @@ def share_dataset(name: str, dataset: str):
                     )
                 if result["share_id"]:
                     flask.flash(
-                        f'Share for session "{dataset}" in project "{name}" created.'
+                        f'Ingest share for session "{dataset}" in project "{name}" created.'
                     )
                     return flask.redirect(
                         flask.url_for("share_dataset", name=name, dataset=dataset)
@@ -695,7 +695,7 @@ def share_dataset(name: str, dataset: str):
                 # TODO error handling
                 if result:
                     flask.flash(
-                        f'Share for session "{dataset}" in project "{name}" deactivated.'
+                        f'Ingest share for session "{dataset}" in project "{name}" stopped.'
                     )
                     return flask.redirect(
                         flask.url_for("share_dataset", name=name, dataset=dataset)
@@ -705,7 +705,7 @@ def share_dataset(name: str, dataset: str):
             else:
                 flask.flash("Error: Invalid opcode.")
         else:
-            flask.flash("Error: Managing share forbidden.")
+            flask.flash("Error: You may not manage this ingest share.")
     if updated:
         pr_info = client.projectdetails(name)
         user_info = client.id_user(current_user.user_id)
@@ -898,7 +898,7 @@ def api_create_share() -> SerializedShare:
         if ds["name"] == request_data["dataset"]:
             break
     if ds is None:
-        raise RuntimeError(f"Dataset not found in project {pr_info['project']['name']}")
+        raise RuntimeError(f"Session not found in project {pr_info['project']['name']}")
     if (
         apiauth.current_user() not in pr_info["project"]["members"]
         and apiauth.current_user() != pr_info["project"]["owner"]
@@ -923,7 +923,7 @@ def api_delete_share(share_id: str) -> DeleteShareResponse:
     shares = smbclient.list()
     share = shares.get(share_id, None)
     if share is None:
-        raise RuntimeError(f"Share {share_id} not found.")
+        raise RuntimeError(f"Ingest share {share_id} not found.")
     user_info = client.id_user(apiauth.current_user())
     if user_info["errno"] != 0:
         raise RuntimeError(user_info["message"])

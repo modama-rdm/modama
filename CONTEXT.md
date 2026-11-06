@@ -33,9 +33,10 @@ The text that describes a project or a session, kept as a `README.md` in its fol
 file in a project, only the user who wrote it first can change it.
 
 **Sealing**:
-Making a session's raw data read-only, so it can be trusted as the original record. Only
-administrators can unseal it again, on request.
-_Avoid_: Freezing, locking, making immutable
+Making a session's raw data immutable, so that nobody can change, rename or remove it, not
+even its owner, and it can be trusted as the original record. Only administrators can unseal
+it again, on request. A session whose raw data is not sealed is **open**.
+_Avoid_: Freezing, locking, write-protecting, making read-only, writable (for open)
 
 ### The file system
 
@@ -50,7 +51,7 @@ _Avoid_: Session directory
 
 **Raw folder**:
 The `raw/` folder of a session folder, which holds its raw data and is what sealing makes
-read-only.
+immutable.
 
 ### Instruments
 
@@ -66,8 +67,9 @@ _Avoid_: Producer, data generating system, client
 ### Getting data in
 
 **Ingest**:
-Getting data from the instrument PCs into a session folder.
-_Avoid_: Upload, import
+Getting data from the instrument PCs into a session folder. Users upload data into an ingest
+share; ingest is the whole process.
+_Avoid_: Import, upload (as the name of the process)
 
 **Ingest share**:
 A temporary network share that writes into one session as the user who opened it, with

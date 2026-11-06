@@ -294,7 +294,7 @@ impl PageOverview {
         Action::None
     }
 
-    /// "Start Session": straight to project selection, unless a share is open
+    /// "Start Ingest": straight to project selection, unless a share is open
     fn start_clicked(&mut self, app_state: &AgentAppState) -> Action {
         if app_state.agent.foreground.share_id().is_none() {
             return Action::CreateSession;
@@ -328,18 +328,18 @@ impl PageOverview {
         let (message, choices) = match &kind {
             StartDialog::OwnShare { previous } => (
                 format!(
-                    "Session {} in project {} is open. Keep it open next to the new one, or \
-                     close it once the new session has started?",
+                    "Your ingest share for session {} in project {} is still running. Keep it \
+                     next to the new one, or stop it once the new ingest has started?",
                     previous.session, previous.project
                 ),
                 vec![
                     DialogChoice {
-                        label: "Keep it open",
+                        label: "Keep it",
                         variant: ButtonVariant::Primary,
                         value: StartChoice::KeepOpen,
                     },
                     DialogChoice {
-                        label: "Close it after starting",
+                        label: "Stop it after starting",
                         variant: ButtonVariant::DangerOutline,
                         value: StartChoice::ClosePrevious,
                     },
@@ -351,8 +351,9 @@ impl PageOverview {
                 user,
             } => (
                 format!(
-                    "Session {session} in project {project} was started by {user}. Starting a \
-                     new session detaches it from {instrument}; it stays open for {user}."
+                    "{user} started the ingest share for session {session} in project {project}. \
+                     If you start a new ingest, new data at {instrument} goes to yours; {user} \
+                     can keep using theirs until it is stopped."
                 ),
                 vec![DialogChoice {
                     label: "Continue",
@@ -365,7 +366,7 @@ impl PageOverview {
             ui.ctx(),
             ui.visuals(),
             START_DIALOG_ID,
-            "Start another ingest session?",
+            "Start another ingest?",
             &message,
             &choices,
             self.focus_start_cancel,
@@ -403,7 +404,7 @@ impl PageOverview {
                         Err(error) => {
                             log::error!("close-session failed: {error}");
                             self.close_failed(TaskFailure::Stay {
-                                message: "Could not close the ingest session.".to_owned(),
+                                message: "Could not stop the ingest share.".to_owned(),
                                 retry: RetryAction::CloseSession,
                             })
                         }
@@ -415,7 +416,7 @@ impl PageOverview {
             Err(error) => {
                 log::error!("close-session task failed: {error}");
                 self.close_failed(TaskFailure::Stay {
-                    message: "Could not close the ingest session.".to_owned(),
+                    message: "Could not stop the ingest share.".to_owned(),
                     retry: RetryAction::CloseSession,
                 })
             }
@@ -436,14 +437,14 @@ impl PageOverview {
     }
 
     fn show_create_section(&mut self, ui: &mut egui::Ui) -> bool {
-        card_heading(ui, "Start an ingest session");
+        card_heading(ui, "Start ingest");
         card_description(
             ui,
-            "Choose a project and session to open an ingest share for incoming data on this \
-             agent.",
+            "Choose a project and session to create an ingest share for new data from this \
+             PC.",
         );
         ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
-        let response = ui.add(primary_button("Start Session", ui));
+        let response = ui.add(primary_button("Start Ingest", ui));
         if self.focus_on_entry && response.enabled() {
             response.request_focus();
             self.focus_on_entry = false;
@@ -451,7 +452,7 @@ impl PageOverview {
         response.clicked()
     }
 
-    /// True if the user asked to release the previous user's drive (offered if `blocked`)
+    /// True if the user asked to release the previous user's ingest share (offered if `blocked`)
     fn show_mounting_session(
         &mut self,
         ui: &mut egui::Ui,
@@ -460,7 +461,7 @@ impl PageOverview {
         status: &str,
         blocked: bool,
     ) -> bool {
-        card_heading(ui, "Preparing ingest session");
+        card_heading(ui, "Preparing ingest");
         session_detail(ui, "Project", &session.project);
         session_detail(ui, "Session", &session.session);
         if let Some(started_by) = started_by {
@@ -474,7 +475,7 @@ impl PageOverview {
         if blocked {
             ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
             ui.add(danger_outline_button(
-                "Disconnect previous user's drive",
+                "Disconnect previous user's ingest share",
                 ui,
             ))
             .clicked()
@@ -490,7 +491,7 @@ impl PageOverview {
         awaiting_close: bool,
     ) -> bool {
         let is_closing = self.close_task.is_pending() || awaiting_close;
-        card_heading(ui, "Active ingest session");
+        card_heading(ui, "Foreground ingest");
         session_detail(ui, "Project", &session.project);
         session_detail(ui, "Session", &session.session);
         if let Some(started_by) = &session.created_by {
@@ -498,18 +499,18 @@ impl PageOverview {
         }
         session_detail(
             ui,
-            "Mount path on this agent",
+            "Mount path on this PC",
             session
                 .mount_path
                 .as_deref()
-                .unwrap_or("Not available on this agent"),
+                .unwrap_or("Not available on this PC"),
         );
 
         ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
         ui.separator();
         ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
 
-        card_heading(ui, "Close the ingest session");
+        card_heading(ui, "Stop ingest");
         card_description(
             ui,
             "Stop the ingest share when you are finished transferring data. Existing project \
@@ -519,12 +520,12 @@ impl PageOverview {
         let response = if is_closing {
             loading_button(
                 ui,
-                "Closing…",
+                "Stopping…",
                 egui::Vec2::ZERO,
                 ButtonVariant::DangerOutline,
             )
         } else {
-            ui.add(danger_outline_button("Close Session", ui))
+            ui.add(danger_outline_button("Stop Ingest", ui))
         };
         if self.focus_on_entry && response.enabled() {
             response.request_focus();
@@ -548,9 +549,9 @@ impl PageOverview {
             ui.ctx(),
             ui.visuals(),
             CLOSE_CONFIRMATION_ID,
-            "Close ingest session?",
+            "Stop ingest?",
             &message,
-            "Close Session",
+            "Stop Ingest",
             self.focus_confirmation_cancel,
         );
         self.focus_confirmation_cancel = false;
@@ -617,7 +618,7 @@ impl PageOverview {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if pending_close == Some(mount.share_id.as_str()) {
                             ui.add(Label::new(
-                                RichText::new("Closing…")
+                                RichText::new("Stopping…")
                                     .font(styles::typography::supporting_text::font_id())
                                     .color(
                                         styles::color::on_surface_dim::VALUE.resolve(ui.visuals()),
@@ -990,7 +991,7 @@ fn card_description(ui: &mut egui::Ui, text: &str) {
 /// shares; deliberately less prominent than the cards' buttons
 fn compact_close_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
     let button = egui::Button::new(
-        RichText::new("Close")
+        RichText::new("Stop")
             .font(styles::typography::supporting_text::font_id())
             .color(styles::color::error::VALUE.resolve(ui.visuals())),
     )

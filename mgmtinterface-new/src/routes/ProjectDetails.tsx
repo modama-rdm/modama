@@ -66,7 +66,7 @@ function StatusBadges({dataset, shared}: { dataset: SerializedDataset; shared: b
                 <span
                     className={`${badgeBase} bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300`}>
                     <span className="h-1.5 w-1.5 rounded-full bg-current"/>
-                    Sharing
+                    Ingest live
                 </span>
             )}
         </div>

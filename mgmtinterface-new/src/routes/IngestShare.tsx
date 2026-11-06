@@ -74,7 +74,7 @@ function ActiveShare({
                             </span>
                         </div>
                         <p className="max-w-110 text-[13px] leading-relaxed text-fg-subtle">
-                            Map this share on your microscope computer to upload data
+                            Map this ingest share on an instrument PC to upload data
                             directly into session{' '}
                             <strong className="font-mono text-xs text-fg">{dataset}</strong>{' '}
                             with your identity and permissions.
@@ -86,7 +86,7 @@ function ActiveShare({
                         disabled={closing}
                         className="shrink-0 whitespace-nowrap"
                     >
-                        {closing ? 'Closing…' : 'Close share'}
+                        {closing ? 'Stopping…' : 'Stop ingest'}
                     </Button>
                 </div>
             </Card>
@@ -183,8 +183,8 @@ function CreateShare({
             <p className="text-sm leading-relaxed text-fg-muted">
                 Creating an ingest share opens a temporary Windows network share
                 (SMB/CIFS) with one-time credentials for{' '}
-                <span className="font-mono text-fg">{dataset}</span>. Map it on a
-                microscope or acquisition machine to write data straight into this
+                <span className="font-mono text-fg">{dataset}</span>. Map it on an
+                instrument PC to write data straight into this
                 session with the correct ownership — no stored credentials, no system
                 account.
             </p>
@@ -316,7 +316,7 @@ function IngestPanel() {
                 {method: 'DELETE'},
             )
             setShare(null)
-            notify(`Ingest share for "${dataset}" closed.`)
+            notify(`Ingest share for "${dataset}" stopped.`)
         } catch (err) {
             if (err instanceof Unauthorized) {
                 navigate(`/login?next=${next}`)
@@ -326,13 +326,13 @@ function IngestPanel() {
                 // Gone already, closed from another tab or by its owner on
                 // another machine. That is the state the user wanted.
                 setShare(null)
-                notify(`Ingest share for "${dataset}" was already closed.`)
+                notify(`Ingest share for "${dataset}" was already stopped.`)
                 return
             }
             setError(
                 err instanceof ApiError
                     ? err.message
-                    : 'Could not close the ingest share. Please try again.',
+                    : 'Could not stop the ingest share. Please try again.',
             )
         } finally {
             setBusy(false)
@@ -348,8 +348,8 @@ function IngestPanel() {
                     className="mb-5 flex items-start gap-2.5 rounded-lg border border-primary/25 bg-primary/5 px-3.5 py-3">
                     <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary"/>
                     <div className="text-[13px] leading-relaxed text-fg-muted">
-                        You already had an ingest share open for this session. These are
-                        its details; no second share was created.
+                        You already have an ingest share for this session. These are
+                        its details; no second ingest share was created.
                     </div>
                 </div>
             )}
@@ -373,9 +373,9 @@ function IngestPanel() {
                 className="mt-6 rounded-lg border border-default/60 bg-surface-muted/30 px-4 py-3 text-[12px] leading-relaxed text-fg-subtle">
                 Windows allows only one set of credentials per host, so all of your
                 ingest shares reuse the same credentials and can be mapped in parallel;
-                shares from a different user cannot coexist and must be closed first.
-                List active shares with <code className="font-mono">net use</code> and
-                close one with{' '}
+                ingest shares of a different user cannot be mapped at the same time and
+                must be disconnected first. List the mapped shares with{' '}
+                <code className="font-mono">net use</code> and disconnect one with{' '}
                 <code className="font-mono">net use &lt;drive&gt; /delete</code>.
             </div>
         </>

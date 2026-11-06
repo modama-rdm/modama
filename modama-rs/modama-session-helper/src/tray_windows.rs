@@ -405,7 +405,7 @@ fn show_menu(window: HWND, anchor: WPARAM) {
         let _ = AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, &label);
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING, MENU_OPEN_MODAMA, w!("Open Modama"));
-        let _ = AppendMenuW(menu, drive_flags, MENU_OPEN_DRIVE, w!("Open network drive"));
+        let _ = AppendMenuW(menu, drive_flags, MENU_OPEN_DRIVE, w!("Open ingest share"));
         // without this, the menu doesn't close when the user clicks elsewhere
         let _ = SetForegroundWindow(window);
         let selected = TrackPopupMenu(

@@ -94,7 +94,7 @@ impl From<modama_common::foreground::OtherMount> for ActiveSession {
 pub fn instrument_name(identity: Option<&AgentIdentity>) -> &str {
     match identity {
         Some(AgentIdentity::AgentId { resource_name, .. }) => resource_name,
-        Some(AgentIdentity::Anonymous { .. }) | None => "this instrument",
+        Some(AgentIdentity::Anonymous { .. }) | None => "this resource",
     }
 }
 
@@ -411,8 +411,8 @@ mod tests {
         let anonymous = AgentIdentity::Anonymous {
             hostname: "pc".to_owned(),
         };
-        assert_eq!(instrument_name(Some(&anonymous)), "this instrument");
-        assert_eq!(instrument_name(None), "this instrument");
+        assert_eq!(instrument_name(Some(&anonymous)), "this resource");
+        assert_eq!(instrument_name(None), "this resource");
     }
 
     fn pending(share_id: &str) -> PendingSession {

@@ -124,7 +124,7 @@ fn popup_mounts(desired: &Shares, result: &PassResult) -> Vec<CreatedMount> {
                     },
                 }),
                 Err(e) => {
-                    warn!("not announcing share {name}: {e}");
+                    warn!("not announcing ingest share {name}: {e}");
                     None
                 }
             }
@@ -186,7 +186,7 @@ impl LoopState {
         };
         let created = popup_mounts(share_state, &result);
         if !created.is_empty() {
-            info!("created the following shares: {created:?}");
+            info!("created the following ingest shares: {created:?}");
             let _ = self.popup.send(PopupEvent::Created(created));
         }
         // so the agent can tell which desired state this report answers
@@ -206,7 +206,7 @@ impl LoopState {
                 .iter()
                 .find(|share| share.share_id == error.share_id)
                 .map_or(error.share_id.as_str(), |share| share.share_name.as_str());
-            warn!("share {name}: {}", error.message);
+            warn!("ingest share {name}: {}", error.message);
         }
         self.actual = Some(report.clone());
         self.publish_tray_state();
