@@ -95,6 +95,18 @@
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
 }
 
+/*
+ * Page inset: a card's 1px border plus its `px-5` padding. Text outside a card
+ * (breadcrumbs, page titles, section headings) is inset by this much
+ * (`px-page-inset`), so it starts and ends on the same vertical line as the
+ * text inside the cards. The boxes (cards, the search field) and the header's
+ * and footer's contents reach the column's edge. Change it together with the
+ * cards' `px-5`, or the two lines drift apart again.
+ */
+@theme {
+    --spacing-page-inset: calc(var(--spacing) * 5 + 1px);
+}
+
 html,
 body,
 #root {

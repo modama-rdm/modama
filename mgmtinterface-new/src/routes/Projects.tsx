@@ -65,7 +65,7 @@ function ProjectsSection({
     if (projects.length === 0) return null
     return (
         <section className="mb-8">
-            <div className="mb-3 text-[11px] font-bold uppercase tracking-wider text-fg-faint">
+            <div className="mb-3 px-page-inset text-[11px] font-bold uppercase tracking-wider text-fg-faint">
                 {title}
             </div>
             <Card className="overflow-hidden">
@@ -139,7 +139,7 @@ export function Projects() {
 
     return (
         <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <div className="mb-6 flex items-center justify-between gap-4">
+            <div className="mb-6 flex items-center justify-between gap-4 px-page-inset">
                 <div>
                     <h1 className="text-2xl font-bold text-fg">Projects</h1>
                     <p className="mt-0.5 text-sm text-fg-subtle">

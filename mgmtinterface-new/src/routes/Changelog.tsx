@@ -28,18 +28,21 @@ function Change({text}: { text: string }) {
 export function Changelog() {
     return (
         <div className="mx-auto max-w-150 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
-            <Link
-                to="/projects"
-                className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
-            >
-                <ArrowLeftIcon className="h-4 w-4"/>
-                Projects
-            </Link>
+            {/* Inset like the text in the cards below. */}
+            <div className="px-page-inset">
+                <Link
+                    to="/projects"
+                    className="mb-5 inline-flex items-center gap-1.5 text-sm text-fg-subtle hover:text-fg"
+                >
+                    <ArrowLeftIcon className="h-4 w-4"/>
+                    Projects
+                </Link>
 
-            <h1 className="text-2xl font-bold text-fg">Changelog</h1>
-            <p className="mt-1 text-sm text-fg-subtle">
-                What’s changed in the Data Management portal.
-            </p>
+                <h1 className="text-2xl font-bold text-fg">Changelog</h1>
+                <p className="mt-1 text-sm text-fg-subtle">
+                    What’s changed in the Data Management portal.
+                </p>
+            </div>
 
             <ol className="mt-8 space-y-4">
                 {CHANGELOG.map((entry) => (

@@ -396,7 +396,7 @@ function AccessCommands({access}: { access: BrowseAccess }) {
 function Breadcrumb({path}: { path: string }) {
     const pyramid = pathPyramid(path)
     return (
-        <nav className="mb-3.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]">
+        <nav className="mb-3.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 px-page-inset text-[13px]">
             <Link to="/projects" className="rounded px-0.5 text-primary hover:underline">
                 Projects
             </Link>

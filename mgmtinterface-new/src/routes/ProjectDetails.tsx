@@ -93,7 +93,7 @@ function ProjectDescription({
     if (!project.description) {
         if (!canMutate) return null
         return (
-            <div className="-mt-3 mb-6">
+            <div className="-mt-3 mb-6 px-page-inset">
                 <Link
                     to={descriptionPath(project.name)}
                     className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
@@ -409,7 +409,7 @@ function ProjectBody() {
 
     return (
         <>
-            <div className="mb-6 flex items-start justify-between gap-4">
+            <div className="mb-6 flex items-start justify-between gap-4 px-page-inset">
                 <div>
                     <h1 className="font-mono text-2xl font-bold text-fg">{project.name}</h1>
                     <p className="mt-0.5 text-sm text-fg-subtle">
@@ -492,7 +492,7 @@ function ProjectBody() {
                 </dl>
             </Card>
 
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between px-page-inset">
                 <h2 className="text-lg font-bold text-fg">Sessions</h2>
                 {canMutate && (
                     <Button
@@ -518,7 +518,7 @@ function DetailsSkeleton() {
     const bar = 'animate-pulse rounded bg-surface-muted'
     return (
         <>
-            <div className={`${bar} mb-6 h-8 w-64`}/>
+            <div className={`${bar} mb-6 ml-page-inset h-8 w-64`}/>
             <Card className="mb-8 divide-y divide-default/60">
                 {Array.from({length: 6}).map((_, i) => (
                     <div key={i} className="grid grid-cols-[8rem_1fr] gap-4 px-5 py-4">
@@ -527,7 +527,7 @@ function DetailsSkeleton() {
                     </div>
                 ))}
             </Card>
-            <div className={`${bar} mb-3 h-6 w-28`}/>
+            <div className={`${bar} mb-3 ml-page-inset h-6 w-28`}/>
             <Card className="p-5">
                 {Array.from({length: 3}).map((_, i) => (
                     <div key={i} className={`${bar} mb-3 h-5 w-full last:mb-0`}/>
@@ -561,7 +561,7 @@ export function ProjectDetails() {
     return (
         <div className="mx-auto max-w-270 px-6 py-8 animate-[fadeIn_0.2s_ease-out]">
             <Breadcrumbs
-                className="mb-5"
+                className="mb-5 px-page-inset"
                 crumbs={[
                     {label: 'Projects', to: '/projects'},
                     {label: name, mono: true},
