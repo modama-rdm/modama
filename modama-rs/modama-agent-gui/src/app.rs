@@ -892,7 +892,7 @@ mod tests {
         app.app_state
             .apply_agent_view(foreground_view(crate::state::ForegroundSession::Mounting(
                 pending.clone(),
-                "Waiting for the session helper to mount the share.".to_owned(),
+                "Waiting for the session helper to mount the ingest share.".to_owned(),
             )));
 
         assert_eq!(app.app_state.pending_start(), None);
@@ -900,7 +900,7 @@ mod tests {
             app.app_state.agent.foreground,
             crate::state::ForegroundSession::Mounting(
                 pending,
-                "Waiting for the session helper to mount the share.".to_owned()
+                "Waiting for the session helper to mount the ingest share.".to_owned()
             )
         );
     }

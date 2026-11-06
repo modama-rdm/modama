@@ -42,7 +42,7 @@ impl std::fmt::Display for AddError {
             Self::LetterTaken => write!(f, "mount failed: drive letter already in use"),
             Self::CredentialConflict => write!(
                 f,
-                "another user's drive is still connected; close their files or release it"
+                "another user's ingest share is still connected; close their files or release it"
             ),
             Self::AuthenticationFailed => write!(f, "mount failed: authentication failed"),
             Self::Other(message) => write!(f, "mount failed: {message}"),
@@ -185,7 +185,7 @@ impl<A: WNetApi> MountTable for WNetTable<'_, A> {
 
     fn add(&mut self, share: &Share) -> Result<(), AddFailure> {
         if share.share_name.is_empty() || share.share_name.contains(['\\', '/']) {
-            return Err(AddFailure::Failed("invalid share name".to_owned()));
+            return Err(AddFailure::Failed("invalid ingest share name".to_owned()));
         }
         let remote = format!(r"\\{}\{}", self.host, share.share_name);
         let user = qualified_username(&share.username, self.domain);
@@ -444,7 +444,7 @@ mod tests {
         assert_eq!(
             messages,
             vec![
-                "another user's drive is still connected; close their files or release it",
+                "another user's ingest share is still connected; close their files or release it",
                 "mount failed: authentication failed",
             ]
         );
@@ -476,7 +476,10 @@ mod tests {
         let api = FakeWNet::default();
         let state = pass(&api, &[share("1", r"b\.."), share("2", "c/d")]);
         let errors: Vec<_> = state.errors.iter().map(|e| e.message.as_str()).collect();
-        assert_eq!(errors, vec!["invalid share name", "invalid share name"]);
+        assert_eq!(
+            errors,
+            vec!["invalid ingest share name", "invalid ingest share name"]
+        );
         assert!(api.calls.borrow().is_empty());
     }
 

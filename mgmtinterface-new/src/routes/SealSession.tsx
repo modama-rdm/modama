@@ -63,11 +63,11 @@ export function SealSession() {
                     <div>
                         <h1 className="text-xl font-bold text-fg">Seal this session?</h1>
                         <p className="mt-1.5 text-sm leading-relaxed text-fg-muted">
-                            This permanently write-protects the{' '}
+                            This makes the{' '}
                             <code className="rounded bg-surface-muted px-1 py-0.5 font-mono text-xs">
                                 raw/
                             </code>{' '}
-                            folder and all its contents.
+                            folder and all its contents immutable.
                         </p>
                     </div>
                 </div>
@@ -75,14 +75,14 @@ export function SealSession() {
                 <div className="mb-5 rounded-xl border border-danger/30 bg-danger/5 px-4.5 py-4">
                     <div className="mb-2 flex items-center gap-1.5 text-[13px] font-bold text-danger">
                         <AlertTriangleIcon className="h-4 w-4"/>
-                        This cannot be undone
+                        Only administrators can undo this
                     </div>
                     <ul className="m-0 list-disc pl-4.5 text-[13px] leading-relaxed text-danger">
                         <li>
                             All files in <code className="font-mono">raw/</code> become
-                            permanently read-only
+                            immutable
                         </li>
-                        <li>Nobody — including you — can modify or delete these files</li>
+                        <li>Nobody — including you — can change, rename or delete these files</li>
                         <li>
                             The session folder and files outside{' '}
                             <code className="font-mono">raw/</code> stay writable

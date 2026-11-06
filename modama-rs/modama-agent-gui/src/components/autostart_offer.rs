@@ -42,15 +42,15 @@ impl AutostartOffer {
                     ))
                     .show(ui, |ui| {
                         ui.label(
-                            RichText::new("Connect ingest drives automatically?")
+                            RichText::new("Connect ingest shares automatically?")
                                 .font(styles::typography::label::font_id()),
                         );
                         ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
                         ui.label(
                             RichText::new(
                                 "Modama can run a small background program when you sign in to \
-                                 Windows. It connects your ingest drives and disconnects them \
-                                 after a session, even when this window is closed.",
+                                 Windows. It connects your ingest shares and disconnects them \
+                                 when they are stopped, even when this window is closed.",
                             )
                             .font(styles::typography::body::font_id())
                             .color(styles::color::on_surface_variant::VALUE.resolve(ui.visuals())),

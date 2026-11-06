@@ -171,7 +171,7 @@ async fn handle_authenticated_connection(
     let updates = hub.subscribe(identity.resource());
     let description = match &identity {
         ParticipantIdentity::Certified { agent } => {
-            format!("certified agent {}", agent.san_encoded)
+            format!("enrolled agent {}", agent.san_encoded)
         }
         ParticipantIdentity::Anonymous { name, lender } => {
             format!(
@@ -322,7 +322,7 @@ async fn authenticate_agent_connection(
             name,
         } => (token, version, protocol, Some(name)),
     };
-    debug!("connection attempt from {peer}; client version {version} protocol {protocol}");
+    debug!("connection attempt from {peer}; agent version {version} protocol {protocol}");
 
     // from the login message, we gather the identity,
     // or reject the connection:
@@ -411,7 +411,7 @@ pub async fn start_event_channel(
                     token_verifier.clone(),
                 ));
             } else {
-                error!("no peer addr, dropping client");
+                error!("no peer addr, dropping the connection");
             }
         }
     });

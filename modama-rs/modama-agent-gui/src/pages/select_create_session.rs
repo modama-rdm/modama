@@ -454,7 +454,7 @@ impl PageSelectCreateSession {
                                 .clone()
                                 .unwrap_or_else(|| self.new_session_input.clone());
                             return self.start_failed(Some(TaskFailure::Stay {
-                                message: "Could not start the ingest session.".to_owned(),
+                                message: "Could not start the ingest share.".to_owned(),
                                 retry: RetryAction::CreateIngest {
                                     project: self.project.clone(),
                                     session,
@@ -468,7 +468,7 @@ impl PageSelectCreateSession {
                 log::error!("create-ingest task failed: {error}");
                 if let Some(session) = self.selected_session.clone() {
                     return self.start_failed(Some(TaskFailure::Stay {
-                        message: "Could not start the ingest session.".to_owned(),
+                        message: "Could not start the ingest share.".to_owned(),
                         retry: RetryAction::CreateIngest {
                             project: self.project.clone(),
                             session,
@@ -476,7 +476,7 @@ impl PageSelectCreateSession {
                     }));
                 }
                 return self.start_failed(Some(TaskFailure::Stay {
-                    message: "Could not start the ingest session.".to_owned(),
+                    message: "Could not start the ingest share.".to_owned(),
                     retry: RetryAction::CreateSession {
                         project: self.project.clone(),
                         session: self.new_session_input.clone(),
@@ -513,7 +513,7 @@ impl PageSelectCreateSession {
             Err(error) => {
                 log::error!("create-session task failed: {error}");
                 return self.start_failed(Some(TaskFailure::Stay {
-                    message: "Could not create the ingest session.".to_owned(),
+                    message: "Could not create the session.".to_owned(),
                     retry: RetryAction::CreateSession {
                         project: self.project.clone(),
                         session: self.new_session_input.clone(),

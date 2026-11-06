@@ -13,10 +13,10 @@
   <h1>Manage ingest share for session "{{ ds.name }}" in project "{{ project.name }}"</h1>
   
   {% include '_flash.html.j2' %}
-  <p>An ingest network share is a temporary Windows network share (SMB/CIFS) with temporary credentials
+  <p>An ingest share is a temporary Windows network share (SMB/CIFS) with temporary credentials
   that can be created on-demand for a session.
   Mapping it on machines that are operated with system accounts,
-  such as microscope computers, allows importing data into a session using the identity of the operator
+  such as instrument PCs, allows uploading data into a session using the identity of the operator
   and not the system account. At the same time, it avoids issues with saving credentials
   on machines that are used by many users.</p>
   <p>That way, data can be saved directly in the correct location with correct ownership
@@ -25,7 +25,7 @@
   <p>
   Windows only allows one set of credentials per session and remote host. The management interface creates all ingest shares for the same user
   with the same credentials so that they can be open in parallel. Ingest shares for different users
-  cannot coexist, however. Any active shares by other users have to be closed for that reason. Active shares
+  cannot coexist, however. Any ingest shares of other users have to be disconnected for that reason. Mapped shares
   can be listed with <code>net use</code> on the command line and closed with <code>net use &lt;drive letter or path&gt; /delete</code>.
   Please note that shares opened with <code>\\&lt;host&gt;\&lt;share&gt;</code> in the Explorer remain active even after the Explorer window
   is closed. They can only be unmapped via the command line or the Microsoft Management Console.

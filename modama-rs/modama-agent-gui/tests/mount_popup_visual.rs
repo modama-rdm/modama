@@ -78,7 +78,7 @@ fn buttons_answer_once() {
         Arc::clone(&answers),
     );
 
-    harness.get_by_label("Open network drive").click();
+    harness.get_by_label("Open ingest share").click();
     harness.run_steps(2);
     harness.get_by_label("Dismiss").click();
     harness.run_steps(2);
