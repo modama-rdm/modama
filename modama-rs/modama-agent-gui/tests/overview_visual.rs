@@ -28,7 +28,7 @@ fn enabled_top_bar_controls_use_pointing_hand_cursor() {
     let mut harness = overview_harness(false, false);
     harness.run_steps(3);
 
-    harness.get_by_label("go to Overview").hover();
+    harness.get_by_label("go to Ingest").hover();
     harness.run_steps(1);
     assert_eq!(
         harness.output().platform_output.cursor_icon,
@@ -121,6 +121,28 @@ fn overview_snapshots() {
     narrow.run_steps(3);
     narrow.snapshot("overview_narrow");
     results.extend_harness(&mut narrow);
+
+    for (dark, name) in [
+        (false, "overview_scripts_dialog"),
+        (true, "overview_scripts_dialog_dark"),
+    ] {
+        let mut dialog = overview_harness(dark, true);
+        dialog.get_by_label("Use in scripts and notebooks").click();
+        dialog.run();
+        dialog.snapshot(name);
+        results.extend_harness(&mut dialog);
+    }
+
+    // narrower than the dialog: it shrinks, and the code scrolls sideways
+    let mut narrow_dialog = overview_harness(false, true);
+    narrow_dialog.set_size(egui::vec2(520.0, VIEWPORT.y));
+    narrow_dialog.run_steps(3);
+    narrow_dialog
+        .get_by_label("Use in scripts and notebooks")
+        .click();
+    narrow_dialog.run();
+    narrow_dialog.snapshot("overview_scripts_dialog_narrow");
+    results.extend_harness(&mut narrow_dialog);
 
     let mut logged_out = overview_harness(false, false);
     logged_out.snapshot("overview_logged_out");
@@ -239,7 +261,7 @@ fn dropped_connection_indicator_does_not_disable_controls() {
             )
             .is_some()
     );
-    for label in ["go to Overview", "Stop Ingest", "Log out"] {
+    for label in ["go to Ingest", "Stop Ingest", "Log out"] {
         assert!(
             harness
                 .query_by(|node| node.label().as_deref() == Some(label) && !node.is_disabled())
@@ -273,6 +295,50 @@ fn another_session_can_be_started_while_one_is_active() {
     );
 }
 
+/// The text the last frame put on the clipboard, if any
+fn copied_text(harness: &Harness<'static, AgentGuiApp>) -> Option<String> {
+    harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        })
+}
+
+#[test]
+fn the_code_icon_opens_the_mount_path_and_notebook_code_to_copy() {
+    let mut active = overview_harness(false, true);
+    assert!(active.query_by_label("Python code").is_none());
+    active.get_by_label("Use in scripts and notebooks").click();
+    active.run();
+    assert!(active.query_by_label("Python code").is_some());
+
+    active
+        .get_by_label("Copy mount path on this computer")
+        .click();
+    active.step();
+    assert_eq!(
+        copied_text(&active).as_deref(),
+        Some("/mnt/modama/representative-project/2026-07-29-ingest")
+    );
+
+    active.get_by_label("Copy python code").click();
+    active.step();
+    let code = copied_text(&active).expect("the code goes to the clipboard");
+    assert!(code.contains("/api/shares/foreground/"), "{code}");
+    assert!(
+        code.contains("session_folder = share[\"mount_path\"]"),
+        "{code}"
+    );
+
+    active.get_by_label("Close").click();
+    active.run();
+    assert!(active.query_by_label("Python code").is_none());
+}
+
 #[test]
 fn active_session_details_include_the_agent_mount_path() {
     let active = overview_harness(false, true);
@@ -289,8 +355,11 @@ fn active_session_details_include_the_agent_mount_path() {
 #[test]
 fn overview_logo_heading_and_card_content_share_a_left_guide() {
     let active = overview_harness(false, true);
-    let logo_x = active.get_by_label("go to Overview").rect().left();
-    let heading_x = active.get_by_label("Overview").rect().left();
+    let logo_x = active.get_by_label("go to Ingest").rect().left();
+    let heading_x = active
+        .get_by_label("Ingest for this resource")
+        .rect()
+        .left();
     let card_content_x = active.get_by_label("Foreground ingest").rect().left();
     let tolerance = styles::components::standard_border::width::EGUI_POINTS;
 
@@ -307,8 +376,8 @@ fn error_toast_aligns_with_the_app_shell_geometry() {
     );
     harness.run_steps(2);
 
-    let logo = harness.get_by_label("go to Overview").rect();
-    let heading = harness.get_by_label("Overview").rect();
+    let logo = harness.get_by_label("go to Ingest").rect();
+    let heading = harness.get_by_label("Ingest for this resource").rect();
     let retry = harness.get_by_label("Retry").rect();
     let dismiss = harness.get_by_label("Dismiss").rect();
     let tolerance = styles::components::standard_border::width::EGUI_POINTS * 2.0;
@@ -436,7 +505,7 @@ fn top_bar_tab_order_follows_its_visual_order() {
             assert!(harness.get_by_label("Start Ingest").is_focused());
         }
         press_tab(&mut harness, false);
-        assert!(harness.get_by_label("go to Overview").is_focused());
+        assert!(harness.get_by_label("go to Ingest").is_focused());
 
         press_tab(&mut harness, false);
         assert!(harness.get_by_label("Switch to dark theme").is_focused());
@@ -448,7 +517,7 @@ fn top_bar_tab_order_follows_its_visual_order() {
         assert!(harness.get_by_label("Switch to dark theme").is_focused());
 
         press_tab(&mut harness, true);
-        assert!(harness.get_by_label("go to Overview").is_focused());
+        assert!(harness.get_by_label("go to Ingest").is_focused());
     }
 }
 
@@ -609,7 +678,7 @@ fn connecting_snapshot() {
     assert!(
         harness
             .query_by(|node| {
-                node.label().as_deref() == Some("go to Overview") && node.is_disabled()
+                node.label().as_deref() == Some("go to Ingest") && node.is_disabled()
             })
             .is_some()
     );
@@ -737,12 +806,23 @@ fn other_mounts_snapshots() {
     with_other_mounts(&mut confirm);
     // labels match exactly: these are the list's buttons, not "Stop Ingest"
     assert_eq!(confirm.get_all_by_label("Stop").count(), 2);
+    // the list may start below the window's edge
+    confirm
+        .get_all_by_label("Stop")
+        .next()
+        .expect("the list has a stop button")
+        .scroll_to_me();
+    confirm.run();
     confirm
         .get_all_by_label("Stop")
         .next()
         .expect("the list has a stop button")
         .click();
     confirm.run();
+    assert!(
+        confirm.query_by_label("Stop ingest?").is_some(),
+        "the click should open the confirmation"
+    );
     confirm.snapshot("overview_other_mount_close_confirmation");
     results.extend_harness(&mut confirm);
 

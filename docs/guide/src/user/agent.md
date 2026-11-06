@@ -10,7 +10,7 @@ an "ingest share".
 
 ![Connecting to modama-agent](images/agent/connecting.png)
 
-![The modama-agent overview while logged out](images/agent/overview-logged-out.png)
+![The modama-agent ingest page while logged out](images/agent/overview-logged-out.png)
 
 - Step 2: log in
 
@@ -37,7 +37,7 @@ TODO: describe the confirmation step.
 Now the ingest share should be available, either as a mapped network drive,
 or as a mounted network filesystem under Linux.
 
-![The overview with an active ingest session](images/agent/active-session.png)
+![The ingest page with a foreground ingest](images/agent/active-session.png)
 
 ## How to upload data to the ingest share
 
@@ -50,17 +50,28 @@ in the data management.
 
 If you would like to integrate data management into your automation, for example
 into an acquisition script or notebook, this is easily possible! `modama-agent`
-provides a local HTTP API on port 3003, which you can query for the current
-session folder. We call this the "foreground share". For example, in Python:
+provides a local HTTP API, which you can query for the current
+session folder. We call this the "foreground ingest". The GUI has ready-made
+Python code for this: on the ingest page, click the `</>` icon next to "Mount
+path on this computer". The code looks like this:
 
 ```python
-import requests
+# The session folder for new data (the foreground ingest), from
+# the modama agent on this computer. Run this when you start
+# saving: it changes whenever someone starts a new ingest.
+import json
+import urllib.request
 
-shares = requests.get("http://localhost:3003/shares/foreground/").json()
-# if there is no foreground share: {"type": None}
-# if there is a foreground share: {"type": "Share", "dest_path": "...", "mount_path": "Z:\\..."}
+url = "http://localhost:3003/api/shares/foreground/"
+headers = {"X-API-Version": "1.0.0"}
+request = urllib.request.Request(url, headers=headers)
+with urllib.request.urlopen(request, timeout=10) as response:
+    share = json.load(response)
+if "mount_path" not in share:
+    reason = share.get("message", "No foreground ingest.")
+    raise RuntimeError(reason)
+session_folder = share["mount_path"]
 ```
 
-It is a good idea to request this information at the beginning of the script,
-as the foreground share is replaced when the next session starts, but your
-script might still want to save data into the correct session.
+The `session_folder` is valid only on the computer where you ran this snippet,
+different computers have their own mount paths.
