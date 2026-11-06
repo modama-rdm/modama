@@ -1,12 +1,14 @@
-/target
+# Files the image builds don't need: a change to them would otherwise invalidate the cached
+# cargo build.
+**/target
 Dockerfile*
 .dockerignore
-dev-env/data
-dev-env/certs
-dev-env/etc-smbdrop
-test-env/target
-test-env/cargo-cache/
-test-env/cargo-git/
-test-env/report-target
-test-env/certs
-test-env/docker-compose.yml
+**/*.md
+**/tests/snapshots
+ci
+ci.just
+justfile
+build.sh
+dev-env
+test-env
+windows-7-dlls.txt
