@@ -34,6 +34,32 @@ differences to expect and where to look, and run `just update-snapshots`
 (and `just clean`) only after they accepted. Looking at the review images
 yourself is helpful, but it doesn't replace the user's acceptance.
 
+A visual test that clicks, types or scrolls before a snapshot also asserts
+the effect it expects, such as the dialog being open or a label being
+there. Otherwise a click that misses still produces a snapshot, and its
+difference looks like any other.
+
+When reviewing differences, look at the snapshots with the largest pixel
+difference first (the test output reports each one's size); don't conclude
+from a sample.
+
+## Shape of UI changes
+
+A small change, such as a text, a label or an icon next to an existing
+element, can be agreed in words. Anything bigger is agreed on its shape
+before it is built: a new dialog, page or major UI element, or a layout
+change that alters most snapshots.
+
+1. Show a mockup first (an ASCII sketch, for example as previews in a
+   question) and agree on it.
+2. As the first step of the implementation, write the visual test for the
+   new UI, run only that test with `just visual-test <name>`, and show the
+   user the snapshots from `modama-agent-gui/tests/snapshots/review/`.
+   If the change affects several pages or states, show a representative
+   snapshot of each. Skip this step if the user asked you to implement something on your own.
+
+Only then build out the rest.
+
 ## GUI layout
 
 Read "Layout › Guides" in `mgmtinterface-new/DESIGN.md` before placing

@@ -77,6 +77,17 @@ visual-tests:
     just review-snapshots
     exit $status
 
+# Earlier review artifacts are removed first, so {{ review_dir }} holds only this run's.
+# Run only the visual tests whose names contain FILTER, for a first look at new UI.
+visual-test FILTER:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    just clean
+    WGPU_DEBUG=0 cargo test -p {{ agent_gui_package }} --features visual-tests --no-fail-fast -- "{{ FILTER }}"
+    status=$?
+    just review-snapshots
+    exit $status
+
 # Gather each differing snapshot (A.png, A.new.png, A.diff.png, A.old.png) into {{ review_dir }}.
 review-snapshots:
     #!/usr/bin/env bash
