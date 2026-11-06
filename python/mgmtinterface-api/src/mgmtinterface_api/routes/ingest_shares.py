@@ -27,7 +27,7 @@ from ..shares import (
 from ..versioning import VERSION_ERROR_RESPONSES
 
 # "Ingest share" is the UI's word for an smbdrop share: a temporary Samba share
-# of one session with one-time credentials, which an instrument PC maps to
+# of one session with one-time credentials, which an instrument computer maps to
 # write data straight into the session as the user who opened it.
 router = APIRouter(
     prefix="/ingest-shares",
@@ -41,7 +41,7 @@ class IngestShare(BaseModel):
     An ingest share. The fields smbdrop reports, plus the project and session
     it belongs to, so that a client does not parse `dest_path`, and the host
     and workgroup the web interface shows a person who connects by hand.
-    modama-agent does not use those two: an instrument PC may reach the Samba
+    modama-agent does not use those two: an instrument computer may reach the Samba
     server another way than the intranet does, so the agent mounts with the
     host, port and domain from its own configuration file.
     """

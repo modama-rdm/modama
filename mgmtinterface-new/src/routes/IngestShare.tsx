@@ -74,7 +74,7 @@ function ActiveShare({
                             </span>
                         </div>
                         <p className="max-w-110 text-[13px] leading-relaxed text-fg-subtle">
-                            Map this ingest share on an instrument PC to upload data
+                            Map this ingest share on an instrument computer to upload data
                             directly into session{' '}
                             <strong className="font-mono text-xs text-fg">{dataset}</strong>{' '}
                             with your identity and permissions.
@@ -184,7 +184,7 @@ function CreateShare({
                 Creating an ingest share opens a temporary Windows network share
                 (SMB/CIFS) with one-time credentials for{' '}
                 <span className="font-mono text-fg">{dataset}</span>. Map it on an
-                instrument PC to write data straight into this
+                instrument computer to write data straight into this
                 session with the correct ownership — no stored credentials, no system
                 account.
             </p>

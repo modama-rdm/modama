@@ -41,6 +41,6 @@ Their name is only for display and is not a trusted identity.
 - A enrolled agent never borrows a token: it fetches its own from the token service over mTLS,
   which signs the certificate's AgentId. A rejection can only come from a bug or a
   misconfiguration, so it is logged as an error on both sides instead of being worked around.
-- An instrument PC that moves between resources is configured as anonymous and carries no certificate.
+- An instrument computer that moves between resources is configured as anonymous and carries no certificate.
 - The same enrolled agent may briefly appear twice, for example while smbdrop still holds a
   half-dead connection after a reconnect. This is accepted.
