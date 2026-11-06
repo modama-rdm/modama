@@ -11,7 +11,6 @@ dist/
 /deploy/testfolder/*/*
 .idea
 /design-handoff
-AGENTS.md
 frontend_auth_spike.md
 /.claude
 cargo-git
