@@ -508,7 +508,9 @@ def cmd_report() -> None:
                 **base_tree(tree, open_numbers, drop_pull=pull),
                 **files,
             },
-            f"Images of failing visual tests for pull request #{pull}, run {run_id}",
+            f"Images of failing visual tests for pull request #{pull}, run {run_id}"
+            if files
+            else f"Remove the images of pull request #{pull}: no failing snapshots in run {run_id}",
         )
         comment_id = find_comment(repo, pull)
         if comment_id is None and all(s.outcome == "success" for s in suites):
