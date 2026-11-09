@@ -6,11 +6,15 @@ into them while they are being used.
 
 ## Language
 
-### Organizing data
+### Projects and sessions
 
 **Project**:
 A collection of sessions with an owner and a list of members, who all have access to its data.
+Its files are kept in its project folder.
 _Avoid_: Group
+
+**Project folder**:
+The folder that holds a project's files. Its owner on the file system is the project's owner.
 
 **Owner**:
 The user responsible for a project, and the only one who can change its members.
@@ -21,12 +25,22 @@ and folders anywhere in the project folder except in sealed raw folders, but can
 or remove what they added themselves.
 
 **Session**:
-One stretch of work on an instrument, usually no longer than a day, as part of a project. Its
-data is kept in a session folder.
+The data kept together in one session folder of a project: its raw data, anything derived
+from it, and its description. A session is meant to hold one stretch of work at one resource,
+usually no longer than a day, but nothing enforces that.
 _Avoid_: Dataset
 
+**Session folder**:
+A folder directly inside a project folder that contains a raw folder, however it was created.
+It holds one session.
+_Avoid_: Session directory
+
 **Raw data**:
-The data as an instrument recorded it, kept apart from anything derived from it.
+The data as it was recorded, kept apart from anything derived from it.
+
+**Raw folder**:
+The `raw/` folder of a session folder, which holds its raw data and is what sealing makes
+immutable.
 
 **Description**:
 The text that describes a project or a session, kept as a `README.md` in its folder. Like any
@@ -37,21 +51,6 @@ Making a session's raw data immutable, so that nobody can change, rename or remo
 even its owner, and it can be trusted as the original record. Only administrators can unseal
 it again, on request. A session whose raw data is not sealed is **open**.
 _Avoid_: Freezing, locking, write-protecting, making read-only, writable (for open)
-
-### The file system
-
-**Project folder**:
-The folder that holds a project's files. Its owner on the file system is the project's owner.
-
-**Session folder**:
-The folder that holds a session's data: its raw folder, anything derived from the raw data,
-and its description. Any folder directly inside a project folder that contains a raw folder
-is a session folder, however it was created.
-_Avoid_: Session directory
-
-**Raw folder**:
-The `raw/` folder of a session folder, which holds its raw data and is what sealing makes
-immutable.
 
 ### Instruments
 
@@ -74,9 +73,9 @@ ingest share; ingest is the whole process.
 _Avoid_: Import, upload (as the name of the process)
 
 **Ingest share**:
-A temporary network share that writes into one session as the user who started it, with
+A temporary network share that writes into one session folder as the user who started it, with
 credentials that are only valid until it is stopped. A user has at most one ingest share per
-session; other users can have their own for the same session.
+session folder at each resource; other users can have their own for the same session folder.
 _Avoid_: Share (in user-facing text), network drive, drop, opening or closing (for starting
 or stopping it)
 
