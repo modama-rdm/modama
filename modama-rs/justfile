@@ -223,3 +223,12 @@ gio-integration-test:
     done
     XDG_RUNTIME_DIR="$runtime_dir" dbus-run-session -- \
         cargo test -q -p modama-session-helper --test gio_integration -- --ignored --test-threads=1
+
+# Run the integration tests in test-env/ (smbdrop, agents, a session helper and the management
+# API in containers, with docker compose or podman compose); arguments go to pytest
+integration-tests *args:
+    test-env/run.sh {{ args }}
+
+# Remove the integration test environment: its containers, test CA and test data
+integration-tests-cleanup:
+    test-env/cleanup.sh

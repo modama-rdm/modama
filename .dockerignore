@@ -8,3 +8,8 @@ mgmtinterface-new/dist-ssr
 
 # test CA: key material
 deploy/testconf/secrets/CA
+
+# Rust build output and the integration test environment (its build cache and test CA
+# keys); no image built from the repo root uses them, and target/ alone can be tens of GB
+**/target
+modama-rs/test-env
