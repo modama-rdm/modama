@@ -42,6 +42,13 @@ The data as it was recorded, kept apart from anything derived from it.
 The `raw/` folder of a session folder, which holds its raw data and is what sealing makes
 immutable.
 
+**Canonical path**:
+The part of a file's or folder's path that is the same for every way of access to the whole of
+Modama's storage (Samba, SSH, Nextcloud, …) and on every computer, like
+`adhoc/testproject/session2`. An ingest share gives access to a single session folder, so paths
+in it leave out that folder's canonical path.
+_Avoid_: Dest path, data path, storage path
+
 **Description**:
 The text that describes a project or a session, kept as a `README.md` in its folder. Like any
 file in a project, only the user who wrote it first can change it.
