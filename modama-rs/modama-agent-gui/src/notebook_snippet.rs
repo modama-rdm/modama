@@ -4,15 +4,17 @@
 const API_VERSION: &str = "1.0.0";
 
 /// Python code (standard library only) that sets `session_folder` to the foreground share's
-/// mount path, as reported by the agent at `agent_url`. It asks at run time, so a notebook
-/// rerun later writes into the session open then, never into a stale one.
+/// mount path, as reported by the agent at `agent_url`, and `raw_folder` to its `raw`
+/// subfolder. It asks at run time, so a notebook rerun later writes into the session open
+/// then, never into a stale one.
 pub fn python_snippet(agent_url: &str) -> String {
     let url = format!("{}/api/shares/foreground/", agent_url.trim_end_matches('/'));
     format!(
-        r#"# The session folder for new data (the foreground ingest), from
-# the modama agent on this computer. Run this when you start
-# saving: it changes whenever someone starts a new ingest.
+        r#"# The session folder for new data (the foreground ingest),
+# from the modama agent on this computer. Run this before you
+# start saving.
 import json
+import pathlib
 import urllib.request
 
 url = "{url}"
@@ -24,6 +26,7 @@ if "mount_path" not in share:
     reason = share.get("message", "No foreground ingest.")
     raise RuntimeError(reason)
 session_folder = share["mount_path"]
+raw_folder = pathlib.Path(session_folder) / "raw"
 "#
     )
 }

@@ -8,6 +8,7 @@ pub mod dropdown;
 pub mod flow_navigation;
 pub mod forms;
 pub mod list_view;
+pub mod path_line;
 pub mod toast;
 
 use eframe::egui::{self, RichText};
@@ -33,4 +34,17 @@ pub(crate) fn page_heading(ui: &mut egui::Ui, text: &str) {
             RichText::new(text).font(styles::typography::heading::font_id()),
         ));
     });
+}
+
+/// The small upper-case label above a value, like the web GUI's detail and copy-field
+/// labels; its accessible name keeps `text`'s case, so screen readers read it as words
+pub(crate) fn detail_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let response = ui.add(egui::Label::new(
+        RichText::new(text.to_uppercase())
+            .font(styles::typography::detail_label::font_id())
+            .extra_letter_spacing(styles::typography::detail_label::LETTER_SPACING)
+            .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
+    ));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    response
 }

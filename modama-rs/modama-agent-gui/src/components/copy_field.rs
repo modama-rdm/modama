@@ -60,12 +60,8 @@ pub fn copy_button(ui: &mut egui::Ui, value: &str, what: &str) -> egui::Response
 /// `label` above a bordered box with `value` in monospace and a copy button at its right
 /// edge. Lines don't wrap (code stays code): a value wider than the box scrolls sideways.
 pub fn copy_field(ui: &mut egui::Ui, label: &str, value: &str) {
-    ui.add(egui::Label::new(
-        RichText::new(label)
-            .font(styles::typography::supporting_text::font_id())
-            .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
-    ));
-    ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
+    super::detail_label(ui, label);
+    ui.add_space(styles::spacing::detail_label_gap::EGUI_POINTS - ui.spacing().item_spacing.y);
     let padding = styles::spacing::input_padding_x::EGUI_POINTS;
     egui::Frame::new()
         .fill(styles::color::surface_variant::VALUE.resolve(ui.visuals()))
