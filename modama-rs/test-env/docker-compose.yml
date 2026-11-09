@@ -24,7 +24,9 @@ services:
       modama-agent-untrusted:
         condition: service_healthy
       session-1:
-        condition: service_started
+        condition: service_healthy
+      mgmtinterface-api:
+        condition: service_healthy
     stop_signal: SIGKILL
 
   smbdrop-init:
@@ -97,6 +99,9 @@ services:
       - ./target:/usr/src/modama-rs/target/
       - ./cargo-cache:/usr/local/cargo/registry/cache/
       - ./cargo-git:/usr/local/cargo/git/
+      # read by the build scripts, from outside of the image's build context (modama-rs/)
+      - ../../python/mgmtinterface-api/openapi.json:/usr/src/python/mgmtinterface-api/openapi.json:ro
+      - ../../mgmtinterface-new/DESIGN.md:/usr/src/mgmtinterface-new/DESIGN.md:ro
     command:
       - "cargo"
       - "run"
@@ -110,7 +115,8 @@ services:
     ports:
       - "3003:3003"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version: 1.0.0", "http://127.0.0.1:3003/api/health/"]
+      # no space after the colon: podman-compose joins the arguments into one shell command line
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version:1.0.0", "http://127.0.0.1:3003/api/health/"]
       interval: 5s
       timeout: 15s
       start_period: 5m
@@ -132,6 +138,9 @@ services:
       - ./target:/usr/src/modama-rs/target/
       - ./cargo-cache:/usr/local/cargo/registry/cache/
       - ./cargo-git:/usr/local/cargo/git/
+      # read by the build scripts, from outside of the image's build context (modama-rs/)
+      - ../../python/mgmtinterface-api/openapi.json:/usr/src/python/mgmtinterface-api/openapi.json:ro
+      - ../../mgmtinterface-new/DESIGN.md:/usr/src/mgmtinterface-new/DESIGN.md:ro
     command:
       - "bash"
       - "-c"
@@ -142,6 +151,13 @@ services:
         exec runuser -u ingest -- env HOME=/home/ingest XDG_RUNTIME_DIR=/run/user/1000 \
           dbus-run-session -- /usr/src/modama-rs/target/release/modama-agent-gui \
           --agent-url http://localhost:3003/ session-helper
+    # healthy once the helper runs, after its build; it connects to the agent right away
+    healthcheck:
+      test: ["CMD-SHELL", "ls -l /proc/[0-9]*/exe 2>/dev/null | grep -q 'release/modama-agent-gui$'"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10m
+      retries: 12
 
   modama-agent-2:
     build:
@@ -159,6 +175,9 @@ services:
       - ./target:/usr/src/modama-rs/target/
       - ./cargo-cache:/usr/local/cargo/registry/cache/
       - ./cargo-git:/usr/local/cargo/git/
+      # read by the build scripts, from outside of the image's build context (modama-rs/)
+      - ../../python/mgmtinterface-api/openapi.json:/usr/src/python/mgmtinterface-api/openapi.json:ro
+      - ../../mgmtinterface-new/DESIGN.md:/usr/src/mgmtinterface-new/DESIGN.md:ro
     command:
       - "cargo"
       - "run"
@@ -170,7 +189,8 @@ services:
       - "--"
       - "--config-path=/certs/agent2.toml"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version: 1.0.0", "http://127.0.0.1:3003/api/health/"]
+      # no space after the colon: podman-compose joins the arguments into one shell command line
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version:1.0.0", "http://127.0.0.1:3003/api/health/"]
       interval: 5s
       timeout: 15s
       start_period: 5m
@@ -192,6 +212,9 @@ services:
       - ./target:/usr/src/modama-rs/target/
       - ./cargo-cache:/usr/local/cargo/registry/cache/
       - ./cargo-git:/usr/local/cargo/git/
+      # read by the build scripts, from outside of the image's build context (modama-rs/)
+      - ../../python/mgmtinterface-api/openapi.json:/usr/src/python/mgmtinterface-api/openapi.json:ro
+      - ../../mgmtinterface-new/DESIGN.md:/usr/src/mgmtinterface-new/DESIGN.md:ro
     command:
       - "cargo"
       - "run"
@@ -203,25 +226,24 @@ services:
       - "--"
       - "--config-path=/certs/agent-untrusted.toml"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version: 1.0.0", "http://127.0.0.1:3003/api/health/"]
+      # no space after the colon: podman-compose joins the arguments into one shell command line
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "12", "--header", "X-API-Version:1.0.0", "http://127.0.0.1:3003/api/health/"]
       interval: 5s
       timeout: 15s
       start_period: 5m
       retries: 12
 
-  mgmtinterface:
-    hostname: mgmtinterface
-    restart: always
-    # build:
-    #   context: ../../../
-    #   dockerfile: er-c-data/mgmtinterface/Dockerfile
-    image: ghcr.io/modama-rdm/mgmtinterface:latest
+  mgmtinterface-api:
+    hostname: mgmtinterface-api
+    build:
+      context: ../..
+      dockerfile: deploy/mgmtinterface-api/Dockerfile
     environment:
-      - MGMTINTERFACE_SECRET=/mgmt_secret.py
+      # plain http, and a throwaway secret, as in deploy/docker-compose.override.yml
+      - MODAMA_SESSION_COOKIE_SECURE=false
+      - MODAMA_SESSION_SECRET=test-env-only-not-a-real-secret
     volumes:
-      - type: bind
-        source: "./mgmt_secret.py"
-        target: "/mgmt_secret.py"
+      # the CA certificate, to trust smbdrop's token service (agent tokens)
       - type: bind
         source: "./certs/ca/pub/"
         target: "/certs/ca/pub/"
@@ -231,8 +253,13 @@ services:
         condition: service_healthy
       permissions:
         condition: service_started
-    working_dir: /
-    command: /venv/bin/flask --app mgmtinterface:app run --debug --port 5000 --host 0.0.0.0
+    healthcheck:
+      # a shell command line, as podman-compose turns the CMD form into one; the image has no curl
+      test: ["CMD-SHELL", "/venv/bin/python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/mgmt-api/healthz', timeout=3)\""]
+      interval: 5s
+      timeout: 5s
+      start_period: 1m
+      retries: 12
     networks:
       - modama-network
 
@@ -243,7 +270,9 @@ services:
       - type: bind
         source: "./testfolder/data/"
         target: "/data/"
-    image: ghcr.io/modama-rdm/permissions:latest
+    build:
+      context: ../..
+      dockerfile: deploy/permissions/Dockerfile
     cap_add:
       - LINUX_IMMUTABLE
     networks:

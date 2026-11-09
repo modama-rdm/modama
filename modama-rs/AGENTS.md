@@ -16,6 +16,18 @@ Start integration test files (`tests/*.rs`, including the visual tests) with
 `#![cfg(test)]`: otherwise clippy doesn't count their helper functions as test
 code, and `allow-unwrap-in-tests` doesn't apply to them.
 
+## Integration tests
+
+Run `just integration-tests` (see "Run the integration tests" in DEV.md) after
+changing how the components talk to each other: smbdrop's HTTP API or event
+channel, the agent's local API, or the agent's use of the management API. They
+are not part of CI, so nothing else catches it when they break. Run them in the
+background; the first start compiles the workspace in the containers.
+
+A failure can come from the tests being out of date rather than from the change:
+check what the test expects against the current behavior, and fix the test if
+it is outdated. Say which tests you changed and why.
+
 ## Visual tests for GUI development
 
 Run visual tests via `just`; otherwise, required workaround(s) for issues
