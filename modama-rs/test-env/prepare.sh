@@ -18,7 +18,7 @@ if [ ! -e ./certs/ ]; then
       --listen-local-api=0.0.0.0:3003 \
       --event-url=wss://smbdrop:5052 \
       --token-service-url=https://smbdrop:5053 \
-      --mgmt-api-url=http://mgmtinterface:5000 \
+      --mgmt-api-url=http://mgmtinterface-api:8000 \
       --smb-hostname=smbdrop \
       --smb-port=445 \
       --smb-domain=ER-C-Ingest \
@@ -29,7 +29,7 @@ if [ ! -e ./certs/ ]; then
       --listen-local-api=0.0.0.0:3003 \
       --event-url=wss://smbdrop:5052 \
       --token-service-url=https://smbdrop:5053 \
-      --mgmt-api-url=http://mgmtinterface:5000 \
+      --mgmt-api-url=http://mgmtinterface-api:8000 \
       --smb-hostname=smbdrop \
       --smb-port=445 \
       --smb-domain=ER-C-Ingest \
@@ -40,7 +40,7 @@ if [ ! -e ./certs/ ]; then
       --listen-local-api=0.0.0.0:3003 \
       --event-url=wss://smbdrop:5052 \
       --token-service-url=https://smbdrop:5053 \
-      --mgmt-api-url=http://mgmtinterface:5000 \
+      --mgmt-api-url=http://mgmtinterface-api:8000 \
       --smb-hostname=smbdrop \
       --smb-port=445 \
       --smb-domain=ER-C-Ingest > certs/agent-untrusted.toml

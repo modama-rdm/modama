@@ -47,6 +47,23 @@ def agent_api() -> str:
 
 
 @pytest.fixture
+def agent(agent_api: str) -> requests.Session:
+    """
+    A client of modama-agent-1 signed in as `clausen`: the agent keeps the sign-in in a
+    cookie, which the session sends along
+    """
+    session = requests.Session()
+    response = session.post(
+        f"{agent_api}/api/login/",
+        headers={"X-API-Version": "1.0.0"},
+        json={"username": "clausen", "password": "1234"},
+        timeout=10,
+    )
+    assert response.status_code == 200, response.text
+    return session
+
+
+@pytest.fixture
 def smbdrop_api() -> str:
     _ = wait_for_url(SMBDROP_BASE_URL + "/health/", service_name="smbdrop API")
     return SMBDROP_BASE_URL

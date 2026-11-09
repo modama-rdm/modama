@@ -1,5 +1,9 @@
 #!/bin/bash
 set -ex
+
+cd "$(dirname "$0")"
+source ./compose.sh
+
 rm -rf ./certs/
-docker compose run --rm smbdrop-init bash -c 'rm -rf /data/adhoc/'
-docker compose down --volumes --remove-orphans
+compose run --rm smbdrop-init bash -c 'rm -rf /data/adhoc/'
+compose down --volumes --remove-orphans
