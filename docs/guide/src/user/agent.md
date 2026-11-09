@@ -64,7 +64,7 @@ import pathlib
 import urllib.request
 
 url = "http://localhost:3003/api/shares/foreground/"
-headers = {"X-API-Version": "1.0.0"}
+headers = {"X-API-Version": "2.0.0"}
 request = urllib.request.Request(url, headers=headers)
 with urllib.request.urlopen(request, timeout=10) as response:
     share = json.load(response)

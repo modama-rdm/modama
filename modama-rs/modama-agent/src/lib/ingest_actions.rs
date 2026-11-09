@@ -30,6 +30,8 @@ pub struct OpenIngest {
     pub project: String,
     pub session: String,
     pub dest_path: String,
+    /// None if the management API doesn't report it yet
+    pub canonical_path: Option<String>,
 }
 
 /// What the management API reported as missing
@@ -137,6 +139,7 @@ impl IngestActions<'_> {
             project: share.project,
             session: share.session,
             dest_path: share.dest_path,
+            canonical_path: share.canonical_path.flatten(),
         })
     }
 

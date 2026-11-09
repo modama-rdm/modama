@@ -20,8 +20,8 @@ from ..shares import (
     delete_share,
     find_share,
     list_shares,
-    share_path,
-    split_share_path,
+    project_and_session,
+    session_path,
     user_shares,
 )
 from ..versioning import VERSION_ERROR_RESPONSES
@@ -39,7 +39,7 @@ router = APIRouter(
 class IngestShare(BaseModel):
     """
     An ingest share. The fields smbdrop reports, plus the project and session
-    it belongs to, so that a client does not parse `dest_path`, and the host
+    it belongs to, so that a client does not parse paths, and the host
     and workgroup the web interface shows a person who connects by hand.
     modama-agent does not use those two: an instrument computer may reach the Samba
     server another way than the intranet does, so the agent mounts with the
@@ -50,7 +50,22 @@ class IngestShare(BaseModel):
     share_name: str = Field(description="The share part of the SMB address.")
     project: str
     session: str
-    dest_path: str = Field(description="The exported folder, as smbdrop sees it.")
+    dest_path: str = Field(
+        description=(
+            "Deprecated: the exported folder with smbdrop's data root in front. "
+            "Use `canonical_path`."
+        ),
+        deprecated=True,
+    )
+    canonical_path: str | None = Field(
+        default=None,
+        description=(
+            "The canonical path of the exported folder, like "
+            "`adhoc/testproject/session2`: the same on every way of access to "
+            "the storage. Null only for an old share outside of smbdrop's data "
+            "root."
+        ),
+    )
     created_timestamp: int = Field(description="Unix time of creation.")
     username: str = Field(description="One-time Samba username.")
     password: str = Field(description="One-time Samba password.")
@@ -80,7 +95,7 @@ class IngestShare(BaseModel):
 class IngestShareList(BaseModel):
     # An object rather than a bare array, like `ProjectList`, and a list rather
     # than the legacy map keyed by share id: each share names its project and
-    # session, so a client no longer has to parse `dest_path` to find the one
+    # session, so a client no longer has to parse a path to find the one
     # it wants.
     shares: list[IngestShare] = Field(
         description="The signed-in user's open shares, oldest first."
@@ -153,7 +168,7 @@ def read_ingest_shares(
     uid = user_uid(settings, session["username"])
     return IngestShareList(
         shares=[
-            _ingest_share(settings, share, *split_share_path(share["dest_path"]))
+            _ingest_share(settings, share, *project_and_session(share))
             for share in user_shares(settings, uid)
         ]
     )
@@ -285,16 +300,16 @@ def add_ingest_share(
 
     project = details["project"]
     uid = user_uid(settings, username)
-    dest_path = share_path(settings, project["relpath"], body.session)
+    canonical_path = session_path(project["relpath"], body.session)
 
-    existing = find_share(settings, dest_path, uid, resource)
+    existing = find_share(settings, canonical_path, uid, resource)
     if existing is not None:
         response.status_code = status.HTTP_200_OK
         share = existing
     else:
         share = create_share(
             settings,
-            dest_path,
+            canonical_path,
             uid=uid,
             gid=project["gid"],
             resource=resource,

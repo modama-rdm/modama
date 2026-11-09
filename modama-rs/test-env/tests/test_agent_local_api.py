@@ -36,12 +36,24 @@ def test_agent_api_start_ingest(agent_api: str, agent: requests.Session):
     response.raise_for_status()
     share = response.json()
     assert share["dest_path"] == "/data/adhoc/testproject/session2"
+    assert share["canonical_path"] == "adhoc/testproject/session2"
     assert share["project"] == "testproject"
     assert share["session"] == "session2"
     assert "share_id" in share
 
     # foreground share eventually switches to session2:
     wait_for_session("session2", agent_api)
+
+    # from 2.0.0 on, only the canonical path, without smbdrop's data root
+    response = requests.get(
+        url=f"{agent_api}/api/shares/foreground/",
+        headers={"X-API-Version": "2.0.0"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    foreground = response.json()
+    assert foreground["canonical_path"] == "adhoc/testproject/session2"
+    assert "dest_path" not in foreground
 
 
 def test_agent_api_start_multiple_ingests(agent_api: str, agent: requests.Session):

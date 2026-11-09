@@ -172,6 +172,7 @@ pub(crate) mod tests {
             share_id: id.to_owned(),
             share_name: name.to_owned(),
             dest_path: format!("/project/{id}"),
+            canonical_path: None,
             created_timestamp: 0,
             username: "user".to_owned(),
             password: "s3cret-password".to_owned(),

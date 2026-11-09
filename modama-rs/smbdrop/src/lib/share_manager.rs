@@ -28,6 +28,7 @@ use tokio::{
 };
 
 use crate::{
+    data_root::{CanonicalPathError, DataRoot},
     mount::{BindMount, MountBackend, MountError},
     mount_manager::{MountManager, SetStateError},
     process_manager::{ProcessManager, ProcessManagerCommand},
@@ -440,6 +441,18 @@ pub enum ShareError {
     #[error("Path name can only contain characters /, a-z, A-Z, 0-9, '_', '-', ' ' and '.'.")]
     PathError,
 
+    #[error("{0}")]
+    CanonicalPath(#[from] CanonicalPathError),
+
+    #[error("`dest_path` {0} is outside of the data root {1}")]
+    OutsideDataRoot(String, String),
+
+    #[error("send either `canonical_path` or `dest_path`, not both")]
+    BothPaths,
+
+    #[error("the request names no folder; send `canonical_path`")]
+    NoPath,
+
     #[error("share `{0}` not found")]
     ShareNotFound(String),
 
@@ -549,13 +562,15 @@ fn make_password() -> String {
 pub struct ShareConfigFile<U: UserProvider> {
     path: PathBuf,
     user_provider: U,
+    data_root: DataRoot,
 }
 
 impl<U: UserProvider> ShareConfigFile<U> {
-    fn new(path: PathBuf, user_provider: U) -> Self {
+    fn new(path: PathBuf, user_provider: U, data_root: DataRoot) -> Self {
         Self {
             path,
             user_provider,
+            data_root,
         }
     }
 
@@ -582,12 +597,33 @@ impl<U: UserProvider> ShareConfigFile<U> {
                 msg: format!("read config {:?} read_to_end", self.path),
             })?;
 
-        let config = spawn_blocking(move || -> Result<_, serde_json::Error> {
+        let mut config: SmbDropState = spawn_blocking(move || -> Result<_, serde_json::Error> {
             serde_json::from_slice(&contents)
         })
         .await??;
+        self.fill_in_canonical_paths(&mut config);
 
         Ok(config)
+    }
+
+    /// Shares persisted by an smbdrop that didn't record the canonical path get it from
+    /// their `dest_path`; it is written back with the next change to the configuration
+    fn fill_in_canonical_paths(&self, config: &mut SmbDropState) {
+        for share in config.shares.values_mut() {
+            if share.canonical_path.is_some() {
+                continue;
+            }
+            share.canonical_path = self.data_root.canonical_path_of(&share.get_dest_path());
+            if share.canonical_path.is_none() {
+                warn!(
+                    "share {} exports {}, which is outside of the data root {}; it has no \
+                     canonical path",
+                    share.share_id,
+                    share.dest_path,
+                    self.data_root.path().display()
+                );
+            }
+        }
     }
 
     /// Write config without consistency checks. Useful for testing.
@@ -696,6 +732,7 @@ async fn get_path_re() -> &'static Regex {
 #[derive(Clone, Debug)]
 pub struct ShareManager<U: UserProvider, M: MountBackend, P: ProcessManager> {
     config_file: Arc<Mutex<ShareConfigFile<U>>>,
+    data_root: DataRoot,
     sm: SambaConfigManager,
     bind_mount_prefix: PathBuf,
     pm_tx: Option<Sender<ProcessManagerCommand>>,
@@ -707,6 +744,7 @@ pub struct ShareManager<U: UserProvider, M: MountBackend, P: ProcessManager> {
 impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager<U, M, P> {
     pub async fn new(
         bind_mount_prefix: PathBuf,
+        data_root: DataRoot,
         shares_config: PathBuf,
         samba_config_path: PathBuf,
         user_provider: U,
@@ -716,17 +754,42 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         let config_file = Arc::new(Mutex::new(ShareConfigFile::new(
             shares_config,
             user_provider.clone(),
+            data_root.clone(),
         )));
         let sm = SambaConfigManager::new(&samba_config_path, &bind_mount_prefix);
 
         Self {
             config_file,
+            data_root,
             pm_tx: None,
             sm,
             bind_mount_prefix,
             mount_backend,
             user_provider,
             process_manager,
+        }
+    }
+
+    /// The canonical path a create request names, from `canonical_path` or, for older callers,
+    /// from `dest_path`; normalized and checked to stay inside the data root
+    pub fn requested_canonical_path(
+        &self,
+        canonical_path: Option<&str>,
+        dest_path: Option<&str>,
+    ) -> Result<String, ShareError> {
+        match (canonical_path, dest_path) {
+            (Some(canonical_path), None) => Ok(DataRoot::normalize(canonical_path)?),
+            (None, Some(dest_path)) => self
+                .data_root
+                .canonical_path_of(Path::new(dest_path))
+                .ok_or_else(|| {
+                    ShareError::OutsideDataRoot(
+                        dest_path.to_owned(),
+                        self.data_root.path().display().to_string(),
+                    )
+                }),
+            (Some(_), Some(_)) => Err(ShareError::BothPaths),
+            (None, None) => Err(ShareError::NoPath),
         }
     }
 
@@ -838,7 +901,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
     ///   (inode), and not by path (which can be renamed over time)
     pub async fn create_share(
         &self,
-        dest_path: &Path,
+        canonical_path: &str,
         uid: u32,
         gid: u32,
         resource: Option<String>,
@@ -847,17 +910,16 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
         // before touching the config, try to heal any inconsistencies:
         self.try_heal().await?;
 
+        let canonical_path = DataRoot::normalize(canonical_path)?;
         let pat = get_path_re().await;
-        info!("creating share to {}", dest_path.to_string_lossy());
-
-        let dest_path = if let Some(path) = dest_path.to_str() {
-            path
-        } else {
-            return Err(ShareError::PathError);
-        };
-        if !pat.is_match(dest_path) {
+        if !pat.is_match(&canonical_path) {
             return Err(ShareError::PathError);
         }
+        let dest_path = self.data_root.folder(&canonical_path);
+        let Some(dest_path) = dest_path.to_str() else {
+            return Err(ShareError::PathError);
+        };
+        info!("creating share to {dest_path}");
 
         let share_id = uuid::Uuid::new_v4();
         let share_name = make_share_name(Path::new(dest_path), &share_id);
@@ -882,6 +944,7 @@ impl<U: UserProvider, M: MountBackend + 'static, P: ProcessManager> ShareManager
             share_id: share_id.clone(),
             share_name,
             dest_path: dest_path.to_owned(),
+            canonical_path: Some(canonical_path),
             username: user.username.clone(),
             password: user.password.clone(),
             uid,
@@ -1130,6 +1193,7 @@ mod tests {
     use modama_common::{logging::init_logging, messages::Share, test_helpers::TempDir};
 
     use crate::{
+        data_root::DataRoot,
         share_manager::{
             ShareConfigFile, ShareError, ShareManager, SmbDropState, make_share_name,
             sanitize_share_name_human_part,
@@ -1257,6 +1321,7 @@ mod tests {
                 share_id: share_id.clone(),
                 share_name: share_id.clone(),
                 dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                canonical_path: None,
                 created_timestamp: 0,
                 username: "different".to_owned(),
                 password: "share-pass".to_owned(),
@@ -1290,6 +1355,7 @@ mod tests {
                 share_id: share_id.clone(),
                 share_name: share_id.clone(),
                 dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                canonical_path: None,
                 created_timestamp: 0,
                 username: username.to_owned(),
                 password: "share-pass".to_owned(),
@@ -1323,6 +1389,7 @@ mod tests {
                 share_id: share_id.clone(),
                 share_name: share_id.clone(),
                 dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                canonical_path: None,
                 created_timestamp: 0,
                 username: username.to_owned(),
                 password: "share-pass".to_owned(),
@@ -1358,6 +1425,7 @@ mod tests {
                 share_id: share_id.clone(),
                 share_name: share_id.clone(),
                 dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                canonical_path: None,
                 created_timestamp: 0,
                 username: username.to_owned(),
                 password: "share-pass".to_owned(),
@@ -1372,6 +1440,7 @@ mod tests {
                 share_id: share_id_2.clone(),
                 share_name: share_id_2.clone(),
                 dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                canonical_path: None,
                 created_timestamp: 0,
                 username: username_2.to_owned(),
                 password: "share-pass".to_owned(),
@@ -1413,6 +1482,7 @@ mod tests {
             share_id: share_id.clone(),
             share_name: share_id.clone(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            canonical_path: None,
             created_timestamp: 0,
             username: username.to_owned(),
             password: "share-pass".to_owned(),
@@ -1466,6 +1536,7 @@ mod tests {
             share_id: share_id.to_owned(),
             share_name: share_id.to_owned(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            canonical_path: None,
             created_timestamp: 0,
             username: format!("user{uid}"),
             password: "share-pass".to_owned(),
@@ -1513,6 +1584,7 @@ mod tests {
         let bind_mount_prefix = TempDir::new("bind_mount_prefix");
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             tmp.join("shares.json"),
             tmp.join("smb_dynamic.conf"),
             MockUserProvider::new(vec![]),
@@ -1521,9 +1593,10 @@ mod tests {
         )
         .await;
         share_manager.start().await.unwrap();
+        let canonical_path = dest_path.file_name().unwrap().to_str().unwrap();
         let create = |uid: u32| {
             share_manager.create_share(
-                &dest_path,
+                canonical_path,
                 uid,
                 uid,
                 Some("holo".to_owned()),
@@ -1611,6 +1684,7 @@ mod tests {
 
         let share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             user_provider.clone(),
@@ -1626,6 +1700,7 @@ mod tests {
                 share_id: share_id.clone(),
                 share_name: share_id.clone(),
                 dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                canonical_path: None,
                 created_timestamp: 0,
                 username: username.to_owned(),
                 password: "share-pass".to_owned(),
@@ -1709,7 +1784,11 @@ mod tests {
         let share_id = String::from("b4fdcdf6-e870-4ac5-9942-78463f051c5c");
         let username = "shareb4fdcdf6e8704ac5994278463f";
         let user_provider = MockUserProvider::new(vec![(username.to_owned(), 1001)]);
-        let f = ShareConfigFile::new(cfg_path.clone(), user_provider.clone());
+        let f = ShareConfigFile::new(
+            cfg_path.clone(),
+            user_provider.clone(),
+            DataRoot::new("/data"),
+        );
 
         let shares = HashMap::new();
         let users = HashMap::new();
@@ -1720,6 +1799,7 @@ mod tests {
             share_id: share_id.clone(),
             share_name: share_id.clone(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            canonical_path: None,
             created_timestamp: 0,
             username: username.to_owned(),
             password: "share-pass".to_owned(),
@@ -1736,10 +1816,56 @@ mod tests {
 
         f.write_config(&state).await.unwrap();
 
-        let f2 = ShareConfigFile::new(cfg_path.clone(), user_provider.clone());
+        let f2 = ShareConfigFile::new(
+            cfg_path.clone(),
+            user_provider.clone(),
+            DataRoot::new("/data"),
+        );
         let state2 = f2.read_config().await.unwrap();
 
         assert_eq!(state, state2);
+    }
+
+    /// Shares persisted by an smbdrop that didn't record the canonical path get it from their
+    /// `dest_path` when the configuration is read
+    #[tokio::test]
+    async fn test_read_config_fills_in_canonical_paths() {
+        let tmp = TempDir::new("share_config_file");
+        let f = ShareConfigFile::new(
+            tmp.join("shares.json"),
+            MockUserProvider::new(vec![]),
+            DataRoot::new("/data"),
+        );
+        let share = |share_id: &str, dest_path: &str| Share {
+            resource: None,
+            share_id: share_id.to_owned(),
+            share_name: share_id.to_owned(),
+            dest_path: dest_path.to_owned(),
+            canonical_path: None,
+            created_timestamp: 0,
+            username: "user".to_owned(),
+            password: "pass".to_owned(),
+            uid: 1001,
+            gid: 1001,
+            created_by: None,
+        };
+        let shares = HashMap::from([
+            ("in".to_owned(), share("in", "/data/adhoc/project/session/")),
+            ("out".to_owned(), share("out", "/srv/adhoc/project/session")),
+        ]);
+        let state = SmbDropState {
+            shares,
+            users: HashMap::new(),
+        };
+        f.write_config_no_check(&state).await.unwrap();
+
+        let read = f.read_config().await.unwrap();
+
+        assert_eq!(
+            read.shares["in"].canonical_path.as_deref(),
+            Some("adhoc/project/session")
+        );
+        assert_eq!(read.shares["out"].canonical_path, None);
     }
 
     #[tokio::test]
@@ -1753,6 +1879,7 @@ mod tests {
         let process_manager: MockProcessManager = MockProcessManager::new();
         let share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             cfg_path,
             tmp.join("smb_dynamic.conf"),
             user_provider.clone(),

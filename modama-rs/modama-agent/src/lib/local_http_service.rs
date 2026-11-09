@@ -1264,6 +1264,7 @@ mod tests {
             share_id: share_id.to_owned(),
             share_name: "share-name".to_owned(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            canonical_path: None,
             created_timestamp: 0,
             username: "share-user".to_owned(),
             password: "secret-password".to_owned(),
@@ -1409,6 +1410,7 @@ mod tests {
             share_id: "id".to_string(),
             share_name: "sname".to_string(),
             dest_path: "/adhoc/project/session/".to_string(),
+            canonical_path: None,
             created_timestamp: 0,
             username: "u".to_string(),
             password: "p".to_string(),
@@ -1435,6 +1437,57 @@ mod tests {
         assert_eq!(got["session"], "session");
         assert_eq!(got["dest_path"], "/adhoc/project/session/");
         assert_eq!(got["mount_path"], "/mnt/point");
+    }
+
+    /// The foreground share as the client asking with `version` gets it
+    async fn foreground_as(test_setup: &TestSetup, version: &str) -> Value {
+        let req = Request::builder()
+            .uri("/api/shares/foreground/")
+            .method("GET")
+            .header("X-API-Version", version)
+            .body(Body::empty())
+            .unwrap();
+        let resp = test_setup.app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn foreground_endpoint_reports_the_canonical_path_and_drops_dest_path_in_2_0_0() {
+        let test_setup = TestSetup::start().await;
+        let share = MessageShare {
+            dest_path: "/data/adhoc/project/session".to_owned(),
+            canonical_path: Some("adhoc/project/session".to_owned()),
+            ..foreground_share("id")
+        };
+        test_setup.set_foreground(share, Some("/mnt/point")).await;
+
+        for version in ["1.0.0", "1.1.0"] {
+            let got = foreground_as(&test_setup, version).await;
+            assert_eq!(got["type"], "Mounted", "{version}");
+            assert_eq!(got["dest_path"], "/data/adhoc/project/session", "{version}");
+            assert_eq!(got["canonical_path"], "adhoc/project/session", "{version}");
+        }
+
+        let got = foreground_as(&test_setup, "2.0.0").await;
+        assert_eq!(got["type"], "Mounted");
+        assert_eq!(got["mount_path"], "/mnt/point");
+        assert_eq!(got["canonical_path"], "adhoc/project/session");
+        assert!(got.get("dest_path").is_none(), "{got}");
+    }
+
+    #[tokio::test]
+    async fn foreground_canonical_path_is_null_for_shares_from_an_older_smbdrop() {
+        let test_setup = TestSetup::start().await;
+        let share = MessageShare {
+            canonical_path: None,
+            ..foreground_share("id")
+        };
+        test_setup.set_foreground(share, Some("/mnt/point")).await;
+
+        let got = foreground_as(&test_setup, "2.0.0").await;
+        assert_eq!(got["type"], "Mounted");
+        assert_eq!(got["canonical_path"], Value::Null);
     }
 
     #[tokio::test]
@@ -1560,6 +1613,7 @@ mod tests {
             share_id: "id".to_owned(),
             share_name: "share".to_owned(),
             dest_path: "session-only".to_owned(),
+            canonical_path: None,
             created_timestamp: 0,
             username: "user".to_owned(),
             password: "secret".to_owned(),
@@ -1637,7 +1691,7 @@ mod tests {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let got: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(got["info"]["title"], "modama-agent local API");
-        assert_eq!(got["info"]["version"], "1.0.0");
+        assert_eq!(got["info"]["version"], "2.0.0");
 
         let paths = got["paths"].as_object().unwrap();
         assert!(paths.contains_key("/api/health/"));
@@ -1823,6 +1877,7 @@ mod tests {
             project: "the-project".to_owned(),
             session: "test-session".to_owned(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            canonical_path: Some("adhoc/the-project/test-session".to_owned()),
             message: "Waiting for the session helper to mount the ingest share.".to_owned(),
             created_by: Some("alice".to_owned()),
         };
@@ -2893,6 +2948,51 @@ mod tests {
         assert!(got.get("username").is_none());
         assert!(got.get("password").is_none());
         assert!(got.get("share").is_none());
+        open.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn start_ingest_reports_the_canonical_path_and_drops_dest_path_in_2_0_0() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        let open = server
+            .mock("POST", "/mgmt-api/ingest-shares")
+            .with_status(201)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"share_id": "share-123", "share_name": "share-name",
+                    "project": "project", "session": "session",
+                    "dest_path": "/data/adhoc/project/session",
+                    "canonical_path": "adhoc/project/session", "created_timestamp": 0,
+                    "username": "temporary-user", "password": "temporary-secret",
+                    "uid": 1000, "gid": 1000, "resource": "resource",
+                    "created_by": "testuser", "smb_host": "host", "workgroup": "W"}"#,
+            )
+            .expect(2)
+            .create_async()
+            .await;
+        let start_ingest = async |version: &str| -> Value {
+            let req = Request::builder()
+                .uri("/api/projects/project/sessions/session/start-ingest/")
+                .method("POST")
+                .header("X-API-Version", version)
+                .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
+                .body(Body::empty())
+                .unwrap();
+            let resp = test_setup.app.clone().oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap()
+        };
+
+        let got = start_ingest("1.1.0").await;
+        assert_eq!(got["dest_path"], "/data/adhoc/project/session");
+        assert_eq!(got["canonical_path"], "adhoc/project/session");
+
+        let got = start_ingest("2.0.0").await;
+        assert_eq!(got["share_id"], "share-123");
+        assert_eq!(got["canonical_path"], "adhoc/project/session");
+        assert!(got.get("dest_path").is_none(), "{got}");
+        assert!(got.get("password").is_none());
         open.assert_async().await;
     }
 

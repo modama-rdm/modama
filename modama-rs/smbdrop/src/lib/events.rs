@@ -641,6 +641,7 @@ mod test {
             share_id: share_id.clone(),
             share_name: share_id.clone(),
             dest_path: "/dest/path".to_owned(),
+            canonical_path: None,
             created_timestamp: 0,
             username: "testuser".to_owned(),
             password: "testpasswod".to_owned(),

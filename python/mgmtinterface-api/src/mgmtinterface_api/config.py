@@ -43,11 +43,9 @@ class Settings(BaseSettings):
 
     permissions_api: str = "http://permissions:5050"
     # smbdrop, which creates the Samba shares for ingest. Shares are addressed
-    # by the path of the session as smbdrop sees it, which is
-    # `smb_base/<project relpath>/<session>`; both containers mount the data
-    # tree at the same place.
+    # by the canonical path of the session, `<project relpath>/<session>`;
+    # smbdrop knows where the data tree is mounted in its container.
     share_api: str = "http://smbdrop:5051"
-    smb_base: str = "/data"
     # Host and workgroup the web interface shows a person for connecting to an
     # ingest share by hand, as seen from the intranet. The share service does
     # not report them, so the API supplies them with the share. modama-agent

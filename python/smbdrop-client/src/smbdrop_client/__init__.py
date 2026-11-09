@@ -22,7 +22,7 @@ class ShareClient:
 
     def create(
         self,
-        dest_path: str,
+        canonical_path: str,
         uid: int,
         gid: int,
         resource: str | None = None,
@@ -30,7 +30,7 @@ class ShareClient:
     ) -> CreateShareResponse:
         url = _make_url(self._base_url, "/share/")
         payload = {
-            "dest_path": dest_path,
+            "canonical_path": canonical_path,
             "uid": uid,
             "gid": gid,
             "resource": resource,
@@ -39,7 +39,7 @@ class ShareClient:
         resp = requests.post(url, json=payload, auth=self.auth)
         if not resp.ok:
             raise RuntimeError(
-                f"something went wrong when creating the share for {dest_path},"
+                f"something went wrong when creating the share for {canonical_path},"
                 " please check the logs!"
             )
         resp_data: CreateShareResponse = resp.json()

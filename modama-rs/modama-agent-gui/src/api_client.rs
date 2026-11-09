@@ -163,7 +163,7 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let login = server
             .mock("POST", "/api/login/")
-            .match_header("x-api-version", "1.0.0")
+            .match_header("x-api-version", "2.0.0")
             .match_body(mockito::Matcher::Json(serde_json::json!({
                 "username": "alice", "password": "secret",
             })))
@@ -179,7 +179,7 @@ mod tests {
         let delete = server
             .mock("DELETE", "/api/shares/share-123/")
             .match_header("cookie", "modama_agent_session=abc")
-            .match_header("x-api-version", "1.0.0")
+            .match_header("x-api-version", "2.0.0")
             .with_status(204)
             .create_async()
             .await;
@@ -205,7 +205,7 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("GET", "/api/identity/")
-            .match_header("x-api-version", "1.0.0")
+            .match_header("x-api-version", "2.0.0")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"type":"Anonymous","hostname":"workstation"}"#)

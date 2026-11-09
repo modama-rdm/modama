@@ -1,3 +1,4 @@
+pub mod data_root;
 pub mod event_hub;
 pub mod events;
 pub mod helpers;
