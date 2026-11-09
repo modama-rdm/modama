@@ -212,13 +212,7 @@ fn generate_typography(output: &mut String, value: Option<&Value>) -> Result<(),
         emit_optional_dimension_property(output, properties, "fontSize", "FONT_SIZE", name)?;
         emit_optional_number_property(output, properties, "fontWeight", "FONT_WEIGHT", name)?;
         emit_optional_string_property(output, properties, "lineHeight", "LINE_HEIGHT", name)?;
-        emit_optional_dimension_property(
-            output,
-            properties,
-            "letterSpacing",
-            "LETTER_SPACING",
-            name,
-        )?;
+        emit_letter_spacing(output, properties, name)?;
         emit_optional_string_property(output, properties, "fontFeature", "FONT_FEATURE", name)?;
         emit_optional_string_property(output, properties, "fontVariation", "FONT_VARIATION", name)?;
         if mapping_value(properties, "fontSize").is_some()
@@ -333,6 +327,35 @@ fn emit_optional_dimension_property(
     output.push_str(&format!(
         "        pub const {rust_name}: f32 = {:?};\n",
         dimension_to_egui_points(value)
+    ));
+    Ok(())
+}
+
+/// Letter spacing in egui points; as in CSS, `em` is relative to the token's own font size
+fn emit_letter_spacing(
+    output: &mut String,
+    properties: &serde_yaml::Mapping,
+    token_name: &str,
+) -> Result<(), String> {
+    let Some(value) = mapping_value(properties, "letterSpacing") else {
+        return Ok(());
+    };
+    let spacing = value.as_str().and_then(parse_dimension).ok_or_else(|| {
+        format!("typography.{token_name}.letterSpacing must be a px, rem, or em dimension")
+    })?;
+    let points = if spacing.unit == "em" {
+        let font_size = mapping_value(properties, "fontSize")
+            .and_then(Value::as_str)
+            .and_then(parse_dimension)
+            .ok_or_else(|| {
+                format!("typography.{token_name}.letterSpacing in em needs a fontSize")
+            })?;
+        spacing.value * dimension_to_egui_points(font_size)
+    } else {
+        dimension_to_egui_points(spacing)
+    };
+    output.push_str(&format!(
+        "        pub const LETTER_SPACING: f32 = {points:?};\n"
     ));
     Ok(())
 }

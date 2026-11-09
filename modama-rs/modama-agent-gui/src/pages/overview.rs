@@ -13,11 +13,13 @@ use crate::{
             ButtonVariant, danger_outline_button, loading_button, primary_button, secondary_button,
         },
         copy_field::{copy_field, icon_font},
+        detail_label,
         dialogs::{
             ChoiceDialogAction, ConfirmationDialogAction, DialogChoice, choice_dialog,
             destructive_confirmation_dialog,
         },
         page_heading,
+        path_line::path_line,
     },
     notebook_snippet::python_snippet,
     service::{AgentService, ServiceError, StubAgentService},
@@ -552,9 +554,13 @@ impl PageOverview {
         }
         match session.mount_path.as_deref() {
             Some(mount_path) => {
-                if mount_path_detail(ui, mount_path) {
-                    self.paths_dialog_open = true;
-                    self.focus_paths_close = true;
+                match mount_path_detail(ui, mount_path) {
+                    Some(MountPathAction::UseInPython) => {
+                        self.paths_dialog_open = true;
+                        self.focus_paths_close = true;
+                    }
+                    Some(MountPathAction::Open) => self.service.open_folder(mount_path),
+                    None => {}
                 }
                 if self.paths_dialog_open {
                     self.show_paths_dialog(ui, mount_path);
@@ -567,8 +573,7 @@ impl PageOverview {
             ),
         }
 
-        ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-        ui.separator();
+        // the heading starts the next section; no divider needed
         ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
 
         card_heading(ui, "Stop ingest");
@@ -610,7 +615,7 @@ impl PageOverview {
                 ui.set_width(width);
                 ui.add(
                     Label::new(
-                        RichText::new("Use in scripts and notebooks")
+                        RichText::new("Use in Python")
                             .font(styles::typography::section_heading::font_id()),
                     )
                     .wrap(),
@@ -908,8 +913,7 @@ fn show_connected_agents(ui: &mut egui::Ui, connected_agents: Option<&ConnectedA
     const VISIBLE_ROWS: f32 = 4.0;
     let row_height = styles::components::connected_agent_row::height::EGUI_POINTS;
 
-    ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
-    ui.separator();
+    // the heading starts the next section; no divider needed
     ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
 
     let Some(agents) = connected_agents else {
@@ -1109,49 +1113,152 @@ fn compact_close_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
     response
 }
 
-/// The mount path like a [`session_detail`], with an icon next to its label that opens the
-/// dialog for scripts and notebooks; true if it was clicked
-fn mount_path_detail(ui: &mut egui::Ui, mount_path: &str) -> bool {
-    ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
-    let clicked = ui
-        .horizontal(|ui| {
-            ui.add(Label::new(
-                RichText::new("Mount path on this computer")
-                    .font(styles::typography::supporting_text::font_id())
-                    .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
-            ));
-            let label = "Use in scripts and notebooks";
-            let response = ui
-                .add(
-                    egui::Button::new(
-                        RichText::new(egui_phosphor::regular::CODE)
-                            .font(icon_font(&styles::typography::supporting_text::font_id()))
-                            .color(styles::color::primary::VALUE.resolve(ui.visuals())),
-                    )
-                    .frame(false),
-                )
-                .on_hover_text(label);
-            response.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
-            });
-            styles::paint_focus_ring(ui, &response);
-            response.clicked()
-        })
-        .inner;
-    ui.add(
-        Label::new(RichText::new(mount_path).font(styles::typography::mono_medium::font_id()))
-            .wrap(),
+/// What the user asked to do with the mount path
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MountPathAction {
+    Open,
+    UseInPython,
+}
+
+/// How long "Copied" replaces "Copy" after copying
+const COPIED_FEEDBACK_SECONDS: f64 = 2.0;
+
+/// The toolbar buttons' padding; the strip's margins subtract it, so that the icons line up
+/// with the path above
+const TOOLBAR_BUTTON_PADDING: egui::Vec2 = egui::vec2(
+    styles::components::path_box_toolbar_button_padding_x::padding::EGUI_POINTS,
+    styles::components::path_box_toolbar_button_padding_y::padding::EGUI_POINTS,
+);
+
+/// The mount path in a box, on one line until clicked, with a toolbar below a divider to
+/// copy it, open it in the file manager and use it in Python. Copying happens here.
+fn mount_path_detail(ui: &mut egui::Ui, mount_path: &str) -> Option<MountPathAction> {
+    ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
+    let padding = styles::spacing::input_padding_x::EGUI_POINTS;
+    let border = egui::Stroke::new(
+        styles::components::standard_border::width::EGUI_POINTS,
+        styles::color::outline::VALUE.resolve(ui.visuals()),
     );
-    clicked
+    let fill = styles::color::surface_variant::VALUE.resolve(ui.visuals());
+    // dividers span the box from border to border
+    let divider = |ui: &mut egui::Ui| {
+        let y = ui.cursor().top();
+        ui.painter().hline(ui.max_rect().x_range(), y, border);
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(border)
+        .corner_radius(styles::radius(styles::rounded::lg::EGUI_POINTS))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 0.0;
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(
+                    padding as i8,
+                    styles::components::path_box_header_padding_y::padding::EGUI_POINTS as i8,
+                ))
+                .show(ui, |ui| detail_label(ui, "Mount path on this computer"));
+            divider(ui);
+            egui::Frame::new()
+                .inner_margin(egui::Margin::same(padding as i8))
+                .show(ui, |ui| {
+                    path_line(
+                        ui,
+                        "foreground-mount-path",
+                        mount_path,
+                        styles::typography::mono_medium::font_id(),
+                        fill,
+                    );
+                });
+            divider(ui);
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(
+                    (padding - TOOLBAR_BUTTON_PADDING.x) as i8,
+                    styles::components::path_box_toolbar_padding_y::padding::EGUI_POINTS as i8,
+                ))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| mount_path_actions(ui, mount_path)).inner
+                })
+                .inner
+        })
+        .inner
+}
+
+/// Copy, open and use-in-Python as small buttons
+fn mount_path_actions(ui: &mut egui::Ui, mount_path: &str) -> Option<MountPathAction> {
+    let copy_id = ui.id().with("copy-mount-path");
+    let now = ui.input(|input| input.time);
+    let copied_at: Option<f64> = ui.data(|data| data.get_temp(copy_id));
+    let copied = copied_at.is_some_and(|at| now - at < COPIED_FEEDBACK_SECONDS);
+    let (copy_icon, copy_label) = if copied {
+        (egui_phosphor::regular::CHECK_CIRCLE, "Copied")
+    } else {
+        (egui_phosphor::regular::COPY, "Copy")
+    };
+
+    let mut action = None;
+    if small_action_button(ui, copy_icon, copy_label).clicked() {
+        ui.ctx().copy_text(mount_path.to_owned());
+        ui.data_mut(|data| data.insert_temp(copy_id, now));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(COPIED_FEEDBACK_SECONDS));
+    }
+    if small_action_button(ui, egui_phosphor::regular::FOLDER_OPEN, "Open folder").clicked() {
+        action = Some(MountPathAction::Open);
+    }
+    if small_action_button(ui, egui_phosphor::regular::CODE, "Use in Python").clicked() {
+        action = Some(MountPathAction::UseInPython);
+    }
+    action
+}
+
+/// An icon and a short label in supporting text, quieter than the cards' buttons
+fn small_action_button(ui: &mut egui::Ui, icon: &str, label: &str) -> egui::Response {
+    let font = styles::typography::supporting_text::font_id();
+    let color = styles::color::on_surface_variant::VALUE.resolve(ui.visuals());
+    let mut text = egui::text::LayoutJob::default();
+    text.append(icon, 0.0, egui::TextFormat::simple(icon_font(&font), color));
+    text.append(
+        label,
+        styles::spacing::field_label_gap::EGUI_POINTS,
+        egui::TextFormat::simple(font, color),
+    );
+    let button =
+        egui::Button::new(text).corner_radius(styles::radius(styles::rounded::lg::EGUI_POINTS));
+    let surface = styles::color::surface::VALUE.resolve(ui.visuals());
+    let outline = egui::Stroke::new(
+        styles::components::standard_border::width::EGUI_POINTS,
+        styles::color::outline::VALUE.resolve(ui.visuals()),
+    );
+    // only text, white with a border under the pointer
+    let (idle_fill, idle_stroke, hover_fill) =
+        (egui::Color32::TRANSPARENT, egui::Stroke::NONE, surface);
+    let response = ui
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = TOOLBAR_BUTTON_PADDING;
+            let widgets = &mut ui.visuals_mut().widgets;
+            widgets.inactive.weak_bg_fill = idle_fill;
+            widgets.inactive.bg_stroke = idle_stroke;
+            for state in [&mut widgets.hovered, &mut widgets.active] {
+                state.weak_bg_fill = hover_fill;
+                state.bg_stroke = outline;
+                state.expansion = 0.0;
+            }
+            ui.add(button)
+        })
+        .inner
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    styles::paint_focus_ring(ui, &response);
+    response
 }
 
 fn session_detail(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
-    ui.add(Label::new(
-        RichText::new(label)
-            .font(styles::typography::supporting_text::font_id())
-            .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
-    ));
+    detail_label(ui, label);
+    ui.add_space(styles::spacing::detail_label_gap::EGUI_POINTS - ui.spacing().item_spacing.y);
     // long values (mount paths) wrap; egui breaks them at a dash or other punctuation before
     // breaking anywhere, and copying the label still gives the unbroken value
     ui.add(

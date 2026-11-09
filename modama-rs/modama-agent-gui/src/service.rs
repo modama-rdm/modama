@@ -49,6 +49,8 @@ pub trait AgentService: Send + Sync {
     fn agent_url(&self) -> &str {
         crate::config::DEFAULT_AGENT_URL
     }
+    /// Show `path` in the file manager, in the background; failures are only logged
+    fn open_folder(&self, _path: &str) {}
     fn connect(&self) -> Result<ConnectedAgent, ServiceError>;
     fn health(&self) -> Result<(), ServiceError>;
     fn foreground(&self) -> Result<ForegroundSession, ServiceError>;
@@ -238,6 +240,18 @@ impl AgentService for HttpAgentService {
         &self.agent_url
     }
 
+    fn open_folder(&self, path: &str) {
+        use modama_session_helper::{
+            mount_popup::FolderOpener as _, open_folder::SystemFolderOpener,
+        };
+
+        let path = std::path::PathBuf::from(path);
+        let handle = self.runtime.handle().clone();
+        // the opener's future isn't Send, so it runs on a blocking thread of its own
+        self.runtime
+            .spawn_blocking(move || handle.block_on(SystemFolderOpener.open(&path)));
+    }
+
     fn connect(&self) -> Result<ConnectedAgent, ServiceError> {
         let identity = self
             .runtime
@@ -387,6 +401,8 @@ impl AgentService for HttpAgentService {
 #[derive(Default)]
 struct StubState {
     foreground: ForegroundSession,
+    /// Folders the GUI asked to show in the file manager, oldest first
+    opened_folders: Vec<String>,
 }
 
 pub struct StubAgentService {
@@ -414,6 +430,14 @@ impl StubAgentService {
         }
     }
 
+    /// The folders the GUI asked to show in the file manager, oldest first
+    pub fn opened_folders(&self) -> Vec<String> {
+        match self.state.lock() {
+            Ok(state) => state.opened_folders.clone(),
+            Err(poisoned) => poisoned.into_inner().opened_folders.clone(),
+        }
+    }
+
     /// Act as if the session ended, so the app's next look sends the user to the login page
     pub fn end_session(&self) {
         self.session_ended.store(true, Ordering::SeqCst);
@@ -429,6 +453,13 @@ impl StubAgentService {
 }
 
 impl AgentService for StubAgentService {
+    fn open_folder(&self, path: &str) {
+        match self.state.lock() {
+            Ok(mut state) => state.opened_folders.push(path.to_owned()),
+            Err(poisoned) => poisoned.into_inner().opened_folders.push(path.to_owned()),
+        }
+    }
+
     fn connect(&self) -> Result<ConnectedAgent, ServiceError> {
         self.delay();
         Ok(ConnectedAgent {

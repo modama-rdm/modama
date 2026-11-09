@@ -52,14 +52,15 @@ If you would like to integrate data management into your automation, for example
 into an acquisition script or notebook, this is easily possible! `modama-agent`
 provides a local HTTP API, which you can query for the current
 session folder. We call this the "foreground ingest". The GUI has ready-made
-Python code for this: on the ingest page, click the `</>` icon next to "Mount
-path on this computer". The code looks like this:
+Python code for this: on the ingest page, click "Use in Python" below the mount
+path. The code looks like this:
 
 ```python
-# The session folder for new data (the foreground ingest), from
-# the modama agent on this computer. Run this when you start
-# saving: it changes whenever someone starts a new ingest.
+# The session folder for new data (the foreground ingest),
+# from the modama agent on this computer. Run this before you
+# start saving.
 import json
+import pathlib
 import urllib.request
 
 url = "http://localhost:3003/api/shares/foreground/"
@@ -71,6 +72,7 @@ if "mount_path" not in share:
     reason = share.get("message", "No foreground ingest.")
     raise RuntimeError(reason)
 session_folder = share["mount_path"]
+raw_folder = pathlib.Path(session_folder) / "raw"
 ```
 
 The `session_folder` is valid only on the computer where you ran this snippet,

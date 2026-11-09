@@ -5,7 +5,7 @@ use modama_agent_gui::{
     async_state::AsyncState,
     guide_screenshots::{VIEWPORT, representative_connected_agents, representative_connection},
     pages::{Page, PageConnecting, PageOverview},
-    service::ConnectedAgent,
+    service::{ConnectedAgent, StubAgentService},
     state::{
         ActiveSession, AgentIdentity, AgentView, ForegroundSession, OperationId, PendingSession,
         SignedIn,
@@ -90,6 +90,9 @@ fn active_logged_out_harness() -> Harness<'static, AgentGuiApp> {
     harness
 }
 
+/// Where GIO mounts a share: always too long for one line
+const LONG_MOUNT_PATH: &str = "/run/user/1000/gvfs/smb-share:server=modama-storage.example.org,share=representative-project-2026-07-29-ingest/incoming/detector-frames";
+
 #[test]
 fn overview_snapshots() {
     let mut results = SnapshotResults::new();
@@ -102,17 +105,18 @@ fn overview_snapshots() {
     logged_in_dark.snapshot("overview_logged_in_dark");
     results.extend_harness(&mut logged_in_dark);
 
-    // long mount paths wrap, preferably after a slash
+    // long mount paths (GIO's always are) stay on one line and fade out; a click shows all
     let mut long_path = overview_harness(false, true);
     if let ForegroundSession::Mounted(session) =
         &mut long_path.state_mut().app_state.agent.foreground
     {
-        session.mount_path = Some(
-            "/run/user/1000/gvfs/smb-share:server=modama-storage.example.org,share=representative-project-2026-07-29-ingest/incoming/detector-frames".to_owned(),
-        );
+        session.mount_path = Some(LONG_MOUNT_PATH.to_owned());
     }
     long_path.run_steps(1);
     long_path.snapshot("overview_long_mount_path");
+    long_path.get_by_label(LONG_MOUNT_PATH).click();
+    long_path.run_steps(3);
+    long_path.snapshot("overview_long_mount_path_expanded");
     results.extend_harness(&mut long_path);
 
     // too narrow for the session and the start action side by side: one above the other
@@ -127,7 +131,7 @@ fn overview_snapshots() {
         (true, "overview_scripts_dialog_dark"),
     ] {
         let mut dialog = overview_harness(dark, true);
-        dialog.get_by_label("Use in scripts and notebooks").click();
+        dialog.get_by_label("Use in Python").click();
         dialog.run();
         dialog.snapshot(name);
         results.extend_harness(&mut dialog);
@@ -137,9 +141,7 @@ fn overview_snapshots() {
     let mut narrow_dialog = overview_harness(false, true);
     narrow_dialog.set_size(egui::vec2(520.0, VIEWPORT.y));
     narrow_dialog.run_steps(3);
-    narrow_dialog
-        .get_by_label("Use in scripts and notebooks")
-        .click();
+    narrow_dialog.get_by_label("Use in Python").click();
     narrow_dialog.run();
     narrow_dialog.snapshot("overview_scripts_dialog_narrow");
     results.extend_harness(&mut narrow_dialog);
@@ -309,10 +311,10 @@ fn copied_text(harness: &Harness<'static, AgentGuiApp>) -> Option<String> {
 }
 
 #[test]
-fn the_code_icon_opens_the_mount_path_and_notebook_code_to_copy() {
+fn use_in_python_opens_the_mount_path_and_notebook_code_to_copy() {
     let mut active = overview_harness(false, true);
     assert!(active.query_by_label("Python code").is_none());
-    active.get_by_label("Use in scripts and notebooks").click();
+    active.get_by_label("Use in Python").click();
     active.run();
     assert!(active.query_by_label("Python code").is_some());
 
@@ -337,6 +339,51 @@ fn the_code_icon_opens_the_mount_path_and_notebook_code_to_copy() {
     active.get_by_label("Close").click();
     active.run();
     assert!(active.query_by_label("Python code").is_none());
+}
+
+#[test]
+fn the_mount_path_toolbar_copies_and_opens_the_mount_path() {
+    let mut active = overview_harness(false, true);
+    let service = Arc::new(StubAgentService::new());
+    active.state_mut().page = Page::Overview(PageOverview::with_service(service.clone()));
+    active.run_steps(1);
+    let mount_path = "/mnt/modama/representative-project/2026-07-29-ingest";
+
+    active.get_by_label("Copy").click();
+    active.step();
+    assert_eq!(copied_text(&active).as_deref(), Some(mount_path));
+    active.run_steps(1);
+    assert!(active.query_by_label("Copied").is_some());
+
+    active.get_by_label("Open folder").click();
+    active.run_steps(1);
+    assert_eq!(service.opened_folders(), [mount_path]);
+}
+
+#[test]
+fn mount_path_box_lines_up_with_the_card_content() {
+    let mut active = overview_harness(false, true);
+    if let ForegroundSession::Mounted(session) = &mut active.state_mut().app_state.agent.foreground
+    {
+        session.mount_path = Some(LONG_MOUNT_PATH.to_owned());
+    }
+    active.run_steps(1);
+    let tolerance = styles::components::standard_border::width::EGUI_POINTS;
+    let card_content_x = active.get_by_label("Foreground ingest").rect().left();
+    let header = active.get_by_label("Mount path on this computer").rect();
+    let path = active.get_by_label(LONG_MOUNT_PATH).rect();
+    let copy = active.get_by_label("Copy").rect();
+    let padding = styles::spacing::input_padding_x::EGUI_POINTS;
+
+    // the box sits on the card's content guide; inside it, the header, the path and the
+    // toolbar's first icon share the box's padding
+    assert!((header.left() - padding - card_content_x).abs() <= tolerance);
+    assert!((path.left() - header.left()).abs() <= tolerance);
+    let button_padding =
+        styles::components::path_box_toolbar_button_padding_x::padding::EGUI_POINTS;
+    assert!((copy.left() + button_padding - path.left()).abs() <= tolerance);
+    // the path doesn't wrap, however long it is
+    assert!(path.height() < 2.0 * styles::typography::mono_medium::FONT_SIZE);
 }
 
 #[test]

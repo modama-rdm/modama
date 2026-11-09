@@ -71,6 +71,11 @@ typography:
     fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
     fontSize: 0.8125rem
     fontWeight: 400
+  detail-label:
+    fontFamily: "Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    fontSize: 0.65625rem
+    fontWeight: 700
+    letterSpacing: 0.025em
   login-logo:
     fontSize: 2.25rem
     fontWeight: 400
@@ -96,6 +101,7 @@ spacing:
   button-padding-x: 20px
   button-padding-y: 10px
   field-label-gap: 6px
+  detail-label-gap: 4px
   form-field-gap: 16px
   header-title-gap: 14px
   header-subtitle-gap: 4px
@@ -170,6 +176,14 @@ components:
     width: 400px
   wide-dialog:
     width: 640px
+  path-box-header-padding-y:
+    padding: 6px
+  path-box-toolbar-padding-y:
+    padding: 4px
+  path-box-toolbar-button-padding-x:
+    padding: 8px
+  path-box-toolbar-button-padding-y:
+    padding: 6px
   card-shadow-offset-y:
     size: 1px
   card-shadow-blur:
@@ -216,6 +230,8 @@ Color variables are mapped directly to theme variables. Hex values must never be
 ## Typography
 - **Sans font**: `Plus Jakarta Sans` for general reading, labels, and headings.
 - **Mono font**: `JetBrains Mono` for displaying resource tags, versions, and code metrics.
+- **Detail labels**: the small label above or beside a value (Project, Session, a copy
+  field's name) uses `detail-label`, in upper case, `detail-label-gap` above its value.
 
 ## Layout
 The interface follows a 4px base rhythm with named spacing tokens for component
@@ -332,6 +348,18 @@ Compact step navigation uses the supporting-text typography and a 6px inline
 gap. Completed steps use the primary color, the current step uses the muted
 foreground, and future steps use the disabled treatment. The native client
 uses this for the `Overview › Project › Session` flow.
+
+### Path box
+A path on this computer with actions for it, in three sections divided by
+`standard-border` lines in `outline`: a header with its `detail-label`, the path
+in `mono-medium` on a single line, and a toolbar of icon-and-text buttons in
+`supporting-text` and `on-surface-variant`. The box has a `surface-variant`
+background, an `outline` border and `lg` rounding. Header, path and the first
+toolbar icon share the `input-padding-x` inset. A path too long for the box
+fades into the background before a `[…]` marker and shows in full, wrapped,
+when clicked. Toolbar buttons have no frame until hovered, then a `surface`
+background and an `outline` border, `path-box-toolbar-padding-y` from the
+dividing line and the box's edge.
 
 ### Avatar
 Deterministic categorical colored circles (`full`) based on username hashing. Displays initials in bold uppercase. Used palette:
