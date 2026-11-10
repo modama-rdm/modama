@@ -9,7 +9,7 @@ use crate::{
     components::toast::{ToastAction, ToastState},
     footer::show_footer,
     foreground_monitor::{ForegroundMonitor, events_url},
-    helper_launch::ProcessLauncher,
+    helper_launch::{HelperLauncher, ProcessLauncher},
     navigation_progress::NavigationProgress,
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
@@ -33,9 +33,14 @@ pub struct AgentGuiApp {
     foreground_monitor: Option<ForegroundMonitor>,
     /// The agent's base URL, if the app should follow the agent's stream and launch helpers
     agent_url: Option<String>,
+    /// Makes the launcher of session helpers for the agent's base URL, each time the stream is
+    /// followed anew
+    make_launcher: LauncherFactory,
     /// Shown in the footer
     version: &'static str,
 }
+
+type LauncherFactory = Box<dyn Fn(&str) -> Box<dyn HelperLauncher>>;
 
 /// The version shown by an app on the stub service (tests, guide screenshots). It's fixed, so
 /// snapshots don't change with every commit, and it can't be mistaken for a release.
@@ -77,7 +82,21 @@ impl AgentGuiApp {
             service,
             foreground_monitor: None,
             agent_url,
+            make_launcher: Box::new(|agent_url| Box::new(ProcessLauncher::new(agent_url))),
             version,
+        }
+    }
+
+    /// Launch session helpers with `make_launcher`'s launchers instead of starting our own
+    /// executable, which in a test is the test binary
+    #[must_use]
+    pub fn with_helper_launcher(
+        self,
+        make_launcher: impl Fn(&str) -> Box<dyn HelperLauncher> + 'static,
+    ) -> Self {
+        Self {
+            make_launcher: Box::new(make_launcher),
+            ..self
         }
     }
 
@@ -385,7 +404,7 @@ impl AgentGuiApp {
             Ok(url) => {
                 self.foreground_monitor = Some(ForegroundMonitor::start(
                     url,
-                    Box::new(ProcessLauncher::new(agent_url.clone())),
+                    (self.make_launcher)(agent_url),
                     self.app_state.agent.clone(),
                     ctx.clone(),
                 ));
