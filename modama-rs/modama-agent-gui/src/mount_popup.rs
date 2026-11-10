@@ -186,7 +186,7 @@ pub fn run() -> eframe::Result {
     let content = Arc::new(Mutex::new(None));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Modama")
+            .with_title("modama-agent")
             .with_inner_size([WIDTH, INITIAL_HEIGHT])
             .with_resizable(false)
             .with_minimize_button(false)

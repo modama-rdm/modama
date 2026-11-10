@@ -132,10 +132,10 @@ fn run_gui(cli: Cli) -> Result<(), Box<dyn Error>> {
     .map_err(|e| match e {
         // no adapter or no surface: another backend may have one
         eframe::Error::Wgpu(_) => format!(
-            "could not open the Modama window: {e}\n\n{}",
+            "could not open the modama-agent window: {e}\n\n{}",
             wgpu_setup::BACKEND_HINT
         ),
-        e => format!("could not open the Modama window: {e}"),
+        e => format!("could not open the modama-agent window: {e}"),
     })?;
 
     Ok(())
@@ -163,7 +163,7 @@ fn show_start_error(message: &str, log_path: Option<&std::path::Path>) {
         MessageBoxW(
             None,
             &HSTRING::from(text),
-            &HSTRING::from("Modama"),
+            &HSTRING::from("modama-agent"),
             MB_OK | MB_ICONERROR,
         );
     }
