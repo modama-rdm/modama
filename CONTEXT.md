@@ -85,8 +85,7 @@ Not to be confused with sharing data with other people.
 
 **Foreground ingest**:
 The ingest share that new data at a resource should go to; at most one per resource. Starting
-an ingest at a resource makes its share the foreground ingest; the user's earlier ingest
-shares stay available at the resource until they are stopped.
+an ingest at a resource makes its share the foreground ingest.
 _Avoid_: Current share, active share
 
 **Hand-off**:
