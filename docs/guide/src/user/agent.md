@@ -102,7 +102,7 @@ You can use this code for example in a Jupyter notebook.
 ## Stopping the ingest
 
 At the end of your session, it is your responsibility to stop the ingest share. 
-Before you do, first wait for all of your copies to the ingest share to fnish.
+Before you do, first wait for all of your copies to the ingest share to finish.
 Then, press the "Stop Ingest" button on the overview page:
 
 ![The overview with an active ingest session, with the Stop Ingest button](images/agent/active-session.png)
@@ -117,14 +117,14 @@ via the network drive or mount path at the
 scientific instrument where you have just uploaded it from.
 
 By closing the ingest, the session folder is not yet sealed, this is a
-separate step done via the managment web interface. Sealing a makes your
+separate step done via the management web interface. Sealing a session folder makes your
 `raw/` directory immutable, preventing modifications and deletions by mistake.
 
 You can now log out, and the next user can start their work.
 
 ## Hand-off from one user to another
 
-If everyone follows the steps from the previous section, the hand-off from one
+If everyone follows the steps from the previous sections, the hand-off from one
 user to the next is easy: they just start their own ingest share. Should
 another ingest share from a previous user still be mounted, the new user
 can close the still-connected ingest share.
