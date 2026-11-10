@@ -3,10 +3,10 @@ Checks the `X-Agent-Token` modama-agent sends when it opens an ingest share,
 against smbdrop's token service.
 
 An agent gets the token from that service with its client certificate, which
-names the instrument it runs on (the "resource"), and the token lives an hour.
+names its resource, and the token lives an hour.
 It says where a request comes from, not who sends it; the session says who.
-With both, a share is opened as the user and bound to the instrument, which is
-what makes smbdrop offer it to that instrument's agent. The legacy endpoint
+With both, a share is opened as the user and bound to the resource, which is
+what makes smbdrop offer it to that resource's agents. The legacy endpoint
 does the same through `token_client.py`.
 """
 

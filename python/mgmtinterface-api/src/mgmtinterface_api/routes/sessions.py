@@ -31,8 +31,8 @@ from ..session import SessionData
 from ..versioning import VERSION_ERROR_RESPONSES
 
 # "Session" is the UI's word for what the permissions service and the legacy
-# API call a dataset: one folder per measurement run inside a project, with a
-# `raw/` subfolder that sealing makes immutable.
+# API call a dataset: the data in a folder directly inside a project folder,
+# with a `raw/` subfolder that sealing makes immutable.
 router = APIRouter(
     prefix="/projects/{project}/sessions",
     tags=["sessions"],

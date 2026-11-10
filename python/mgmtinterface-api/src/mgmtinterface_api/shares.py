@@ -72,8 +72,8 @@ def find_share(
     each have one for the same session. Matching on the normalized path mirrors
     the legacy `add_share_info`.
 
-    With a `resource`, only a share bound to that instrument counts: smbdrop
-    offers an agent only the shares bound to its instrument, so handing it an
+    With a `resource`, only a share bound to that resource counts: smbdrop
+    offers an agent only the shares bound to its resource, so handing it an
     unbound one would leave it waiting. Without one, any of the user's shares
     for the path does.
     """

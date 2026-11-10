@@ -87,7 +87,7 @@ impl From<modama_common::foreground::OtherMount> for ActiveSession {
     }
 }
 
-/// How texts refer to the instrument: the agent's resource name, or "this instrument" if
+/// How texts refer to the resource: the agent's resource name, or "this resource" if
 /// unknown (anonymous agent, or not connected yet)
 // TODO: for an anonymous agent, name the resource it inherits from its token, as the connected
 // agents (`ConnectedAgents::resource`) do

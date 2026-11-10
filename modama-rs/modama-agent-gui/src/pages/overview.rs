@@ -39,7 +39,7 @@ enum StartChoice {
 pub(crate) enum StartDialog {
     /// The user's own share (or one whose creator is unknown): keep it, or close it afterwards
     OwnShare { previous: ActiveSession },
-    /// Someone else's: starting detaches it from this instrument
+    /// Someone else's: starting is a hand-off, and their share is no longer available here
     OthersShare {
         project: String,
         session: String,

@@ -117,16 +117,17 @@ TAGS_METADATA = [
     {
         "name": "sessions",
         "description": (
-            "Sessions, one folder per measurement run inside a project. The "
-            "legacy API calls them datasets."
+            "Sessions: the session folders of a project, each meant for one "
+            "stretch of work at one resource. The legacy API calls them "
+            "datasets."
         ),
     },
     {
         "name": "ingest shares",
         "description": (
             "Temporary Samba shares with one-time credentials for writing data "
-            "into a session from an instrument PC. The legacy API calls them "
-            "shares."
+            "into a session folder from an instrument computer. The legacy API "
+            "calls them shares."
         ),
     },
     {

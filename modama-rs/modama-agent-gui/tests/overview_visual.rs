@@ -652,7 +652,7 @@ fn start_while_open_snapshots() {
     own.snapshot("overview_start_while_own_share_open");
     results.extend_harness(&mut own);
 
-    // someone else's share: starting detaches it from the instrument
+    // someone else's share: starting is a hand-off
     let mut others = overview_harness(false, true);
     others.state_mut().app_state.identity = Some(AgentIdentity::AgentId {
         agent_name: "k2".to_owned(),
