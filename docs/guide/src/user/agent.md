@@ -59,7 +59,7 @@ The ingest share is not only available on the computer where you just created it
 but also on other computers that belong to the same scientific instrument.
 
 You can see the list of other connected computers ("agents") on the overview page,
-where you can also upload data into your ingest share.
+which also gives you information on how to upload your data into your ingest share.
 
 ## How to upload data to the ingest share
 
@@ -114,6 +114,8 @@ def free_subfolder(prefix="scan_", digits=4, full_path=True):
     name = f"{prefix}{max(numbers) + 1:0{digits}}"
     return raw_folder / name if full_path else name
 ```
+
+You can use this code for example in a Jupyter notebook.
 
 The code needs Python 3.9 or newer. `project` and `session` are the names of the
 project and the session that the data goes to.
