@@ -19,6 +19,7 @@ use crate::{
     async_state::AsyncState,
     components::{
         buttons::{ButtonVariant, loading_button, primary_button, secondary_button},
+        dialogs::{ChoiceDialogAction, DialogChoice, choice_dialog},
         display_error,
         flow_navigation::{FlowStage, flow_navigation},
         forms::labeled_text_input,
@@ -76,7 +77,13 @@ pub struct PageSelectCreateSession {
     /// Operation identity paired with the public async task fields in test fixtures.
     pub start_operation_id: Option<OperationId>,
     started_action: Option<Box<Action>>,
+    /// The existing session the user asked to create, while the page asks whether to ingest
+    /// into it
+    existing_session_confirmation: Option<String>,
+    focus_existing_cancel: bool,
 }
+
+const EXISTING_SESSION_DIALOG_ID: &str = "existing-session-confirmation";
 
 impl PageSelectCreateSession {
     pub fn new(project: String) -> Self {
@@ -112,6 +119,8 @@ impl PageSelectCreateSession {
             signed_in,
             start_operation_id: None,
             started_action: None,
+            existing_session_confirmation: None,
+            focus_existing_cancel: false,
         }
     }
 
@@ -144,11 +153,16 @@ impl PageSelectCreateSession {
             SessionPageMode::SelectExisting => self.show_session_selection(ui),
             SessionPageMode::CreateNew => self.show_create_form(ui),
         }
+        self.show_existing_session_confirmation(ui);
 
         self.take_started_action()
     }
 
     fn handle_keyboard_shortcuts(&mut self, ui: &mut egui::Ui) {
+        if self.existing_session_confirmation.is_some() {
+            // the dialog handles its keys
+            return;
+        }
         let command_n =
             ui.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::N));
         if self.mode == SessionPageMode::SelectExisting
@@ -406,10 +420,55 @@ impl PageSelectCreateSession {
     }
 
     fn start_new_session(&mut self, ctx: egui::Context) {
-        if self.create_session_task.is_pending() {
+        if self.create_session_task.is_pending() || self.existing_session_confirmation.is_some() {
+            return;
+        }
+        let name = self.new_session_input.trim();
+        if self
+            .available_sessions
+            .iter()
+            .any(|session| session == name)
+        {
+            self.existing_session_confirmation = Some(name.to_owned());
+            self.focus_existing_cancel = true;
             return;
         }
         self.spawn_create_session_task(self.new_session_input.clone(), ctx);
+    }
+
+    fn show_existing_session_confirmation(&mut self, ui: &mut egui::Ui) {
+        let Some(session) = self.existing_session_confirmation.clone() else {
+            return;
+        };
+        let message = format!(
+            "The session {session} exists already in project {}. Start the ingest into it?",
+            self.project
+        );
+        let action = choice_dialog(
+            ui.ctx(),
+            ui.visuals(),
+            EXISTING_SESSION_DIALOG_ID,
+            "Session exists already",
+            &message,
+            &[DialogChoice {
+                label: "Use existing session",
+                variant: ButtonVariant::Primary,
+                value: (),
+            }],
+            self.focus_existing_cancel,
+        );
+        self.focus_existing_cancel = false;
+        match action {
+            ChoiceDialogAction::None => {}
+            ChoiceDialogAction::Cancel => {
+                self.existing_session_confirmation = None;
+                self.focus_target = SessionFocusTarget::SessionName;
+            }
+            ChoiceDialogAction::Choose(()) => {
+                self.existing_session_confirmation = None;
+                self.spawn_create_session_task(session, ui.ctx().clone());
+            }
+        }
     }
 
     pub fn poll(&mut self) -> Action {

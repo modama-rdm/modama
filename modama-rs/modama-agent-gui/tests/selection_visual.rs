@@ -1008,6 +1008,18 @@ fn session_selection_snapshots() {
     validation.snapshot("select_session_create_validation");
     results.extend_harness(&mut validation);
 
+    let mut existing_page = session_page_at_fixture_date();
+    existing_page.available_sessions = strings(&SESSIONS);
+    existing_page.new_session_input = SESSIONS[1].to_owned();
+    let mut existing = selection_harness(Page::SelectCreateSession(existing_page));
+    existing.run_steps(3);
+    existing.get_by_label("Create a new session").click();
+    existing.run_steps(2);
+    existing.get_by_label("Create Session").click();
+    existing.run_steps(3);
+    existing.snapshot("select_session_create_existing");
+    results.extend_harness(&mut existing);
+
     let mut rejected_page = session_page_at_fixture_date();
     rejected_page.available_sessions = strings(&SESSIONS);
     rejected_page.new_session_input = "2026-07-30-forbidden-run".to_owned();
@@ -1212,6 +1224,89 @@ fn enter_submits_the_create_session_form() {
     harness.key_press(egui::Key::Enter);
     harness.run_steps(1);
 
+    match &harness.state().page {
+        Page::SelectCreateSession(page) => assert!(page.create_session_task.is_pending()),
+        Page::Overview(_) => {}
+        _ => panic!("session creation changed to an unexpected page"),
+    }
+}
+
+#[test]
+fn creating_an_existing_session_asks_first_and_cancel_keeps_the_name() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.available_sessions = strings(&SESSIONS);
+    page.new_session_input = format!(" {} ", SESSIONS[1]);
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+    harness.get_by_label("Create a new session").click();
+    harness.run_steps(2);
+    harness.get_by_label("Create Session").click();
+    harness.run_steps(3);
+
+    let message = format!(
+        "The session {} exists already in project Project Alpha. Start the ingest into it?",
+        SESSIONS[1]
+    );
+    harness.get_by_label(&message);
+    match &harness.state().page {
+        Page::SelectCreateSession(page) => assert!(!page.create_session_task.is_pending()),
+        _ => panic!("the confirmation left the session page"),
+    }
+
+    // the form's Cancel is still in the tree, behind the dialog's
+    let cancels: Vec<_> = harness
+        .query_all_by_role_and_label(Role::Button, "Cancel")
+        .collect();
+    assert_eq!(cancels.len(), 2);
+    cancels[1].click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label(&message).is_none());
+    match &harness.state().page {
+        Page::SelectCreateSession(page) => {
+            assert!(!page.create_session_task.is_pending());
+            assert_eq!(page.new_session_input, format!(" {} ", SESSIONS[1]));
+        }
+        _ => panic!("cancelling left the session page"),
+    }
+    harness.get_by_role_and_label(egui::accesskit::Role::TextInput, "Session name");
+}
+
+#[test]
+fn confirming_an_existing_session_starts_the_ingest_into_it() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.available_sessions = strings(&SESSIONS);
+    page.new_session_input = SESSIONS[1].to_owned();
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+    harness.get_by_label("Create a new session").click();
+    harness.run_steps(2);
+    harness.get_by_label("Create Session").click();
+    harness.run_steps(3);
+    harness
+        .get_by_role_and_label(Role::Button, "Use existing session")
+        .click();
+    harness.run_steps(1);
+
+    match &harness.state().page {
+        Page::SelectCreateSession(page) => assert!(page.create_session_task.is_pending()),
+        Page::Overview(_) => {}
+        _ => panic!("confirming changed to an unexpected page"),
+    }
+}
+
+#[test]
+fn a_new_session_name_is_created_without_asking() {
+    let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
+    page.available_sessions = strings(&SESSIONS);
+    page.new_session_input = "2026-07-30-new-run".to_owned();
+    let mut harness = selection_harness(Page::SelectCreateSession(page));
+    harness.run_steps(3);
+    harness.get_by_label("Create a new session").click();
+    harness.run_steps(2);
+    harness.get_by_label("Create Session").click();
+    harness.run_steps(1);
+
+    assert!(harness.query_by_label("Session exists already").is_none());
     match &harness.state().page {
         Page::SelectCreateSession(page) => assert!(page.create_session_task.is_pending()),
         Page::Overview(_) => {}
