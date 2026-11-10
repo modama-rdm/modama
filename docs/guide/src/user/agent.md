@@ -52,14 +52,14 @@ mapped network drive on Windows, or as a mounted network filesystem under Linux.
 
 Where exactly your ingest share is mounted depends on your operating system and its version.
 It should also show up in your normal file manager as a network drive or location.
-As shown above, you can use the "Copy" button to copy its path into the clipboard,
+As the path can be long, you can use the "Copy" button to copy its path into the clipboard,
 or "Open folder" to open your ingest share with a file manager.
 
 The ingest share is not only available on the computer where you just created it,
 but also on other computers that belong to the same scientific instrument.
 
-You can see the list of other connected computers ("agents") on the overview page,
-which also gives you information on how to upload your data into your ingest share.
+You can see the list of other connected computers ("agents") on the overview page.
+There, you also find information on how to upload your data into your ingest share.
 
 ## How to upload data to the ingest share
 
@@ -101,19 +101,24 @@ You can use this code for example in a Jupyter notebook.
 
 ## Stopping the ingest
 
-At the end of your session, it is your responsibility to stop the ingest share. You can do this with
-the "Stop Ingest" button on the overview page:
+At the end of your session, it is your responsibility to stop the ingest share. 
+Before you do, first wait for all of your copies to the ingest share to fnish.
+Then, press the "Stop Ingest" button on the overview page:
 
-![The overview with an active ingest session, with the Close Ingest button](images/agent/active-session.png)
+![The overview with an active ingest session, with the Stop Ingest button](images/agent/active-session.png)
 
 After you click that button, you get a confirmation dialog:
 
 TODO: confirmation dialog screenshot here, add it to the snapshot generator
 
 After closing ingest, the data you uploaded to the data management is still
-available via the normal data access methods (TODO: link), just no longer
+available via the normal data access methods, just no longer
 via the network drive or mount path at the
 scientific instrument where you have just uploaded it from.
+
+By closing the ingest, the session folder is not yet sealed, this is a
+separate step done via the managment web interface. Sealing a makes your
+`raw/` directory immutable, preventing modifications and deletions by mistake.
 
 You can now log out, and the next user can start their work.
 
