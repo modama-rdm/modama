@@ -10,7 +10,7 @@ use std::{path::PathBuf, process::Stdio};
 
 use log::{info, warn};
 use modama_common::{
-    foreground::ScopeView,
+    foreground::{ScopeView, project_and_session},
     internal_api_types::{SessionHelperState, ToSessionHelper},
 };
 use tokio::sync::{mpsc, watch};
@@ -40,6 +40,8 @@ pub struct TrayState {
     pub status: TrayStatus,
     /// Where the current foreground share is mounted, for "Open ingest share"
     pub network_drive: Option<PathBuf>,
+    /// The session of the foreground share, while it is mounted
+    pub foreground_session: Option<String>,
 }
 
 impl TrayState {
@@ -51,7 +53,10 @@ impl TrayState {
             TrayStatus::Working {
                 reason: Some(reason),
             } => format!("Working: {reason}"),
-            TrayStatus::Ready => "Ready".to_owned(),
+            TrayStatus::Ready => match &self.foreground_session {
+                Some(session) => format!("Ingest share for session {session}"),
+                None => "Ready".to_owned(),
+            },
         }
     }
 }
@@ -76,6 +81,11 @@ pub fn tray_state(
     let network_drive = view
         .and_then(|view| view.foreground_mount_path())
         .map(PathBuf::from);
+    let foreground_session = view
+        .filter(|_| network_drive.is_some())
+        .and_then(|view| view.foreground_share())
+        .and_then(|share| project_and_session(&share.dest_path).ok())
+        .map(|(_project, session)| session);
     let status = match (connected, view) {
         (false, _) => TrayStatus::Disconnected,
         (true, Some(view)) if !view.actual_differs_from_desired() => TrayStatus::Ready,
@@ -88,6 +98,7 @@ pub fn tray_state(
     TrayState {
         status,
         network_drive,
+        foreground_session,
     }
 }
 
@@ -261,10 +272,24 @@ mod tests {
     }
 
     #[test]
-    fn converged_is_ready() {
+    fn converged_names_the_foreground_share_s_session() {
         let desired = desired(vec![share("a")], Some("a"));
         let state = tray_state(true, Some(&desired), Some(&mounted("a")));
         assert_eq!(state.status, TrayStatus::Ready);
+        assert_eq!(state.label(), "Ingest share for session a");
+    }
+
+    #[test]
+    fn converged_without_an_ingest_share_is_ready() {
+        let desired = desired(vec![], None);
+        let nothing_mounted = SessionHelperState {
+            mounted_shares: vec![],
+            errors: vec![],
+            reconciled_share_ids: None,
+        };
+        let state = tray_state(true, Some(&desired), Some(&nothing_mounted));
+        assert_eq!(state.status, TrayStatus::Ready);
+        assert_eq!(state.foreground_session, None);
         assert_eq!(state.label(), "Ready");
     }
 
