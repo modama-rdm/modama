@@ -16,8 +16,9 @@ use tokio::sync::Mutex;
 use url::Url;
 
 use crate::mgmt_api_client::generated::{
-    ApiOpError, CreateIngestShareRequest, CreateSessionRequest, ErrorResponse, HttpClient,
-    IngestShare, LoginRequest, ProjectDetails, ProjectList,
+    ApiOpError, CreateIngestShareRequest, CreateSessionRequest, ErrorResponse, HTTPValidationError,
+    HttpClient, IngestShare, LoginRequest, ProjectDetails, ProjectList, ValidationError,
+    ValidationErrorLocItemUnion,
 };
 
 /// The contract version (`X-Modama-API-Version`) this agent is built against: `info.version` of
@@ -253,11 +254,38 @@ fn map_error<E: std::fmt::Debug>(error: ApiOpError<E>) -> MgmtApiError {
         (404, Some(ErrorResponse { code, message })) => MgmtApiError::Missing { code, message },
         (404, None) => MgmtApiError::NoRoute,
         (status, Some(ErrorResponse { message, .. })) => MgmtApiError::Backend { status, message },
+        (422, None) => MgmtApiError::Backend {
+            status: 422,
+            message: validation_message(&error.body).unwrap_or(error.body),
+        },
         (status, None) => MgmtApiError::Backend {
             status,
             message: error.body,
         },
     }
+}
+
+/// A request the API refused as invalid (FastAPI's `HTTPValidationError`), as one line per
+/// problem: the field, then the API's message, e.g. `name: String should match pattern …`
+fn validation_message(body: &str) -> Option<String> {
+    let detail = serde_json::from_str::<HTTPValidationError>(body)
+        .ok()?
+        .detail?;
+    let field = |issue: &ValidationError| {
+        // the location is like ["body", "name"]; the field is its last name
+        issue.loc.iter().rev().find_map(|item| match item {
+            ValidationErrorLocItemUnion::String(name) if name != "body" => Some(name.clone()),
+            _ => None,
+        })
+    };
+    let lines = detail
+        .iter()
+        .map(|issue| match field(issue) {
+            Some(field) => format!("{field}: {}", issue.msg),
+            None => issue.msg.clone(),
+        })
+        .collect::<Vec<_>>();
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 /// mgmtinterface-api at a known mount point
@@ -690,6 +718,49 @@ mod tests {
             Err(MgmtApiError::Missing { code, .. }) => assert_eq!(code, "project_not_found"),
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn a_refused_invalid_request_is_described_in_words() {
+        let mut server = Server::new_async().await;
+        let api = api_at_mgmt_api(&mut server).await;
+        // FastAPI's answer to a session name outside the pattern
+        server
+            .mock("POST", "/mgmt-api/projects/p/sessions")
+            .with_status(422)
+            .with_body(
+                r#"{"detail":[{"type":"string_pattern_mismatch","loc":["body","name"],
+                    "msg":"String should match pattern '^[A-Za-z0-9 ._-]+$'",
+                    "input":"M\u00fcller","ctx":{"pattern":"^[A-Za-z0-9 ._-]+$"}}]}"#,
+            )
+            .create_async()
+            .await;
+
+        let connection = api.connect(&server_url(&server)).await.unwrap();
+        let mut sign_in = SignIn::from_cookie(MGMT_COOKIE);
+        match connection.create_session(&mut sign_in, "p", "Müller").await {
+            Err(MgmtApiError::Backend { status, message }) => {
+                assert_eq!(status, 422);
+                assert_eq!(
+                    message,
+                    "name: String should match pattern '^[A-Za-z0-9 ._-]+$'"
+                );
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_body_that_is_no_validation_error_stays_as_it_is() {
+        assert_eq!(super::validation_message("not json"), None);
+        assert_eq!(super::validation_message(r#"{"detail": []}"#), None);
+        assert_eq!(
+            super::validation_message(
+                r#"{"detail":[{"type":"missing","loc":["body"],"msg":"Field required"}]}"#
+            )
+            .as_deref(),
+            Some("Field required")
+        );
     }
 
     #[tokio::test]
