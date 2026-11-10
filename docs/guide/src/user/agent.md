@@ -50,6 +50,11 @@ mapped network drive on Windows, or as a mounted network filesystem under Linux.
 
 ![The ingest page with a foreground ingest](images/agent/active-session.png)
 
+Where exactly your ingest share is mounted depends on your operating system and its version.
+It should also show up in your normal file manager as a network drive or location.
+As shown above, you can use the "Copy" button to copy its path into the clipboard,
+or "Open folder" to open your ingest share with a file manager.
+
 The ingest share is not only available on the computer where you just created it,
 but also on other computers that belong to the same scientific instrument.
 
@@ -60,8 +65,8 @@ where you can also upload data into your ingest share.
 
 The ingest share should automatically open on all data-producing systems. On
 Windows, it will be mapped as a network drive (for example `Z:\`). Simply save
-your data on this network drive, or copy/drag is there, and it will be stored
-in the data management.
+your data on this network drive, or copy/drag it there, as normal,
+and it will be stored in the data management.
 
 ## Automation: how to get the current session folder?
 
