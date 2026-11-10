@@ -205,7 +205,7 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
                 share_id: "guide-share".to_owned(),
                 project: PROJECT.to_owned(),
                 session: SESSION.to_owned(),
-                mount_path: Some(format!("/mnt/modama/{PROJECT}/{SESSION}")),
+                mount_path: Some(r"Z:\".to_string()),
                 created_by: Some(USERNAME.to_owned()),
             });
             app.page = Page::Overview(PageOverview::new());
