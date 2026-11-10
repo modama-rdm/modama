@@ -10,6 +10,7 @@ pub enum RetryAction {
     CreateIngest { project: String, session: String },
     CreateSession { project: String, session: String },
     CloseSession,
+    StopAndLogOut,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +80,8 @@ pub enum Action {
         operation_id: OperationId,
         failure: TaskFailure,
     },
+    /// The user asked to log out; the app reminds them of their ingest shares first
+    LogoutRequested,
     LogoutSuccess,
     TaskFailed(TaskFailure),
 }

@@ -403,6 +403,8 @@ struct StubState {
     foreground: ForegroundSession,
     /// Folders the GUI asked to show in the file manager, oldest first
     opened_folders: Vec<String>,
+    /// The ingest shares the GUI asked to stop, oldest first
+    stopped_shares: Vec<String>,
 }
 
 pub struct StubAgentService {
@@ -435,6 +437,14 @@ impl StubAgentService {
         match self.state.lock() {
             Ok(state) => state.opened_folders.clone(),
             Err(poisoned) => poisoned.into_inner().opened_folders.clone(),
+        }
+    }
+
+    /// The ingest shares the GUI asked to stop, by share ID, oldest first
+    pub fn stopped_shares(&self) -> Vec<String> {
+        match self.state.lock() {
+            Ok(state) => state.stopped_shares.clone(),
+            Err(poisoned) => poisoned.into_inner().stopped_shares.clone(),
         }
     }
 
@@ -578,6 +588,7 @@ impl AgentService for StubAgentService {
         if state.foreground.share_id() == Some(&session.share_id) {
             state.foreground = ForegroundSession::None;
         }
+        state.stopped_shares.push(session.share_id.clone());
         Ok(())
     }
 }

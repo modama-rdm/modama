@@ -6,16 +6,22 @@ use std::sync::Arc;
 use crate::components::autostart_offer::{AutostartOffer, AutostartOfferAction};
 use crate::{
     actions::{Action, LoginDestination, RetryAction, TaskFailure},
-    components::toast::{ToastAction, ToastState},
+    async_state::AsyncState,
+    components::{
+        buttons::ButtonVariant,
+        dialogs::{ChoiceDialogAction, DialogChoice, choice_dialog},
+        toast::{ToastAction, ToastState},
+    },
     footer::show_footer,
     foreground_monitor::{ForegroundMonitor, events_url},
     helper_launch::{HelperLauncher, ProcessLauncher},
     navigation_progress::NavigationProgress,
+    pages::overview::others_share_user,
     pages::{
         Page, PageConnecting, PageLogin, PageOverview, PageSelectCreateSession, PageSelectProject,
     },
-    service::{AgentService, HttpAgentService, StubAgentService},
-    state::{AgentAppState, AgentView},
+    service::{AgentService, HttpAgentService, ServiceError, StubAgentService},
+    state::{ActiveSession, AgentAppState, AgentView, ForegroundSession},
     styles,
     top_bar::TopBar,
 };
@@ -38,7 +44,23 @@ pub struct AgentGuiApp {
     make_launcher: LauncherFactory,
     /// Shown in the footer
     version: &'static str,
+    /// Open while the app asks, on logout, whether to stop the user's ingest shares
+    logout_reminder: Option<LogoutReminder>,
+    /// Stops the user's ingest shares, before logging out
+    stop_before_logout: AsyncState<Result<(), ServiceError>>,
 }
+
+struct LogoutReminder {
+    focus_cancel: bool,
+}
+
+#[derive(Clone, Copy)]
+enum LogoutChoice {
+    LogOut,
+    StopAndLogOut,
+}
+
+const LOGOUT_REMINDER_ID: &str = "logout-reminder";
 
 type LauncherFactory = Box<dyn Fn(&str) -> Box<dyn HelperLauncher>>;
 
@@ -84,6 +106,8 @@ impl AgentGuiApp {
             agent_url,
             make_launcher: Box::new(|agent_url| Box::new(ProcessLauncher::new(agent_url))),
             version,
+            logout_reminder: None,
+            stop_before_logout: AsyncState::Idle,
         }
     }
 
@@ -345,6 +369,13 @@ impl AgentGuiApp {
                     self.handle_task_failure(failure);
                 }
             }
+            Action::LogoutRequested => {
+                if self.own_ingest_shares().is_empty() {
+                    self.handle_action(Action::LogoutSuccess);
+                } else {
+                    self.logout_reminder = Some(LogoutReminder { focus_cancel: true });
+                }
+            }
             Action::LogoutSuccess => {
                 self.toast.clear();
                 self.service.logout();
@@ -432,6 +463,117 @@ impl AgentGuiApp {
         }
     }
 
+    /// The ingest shares here that the signed-in user started: the foreground one (also
+    /// while it mounts) and the others mounted for them. A share whose creator isn't known
+    /// counts as the user's own, as when starting another ingest.
+    fn own_ingest_shares(&self) -> Vec<ActiveSession> {
+        let Some(signed_in) = &self.app_state.signed_in else {
+            return Vec::new();
+        };
+        let foreground = match &self.app_state.agent.foreground {
+            ForegroundSession::None => None,
+            ForegroundSession::Mounted(session) => Some(session.clone()),
+            ForegroundSession::Mounting(pending, _) => Some(ActiveSession {
+                share_id: pending.share_id.clone(),
+                project: pending.project.clone(),
+                session: pending.session.clone(),
+                mount_path: None,
+                created_by: pending.created_by.clone(),
+            }),
+        };
+        foreground
+            .into_iter()
+            .chain(self.app_state.agent.other_mounts.iter().cloned())
+            .filter(|share| others_share_user(share.created_by.as_deref(), signed_in).is_none())
+            .collect()
+    }
+
+    fn show_logout_reminder(&mut self, ui: &mut egui::Ui) {
+        let Some(reminder) = &mut self.logout_reminder else {
+            return;
+        };
+        let focus_cancel = std::mem::take(&mut reminder.focus_cancel);
+        let message = if self.own_ingest_shares().len() > 1 {
+            "Please remember to stop your ingest shares once you are done uploading data."
+        } else {
+            "Please remember to stop your ingest share once you are done uploading data."
+        };
+        let action = choice_dialog(
+            ui.ctx(),
+            ui.visuals(),
+            LOGOUT_REMINDER_ID,
+            "Log out?",
+            message,
+            &[
+                DialogChoice {
+                    label: "Log out",
+                    variant: ButtonVariant::Primary,
+                    value: LogoutChoice::LogOut,
+                },
+                DialogChoice {
+                    label: "Stop and log out",
+                    variant: ButtonVariant::Secondary,
+                    value: LogoutChoice::StopAndLogOut,
+                },
+            ],
+            focus_cancel,
+        );
+        match action {
+            ChoiceDialogAction::None => {}
+            ChoiceDialogAction::Cancel => self.logout_reminder = None,
+            ChoiceDialogAction::Choose(LogoutChoice::LogOut) => {
+                self.logout_reminder = None;
+                self.handle_action(Action::LogoutSuccess);
+            }
+            ChoiceDialogAction::Choose(LogoutChoice::StopAndLogOut) => {
+                self.logout_reminder = None;
+                self.stop_and_log_out(ui.ctx().clone());
+            }
+        }
+    }
+
+    /// Stop the user's ingest shares, one after the other, and log out once all are stopped
+    fn stop_and_log_out(&mut self, ctx: egui::Context) {
+        let Some(signed_in) = self.app_state.signed_in.clone() else {
+            return;
+        };
+        if self.stop_before_logout.is_pending() {
+            return;
+        }
+        let shares = self.own_ingest_shares();
+        let service = Arc::clone(&self.service);
+        self.toast.clear();
+        self.stop_before_logout.spawn(
+            move || {
+                shares
+                    .iter()
+                    .try_for_each(|share| service.close_session(&signed_in, share))
+            },
+            ctx,
+        );
+    }
+
+    fn poll_stop_before_logout(&mut self) {
+        let result = match self.stop_before_logout.poll() {
+            Ok(task) => match task.take_ready() {
+                Some(result) => result.map_err(|error| error.to_string()),
+                None => return,
+            },
+            Err(error) => Err(error.to_string()),
+        };
+        self.stop_before_logout.reset();
+        match result {
+            Ok(()) => self.handle_action(Action::LogoutSuccess),
+            Err(error) => {
+                log::error!("stopping the ingest shares before logging out failed: {error}");
+                self.toast.show_error(
+                    "Could not stop the ingest share.".to_owned(),
+                    RetryAction::StopAndLogOut,
+                );
+            }
+        }
+    }
+
     fn handle_retry(&mut self, retry: RetryAction, ctx: egui::Context) {
         match retry {
             RetryAction::Login => {
@@ -467,6 +609,7 @@ impl AgentGuiApp {
                     self.handle_action(action);
                 }
             }
+            RetryAction::StopAndLogOut => self.stop_and_log_out(ctx),
         }
         self.toast.clear();
     }
@@ -504,7 +647,8 @@ impl eframe::App for AgentGuiApp {
             .signed_in
             .as_ref()
             .map(|signed_in| signed_in.username.clone());
-        let page_busy = self.page.is_busy();
+        self.poll_stop_before_logout();
+        let page_busy = self.page.is_busy() || self.stop_before_logout.is_pending();
         let show_login_action = !matches!(self.page, Page::Login(_));
         let action = self.top_bar.show_inside(
             ui,
@@ -537,6 +681,8 @@ impl eframe::App for AgentGuiApp {
                 }
             });
 
+        self.show_logout_reminder(ui);
+
         if let Some(action) = self.toast.show(ui.ctx()) {
             match action {
                 ToastAction::Retry(retry) => self.handle_retry(retry, ui.ctx().clone()),
@@ -556,7 +702,7 @@ impl eframe::App for AgentGuiApp {
 
         self.navigation_progress.show(
             ui.ctx(),
-            self.page.is_busy(),
+            self.page.is_busy() || self.stop_before_logout.is_pending(),
             self.app_state.agent.connection_dropped,
         );
     }

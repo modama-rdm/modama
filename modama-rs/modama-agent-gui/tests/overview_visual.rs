@@ -208,10 +208,23 @@ fn overview_snapshots() {
     close_release.wait();
     results.extend_harness(&mut close_pending);
 
+    let mut logout_reminder = overview_harness(false, true);
+    logout_reminder.get_by_label("Log out").click();
+    logout_reminder.run_steps(3);
+    logout_reminder.get_by_label(LOGOUT_REMINDER);
+    logout_reminder.snapshot("overview_logout_reminder");
+    results.extend_harness(&mut logout_reminder);
+
     let mut logout_completed = overview_harness(false, true);
+    let top_bar_logout = logout_completed.get_by_label("Log out").rect().center();
     logout_completed.get_by_label("Log out").click();
     logout_completed.run_steps(3);
+    click_dialog_button(&mut logout_completed, "Log out");
+    logout_completed.run_steps(3);
     assert!(logout_completed.query_by_label("Log out").is_none());
+    // the pointer back on the top bar, where the click on Log out leaves it without a reminder
+    logout_completed.hover_at(top_bar_logout);
+    logout_completed.run_steps(3);
     logout_completed.snapshot("overview_logout_completed");
     results.extend_harness(&mut logout_completed);
 
@@ -755,6 +768,104 @@ fn started_by_is_shown_only_when_known() {
     }
     unknown.run_steps(1);
     assert!(unknown.query_by_label("Started by").is_none());
+}
+
+const LOGOUT_REMINDER: &str =
+    "Please remember to stop your ingest share once you are done uploading data.";
+
+/// Click a dialog's button whose label also names a button behind the dialog
+fn click_dialog_button(harness: &mut Harness<'static, AgentGuiApp>, label: &str) {
+    let buttons: Vec<_> = harness
+        .query_all_by_role_and_label(egui::accesskit::Role::Button, label)
+        .collect();
+    assert!(buttons.len() >= 2, "no dialog button {label}");
+    buttons[buttons.len() - 1].click();
+}
+
+fn open_logout_reminder() -> Harness<'static, AgentGuiApp> {
+    let mut harness = overview_harness(false, true);
+    harness.get_by_label("Log out").click();
+    harness.run_steps(3);
+    harness.get_by_label(LOGOUT_REMINDER);
+    harness
+}
+
+#[test]
+fn logout_reminder_logs_out_and_keeps_the_ingest_share() {
+    let mut harness = open_logout_reminder();
+    click_dialog_button(&mut harness, "Log out");
+    harness.run_steps(3);
+    assert!(harness.state().app_state.signed_in.is_none());
+    assert!(harness.query_by_label(LOGOUT_REMINDER).is_none());
+    assert!(matches!(
+        harness.state().app_state.agent.foreground,
+        ForegroundSession::Mounted(_)
+    ));
+}
+
+#[test]
+fn logout_reminder_can_be_cancelled() {
+    let mut harness = open_logout_reminder();
+    harness.get_by_label("Cancel").click();
+    harness.run_steps(3);
+    assert!(harness.state().app_state.signed_in.is_some());
+    assert!(harness.query_by_label(LOGOUT_REMINDER).is_none());
+}
+
+#[test]
+fn stop_and_log_out_stops_the_users_ingest_shares_first() {
+    let service = Arc::new(StubAgentService::new());
+    let app_service = Arc::clone(&service);
+    let mut harness = Harness::new_eframe(move |cc| {
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+        styles::theme::install(&cc.egui_ctx);
+        let mut app = AgentGuiApp::with_service_without_monitor(app_service);
+        app.page = Page::Overview(PageOverview::new());
+        app.app_state.signed_in = Some(SignedIn {
+            username: "representative.user".to_string(),
+        });
+        app.app_state.agent.foreground = ForegroundSession::Mounted(ActiveSession {
+            share_id: "own-foreground".to_owned(),
+            project: "representative-project".to_string(),
+            session: "2026-07-29-ingest".to_string(),
+            mount_path: None,
+            created_by: Some("representative.user".to_owned()),
+        });
+        app.app_state.agent.other_mounts = vec![ActiveSession {
+            share_id: "own-older".to_owned(),
+            project: "representative-project".to_string(),
+            session: "2026-07-28-ingest".to_string(),
+            mount_path: None,
+            created_by: None,
+        }];
+        app
+    });
+    harness.set_size(VIEWPORT).set_pixels_per_point(1.0);
+    harness.run_steps(3);
+    harness.get_by_label("Log out").click();
+    harness.run_steps(3);
+    harness.get_by_label(
+        "Please remember to stop your ingest shares once you are done uploading data.",
+    );
+    harness.get_by_label("Stop and log out").click();
+    for _ in 0..50 {
+        harness.run_steps(1);
+        if harness.state().app_state.signed_in.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(harness.state().app_state.signed_in.is_none());
+    assert_eq!(service.stopped_shares(), ["own-foreground", "own-older"]);
+}
+
+#[test]
+fn logout_without_an_own_ingest_share_does_not_ask() {
+    let mut harness = others_share_harness();
+    harness.get_by_label("Log out").click();
+    harness.run_steps(3);
+    assert!(harness.query_by_label(LOGOUT_REMINDER).is_none());
+    assert!(harness.state().app_state.signed_in.is_none());
 }
 
 fn stop_is_disabled(harness: &Harness<'static, AgentGuiApp>) -> bool {
