@@ -141,8 +141,8 @@ pub async fn run_tray(
     }
 }
 
-/// Start the GUI, which is our own executable. An already open GUI gets a second window; the GUI
-/// has no single-instance handling yet.
+/// Start the GUI, which is our own executable. On X11, an already open GUI brings its window to
+/// the front instead (`modama_agent_gui::single_instance`); elsewhere it gets a second window.
 fn open_modama(agent_url: &Url) {
     let gui = match std::env::current_exe() {
         Ok(gui) => gui,
