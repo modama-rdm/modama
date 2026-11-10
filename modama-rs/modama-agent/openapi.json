@@ -789,6 +789,13 @@
           "project": {
             "type": "string"
           },
+          "session_summaries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/APISessionSummary"
+            },
+            "description": "The same sessions with their last modification. Missing in answers of older agents."
+          },
           "sessions": {
             "type": "array",
             "items": {
@@ -849,6 +856,24 @@
             "type": "string"
           },
           "owner": {
+            "type": "string"
+          }
+        }
+      },
+      "APISessionSummary": {
+        "type": "object",
+        "description": "A session in a project",
+        "required": [
+          "name",
+          "modified_at"
+        ],
+        "properties": {
+          "modified_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Last modification of the session folder as an integer Unix timestamp."
+          },
+          "name": {
             "type": "string"
           }
         }

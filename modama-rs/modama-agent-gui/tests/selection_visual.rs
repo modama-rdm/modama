@@ -15,11 +15,12 @@ use modama_agent_gui::{
 };
 use time::{Date, Month};
 
+/// Newest first, as the agent service lists them
 const SESSIONS: [&str; 4] = [
-    "2026-06-16-holo-stacks",
-    "2026-06-18-holo-stacks",
-    "2026-06-20-holo-stacks",
     "2026-06-26-holo-stacks",
+    "2026-06-20-holo-stacks",
+    "2026-06-18-holo-stacks",
+    "2026-06-16-holo-stacks",
 ];
 
 fn session_page_at_fixture_date() -> PageSelectCreateSession {
@@ -1074,11 +1075,12 @@ fn session_selection_snapshots() {
 
     let mut scrolled_page = PageSelectCreateSession::new("Project Alpha".to_string());
     scrolled_page.available_sessions = (1..=24)
+        .rev()
         .map(|day| format!("2026-06-{day:02}-holo-stacks"))
         .collect();
     let mut scrolled = selection_harness(Page::SelectCreateSession(scrolled_page));
     scrolled.run_steps(3);
-    let first_session = scrolled.get_by_role_and_label(Role::Button, "2026-06-01-holo-stacks");
+    let first_session = scrolled.get_by_role_and_label(Role::Button, "2026-06-24-holo-stacks");
     for _ in 0..8 {
         first_session.scroll_down();
     }
@@ -1408,6 +1410,7 @@ fn session_list_follows_available_geometry_and_shared_guide() {
     for height in [600.0, 768.0, 900.0] {
         let mut page = PageSelectCreateSession::new("Project Alpha".to_string());
         page.available_sessions = (1..=24)
+            .rev()
             .map(|day| format!("2026-06-{day:02}-holo-stacks"))
             .collect();
         let mut harness = selection_harness_at_size(
@@ -1424,7 +1427,7 @@ fn session_list_follows_available_geometry_and_shared_guide() {
             .rect();
         let create_row = harness.get_by_label("Create a new session").rect();
         harness
-            .get_by_role_and_label(Role::Button, "2026-06-01-holo-stacks")
+            .get_by_role_and_label(Role::Button, "2026-06-24-holo-stacks")
             .rect();
         let action = harness.get_by_label("Select Session").rect();
         let card_border = styles::components::standard_border::width::EGUI_POINTS;

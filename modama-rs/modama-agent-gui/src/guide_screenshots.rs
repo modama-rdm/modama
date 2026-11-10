@@ -31,11 +31,12 @@ pub const VIEWPORT: egui::Vec2 = egui::vec2(
 const PROJECT: &str = "Holo Stacks";
 const SESSION: &str = "2026-06-26-holo-stacks";
 const USERNAME: &str = "representative.user";
+/// Newest first, as the agent service lists them
 const SESSIONS: [&str; 4] = [
-    "2026-06-16-holo-stacks",
-    "2026-06-18-holo-stacks",
-    "2026-06-20-holo-stacks",
     SESSION,
+    "2026-06-20-holo-stacks",
+    "2026-06-18-holo-stacks",
+    "2026-06-16-holo-stacks",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

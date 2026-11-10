@@ -98,6 +98,17 @@ pub struct APIListProjectsResponse {
 pub struct APIListSessionsResponse {
     pub project: String,
     pub sessions: Vec<String>,
+    /// The same sessions with their last modification. Missing in answers of older agents.
+    #[serde(default)]
+    pub session_summaries: Vec<APISessionSummary>,
+}
+
+/// A session in a project
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+pub struct APISessionSummary {
+    pub name: String,
+    /// Last modification of the session folder as an integer Unix timestamp.
+    pub modified_at: i64,
 }
 
 /// Create a new session in the given project
