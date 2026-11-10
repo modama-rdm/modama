@@ -159,7 +159,7 @@ impl TopBar {
             ui.add_enabled(!navigation_busy, secondary_button("Log out", ui))
         };
         if response.clicked() {
-            return Some(Action::LogoutSuccess);
+            return Some(Action::LogoutRequested);
         }
         None
     }
