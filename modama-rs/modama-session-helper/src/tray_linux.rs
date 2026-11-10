@@ -47,7 +47,7 @@ impl ksni::Tray for ModamaTray {
     }
 
     fn title(&self) -> String {
-        "Modama".into()
+        "modama-agent".into()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -56,7 +56,7 @@ impl ksni::Tray for ModamaTray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: "Modama".into(),
+            title: "modama-agent".into(),
             description: self.state.label(),
             ..Default::default()
         }
@@ -77,7 +77,7 @@ impl ksni::Tray for ModamaTray {
             .into(),
             ksni::MenuItem::Separator,
             StandardItem {
-                label: "Open Modama".into(),
+                label: "Open modama-agent".into(),
                 activate: Box::new(|tray: &mut Self| tray.request(TrayAction::OpenModama)),
                 ..Default::default()
             }
