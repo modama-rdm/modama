@@ -59,7 +59,7 @@ The ingest share is not only available on the computer where you just created it
 but also on other computers that belong to the same scientific instrument.
 
 You can see the list of other connected computers ("agents") on the overview page,
-where you can also upload data into your ingest share.
+which also gives you information on how to upload your data into your ingest share.
 
 ## How to upload data to the ingest share
 
@@ -96,6 +96,8 @@ if "mount_path" not in share:
 session_folder = share["mount_path"]
 raw_folder = pathlib.Path(session_folder) / "raw"
 ```
+
+You can use this code for example in a Jupyter notebook.
 
 ## Stopping the ingest
 

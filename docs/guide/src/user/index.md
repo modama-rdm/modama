@@ -28,7 +28,7 @@ scientific instrument. It is good practice to scope your session
 folders to a single day, such that you can easily find back
 the data that matches entries in your lab notebook notes.
 
-You can create a session folders directly using [`modama-agent`](./user/agent.md), or
+You can create a session folders directly using [`modama-agent`](./agent.md), or
 in the web managament interface.
 
 ## The data life cycle in modama
@@ -40,7 +40,7 @@ which can be made available directly at the scientific instruments,
 where the data is first recorded. It helps to streamline data
 management tasks, so you can stay focused on running your experiment.
 
-- [`modama-agent`](./user/agent.md) - uploading your data directly into the data management
+- [`modama-agent`](./agent.md) - uploading your data directly into the data management
 
 ### Accessing data stored in modama
 
