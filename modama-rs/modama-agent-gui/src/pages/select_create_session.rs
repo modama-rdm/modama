@@ -35,8 +35,13 @@ use crate::{
 pub enum CreateSessionError {
     #[error("Please enter a session name.")]
     EmptyName,
-    #[error("Session name cannot contain a \"/\".")]
-    ContainsSlash,
+    #[error(
+        "Session names can only contain letters A-Z, digits, spaces, \".\", \"_\" and \"-\", \
+         not \"{0}\"."
+    )]
+    InvalidCharacter(char),
+    #[error("Session names can be up to {MAX_SESSION_NAME_LENGTH} characters long.")]
+    TooLong,
     #[error("{0}")]
     Server(String),
     #[error("Session was created, but the ingest share could not be started: {0}")]
@@ -638,7 +643,7 @@ impl PageSelectCreateSession {
             move || {
                 service
                     .create_session(&signed_in, &project, &session)
-                    .map_err(|error| CreateSessionError::Server(error.to_string()))?;
+                    .map_err(|error| CreateSessionError::Server(refusal_message(error)))?;
                 service
                     .start_ingest(&signed_in, &project, &session)
                     .map_err(|error| CreateSessionError::Start(error.to_string()))
@@ -906,12 +911,30 @@ fn centered_loading(ui: &mut egui::Ui, height: f32) {
     content_ui.label(RichText::new(loading_text).font(styles::typography::body::font_id()));
 }
 
+/// What to show for a failed request: a refusal (4xx) in the server's words, without the
+/// status code; anything else as the error says it
+fn refusal_message(error: ServiceError) -> String {
+    match error {
+        ServiceError::Server { status, message } if (400..500).contains(&status) => message,
+        error => error.to_string(),
+    }
+}
+
+/// The management API's limit for a session name (`CreateSessionRequest.name`)
+const MAX_SESSION_NAME_LENGTH: usize = 255;
+
+/// The management API's rule for session names (`CreateSessionRequest.name` in its OpenAPI
+/// document: `^[A-Za-z0-9 ._-]+$`, up to 255 characters), checked before sending, so the user
+/// gets a sentence instead of the API's refusal
 fn validate_session_name(input: &str) -> Result<String, CreateSessionError> {
     let trimmed = input.trim();
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-');
     if trimmed.is_empty() {
         Err(CreateSessionError::EmptyName)
-    } else if trimmed.contains('/') {
-        Err(CreateSessionError::ContainsSlash)
+    } else if let Some(invalid) = trimmed.chars().find(|c| !allowed(*c)) {
+        Err(CreateSessionError::InvalidCharacter(invalid))
+    } else if trimmed.chars().count() > MAX_SESSION_NAME_LENGTH {
+        Err(CreateSessionError::TooLong)
     } else {
         Ok(trimmed.to_owned())
     }
@@ -981,7 +1004,49 @@ mod tests {
         );
         assert_eq!(
             validate_session_name("2026-07-30/run"),
-            Err(CreateSessionError::ContainsSlash)
+            Err(CreateSessionError::InvalidCharacter('/'))
+        );
+        assert_eq!(
+            validate_session_name("2026-11-10-second run Müller"),
+            Err(CreateSessionError::InvalidCharacter('ü'))
+        );
+        assert_eq!(
+            validate_session_name("2026-11-10 run_2.b-c"),
+            Ok("2026-11-10 run_2.b-c".to_owned())
+        );
+        assert_eq!(
+            validate_session_name(&"a".repeat(MAX_SESSION_NAME_LENGTH)),
+            Ok("a".repeat(MAX_SESSION_NAME_LENGTH))
+        );
+        assert_eq!(
+            validate_session_name(&"a".repeat(MAX_SESSION_NAME_LENGTH + 1)),
+            Err(CreateSessionError::TooLong)
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_shown_in_the_servers_words() {
+        let refused = ServiceError::Server {
+            status: 422,
+            message: "name: String should match pattern".to_owned(),
+        };
+        assert_eq!(
+            refusal_message(refused),
+            "name: String should match pattern"
+        );
+        let failed = ServiceError::Server {
+            status: 502,
+            message: "unreachable".to_owned(),
+        };
+        assert_eq!(refusal_message(failed), "server error (502): unreachable");
+    }
+
+    #[test]
+    fn invalid_characters_are_named_in_the_message() {
+        assert_eq!(
+            CreateSessionError::InvalidCharacter('ü').to_string(),
+            "Session names can only contain letters A-Z, digits, spaces, \".\", \"_\" and \"-\", \
+             not \"ü\"."
         );
     }
 
