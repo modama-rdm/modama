@@ -27,8 +27,8 @@ from ..shares import (
 from ..versioning import VERSION_ERROR_RESPONSES
 
 # "Ingest share" is the UI's word for an smbdrop share: a temporary Samba share
-# of one session with one-time credentials, which an instrument computer maps to
-# write data straight into the session as the user who opened it.
+# of one session folder with one-time credentials, which an instrument computer
+# maps to write data straight into the session as the user who opened it.
 router = APIRouter(
     prefix="/ingest-shares",
     tags=["ingest shares"],
@@ -213,7 +213,10 @@ def close_ingest_share(
     responses={
         200: {
             "model": IngestShare,
-            "description": "You already have an ingest share open for this session.",
+            "description": (
+                "You already have an ingest share open for this session "
+                "(for an agent: at this resource)."
+            ),
         },
         **AUTH_ERROR_RESPONSES,
         **CSRF_ERROR_RESPONSES,
@@ -251,9 +254,10 @@ def add_ingest_share(
     identity.
 
     modama-agent also sends `X-Agent-Token` and `resource`, which bind the share
-    to the instrument it runs on, so that smbdrop offers the share to that
-    instrument's agent. The token must have been issued for that `resource`. A
-    repeat then counts only a share bound to the same instrument.
+    to the agent's resource, so that smbdrop offers the share to that
+    resource's agents. The token must have been issued for that `resource`. A
+    repeat then counts only a share bound to the same resource: a user can have
+    one share per session at each resource.
     """
     settings = settings_of(request)
     username = session["username"]

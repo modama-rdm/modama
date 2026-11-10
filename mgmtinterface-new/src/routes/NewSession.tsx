@@ -105,8 +105,9 @@ export function NewSession() {
                         What is a session?
                     </div>
                     <div className="text-[13px] leading-relaxed text-fg-muted">
-                        A session is a folder within this project for one measurement run
-                        or experiment. Once data collection is complete, you can{' '}
+                        A session keeps the data of one stretch of work at one instrument,
+                        usually no longer than a day, in its own folder within this project.
+                        Once data collection is complete, you can{' '}
                         <strong>seal</strong> it to permanently protect the raw data from
                         accidental changes.
                     </div>

@@ -307,7 +307,7 @@ def test_a_token_does_not_replace_the_session(
     settings: Settings, backend: dict, token_service: dict
 ):
     # The two pieces answer different questions: without a session nobody is
-    # signed in, whatever instrument the token names.
+    # signed in, whatever resource the token names.
     client = api_client(create_app(settings))
     response = client.post(INGEST_SHARES, json=AGENT_REQUEST, headers=AGENT_HEADERS)
     assert response.status_code == 401
@@ -339,7 +339,7 @@ def test_a_repeat_with_a_token_returns_the_bound_share(
 def test_a_share_not_bound_to_the_instrument_is_not_a_repeat(
     member: TestClient, backend: dict, token_service: dict, bound_to: str | None
 ):
-    # smbdrop offers the agent only shares bound to its instrument; returning
+    # smbdrop offers the agent only shares bound to its resource; returning
     # this one would leave the agent waiting for a share that never comes.
     existing = {**make_share("old", UIDS["user2"]), "resource": bound_to}
     backend["shares"][existing["share_id"]] = existing

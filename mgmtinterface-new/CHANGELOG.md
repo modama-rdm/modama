@@ -26,6 +26,8 @@ planned for the cutover.
   whether someone is uploading right now.
 - On the ingest share page, “Close share” is now “Stop ingest”, and the texts
   speak of instrument computers instead of microscope computers.
+- The “What is a session?” note on the new session page says that a session
+  holds one stretch of work at one instrument, usually no longer than a day.
 - Sealing a session explains what it does: the files in `raw/` become
   immutable, so nobody can change, rename or delete them, and only
   administrators can undo it. The dialog used to say it can’t be undone.

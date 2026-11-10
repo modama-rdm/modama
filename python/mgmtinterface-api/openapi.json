@@ -1402,7 +1402,7 @@
           "ingest shares"
         ],
         "summary": "Open an ingest share for a session, or return the one already open",
-        "description": "Open a share for a session that writes as the signed-in user.\n\nIdempotent per user and session: if the signed-in user already has a share\nfor that session, it is answered with 200 instead of a second share, so a\nclient that lost the first response can simply retry. Another user's share\nfor the same session is not reused; each user ingests under their own\nidentity.\n\nmodama-agent also sends `X-Agent-Token` and `resource`, which bind the share\nto the instrument it runs on, so that smbdrop offers the share to that\ninstrument's agent. The token must have been issued for that `resource`. A\nrepeat then counts only a share bound to the same instrument.",
+        "description": "Open a share for a session that writes as the signed-in user.\n\nIdempotent per user and session: if the signed-in user already has a share\nfor that session, it is answered with 200 instead of a second share, so a\nclient that lost the first response can simply retry. Another user's share\nfor the same session is not reused; each user ingests under their own\nidentity.\n\nmodama-agent also sends `X-Agent-Token` and `resource`, which bind the share\nto the agent's resource, so that smbdrop offers the share to that\nresource's agents. The token must have been issued for that `resource`. A\nrepeat then counts only a share bound to the same resource: a user can have\none share per session at each resource.",
         "operationId": "add_ingest_share_mgmt_api_ingest_shares_post",
         "security": [
           {
@@ -1475,7 +1475,7 @@
             }
           },
           "200": {
-            "description": "You already have an ingest share open for this session.",
+            "description": "You already have an ingest share open for this session (for an agent: at this resource).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2889,11 +2889,11 @@
     },
     {
       "name": "sessions",
-      "description": "Sessions, one folder per measurement run inside a project. The legacy API calls them datasets."
+      "description": "Sessions: the session folders of a project, each meant for one stretch of work at one resource. The legacy API calls them datasets."
     },
     {
       "name": "ingest shares",
-      "description": "Temporary Samba shares with one-time credentials for writing data into a session from an instrument PC. The legacy API calls them shares."
+      "description": "Temporary Samba shares with one-time credentials for writing data into a session folder from an instrument computer. The legacy API calls them shares."
     },
     {
       "name": "browse",

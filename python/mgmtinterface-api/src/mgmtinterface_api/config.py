@@ -51,12 +51,12 @@ class Settings(BaseSettings):
     # Host and workgroup the web interface shows a person for connecting to an
     # ingest share by hand, as seen from the intranet. The share service does
     # not report them, so the API supplies them with the share. modama-agent
-    # does not use them: an instrument PC may reach the Samba server another
+    # does not use them: an instrument computer may reach the Samba server another
     # way, so the agent mounts with its own configured host, port and domain.
     ingest_smb_host: str = "moellenstedt.iff.kfa-juelich.de"
     ingest_workgroup: str = "ER-C-INGEST"
     # smbdrop's token service, which checks the `X-Agent-Token` modama-agent
-    # sends to bind an ingest share to its instrument. It speaks https with a
+    # sends to bind an ingest share to its resource. It speaks https with a
     # certificate from the deployment's own CA, so the CA certificate is needed
     # to trust it; the deployment mounts it where the Flask app reads it.
     token_api: str = "https://smbdrop:5053"
