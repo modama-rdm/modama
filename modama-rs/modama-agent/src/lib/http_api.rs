@@ -19,9 +19,17 @@ use crate::{
 
 use modama_common::local_api_messages::{
     APIAgentIdentity, APICreateSessionRequest, APICreateSessionResponse, APICreateShareResponse,
-    APICurrentForegroundShare, APIHealthCheckResponse, APIListProjectsResponse,
-    APIListSessionsResponse, APILoginRequest, APILoginResponse, APIProjectSummary,
+    APICreateShareResponseV2, APICurrentForegroundShare, APICurrentForegroundShareV2,
+    APIHealthCheckResponse, APIListProjectsResponse, APIListSessionsResponse, APILoginRequest,
+    APILoginResponse, APIProjectSummary,
 };
+
+// Versions of the local API:
+//
+// - 1.0.0: the first one
+// - 1.1.0: `canonical_path` in the foreground share and the `start-ingest` response; their
+//   `dest_path` is deprecated
+// - 2.0.0: the foreground share and the `start-ingest` response without `dest_path`
 
 #[utoipa::path(
     get,
@@ -37,6 +45,23 @@ async fn api_shares_foreground(
 ) -> Result<impl IntoResponse, LocalAPIError> {
     let scope = api_state.resolve_scope(conn).await?;
     Ok(Json(api_state.fan_out.foreground_for(scope)?))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/shares/foreground/",
+    operation_id = "get_foreground_share",
+    params(("X-API-Version" = String, Header, description = "API version")),
+    responses((status = 200, description = "The foreground ingest", body = APICurrentForegroundShareV2))
+)]
+/// Query for the foreground ingest
+async fn api_shares_foreground_v2(
+    State(api_state): State<ApiState>,
+    ConnectInfo(conn): ConnectInfo<ConnInfo>,
+) -> Result<impl IntoResponse, LocalAPIError> {
+    let scope = api_state.resolve_scope(conn).await?;
+    let foreground = api_state.fan_out.foreground_for(scope)?;
+    Ok(Json(APICurrentForegroundShareV2::from(foreground)))
 }
 
 #[utoipa::path(
@@ -81,6 +106,41 @@ async fn api_start_ingest(
         project: share.project,
         session: share.session,
         dest_path: share.dest_path,
+        canonical_path: share.canonical_path,
+    })))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/projects/{project_name}/sessions/{session_name}/start-ingest/",
+    operation_id = "start_ingest",
+    params(
+        ("X-API-Version" = String, Header, description = "API version"),
+        ("project_name" = String, Path, description = "Project name"),
+        ("session_name" = String, Path, description = "Session name")
+    ),
+    responses(
+        (status = 200, description = "The ingest share: a new one, or the caller's existing one for this session", body = APICreateShareResponseV2),
+        (status = 401, description = "Not signed in, or the session has ended"),
+        (status = 403, description = "Not a member of the project"),
+        (status = 404, description = "Project or session not found")
+    ),
+    security(("session_cookie" = []))
+)]
+async fn api_start_ingest_v2(
+    Path((project_name, session_name)): Path<(String, String)>,
+    State(api_state): State<ApiState>,
+    ClientSignIn(mut sign_in): ClientSignIn,
+) -> Result<Response, LocalAPIError> {
+    let share = api_state
+        .actions()
+        .start_ingest(&mut sign_in, &project_name, &session_name)
+        .await?;
+    Ok(sign_in.respond(Json(APICreateShareResponseV2 {
+        share_id: share.share_id,
+        project: share.project,
+        session: share.session,
+        canonical_path: share.canonical_path,
     })))
 }
 
@@ -284,14 +344,18 @@ async fn api_health(State(api_state): State<ApiState>) -> impl IntoResponse {
 }
 
 fn latest_api_version() -> Version {
-    Version::new(1, 0, 0)
+    Version::new(2, 0, 0)
 }
 
 fn api_routes() -> VersionedRouterBuilder<ApiState> {
     VersionedRouterBuilder::new()
         .route(
-            versions!("1.0.0.."),
+            versions!("1.0.0..2.0.0"),
             versioned_route!(api_shares_foreground),
+        )
+        .route(
+            versions!("2.0.0.."),
+            versioned_route!(api_shares_foreground_v2),
         )
         .route(versions!("1.0.0.."), versioned_route!(api_identity))
         .route(versions!("1.0.0.."), versioned_route!(api_delete_share))
@@ -307,7 +371,11 @@ fn api_routes() -> VersionedRouterBuilder<ApiState> {
             versions!("1.0.0.."),
             versioned_route!(api_create_session_in_project),
         )
-        .route(versions!("1.0.0.."), versioned_route!(api_start_ingest))
+        .route(
+            versions!("1.0.0..2.0.0"),
+            versioned_route!(api_start_ingest),
+        )
+        .route(versions!("2.0.0.."), versioned_route!(api_start_ingest_v2))
 }
 
 fn customize_openapi(mut openapi: utoipa::openapi::OpenApi) -> utoipa::openapi::OpenApi {

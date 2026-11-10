@@ -9,7 +9,6 @@ def wait_for_session(name: str, agent_api: str):
     while time.time() < deadline:
         response = requests.get(
             url=f"{agent_api}/api/shares/foreground/",
-            auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
             headers={"X-API-Version": "1.0.0"},
             timeout=30,
         )
@@ -28,16 +27,16 @@ def test_agent_api_connectivity(agent_api: str) -> None:
     assert response.status_code in (200, 401), response.text
 
 
-def test_agent_api_start_ingest(agent_api: str):
-    response = requests.post(
+def test_agent_api_start_ingest(agent_api: str, agent: requests.Session):
+    response = agent.post(
         url=f"{agent_api}/api/projects/testproject/sessions/session2/start-ingest/",
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         headers={"X-API-Version": "1.0.0"},
         timeout=35,
     )
     response.raise_for_status()
     share = response.json()
     assert share["dest_path"] == "/data/adhoc/testproject/session2"
+    assert share["canonical_path"] == "adhoc/testproject/session2"
     assert share["project"] == "testproject"
     assert share["session"] == "session2"
     assert "share_id" in share
@@ -45,14 +44,24 @@ def test_agent_api_start_ingest(agent_api: str):
     # foreground share eventually switches to session2:
     wait_for_session("session2", agent_api)
 
+    # from 2.0.0 on, only the canonical path, without smbdrop's data root
+    response = requests.get(
+        url=f"{agent_api}/api/shares/foreground/",
+        headers={"X-API-Version": "2.0.0"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    foreground = response.json()
+    assert foreground["canonical_path"] == "adhoc/testproject/session2"
+    assert "dest_path" not in foreground
 
-def test_agent_api_start_multiple_ingests(agent_api: str):
+
+def test_agent_api_start_multiple_ingests(agent_api: str, agent: requests.Session):
     time.sleep(
         1.1
     )  # session creation is recorded in second resolution, so wait a bit to ensure we become the fg share
-    response = requests.post(
+    response = agent.post(
         url=f"{agent_api}/api/projects/testproject/sessions/session6/start-ingest/",
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         headers={"X-API-Version": "1.0.0"},
         timeout=35,
     )
@@ -69,9 +78,8 @@ def test_agent_api_start_multiple_ingests(agent_api: str):
         1.1
     )  # session creation is recorded in second resolution, so wait a bit to ensure we become the fg share
 
-    response = requests.post(
+    response = agent.post(
         url=f"{agent_api}/api/projects/testproject/sessions/session7/start-ingest/",
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         headers={"X-API-Version": "1.0.0"},
         timeout=30,
     )
@@ -88,10 +96,9 @@ def test_agent_api_start_multiple_ingests(agent_api: str):
     # FIXME: clean up
 
 
-def test_agent_api_create_session(agent_api: str):
-    response = requests.post(
+def test_agent_api_create_session(agent_api: str, agent: requests.Session):
+    response = agent.post(
         url=f"{agent_api}/api/projects/testproject/sessions/",
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         headers={"X-API-Version": "1.0.0"},
         json={
             "session": "2028-01-01-brand-new-session",
@@ -105,10 +112,9 @@ def test_agent_api_create_session(agent_api: str):
         "session": "2028-01-01-brand-new-session",
     }
 
-    response = requests.get(
+    response = agent.get(
         url=f"{agent_api}/api/projects/testproject/sessions/",
         headers={"X-API-Version": "1.0.0"},
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         timeout=3,
     )
     response.raise_for_status()
@@ -118,11 +124,10 @@ def test_agent_api_create_session(agent_api: str):
     assert "2028-01-01-brand-new-session" in sessions
 
 
-def test_agent_api_list_sessions(agent_api: str):
-    response = requests.get(
+def test_agent_api_list_sessions(agent_api: str, agent: requests.Session):
+    response = agent.get(
         url=f"{agent_api}/api/projects/testproject/sessions/",
         headers={"X-API-Version": "1.0.0"},
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         timeout=3,
     )
     response.raise_for_status()
@@ -133,29 +138,26 @@ def test_agent_api_list_sessions(agent_api: str):
         assert s in sessions
 
 
-def test_agent_api_list_projects(agent_api: str):
-    response = requests.get(
+def test_agent_api_list_projects(agent_api: str, agent: requests.Session):
+    response = agent.get(
         url=f"{agent_api}/api/projects/",
         headers={"X-API-Version": "1.0.0"},
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         timeout=3,
     )
     response.raise_for_status()
     resp_data = response.json()
-    projects = resp_data["projects"]
-    p0 = projects[0]
-    assert p0["name"] == "testproject"
-    assert p0["owner"] == "clausen"
-    assert "members" in p0
-    assert "modified_at" in p0
+    projects = {project["name"]: project for project in resp_data["projects"]}
+    testproject = projects["testproject"]
+    assert testproject["owner"] == "clausen"
+    assert "members" in testproject
+    assert "modified_at" in testproject
 
 
-def test_create_duplicate_session(agent_api: str):
+def test_create_duplicate_session(agent_api: str, agent: requests.Session):
     name = "duplicate-session"
-    response = requests.post(
+    response = agent.post(
         url=f"{agent_api}/api/projects/testproject/sessions/",
         headers={"X-API-Version": "1.0.0"},
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         json={
             "session": name,
         },
@@ -163,15 +165,13 @@ def test_create_duplicate_session(agent_api: str):
     )
     response.raise_for_status()
 
-    response = requests.post(
+    response = agent.post(
         url=f"{agent_api}/api/projects/testproject/sessions/",
         headers={"X-API-Version": "1.0.0"},
-        auth=requests.auth.HTTPBasicAuth("clausen", "1234"),
         json={
             "session": name,
         },
         timeout=3,
     )
-    assert (
-        response.status_code == 500
-    )  # should be bad request - the session already exists
+    # the management API answers for a session that exists already as for a new one
+    assert response.status_code == 200, response.text

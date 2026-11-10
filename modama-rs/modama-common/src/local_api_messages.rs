@@ -14,9 +14,8 @@ pub enum APIAgentIdentity {
     },
 }
 
-/// Local system users can ask the agent for the current foreground share. This
-/// doesn't have to contain credentials, most important is some kind of identity
-/// and the path where the share is mounted.
+/// The foreground share as API 1.x answers it: [`APICurrentForegroundShareV2`] plus the
+/// deprecated `dest_path`. The agent also uses it internally, for its pages and the GUI.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
 #[serde(tag = "type")]
 pub enum APICurrentForegroundShare {
@@ -34,8 +33,15 @@ pub enum APICurrentForegroundShare {
         /// Session derived from the share destination.
         session: String,
 
-        /// The path in the data management that is exported with this Share.
+        /// Deprecated, removed in 2.0.0: the exported folder with smbdrop's data root in front.
+        /// Use `canonical_path`.
+        #[schema(deprecated)]
         dest_path: String,
+
+        /// The canonical path of the exported folder, like `adhoc/testproject/session2`; null
+        /// if smbdrop doesn't know it: from an older smbdrop, or for an old share outside of
+        /// its data root. Added in 1.1.0; 1.0.0 clients get it too.
+        canonical_path: Option<String>,
 
         /// Why the share is unavailable, written for the person running the client.
         message: String,
@@ -56,8 +62,15 @@ pub enum APICurrentForegroundShare {
         /// Session derived from the share destination.
         session: String,
 
-        /// The path in the data management that is exported with this Share
+        /// Deprecated, removed in 2.0.0: the exported folder with smbdrop's data root in front.
+        /// Use `canonical_path`.
+        #[schema(deprecated)]
         dest_path: String,
+
+        /// The canonical path of the exported folder, like `adhoc/testproject/session2`; null
+        /// if smbdrop doesn't know it: from an older smbdrop, or for an old share outside of
+        /// its data root. Added in 1.1.0; 1.0.0 clients get it too.
+        canonical_path: Option<String>,
 
         /// Where the share is mounted on the local system
         mount_path: String,
@@ -68,13 +81,136 @@ pub enum APICurrentForegroundShare {
     },
 }
 
-/// Response when successfully creating a new ingest share.
+/// Local system users can ask the agent for the current foreground share. This
+/// doesn't have to contain credentials, most important is some kind of identity
+/// and the path where the share is mounted.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+#[serde(tag = "type")]
+#[schema(as = APICurrentForegroundShare)]
+pub enum APICurrentForegroundShareV2 {
+    /// No foreground share is desired.
+    None,
+
+    /// A foreground share is desired, but it can't be used in the caller's login session (yet).
+    Unavailable {
+        /// Stable identifier used to close this share.
+        share_id: String,
+
+        /// Project derived from the share destination.
+        project: String,
+
+        /// Session derived from the share destination.
+        session: String,
+
+        /// The canonical path of the exported folder, like `adhoc/testproject/session2`; null
+        /// if smbdrop doesn't know it: from an older smbdrop, or for an old share outside of
+        /// its data root
+        canonical_path: Option<String>,
+
+        /// Why the share is unavailable, written for the person running the client.
+        message: String,
+
+        /// Login name of the user who started the share; null for shares from an smbdrop
+        /// that didn't record it yet
+        created_by: Option<String>,
+    },
+
+    /// The foreground share is mounted; write here.
+    Mounted {
+        /// Stable identifier used to close this share.
+        share_id: String,
+
+        /// Project derived from the share destination.
+        project: String,
+
+        /// Session derived from the share destination.
+        session: String,
+
+        /// The canonical path of the exported folder, like `adhoc/testproject/session2`; null
+        /// if smbdrop doesn't know it: from an older smbdrop, or for an old share outside of
+        /// its data root
+        canonical_path: Option<String>,
+
+        /// Where the share is mounted on the local system
+        mount_path: String,
+
+        /// Login name of the user who started the share; null for shares from an smbdrop
+        /// that didn't record it yet
+        created_by: Option<String>,
+    },
+}
+
+impl From<APICurrentForegroundShare> for APICurrentForegroundShareV2 {
+    fn from(share: APICurrentForegroundShare) -> Self {
+        match share {
+            APICurrentForegroundShare::None => Self::None,
+            APICurrentForegroundShare::Unavailable {
+                share_id,
+                project,
+                session,
+                dest_path: _,
+                canonical_path,
+                message,
+                created_by,
+            } => Self::Unavailable {
+                share_id,
+                project,
+                session,
+                canonical_path,
+                message,
+                created_by,
+            },
+            APICurrentForegroundShare::Mounted {
+                share_id,
+                project,
+                session,
+                dest_path: _,
+                canonical_path,
+                mount_path,
+                created_by,
+            } => Self::Mounted {
+                share_id,
+                project,
+                session,
+                canonical_path,
+                mount_path,
+                created_by,
+            },
+        }
+    }
+}
+
+/// The `start-ingest` response as API 1.x answers it: [`APICreateShareResponseV2`] plus the
+/// deprecated `dest_path`
 #[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct APICreateShareResponse {
     pub share_id: String,
     pub project: String,
     pub session: String,
+
+    /// Deprecated, removed in 2.0.0: the exported folder with smbdrop's data root in front.
+    /// Use `canonical_path`.
+    #[schema(deprecated)]
     pub dest_path: String,
+
+    /// The canonical path of the exported folder, like `adhoc/testproject/session2`; null if
+    /// the management API doesn't know it: from an older one, or for an old share outside of
+    /// smbdrop's data root. Added in 1.1.0; 1.0.0 clients get it too.
+    pub canonical_path: Option<String>,
+}
+
+/// Response when successfully creating a new ingest share.
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[schema(as = APICreateShareResponse)]
+pub struct APICreateShareResponseV2 {
+    pub share_id: String,
+    pub project: String,
+    pub session: String,
+
+    /// The canonical path of the exported folder, like `adhoc/testproject/session2`; null if
+    /// the management API doesn't know it: from an older one, or for an old share outside of
+    /// smbdrop's data root
+    pub canonical_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]

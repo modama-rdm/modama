@@ -2282,7 +2282,20 @@
           "dest_path": {
             "type": "string",
             "title": "Dest Path",
-            "description": "The exported folder, as smbdrop sees it."
+            "description": "Deprecated: the exported folder with smbdrop's data root in front. Use `canonical_path`.",
+            "deprecated": true
+          },
+          "canonical_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Path",
+            "description": "The canonical path of the exported folder, like `adhoc/testproject/session2`: the same on every way of access to the storage. Null only for an old share outside of smbdrop's data root."
           },
           "created_timestamp": {
             "type": "integer",
@@ -2361,7 +2374,7 @@
           "workgroup"
         ],
         "title": "IngestShare",
-        "description": "An ingest share. The fields smbdrop reports, plus the project and session\nit belongs to, so that a client does not parse `dest_path`, and the host\nand workgroup the web interface shows a person who connects by hand.\nmodama-agent does not use those two: an instrument computer may reach the Samba\nserver another way than the intranet does, so the agent mounts with the\nhost, port and domain from its own configuration file."
+        "description": "An ingest share. The fields smbdrop reports, plus the project and session\nit belongs to, so that a client does not parse paths, and the host\nand workgroup the web interface shows a person who connects by hand.\nmodama-agent does not use those two: an instrument computer may reach the Samba\nserver another way than the intranet does, so the agent mounts with the\nhost, port and domain from its own configuration file."
       },
       "IngestShareList": {
         "properties": {

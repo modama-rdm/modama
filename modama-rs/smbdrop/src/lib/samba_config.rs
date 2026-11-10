@@ -114,6 +114,7 @@ mod tests {
                 share_id: "share-123".to_owned(),
                 share_name: "share-123".to_owned(),
                 dest_path: "/adhoc/the-project/test-session/".to_owned(),
+                canonical_path: None,
                 created_timestamp: 0,
                 username: "share-user".to_owned(),
                 password: "share-pass".to_owned(),

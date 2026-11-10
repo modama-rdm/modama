@@ -241,6 +241,7 @@ mod test {
             share_id: id.to_owned(),
             share_name: format!("share-{id}"),
             dest_path: format!("/data/dest/{id}"),
+            canonical_path: None,
             created_timestamp,
             username: "u".to_owned(),
             password: "p".to_owned(),

@@ -8,6 +8,7 @@ use modama_common::{
     logging::init_logging,
 };
 use smbdrop::{
+    data_root::DataRoot,
     event_hub::EventHub,
     events::start_event_channel,
     mount_manager::LinuxMountBackend,
@@ -39,6 +40,11 @@ struct Args {
     #[arg(long, default_value = "/run/smbdrop/")]
     bind_mount_prefix: PathBuf,
 
+    /// Where the data tree is mounted; shares are created for folders under it, named by
+    /// their path relative to it (the canonical path)
+    #[arg(long, default_value = "/data")]
+    data_root: PathBuf,
+
     #[arg(long, default_value = "localhost:5051")]
     api_listen: String,
 
@@ -57,6 +63,7 @@ async fn main() -> AnyResult<()> {
     let pm = SambaProcessManager::new();
     let mut sm = ShareManager::new(
         args.bind_mount_prefix,
+        DataRoot::new(args.data_root),
         args.shares_config,
         args.samba_config_file,
         DefaultUserProvider::new(),

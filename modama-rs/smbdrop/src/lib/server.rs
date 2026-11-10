@@ -1,5 +1,5 @@
 use anyhow::Result as AnyResult;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     Json, Router,
@@ -8,7 +8,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use hyper::StatusCode;
-use log::{error, info};
+use log::{error, info, warn};
 use modama_common::messages::Share;
 use modama_common::requests::CreateShareRequest;
 use serde::{Deserialize, Serialize};
@@ -94,6 +94,22 @@ impl IntoResponse for ShareAPIError {
                     StatusCode::NOT_FOUND,
                     Json(ShareAPIErrorResponse::Error {
                         msg: format!("share '{share_id}' not found"),
+                    }),
+                )
+                    .into_response()
+            }
+            Self::Manager(
+                err @ (ShareError::PathError
+                | ShareError::CanonicalPath(_)
+                | ShareError::OutsideDataRoot(..)
+                | ShareError::BothPaths
+                | ShareError::NoPath),
+            ) => {
+                warn!("refused to create share: {err}");
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ShareAPIErrorResponse::Error {
+                        msg: err.to_string(),
                     }),
                 )
                     .into_response()
@@ -189,12 +205,15 @@ async fn create_share<U: UserProvider, M: MountBackend, P: ProcessManager>(
     State(state): State<ApiState<U, M, P>>,
     Json(request): Json<CreateShareRequest>,
 ) -> Result<impl IntoResponse, ShareAPIError> {
-    let dest_path = PathBuf::from(&request.dest_path);
     info!("creating share from request {request:?}");
+    let canonical_path = state.share_manager.requested_canonical_path(
+        request.canonical_path.as_deref(),
+        request.dest_path.as_deref(),
+    )?;
     let share = state
         .share_manager
         .create_share(
-            &dest_path,
+            &canonical_path,
             request.uid,
             request.gid,
             request.resource,
@@ -294,6 +313,7 @@ mod tests {
     use url::Url;
 
     use crate::{
+        data_root::DataRoot,
         event_hub::EventHub,
         mount::BindMount,
         readiness::NoopShareReadiness,
@@ -304,6 +324,12 @@ mod tests {
         share_manager::{ShareManager, User, UserProvider},
         test_helpers::{MockMountBackend, MockProcessManager, MockUserProvider},
     };
+
+    /// `path`'s canonical path under the data root of the test share managers, the temp folder
+    fn canonical(path: &Path) -> Option<String> {
+        let relative = path.strip_prefix(std::env::temp_dir()).unwrap();
+        Some(relative.to_str().unwrap().to_owned())
+    }
 
     /// The shares the agents at `resource` are told about
     fn published_shares(event_hub: &EventHub, resource: &str) -> Vec<Share> {
@@ -317,7 +343,8 @@ mod tests {
 
     async fn create_test_share(client: &reqwest::Client, api_base_url: &Url, path: &Path) -> Share {
         let request = CreateShareRequest {
-            dest_path: path.to_string_lossy().into_owned(),
+            canonical_path: canonical(path),
+            dest_path: None,
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
@@ -369,6 +396,7 @@ mod tests {
         let process_manager: MockProcessManager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             user_provider,
@@ -390,7 +418,8 @@ mod tests {
         let client = ClientBuilder::new().build().unwrap();
 
         let request = CreateShareRequest {
-            dest_path: dest_path.to_str().unwrap().to_owned(),
+            canonical_path: canonical(&dest_path),
+            dest_path: None,
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
@@ -436,6 +465,7 @@ mod tests {
                 assert_eq!(share.gid, 1001);
                 assert_eq!(share.resource.unwrap().as_str(), "holo");
                 assert_eq!(share.dest_path, dest_path.to_string_lossy());
+                assert_eq!(share.canonical_path, canonical(&dest_path));
                 assert_eq!(share.created_by.as_deref(), Some("alice"));
                 share_clone
             }
@@ -450,6 +480,111 @@ mod tests {
         assert_eq!(health_response.status(), StatusCode::OK);
         let health = health_response.json::<HealthResponse>().await.unwrap();
         assert_eq!(health, HealthResponse::Healthy);
+
+        handle.abort();
+    }
+
+    /// Post a create request for a share at `holo` with the given paths
+    async fn post_create(
+        client: &reqwest::Client,
+        api_base_url: &Url,
+        canonical_path: Option<&str>,
+        dest_path: Option<&str>,
+    ) -> reqwest::Response {
+        let request = CreateShareRequest {
+            canonical_path: canonical_path.map(str::to_owned),
+            dest_path: dest_path.map(str::to_owned),
+            resource: Some("holo".to_owned()),
+            uid: 1001,
+            gid: 1001,
+            created_by: None,
+        };
+        let mut url = api_base_url.clone();
+        url.set_path("/share/");
+        client.post(url).json(&request).send().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_create_share_paths() {
+        init_logging();
+
+        let configs_path = TempDir::new("share_manager_configs");
+        let dest_path = TempDir::new("dest_path_for_share");
+        let bind_mount_prefix = TempDir::new("bind_mount_prefix");
+        let mut share_manager = ShareManager::new(
+            bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
+            configs_path.join("shares_config.json"),
+            configs_path.join("smb_dynamic.conf"),
+            MockUserProvider::new(vec![]),
+            Arc::new(MockMountBackend::new()),
+            MockProcessManager::new(),
+        )
+        .await;
+        share_manager.start().await.unwrap();
+        let api_state = ApiState::new(
+            share_manager,
+            EventHub::new(HashMap::new()),
+            Arc::new(NoopShareReadiness),
+        );
+        let (handle, port) = spawn_smbdrop_task(api_state, "127.0.0.1:0").await.unwrap();
+        let api_base_url = Url::parse(&format!("http://127.0.0.1:{port}")).unwrap();
+        let client = ClientBuilder::new().build().unwrap();
+        let canonical_path = canonical(&dest_path).unwrap();
+
+        // an older caller names the folder with its full path; smbdrop works out the
+        // canonical path from its data root
+        let response = post_create(
+            &client,
+            &api_base_url,
+            None,
+            Some(&format!("{}/", dest_path.to_str().unwrap())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let CreateShareResponse::Ok { share } = response.json().await.unwrap();
+        assert_eq!(share.dest_path, dest_path.to_string_lossy());
+        assert_eq!(
+            share.canonical_path.as_deref(),
+            Some(canonical_path.as_str())
+        );
+
+        // the canonical path is normalized
+        let response = post_create(
+            &client,
+            &api_base_url,
+            Some(&format!("./{canonical_path}/")),
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let CreateShareResponse::Ok { share } = response.json().await.unwrap();
+        assert_eq!(share.dest_path, dest_path.to_string_lossy());
+        assert_eq!(
+            share.canonical_path.as_deref(),
+            Some(canonical_path.as_str())
+        );
+
+        let absolute = format!("/{canonical_path}");
+        let parent = format!("{canonical_path}/../..");
+        let refused: [(Option<&str>, Option<&str>); 6] = [
+            (Some(&absolute), None),
+            (Some(&parent), None),
+            (Some(""), None),
+            (None, Some("/etc")),
+            (Some(&canonical_path), dest_path.to_str()),
+            (None, None),
+        ];
+        for (canonical_path, dest_path) in refused {
+            let response = post_create(&client, &api_base_url, canonical_path, dest_path).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{canonical_path:?}, {dest_path:?}"
+            );
+            let ShareAPIErrorResponse::Error { msg } = response.json().await.unwrap();
+            assert!(!msg.is_empty());
+        }
 
         handle.abort();
     }
@@ -469,6 +604,7 @@ mod tests {
         let process_manager: MockProcessManager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             user_provider,
@@ -490,7 +626,8 @@ mod tests {
         let client = ClientBuilder::new().build().unwrap();
 
         let request = CreateShareRequest {
-            dest_path: dest_path.to_str().unwrap().to_owned(),
+            canonical_path: canonical(&dest_path),
+            dest_path: None,
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
@@ -527,6 +664,7 @@ mod tests {
         let process_manager: MockProcessManager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             user_provider,
@@ -548,7 +686,8 @@ mod tests {
         let client = ClientBuilder::new().build().unwrap();
 
         let request = CreateShareRequest {
-            dest_path: dest_path.to_str().unwrap().to_owned(),
+            canonical_path: canonical(&dest_path),
+            dest_path: None,
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
@@ -616,6 +755,7 @@ mod tests {
         let process_manager: MockProcessManager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             user_provider,
@@ -672,6 +812,7 @@ mod tests {
         let process_manager: MockProcessManager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             user_provider,
@@ -692,7 +833,8 @@ mod tests {
 
         let client = ClientBuilder::new().build().unwrap();
         let request = CreateShareRequest {
-            dest_path: dest_path.to_str().unwrap().to_owned(),
+            canonical_path: canonical(&dest_path),
+            dest_path: None,
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,
@@ -737,6 +879,7 @@ mod tests {
         let process_manager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             dynamic_config_path.clone(),
             MockUserProvider::new(vec![]),
@@ -813,6 +956,7 @@ mod tests {
         let process_manager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             MockUserProvider::new(vec![]),
@@ -863,6 +1007,7 @@ mod tests {
         let process_manager: MockProcessManager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             user_provider,
@@ -882,6 +1027,7 @@ mod tests {
             share_id: share_id.clone(),
             share_name: share_id.clone(),
             dest_path: "/adhoc/the-project/test-session/".to_owned(),
+            canonical_path: None,
             created_timestamp: 0,
             username: username.to_owned(),
             password: "share-pass".to_owned(),
@@ -989,6 +1135,7 @@ mod tests {
         let process_manager: MockProcessManager = MockProcessManager::new();
         let mut share_manager = ShareManager::new(
             bind_mount_prefix.to_owned(),
+            DataRoot::new(std::env::temp_dir()),
             configs_path.join("shares_config.json"),
             configs_path.join("smb_dynamic.conf"),
             user_provider,
@@ -1033,7 +1180,8 @@ mod tests {
         let client = ClientBuilder::new().build().unwrap();
 
         let request = CreateShareRequest {
-            dest_path: dest_path.to_str().unwrap().to_owned(),
+            canonical_path: canonical(&dest_path),
+            dest_path: None,
             resource: Some("holo".to_owned()),
             uid: 1001,
             gid: 1001,

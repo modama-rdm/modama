@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "modama-agent local API",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "paths": {
     "/api/health/": {
@@ -418,7 +418,7 @@
             "session_cookie": []
           }
         ],
-        "x-introduced-in-version": "1.0.0"
+        "x-introduced-in-version": "2.0.0"
       }
     },
     "/api/shares/foreground/": {
@@ -458,7 +458,7 @@
             }
           }
         },
-        "x-introduced-in-version": "1.0.0"
+        "x-introduced-in-version": "2.0.0"
       }
     },
     "/api/shares/{share_id}/": {
@@ -598,12 +598,15 @@
         "required": [
           "share_id",
           "project",
-          "session",
-          "dest_path"
+          "session"
         ],
         "properties": {
-          "dest_path": {
-            "type": "string"
+          "canonical_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The canonical path of the exported folder, like `adhoc/testproject/session2`; null if\nthe management API doesn't know it: from an older one, or for an old share outside of\nsmbdrop's data root"
           },
           "project": {
             "type": "string"
@@ -640,21 +643,23 @@
               "share_id",
               "project",
               "session",
-              "dest_path",
               "message",
               "type"
             ],
             "properties": {
+              "canonical_path": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The canonical path of the exported folder, like `adhoc/testproject/session2`; null\nif smbdrop doesn't know it: from an older smbdrop, or for an old share outside of\nits data root"
+              },
               "created_by": {
                 "type": [
                   "string",
                   "null"
                 ],
                 "description": "Login name of the user who started the share; null for shares from an smbdrop\nthat didn't record it yet"
-              },
-              "dest_path": {
-                "type": "string",
-                "description": "The path in the data management that is exported with this Share."
               },
               "message": {
                 "type": "string",
@@ -687,21 +692,23 @@
               "share_id",
               "project",
               "session",
-              "dest_path",
               "mount_path",
               "type"
             ],
             "properties": {
+              "canonical_path": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The canonical path of the exported folder, like `adhoc/testproject/session2`; null\nif smbdrop doesn't know it: from an older smbdrop, or for an old share outside of\nits data root"
+              },
               "created_by": {
                 "type": [
                   "string",
                   "null"
                 ],
                 "description": "Login name of the user who started the share; null for shares from an smbdrop\nthat didn't record it yet"
-              },
-              "dest_path": {
-                "type": "string",
-                "description": "The path in the data management that is exported with this Share"
               },
               "mount_path": {
                 "type": "string",

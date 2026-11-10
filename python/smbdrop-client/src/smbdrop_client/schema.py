@@ -7,9 +7,16 @@ CREATE_SHARE_REQUEST_SCHEMA = {
     "description": "The JSON payload for the POST request to create a new smbdrop share",
     "type": "object",
     "properties": {
+        "canonical_path": {
+            "type": "string",
+            "description": "The canonical path of the folder to share, like "
+            "`adhoc/testproject/session2`: relative to smbdrop's data root, "
+            "without `..`",
+        },
         "dest_path": {
             "type": "string",
-            "description": "Base destination path. Should be a clean, newly created directory",
+            "description": "Deprecated: the folder to share with smbdrop's data root "
+            "in front. Send `canonical_path` instead; not both",
         },
         "uid": {
             "type": "number",
@@ -29,12 +36,14 @@ CREATE_SHARE_REQUEST_SCHEMA = {
             "description": "Login name of the user who asked for the share",
         },
     },
-    "required": ["dest_path"],
+    "oneOf": [{"required": ["canonical_path"]}, {"required": ["dest_path"]}],
 }
 
 
 class CreateShareRequest(TypedDict):
-    dest_path: str
+    canonical_path: NotRequired[str]
+    # deprecated, for callers from before `canonical_path`:
+    dest_path: NotRequired[str]
     uid: int
     gid: int
     resource: str | None
@@ -46,7 +55,11 @@ class SerializedShare(TypedDict):
 
     share_id: str
     share_name: str
+    # the shared folder as smbdrop sees it: its data root plus the canonical path
     dest_path: str
+    # missing or None for shares from an smbdrop that didn't record it, or that lie
+    # outside of its data root:
+    canonical_path: NotRequired[str | None]
     created_timestamp: int
 
     # temporary credentials:

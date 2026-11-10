@@ -13,7 +13,7 @@ def create_share(
     response = requests.post(
         f"{smbdrop_api}/share/",
         json={
-            "dest_path": str(dest_path),
+            "canonical_path": str(dest_path.relative_to("/data")),
             "uid": 1001,
             "gid": 1001,
             "resource": resource,

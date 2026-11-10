@@ -6,8 +6,6 @@ as `requests` exceptions; both become a 502 here, because nothing in this
 service can act on them and the caller only needs to know to retry later.
 """
 
-import os
-
 import requests
 from smbdrop_client import ShareClient
 from smbdrop_client.schema import SerializedShare
@@ -22,25 +20,32 @@ def make_client(settings: Settings) -> ShareClient:
     return ShareClient(settings.share_api)
 
 
-def share_path(settings: Settings, relpath: str, session: str) -> str:
+def normalize_path(path: str) -> str:
     """
-    The path smbdrop exports for a session: `smb_base/<project relpath>/<session>`.
-
-    Normalized, because this is also the key for finding an existing share, and
-    smbdrop stores whatever path it was given.
+    `path` without empty and `.` segments, as smbdrop normalizes a canonical
+    path; also the key for finding an existing share.
     """
-    return os.path.normpath(os.path.join(settings.smb_base, relpath, session))
+    return "/".join(segment for segment in path.split("/") if segment not in ("", "."))
 
 
-def split_share_path(dest_path: str) -> tuple[str, str]:
+def session_path(relpath: str, session: str) -> str:
+    """
+    The canonical path of a session, `<project relpath>/<session>`, which
+    smbdrop shares under its data root.
+    """
+    return normalize_path(f"{relpath}/{session}")
+
+
+def project_and_session(share: SerializedShare) -> tuple[str, str]:
     """
     The project and session a share is for, read off its path: the last two
-    segments of `smb_base/<project relpath>/<session>`, as the legacy
-    `split_smbpath` reads them. Normalized first, because smbdrop stores the
-    path as it was given, trailing slash included.
+    segments of `<project relpath>/<session>`, as the legacy `split_smbpath`
+    reads them. From `dest_path` for a share without a canonical path, which
+    has the same last two segments.
     """
-    head, session = os.path.split(os.path.normpath(dest_path))
-    return os.path.basename(head), session
+    path = normalize_path(share.get("canonical_path") or share["dest_path"])
+    head, _, session = path.rpartition("/")
+    return head.rpartition("/")[2], session
 
 
 def list_shares(settings: Settings) -> dict[str, SerializedShare]:
@@ -63,14 +68,13 @@ def user_shares(settings: Settings, uid: int) -> list[SerializedShare]:
 
 
 def find_share(
-    settings: Settings, dest_path: str, uid: int, resource: str | None = None
+    settings: Settings, canonical_path: str, uid: int, resource: str | None = None
 ) -> SerializedShare | None:
     """
     The share a user already has for a path, if any.
 
     A share belongs to the user whose uid it impersonates, so two users can
-    each have one for the same session. Matching on the normalized path mirrors
-    the legacy `add_share_info`.
+    each have one for the same session. `canonical_path` must be normalized.
 
     With a `resource`, only a share bound to that resource counts: smbdrop
     offers an agent only the shares bound to its resource, so handing it an
@@ -80,7 +84,7 @@ def find_share(
     for share in list_shares(settings).values():
         if (
             share["uid"] == uid
-            and os.path.normpath(share["dest_path"]) == dest_path
+            and normalize_path(share.get("canonical_path") or "") == canonical_path
             and (resource is None or share["resource"] == resource)
         ):
             return share
@@ -89,7 +93,7 @@ def find_share(
 
 def create_share(
     settings: Settings,
-    dest_path: str,
+    canonical_path: str,
     uid: int,
     gid: int,
     resource: str | None = None,
@@ -97,7 +101,7 @@ def create_share(
 ) -> SerializedShare:
     try:
         result = make_client(settings).create(
-            dest_path=dest_path,
+            canonical_path=canonical_path,
             uid=uid,
             gid=gid,
             resource=resource,

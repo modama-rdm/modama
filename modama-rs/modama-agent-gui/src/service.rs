@@ -187,6 +187,7 @@ impl From<modama_common::local_api_messages::APICurrentForegroundShare> for Fore
                 project,
                 session,
                 dest_path: _,
+                canonical_path: _,
                 message,
                 created_by,
             } => ForegroundSession::Mounting(
@@ -203,6 +204,7 @@ impl From<modama_common::local_api_messages::APICurrentForegroundShare> for Fore
                 project,
                 session,
                 dest_path: _,
+                canonical_path: _,
                 mount_path,
                 created_by,
             } => ForegroundSession::Mounted(ActiveSession {
@@ -633,7 +635,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let mock = server
             .mock("GET", "/api/health/")
-            .match_header("x-api-version", "1.0.0")
+            .match_header("x-api-version", "2.0.0")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"type":"Ok"}"#)
@@ -708,11 +710,11 @@ mod tests {
         let mut server = mockito::Server::new();
         let mock = server
             .mock("GET", "/api/shares/foreground/")
-            .match_header("x-api-version", "1.0.0")
+            .match_header("x-api-version", "2.0.0")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
-                r#"{"type":"Unavailable","share_id":"share","project":"project","session":"session","dest_path":"/project/session","message":"no helper"}"#,
+                r#"{"type":"Unavailable","share_id":"share","project":"project","session":"session","canonical_path":"project/session","message":"no helper"}"#,
             )
             .create();
 
@@ -738,11 +740,11 @@ mod tests {
         let mut server = mockito::Server::new();
         let mock = server
             .mock("GET", "/api/shares/foreground/")
-            .match_header("x-api-version", "1.0.0")
+            .match_header("x-api-version", "2.0.0")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
-                r#"{"type":"Mounted","share_id":"share","project":"project","session":"session","dest_path":"/project/session","mount_path":"/mnt/session"}"#,
+                r#"{"type":"Mounted","share_id":"share","project":"project","session":"session","canonical_path":"project/session","mount_path":"/mnt/session"}"#,
             )
             .create();
 

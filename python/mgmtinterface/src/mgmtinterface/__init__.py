@@ -238,7 +238,9 @@ def project():
     own_shareinfo = []
     for share in shares.values():
         if share["uid"] == user_info["id"]["uid"]:
-            project, dsname = split_smbpath(share["dest_path"])
+            project, dsname = split_smbpath(
+                share.get("canonical_path") or share["dest_path"]
+            )
             own_shareinfo.append(
                 {
                     "project": project,
@@ -405,12 +407,19 @@ def smblink(path: str) -> str:
     return app.config["SMB_URL_BASE"] + quote(path)
 
 
-def smbpath(project: proxy.SerializedProject, dsname: str) -> str:
-    return os.path.join(app.config["SMB_BASE"], project["relpath"], dsname)
+def normalize_share_path(path: str) -> str:
+    """`path` without empty and `.` segments, as smbdrop normalizes a canonical path"""
+    return "/".join(segment for segment in path.split("/") if segment not in ("", "."))
 
 
-def split_smbpath(dest_path: str) -> tuple[str, str]:
-    head, dsname = os.path.split(dest_path)
+def session_share_path(project: proxy.SerializedProject, dsname: str) -> str:
+    """The canonical path of a session, which smbdrop shares under its data root"""
+    return normalize_share_path(f"{project['relpath']}/{dsname}")
+
+
+def split_smbpath(path: str) -> tuple[str, str]:
+    """The project and session of a share's canonical path or `dest_path`"""
+    head, dsname = os.path.split(normalize_share_path(path))
     _, project = os.path.split(head)
     return (project, dsname)
 
@@ -429,6 +438,7 @@ class ShareInfo(TypedDict):
     share_id: str
     share_name: str
     dest_path: str
+    canonical_path: NotRequired[str | None]
     created_timestamp: int
 
     # temporary credentials:
@@ -461,12 +471,13 @@ def add_share_info(
     result: list[DatasetWithShareInfo] = []
     for ds_orig in datasets:
         ds: DatasetWithShareInfo = ds_orig  # pyright:ignore[reportAssignmentType]
-        dest_path = os.path.normpath(smbpath(project, ds["name"]))
+        canonical_path = session_share_path(project, ds["name"])
         ds["shareinfo"] = None
         ds["shared"] = False
         for value in shares.values():
             share_info: ShareInfo = value  # pyright:ignore[reportAssignmentType]
-            path_match = os.path.normpath(share_info["dest_path"]) == dest_path
+            share_path = normalize_share_path(share_info.get("canonical_path") or "")
+            path_match = share_path == canonical_path
             if path_match and share_info["uid"] == uid:
                 ds["shared"] = True
                 share_info["smb_host"] = "moellenstedt.iff.kfa-juelich.de"
@@ -669,7 +680,9 @@ def share_dataset(name: str, dataset: str):
                 updated = True
                 try:
                     result = smbclient.create(
-                        dest_path=smbpath(pr_info["project"], ds["name"]),
+                        canonical_path=session_share_path(
+                            pr_info["project"], ds["name"]
+                        ),
                         uid=user_info["id"]["uid"],
                         gid=pr_info["project"]["gid"],
                         created_by=current_user.user_id,
@@ -908,7 +921,7 @@ def api_create_share() -> SerializedShare:
             f"not in project members {pr_info['project']['members']} and is not the owner."
         )
     resp = smbclient.create(
-        dest_path=smbpath(pr_info["project"], ds["name"]),
+        canonical_path=session_share_path(pr_info["project"], ds["name"]),
         uid=user_info["id"]["uid"],
         gid=pr_info["project"]["gid"],
         resource=resource,

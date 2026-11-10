@@ -142,8 +142,12 @@ docker compose logs mgmtinterface-api | grep "First request this boot"
 A version can be removed once this has shown no clients on it for a while and
 its `Sunset` date has passed.
 
-The tests of a released version are not changed. If a behaviour change makes an
-old test fail, that change is breaking and belongs in a new version.
+The tests of a released version pin its contract with clients: what a client
+sends and what it gets back. That part of them is not changed; if a change makes
+such a test fail, the change is breaking and belongs in a new version. What the
+tests simulate behind the API, such as the permissions service or smbdrop, may
+change with those services: all server-side services are deployed together, so
+the API never talks to an older or newer one.
 
 ## Endpoints
 

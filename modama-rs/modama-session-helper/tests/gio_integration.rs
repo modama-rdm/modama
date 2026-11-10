@@ -30,6 +30,7 @@ fn share(id: &str, name: &str, password: &str) -> Share {
         share_id: id.to_owned(),
         share_name: name.to_owned(),
         dest_path: format!("/project/{id}"),
+        canonical_path: None,
         created_timestamp: 0,
         username: "testuser".to_owned(),
         password: password.to_owned(),

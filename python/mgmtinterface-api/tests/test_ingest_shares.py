@@ -25,17 +25,22 @@ UIDS = {"user1": 90_032_240, "user2": 90_032_241}
 INGEST_SHARES = f"{API_PREFIX}/ingest-shares"
 REQUEST = {"project": PROJECT["name"], "session": SESSION["name"]}
 
-# Where smbdrop sees the session: smb_base + relpath + session name.
-DEST_PATH = "/data/adhoc/datamanagement/create by hand"
+# The session's canonical path: relpath + session name; smbdrop puts its data
+# root in front for `dest_path`.
+CANONICAL_PATH = "adhoc/datamanagement/create by hand"
+DEST_PATH = f"/data/{CANONICAL_PATH}"
 
 
-def make_share(share_id: str, uid: int, dest_path: str = DEST_PATH) -> dict:
+def make_share(
+    share_id: str, uid: int, canonical_path: str | None = CANONICAL_PATH
+) -> dict:
     """A share as smbdrop reports it (shape from the test VM capture)."""
     return {
         "resource": None,
         "share_id": share_id,
         "share_name": f"share-{share_id}",
-        "dest_path": dest_path,
+        "dest_path": f"/data/{canonical_path}",
+        "canonical_path": canonical_path,
         "created_timestamp": 1_784_720_092,
         "username": f"share{share_id[:8]}",
         "password": "one-time-secret",
@@ -71,15 +76,15 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> dict:
 
     def create(
         self: ShareClient,
-        dest_path: str,
+        canonical_path: str,
         uid: int,
         gid: int,
         resource=None,
         created_by=None,
     ):
-        state["create_calls"].append((dest_path, uid, gid, resource))
+        state["create_calls"].append((canonical_path, uid, gid, resource))
         state["created_by"].append(created_by)
-        share = make_share(f"new-{len(state['create_calls'])}", uid, dest_path)
+        share = make_share(f"new-{len(state['create_calls'])}", uid, canonical_path)
         share["resource"] = resource
         share["created_by"] = created_by
         state["shares"][share["share_id"]] = share
@@ -108,12 +113,15 @@ def test_opens_a_share_that_writes_as_the_signed_in_user(
 ):
     response = member.post(INGEST_SHARES, json=REQUEST)
     assert response.status_code == 201
-    # The share is for the session's path, impersonating the user, with the
-    # project's group, like the legacy endpoint.
-    assert backend["create_calls"] == [(DEST_PATH, UIDS["user2"], PROJECT["gid"], None)]
+    # The share is for the session's canonical path, impersonating the user,
+    # with the project's group, like the legacy endpoint.
+    assert backend["create_calls"] == [
+        (CANONICAL_PATH, UIDS["user2"], PROJECT["gid"], None)
+    ]
 
     body = response.json()
     assert body["share_id"] == "new-1"
+    assert body["canonical_path"] == CANONICAL_PATH
     assert body["dest_path"] == DEST_PATH
     assert body["uid"] == UIDS["user2"]
     # What the legacy API left to the client: which project and session the
@@ -160,7 +168,7 @@ def test_repeating_a_create_returns_the_open_share(member: TestClient, backend: 
 def test_an_existing_share_is_matched_on_the_normalized_path(
     member: TestClient, backend: dict
 ):
-    existing = make_share("old", UIDS["user2"], dest_path=f"{DEST_PATH}/")
+    existing = make_share("old", UIDS["user2"], canonical_path=f"./{CANONICAL_PATH}/")
     backend["shares"][existing["share_id"]] = existing
     response = member.post(INGEST_SHARES, json=REQUEST)
     assert response.status_code == 200
@@ -280,7 +288,7 @@ def test_an_agent_token_binds_the_share_to_its_instrument(
     assert response.status_code == 201
     # Still opened as the signed-in user; the token only adds the binding.
     assert backend["create_calls"] == [
-        (DEST_PATH, UIDS["user2"], PROJECT["gid"], RESOURCE)
+        (CANONICAL_PATH, UIDS["user2"], PROJECT["gid"], RESOURCE)
     ]
     assert response.json()["resource"] == RESOURCE
 
@@ -485,17 +493,25 @@ def test_shares_are_listed_oldest_first(member: TestClient, backend: dict):
 
 
 def test_project_and_session_are_read_off_the_path(member: TestClient, backend: dict):
-    # The last two segments of the normalized path, as the legacy
-    # `split_smbpath` reads them; smbdrop keeps a trailing slash if given one.
+    # The last two segments of the normalized canonical path, as the legacy
+    # `split_smbpath` reads them.
+    old = {
+        **make_share("c", UIDS["user2"], canonical_path=None),
+        "dest_path": "/srv/adhoc/old/session/",
+    }
     backend["shares"] = {
-        "a": make_share("a", UIDS["user2"], dest_path=f"{DEST_PATH}/"),
-        "b": make_share("b", UIDS["user2"], dest_path="/data/adhoc/other/2026 run"),
+        "a": make_share("a", UIDS["user2"], canonical_path=f"{CANONICAL_PATH}/"),
+        "b": make_share("b", UIDS["user2"], canonical_path="adhoc/other/2026 run"),
+        # a share smbdrop has no canonical path for: from `dest_path`
+        "c": {**old, "created_timestamp": 1_784_720_093},
     }
     shares = member.get(INGEST_SHARES).json()["shares"]
     assert [(s["project"], s["session"]) for s in shares] == [
         (PROJECT["name"], SESSION["name"]),
         ("other", "2026 run"),
+        ("old", "session"),
     ]
+    assert shares[2]["canonical_path"] is None
 
 
 def test_no_shares_is_an_empty_list(member: TestClient, backend: dict):

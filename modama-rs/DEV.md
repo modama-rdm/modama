@@ -35,6 +35,34 @@ In a pull request, CI comments with up to five failing snapshots per suite
 all of them. Changes to committed snapshots show up in the PR's "Files changed"
 tab. `.github/scripts/snapshot_review.py` describes how a test suite takes part.
 
+## Run the integration tests
+
+`test-env/` runs smbdrop, three agents, a session helper, the management API
+(mgmtinterface-api) and the permissions service in containers, and the pytest
+suite in `test-env/tests/` against them. They are not part of CI.
+
+- `just integration-tests`          # build, start and test; arguments go to pytest
+- `just integration-tests -k token` # only some tests
+- `just integration-tests-cleanup`  # remove containers, test CA and test data
+
+It uses docker compose if installed, podman compose otherwise; set
+`MODAMA_COMPOSE=docker` or `MODAMA_COMPOSE=podman` to choose. Rootless podman
+can't run the tests that create shares: smbdrop marks a session folder
+immutable (`chattr +i`) while it bind-mounts it, and only root on the host may
+do that, so those tests fail with `EPERM`. Use docker or rootful podman for
+them.
+
+The containers compile the workspace on first start, which takes several
+minutes; the build cache is kept in `test-env/target/`.
+
+The test CA and the agent configurations in `test-env/certs/` are created only
+if that folder is missing. After changing them in `test-env/prepare.sh`, run
+`just integration-tests-cleanup` first.
+
+If a run hangs while starting the containers, a service has most likely crashed
+and compose is waiting for it to become healthy. Look at
+`podman ps -a` (or `docker ps -a`) and the logs of the service that exited.
+
 ## Linting and formatting
 
 - `just fmt`               # run the correct `cargo fmt` command on the whole workspace

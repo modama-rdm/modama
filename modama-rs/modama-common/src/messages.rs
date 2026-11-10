@@ -21,8 +21,14 @@ pub struct Share {
     /// The full share name; the first path element of the SMB URL
     pub share_name: String,
 
-    /// The path in the data management that is exported with this Share
+    /// The exported folder as smbdrop sees it: its data root plus `canonical_path`. Kept for
+    /// agents that read the project and session from it; use `canonical_path` instead.
     pub dest_path: String,
+
+    /// The canonical path of the exported folder, like `adhoc/testproject/session2`; None from
+    /// an smbdrop that doesn't record it yet, and for old shares outside of smbdrop's data root
+    #[serde(default)]
+    pub canonical_path: Option<String>,
 
     /// When was this share created? Unix timestamp
     pub created_timestamp: u64,
@@ -62,6 +68,7 @@ impl std::fmt::Debug for Share {
             .field("share_id", &self.share_id)
             .field("share_name", &self.share_name)
             .field("dest_path", &self.dest_path)
+            .field("canonical_path", &self.canonical_path)
             .field("created_timestamp", &self.created_timestamp)
             .field("username", &self.username)
             .field("password", &"[REDACTED]")
@@ -258,6 +265,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(share.created_by, None);
+        assert_eq!(share.canonical_path, None);
     }
 
     /// Requests from callers that don't send the creator yet
@@ -271,6 +279,23 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(request.created_by, None);
+        assert_eq!(request.canonical_path, None);
+        assert_eq!(request.dest_path.as_deref(), Some("/adhoc/project/session"));
+    }
+
+    /// Requests that name the folder by its canonical path only
+    #[test]
+    fn create_request_with_canonical_path_leaves_out_dest_path() {
+        let request: CreateShareRequest = serde_json::from_value(serde_json::json!({
+            "canonical_path": "adhoc/project/session",
+            "resource": null,
+            "uid": 1001,
+            "gid": 1001,
+        }))
+        .unwrap();
+        assert_eq!(request.dest_path, None);
+        let json = serde_json::to_value(&request).unwrap();
+        assert!(json.get("dest_path").is_none(), "{json}");
     }
 
     /// Login from an agent from before protocol versions

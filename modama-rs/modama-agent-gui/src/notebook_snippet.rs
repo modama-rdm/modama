@@ -1,7 +1,8 @@
 //! Python code for a Jupyter notebook that asks the local agent for the current session folder
 
-/// The agent API version the snippet asks for; the foreground endpoint exists since 1.0.0
-const API_VERSION: &str = "1.0.0";
+/// The agent API version the snippet asks for: the newest, so that `share` in the notebook has
+/// the newest fields, such as `canonical_path`, for users who look into it
+const API_VERSION: &str = "2.0.0";
 
 /// Python code (standard library only) that sets `session_folder` to the foreground share's
 /// mount path, as reported by the agent at `agent_url`, and `raw_folder` to its `raw`
@@ -46,7 +47,7 @@ mod tests {
     fn the_snippet_asks_the_configured_agent() {
         let snippet = python_snippet("http://localhost:3003/");
         assert!(snippet.contains(r#""http://localhost:3003/api/shares/foreground/""#));
-        assert!(snippet.contains(r#"{"X-API-Version": "1.0.0"}"#));
+        assert!(snippet.contains(r#"{"X-API-Version": "2.0.0"}"#));
         // JetBrains Mono's ligatures would show these as single symbols
         for ligature in ["!=", "==", "->", "<=", ">="] {
             assert!(!snippet.contains(ligature), "{ligature}");
