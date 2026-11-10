@@ -58,6 +58,10 @@ or "Open folder" to open your ingest share with a file manager.
 The ingest share is not only available on the computer where you just created it,
 but also on other computers that belong to the same scientific instrument.
 
+The ingest share stays active until it is closed, either explicitly or because another
+user's session starts. If you disconnect the network drive manually, it will automatically
+be connected again.
+
 You can see the list of other connected computers ("agents") on the overview page.
 There, you also find information on how to upload your data into your ingest share.
 
@@ -127,7 +131,7 @@ You can now log out, and the next user can start their work.
 If everyone follows the steps from the previous sections, the hand-off from one
 user to the next is easy: they just start their own ingest share. Should
 another ingest share from a previous user still be mounted, the new user
-can close the still-connected ingest share.
+can close the still-connected ingest share by opening one of their own.
 
 > [!TIP]
 > To make this easier for everyone involved, transfer or save any
