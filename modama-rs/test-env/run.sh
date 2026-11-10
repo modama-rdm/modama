@@ -15,7 +15,9 @@ compose run --rm smbdrop-init
 compose build "${build_flags[@]}" --pull
 compose up -d
 
-compose exec permissions bash -c 'useradd weber; useradd clausen; groupadd iff; adduser weber iff; adduser clausen iff;'
+# Uids that are free in smbdrop's container, which creates a share user with the owner's uid:
+# its image (Dockerfile-tests, shared with the session helper) has uid 1000 already
+compose exec permissions bash -c 'useradd -u 2001 weber; useradd -u 2002 clausen; groupadd iff; adduser weber iff; adduser clausen iff;'
 echo -e "weber:1234\nclausen:1234" | compose exec -T permissions chpasswd
 compose exec permissions bash -c 'mkdir -p /data/adhoc/testproject/session{1,2,3,4,5}/raw/'
 compose exec permissions bash -c 'chown clausen -R /data/adhoc/testproject/'
