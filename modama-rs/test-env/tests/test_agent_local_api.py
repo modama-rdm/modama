@@ -124,6 +124,9 @@ def test_agent_api_list_sessions(agent_api: str, agent: requests.Session):
     sessions = resp_data["sessions"]
     for s in ["session1", "session2", "session3", "session4"]:
         assert s in sessions
+    summaries = resp_data["session_summaries"]
+    assert [summary["name"] for summary in summaries] == sessions
+    assert all(isinstance(summary["modified_at"], int) for summary in summaries)
 
 
 def test_agent_api_list_projects(agent_api: str, agent: requests.Session):

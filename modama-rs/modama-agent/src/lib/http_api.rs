@@ -21,6 +21,7 @@ use modama_common::local_api_messages::{
     APIAgentIdentity, APICreateSessionRequest, APICreateSessionResponse, APICreateShareResponse,
     APICurrentForegroundShare, APIHealthCheckResponse, APIListProjectsResponse,
     APIListSessionsResponse, APILoginRequest, APILoginResponse, APIProjectSummary,
+    APISessionSummary,
 };
 
 #[utoipa::path(
@@ -223,8 +224,16 @@ async fn api_list_sessions_in_project(
         project: project_name,
         sessions: details
             .sessions
+            .iter()
+            .map(|session| session.name.clone())
+            .collect(),
+        session_summaries: details
+            .sessions
             .into_iter()
-            .map(|session| session.name)
+            .map(|session| APISessionSummary {
+                name: session.name,
+                modified_at: session.mtime as i64,
+            })
             .collect(),
     });
     Ok(sign_in.respond(response))

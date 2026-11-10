@@ -2717,6 +2717,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_api_lists_sessions_with_their_modification_time() {
+        let test_setup = TestSetup::start().await;
+        let mut server = mgmt_api_server(&test_setup).await;
+        let mock = server
+            .mock("GET", "/mgmt-api/projects/p")
+            .match_header("cookie", MGMT_COOKIE)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"name": "p", "owner": "o", "members": [], "ctime": 1.0, "mtime": 2.0,
+                    "gid": 1, "relpath": "adhoc/p", "usage_bytes": null,
+                    "sessions": [
+                        {"name": "old", "immutable": false, "ctime": 1.0, "mtime": 1782000000.5},
+                        {"name": "new", "immutable": false, "ctime": 1.0, "mtime": 1782432123.75}
+                    ]}"#,
+            )
+            .create_async()
+            .await;
+        let req = Request::builder()
+            .uri("/api/projects/p/sessions/")
+            .method("GET")
+            .header("X-API-Version", "1.0.0")
+            .header(header::COOKIE, signed_in_cookie(MGMT_COOKIE))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = test_setup.app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got: Value =
+            serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(got["sessions"], serde_json::json!(["old", "new"]));
+        assert_eq!(
+            got["session_summaries"],
+            serde_json::json!([
+                {"name": "old", "modified_at": 1_782_000_000_i64},
+                {"name": "new", "modified_at": 1_782_432_123_i64}
+            ])
+        );
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
     async fn a_renewed_sign_in_is_passed_on_to_the_client() {
         let test_setup = TestSetup::start().await;
         let mut server = mgmt_api_server(&test_setup).await;
