@@ -16,6 +16,7 @@ mod navigation_progress;
 mod notebook_snippet;
 pub mod pages;
 pub mod service;
+pub mod single_instance;
 pub mod state;
 pub mod styles;
 mod top_bar;

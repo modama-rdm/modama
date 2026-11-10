@@ -7,8 +7,12 @@ use std::{error::Error, path::PathBuf, sync::Arc};
 use clap::{CommandFactory, Parser, Subcommand};
 use eframe::egui;
 use modama_agent_gui::{
-    app::AgentGuiApp, config::load_config, mount_popup, service::HttpAgentService, styles,
-    wgpu_setup,
+    app::AgentGuiApp,
+    config::load_config,
+    mount_popup,
+    service::HttpAgentService,
+    single_instance::{self, Claim},
+    styles, wgpu_setup,
 };
 use modama_common::{
     logging::{init_logging, init_user_session_logging},
@@ -95,6 +99,10 @@ fn init_session_logging(file_name: &str) -> Option<PathBuf> {
 
 fn run_gui(cli: Cli) -> Result<(), Box<dyn Error>> {
     let config = load_config(cli.config_path.as_deref(), cli.agent_url)?;
+    let instance = match single_instance::claim() {
+        Claim::Raised => return Ok(()),
+        Claim::Run(instance) => instance,
+    };
     let service = Arc::new(HttpAgentService::new(config.agent_url)?);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([
@@ -112,6 +120,9 @@ fn run_gui(cli: Cli) -> Result<(), Box<dyn Error>> {
             wgpu_setup::log_adapter(cctx);
             egui_extras::install_image_loaders(&cctx.egui_ctx);
             styles::theme::install(&cctx.egui_ctx);
+            if let Some(instance) = instance {
+                instance.listen(cctx.egui_ctx.clone());
+            }
             let app = AgentGuiApp::with_service(service);
             #[cfg(feature = "autostart")]
             let app = app.with_autostart_offer();
