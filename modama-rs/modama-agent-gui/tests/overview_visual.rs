@@ -423,7 +423,7 @@ fn overview_logo_heading_and_card_content_share_a_left_guide() {
     let active = overview_harness(false, true);
     let logo_x = active.get_by_label("go to Ingest").rect().left();
     let heading_x = active
-        .get_by_label("Ingest for this resource")
+        .get_by_label("Ingest for this instrument")
         .rect()
         .left();
     let card_content_x = active.get_by_label("Foreground ingest").rect().left();
@@ -443,7 +443,7 @@ fn error_toast_aligns_with_the_app_shell_geometry() {
     harness.run_steps(2);
 
     let logo = harness.get_by_label("go to Ingest").rect();
-    let heading = harness.get_by_label("Ingest for this resource").rect();
+    let heading = harness.get_by_label("Ingest for this instrument").rect();
     let retry = harness.get_by_label("Retry").rect();
     let dismiss = harness.get_by_label("Dismiss").rect();
     let tolerance = styles::components::standard_border::width::EGUI_POINTS * 2.0;

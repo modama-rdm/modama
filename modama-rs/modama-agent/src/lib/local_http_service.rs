@@ -737,7 +737,7 @@ async fn start_ingest_step2(
     // TODO: name the resource an anonymous agent inherits from its token
     // (`LocalFanOut::logged_in`), like the connected agents on the index page
     let res_name = identity.resource().unwrap_or(identity.name());
-    let instrument = identity.resource().unwrap_or("this resource");
+    let instrument = identity.resource().unwrap_or("this instrument");
     // starting doesn't close the open share: say what happens to it
     let current = match desired_foreground(&api_state) {
         Some(share) => {
