@@ -215,6 +215,36 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
     app
 }
 
+/// egui's time at which [`freeze_time`] stops the clock: a spinner's arc is clearly visible then
+/// (its length follows `sin(time)`).
+pub const FROZEN_TIME: f64 = 101.5;
+
+/// How long the navigation progress bar has been running when [`freeze_time`] stops the clock:
+/// long enough for it to be shown.
+const FROZEN_PROGRESS_SECONDS: f64 = 0.5;
+
+/// Stop egui's clock at [`FROZEN_TIME`] for the following frames, so that what moves with the
+/// time looks the same in every snapshot. Without it, egui's time is the number of frames run so
+/// far times the step, and that number can depend on how fast a background task finishes.
+///
+/// The spinner moves with the time itself, the navigation progress bar with the time since it
+/// started: this restarts the bar [`FROZEN_PROGRESS_SECONDS`] before [`FROZEN_TIME`]. egui's
+/// clock can't go back, so the test must not have run past that. Call this right before the
+/// snapshot: tooltips and other delays need a running clock.
+pub fn freeze_time(harness: &mut Harness<'_, AgentGuiApp>) {
+    let progress_start = FROZEN_TIME - FROZEN_PROGRESS_SECONDS;
+    let now = harness.ctx.input(|input| input.time);
+    assert!(
+        now <= progress_start,
+        "egui's time {now} is already past {progress_start}, where freeze_time starts"
+    );
+    harness.state_mut().restart_navigation_progress();
+    harness.input_mut().time = Some(progress_start);
+    harness.step();
+    harness.input_mut().time = Some(FROZEN_TIME);
+    harness.step();
+}
+
 /// Render one light-theme guide scene at the canonical viewport size.
 pub fn render(scene: GuideScene) -> Result<image::RgbaImage, String> {
     let release = (scene == GuideScene::Connecting).then(|| Arc::new(Barrier::new(2)));
