@@ -45,6 +45,16 @@ suite in `test-env/tests/` against them. They are not part of CI.
 - `just integration-tests -k token` # only some tests
 - `just integration-tests-cleanup`  # remove containers, test CA and test data
 
+After pytest, `run.sh` runs the agent GUI's end-to-end tests,
+`modama-agent-gui/tests/e2e_*.rs` (feature `e2e`), in the service `gui-e2e`. They
+drive the GUI with egui_kittest against agent1, without rendering, as the user of
+`session-1`, whose session bus and `XDG_RUNTIME_DIR` they share: `gio` there sees
+the session helper's GVfs mounts. To run them again against the running
+containers, with an optional test name filter:
+`docker compose --profile e2e run --rm gui-e2e [FILTER]` (or `podman compose`) in
+`test-env/`. They build in `test-env/target/gui-e2e/`, apart from the binary
+`session-1` runs.
+
 It uses docker compose if installed, podman compose otherwise; set
 `MODAMA_COMPOSE=docker` or `MODAMA_COMPOSE=podman` to choose. Rootless podman
 can't run the tests that create shares: smbdrop marks a session folder

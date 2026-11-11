@@ -8,5 +8,7 @@ test-env/target
 test-env/report-target
 test-env/certs
 test-env/cargo-cache/
+test-env/cargo-git/
+test-env/testfolder/
 .xwin-cache/
 modama-agent-gui/tests/snapshots/review/
