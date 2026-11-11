@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- One panel at the top: the launchers of Modama and the file manager, window buttons, then
+     the notification area at the right end (ui.py panel-icons finds the tray icons there). -->
+<channel name="xfce4-panel" version="1.0">
+  <property name="configver" type="int" value="2"/>
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="dark-mode" type="bool" value="true"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=6;x=0;y=0"/>
+      <property name="length" type="uint" value="100"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="icon-size" type="uint" value="16"/>
+      <property name="size" type="uint" value="26"/>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="4"/>
+        <value type="int" value="5"/>
+        <value type="int" value="1"/>
+        <value type="int" value="2"/>
+        <value type="int" value="3"/>
+      </property>
+    </property>
+  </property>
+  <property name="plugins" type="empty">
+    <!-- start.sh puts its item, modama.desktop, into ~/.config/xfce4/panel/launcher-4/ -->
+    <property name="plugin-4" type="string" value="launcher">
+      <property name="items" type="array">
+        <value type="string" value="modama.desktop"/>
+      </property>
+    </property>
+    <!-- start.sh puts its item, Thunar's own thunar.desktop, into launcher-5/ -->
+    <property name="plugin-5" type="string" value="launcher">
+      <property name="items" type="array">
+        <value type="string" value="thunar.desktop"/>
+      </property>
+    </property>
+    <property name="plugin-1" type="string" value="tasklist"/>
+    <property name="plugin-2" type="string" value="separator">
+      <property name="expand" type="bool" value="true"/>
+      <property name="style" type="uint" value="0"/>
+    </property>
+    <property name="plugin-3" type="string" value="systray">
+      <property name="square-icons" type="bool" value="true"/>
+    </property>
+  </property>
+</channel>

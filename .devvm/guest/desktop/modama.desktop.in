@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=modama-agent
+Comment=Start ingest shares for this computer's instrument
+Exec=@BIN@/modama-agent-gui --agent-url http://localhost:3003/
+Icon=@TOOLS@/modama.svg
+Terminal=false
+Categories=Science;
