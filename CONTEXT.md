@@ -61,10 +61,15 @@ _Avoid_: Freezing, locking, write-protecting, making read-only, writable (for op
 
 ### Instruments
 
+**Instrument**:
+A data-producing apparatus, such as an electron microscope, a FIB or an X-ray diffractometer.
+In text for users, it also stands for the resource it belongs to.
+
 **Resource**:
-A data-producing instrument, such as an electron microscope, a FIB or an X-ray
-diffractometer, together with all the instrument computers that belong to it.
-_Avoid_: Instrument (when the whole set of computers is meant), microscope, device
+One or more instruments together with the instrument computers that belong to them: the unit
+at which ingest shares are available. The term for code, APIs and administration; text for
+users says "instrument" or the resource's name.
+_Avoid_: Microscope, device
 
 **Instrument computer**:
 A computer that belongs to a resource and works with its data: one that records data, such as
