@@ -7,6 +7,8 @@ rust-version.workspace = true
 [features]
 guide-screenshots = ["dep:egui_kittest", "dep:image"]
 visual-tests = ["guide-screenshots"]
+# End-to-end tests against test-env (tests/e2e_*.rs); they run in its gui-e2e service
+e2e = ["dep:egui_kittest"]
 inspection = ["eframe/inspection"]
 # Offer to start the session helper at sign-in (Windows, HKCU Run entry). Off until there is a
 # proper installer for the session executable.

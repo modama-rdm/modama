@@ -141,16 +141,21 @@ services:
       # read by the build scripts, from outside of the image's build context (modama-rs/)
       - ../../python/mgmtinterface-api/openapi.json:/usr/src/python/mgmtinterface-api/openapi.json:ro
       - ../../mgmtinterface-new/DESIGN.md:/usr/src/mgmtinterface-new/DESIGN.md:ro
+      # the login session's runtime directory, shared with gui-e2e: its session bus and
+      # GVfs's sockets, so GIO there sees the mounts made here
+      - session-1-run:/run/user/1000
     command:
       - "bash"
       - "-c"
       - |
         set -e
         cargo build --target-dir /usr/src/modama-rs/target/ --release --bin modama-agent-gui
-        install -d -o ingest -m 700 /run/user/1000
+        chown ingest /run/user/1000 && chmod 700 /run/user/1000
         exec runuser -u ingest -- env HOME=/home/ingest XDG_RUNTIME_DIR=/run/user/1000 \
-          dbus-run-session -- /usr/src/modama-rs/target/release/modama-agent-gui \
-          --agent-url http://localhost:3003/ session-helper
+          DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+          bash -c 'dbus-daemon --session --address="$$DBUS_SESSION_BUS_ADDRESS" --fork && \
+            exec /usr/src/modama-rs/target/release/modama-agent-gui \
+            --agent-url http://localhost:3003/ session-helper'
     # healthy once the helper runs, after its build; it connects to the agent right away
     healthcheck:
       test: ["CMD-SHELL", "ls -l /proc/[0-9]*/exe 2>/dev/null | grep -q 'release/modama-agent-gui$'"]
@@ -158,6 +163,52 @@ services:
       timeout: 5s
       start_period: 10m
       retries: 12
+
+  # The GUI's end-to-end tests (modama-agent-gui/tests/e2e_*.rs), in session-1's login
+  # session: same user, network namespace (for the agent) and session bus. Not started by
+  # `up`; run.sh runs it after the other tests.
+  gui-e2e:
+    build:
+      context: ..
+      dockerfile: test-env/Dockerfile-tests
+    profiles: ["e2e"]
+    network_mode: "service:modama-agent-1"
+    volumes:
+      - ./target:/usr/src/modama-rs/target/
+      - ./cargo-cache:/usr/local/cargo/registry/cache/
+      - ./cargo-git:/usr/local/cargo/git/
+      # read by the build scripts, from outside of the image's build context (modama-rs/)
+      - ../../python/mgmtinterface-api/openapi.json:/usr/src/python/mgmtinterface-api/openapi.json:ro
+      - ../../mgmtinterface-new/DESIGN.md:/usr/src/mgmtinterface-new/DESIGN.md:ro
+      - session-1-run:/run/user/1000
+      - type: bind
+        source: "./testfolder/data/"
+        target: "/data/"
+        read_only: true
+    depends_on:
+      session-1:
+        condition: service_healthy
+      mgmtinterface-api:
+        condition: service_healthy
+    # Built as root like the other services' builds, run as session-1's user. In a target
+    # directory of its own: for integration tests cargo also builds the package's binaries,
+    # here with the e2e feature, which would replace the one session-1 runs.
+    command:
+      - "bash"
+      - "-c"
+      - |
+        set -eo pipefail
+        tests=$$(cargo test --target-dir /usr/src/modama-rs/target/gui-e2e/ --release -p modama-agent-gui \
+          --features e2e --test 'e2e_*' --no-run 2>&1 | tee /dev/stderr \
+          | sed -n 's/.*Executable .*(\(.*\))$$/\1/p')
+        for test in $$tests; do
+          # cargo prints the path relative to /usr/src/modama-rs, the working directory; one
+          # test at a time, since they all act on the same agent and resource
+          runuser -u ingest -- env HOME=/home/ingest XDG_RUNTIME_DIR=/run/user/1000 \
+            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus WGPU_DEBUG=0 \
+            "$$test" --nocapture --test-threads=1 "$$@"
+        done
+      - "gui-e2e"
 
   modama-agent-2:
     build:
@@ -284,3 +335,11 @@ services:
 networks:
   modama-network:
     driver: bridge
+
+volumes:
+  # tmpfs like a real /run/user/<uid>, shared by session-1 and gui-e2e; gone with the stack
+  session-1-run:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs

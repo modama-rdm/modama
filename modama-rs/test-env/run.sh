@@ -12,7 +12,8 @@ compose down --remove-orphans
 mkdir -p testfolder/data
 
 compose run --rm smbdrop-init
-compose build "${build_flags[@]}" --pull
+# with the profile, also the image of gui-e2e, which `up` doesn't start
+compose --profile e2e build "${build_flags[@]}" --pull
 compose up -d
 
 # Uids that are free in smbdrop's container, which creates a share user with the owner's uid:
@@ -32,4 +33,8 @@ compose exec permissions bash -c 'chgrp iff -R /data/adhoc/weberproject/'
 compose exec permissions bash -c 'setfacl -m default:user:clausen:rwx /data/adhoc/weberproject/'
 compose exec permissions bash -c 'setfacl -Rm user:clausen:rwx /data/adhoc/weberproject/'
 
-compose run --rm test-runner /opt/venv/bin/python -m pytest -v tests "$@"
+failed=0
+compose run --rm test-runner /opt/venv/bin/python -m pytest -v tests "$@" || failed=1
+# the GUI's end-to-end tests, in session-1's login session (modama-agent-gui/tests/e2e_*.rs)
+compose --profile e2e run --rm gui-e2e || failed=1
+exit $failed

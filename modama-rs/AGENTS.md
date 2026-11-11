@@ -24,6 +24,11 @@ channel, the agent's local API, or the agent's use of the management API. They
 are not part of CI, so nothing else catches it when they break. Run them in the
 background; the first start compiles the workspace in the containers.
 
+The GUI's end-to-end tests (`modama-agent-gui/tests/e2e_*.rs`) run there too.
+Add one only for what the unit and visual tests can't catch: a flow across the
+GUI, the agent, the session helper and the services. One test per flow, with
+few, telling checks; texts and layout belong in the visual tests.
+
 A failure can come from the tests being out of date rather than from the change:
 check what the test expects against the current behavior, and fix the test if
 it is outdated. Say which tests you changed and why.
