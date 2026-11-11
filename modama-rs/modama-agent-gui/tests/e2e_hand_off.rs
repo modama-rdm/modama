@@ -4,8 +4,8 @@
 //! clausen starts an ingest at the resource; weber, in a second GUI, starts one after the
 //! warning that clausen's is there. smbdrop keeps the ingest shares of one user per resource:
 //! clausen's keeps existing but is no longer at the resource, and the session helper replaces
-//! its mount by weber's. Stopping weber's ingest removes the share and the mount. See
-//! `e2e_common` for how the tests run.
+//! its mount by weber's. clausen's GUI shows weber's ingest share but can't stop it. Stopping
+//! weber's ingest removes the share and the mount. See `e2e_common` for how the tests run.
 #![cfg(test)]
 #![cfg(feature = "e2e")]
 
@@ -14,8 +14,8 @@ mod e2e_common;
 use std::time::Duration;
 
 use e2e_common::{
-    click_button, gui, has_text, mount_uri, resource, sign_in, smbdrop_share, start_ingest,
-    wait_for, wait_until,
+    click_button, gui, has_button, has_text, mount_uri, resource, sign_in, smbdrop_share,
+    start_ingest, wait_for, wait_until,
 };
 
 #[test]
@@ -25,7 +25,6 @@ fn hand_off_to_another_researcher_then_stop() {
     let mut clausen = gui();
     sign_in(&mut clausen, "clausen", "1234");
     let first = start_ingest(&mut clausen, "testproject");
-    drop(clausen);
     assert_eq!(
         smbdrop_share(&first.share_name).expect("smbdrop has clausen's ingest share")["resource"],
         resource.as_str()
@@ -64,6 +63,17 @@ fn hand_off_to_another_researcher_then_stop() {
     wait_for("clausen's mount to go", Duration::from_secs(60), || {
         mount_uri(&first.share_name).is_none()
     });
+
+    // clausen's GUI, still open and signed in, shows weber's ingest share, which only weber
+    // can stop
+    wait_until(
+        &mut clausen,
+        "clausen's GUI to show weber's ingest share",
+        Duration::from_secs(60),
+        |h| has_text(h, &format!("share={}-", second.session)),
+    );
+    assert!(!has_button(&clausen, "Stop Ingest"));
+    drop(clausen);
 
     // stopping removes weber's ingest share and its mount
     click_button(&mut weber, "Stop Ingest");
