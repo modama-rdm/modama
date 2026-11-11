@@ -3,7 +3,9 @@ use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
-    guide_screenshots::{VIEWPORT, representative_connected_agents, representative_connection},
+    guide_screenshots::{
+        VIEWPORT, freeze_time, representative_connected_agents, representative_connection,
+    },
     pages::{Page, PageConnecting, PageOverview},
     service::{ConnectedAgent, StubAgentService},
     state::{
@@ -161,6 +163,7 @@ fn overview_snapshots() {
         "Waiting for the session helper to mount the ingest share.".to_owned(),
     );
     mounting.run_steps(1);
+    freeze_time(&mut mounting);
     mounting.snapshot("overview_mounting");
     results.extend_harness(&mut mounting);
 
@@ -181,6 +184,7 @@ fn overview_snapshots() {
         .agent
         .hand_off_blocked = true;
     hand_off_blocked.run_steps(1);
+    freeze_time(&mut hand_off_blocked);
     hand_off_blocked.snapshot("overview_hand_off_blocked");
     results.extend_harness(&mut hand_off_blocked);
 
@@ -204,6 +208,7 @@ fn overview_snapshots() {
         );
     }
     close_pending.run_steps(1);
+    freeze_time(&mut close_pending);
     close_pending.snapshot("overview_close_pending");
     close_release.wait();
     results.extend_harness(&mut close_pending);
@@ -256,6 +261,7 @@ fn overview_snapshots() {
         .agent
         .connection_dropped = true;
     connection_dropped.run_steps(2);
+    freeze_time(&mut connection_dropped);
     connection_dropped.snapshot("overview_connection_dropped");
     results.extend_harness(&mut connection_dropped);
 
@@ -747,6 +753,7 @@ fn connecting_snapshot() {
             .query_by_role_and_label(egui::accesskit::Role::ProgressIndicator, "Loading")
             .is_some()
     );
+    freeze_time(&mut harness);
     harness.snapshot("connecting");
     release.wait();
 
@@ -982,6 +989,7 @@ fn start_while_open_snapshots() {
         },
     );
     pending.run_steps(1);
+    freeze_time(&mut pending);
     pending.snapshot("overview_start_pending_while_share_open");
     results.extend_harness(&mut pending);
 }

@@ -3,6 +3,7 @@ use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
+    guide_screenshots::freeze_time,
     pages::{Page, PageLogin},
     service::ServiceError,
     styles,
@@ -236,6 +237,7 @@ fn login_snapshots() {
         );
     }
     pending.run_steps(1);
+    freeze_time(&mut pending);
     pending.snapshot("login_pending");
     results.extend_harness(&mut pending);
     release.wait();
@@ -258,6 +260,7 @@ fn login_snapshots() {
         );
     }
     focused_disabled.run_steps(1);
+    freeze_time(&mut focused_disabled);
     focused_disabled.snapshot("login_focused_disabled");
     results.extend_harness(&mut focused_disabled);
     release.wait();

@@ -5,7 +5,7 @@ use egui_kittest::{Harness, SnapshotResults, kittest::Queryable};
 use modama_agent_gui::{
     app::AgentGuiApp,
     async_state::AsyncState,
-    guide_screenshots::VIEWPORT,
+    guide_screenshots::{VIEWPORT, freeze_time},
     pages::{
         CreateSessionError, Page, PageSelectCreateSession, PageSelectProject,
         select_project::{ProjectSort, representative_projects},
@@ -214,6 +214,7 @@ fn project_selection_snapshots() {
         sort.bottom(),
         action.top(),
     );
+    freeze_time(&mut loading);
     loading.snapshot("select_project_loading");
     release.wait();
     results.extend_harness(&mut loading);
@@ -923,6 +924,7 @@ fn session_selection_snapshots() {
         );
     }
     loading.run_steps(3);
+    freeze_time(&mut loading);
     loading.snapshot("select_session_loading");
     release.wait();
     results.extend_harness(&mut loading);
@@ -1069,6 +1071,7 @@ fn session_selection_snapshots() {
         );
     }
     creating.run_steps(1);
+    freeze_time(&mut creating);
     creating.snapshot("select_session_creating");
     release.wait();
     results.extend_harness(&mut creating);
@@ -1110,6 +1113,7 @@ fn session_selection_snapshots() {
         );
     }
     starting.run_steps(1);
+    freeze_time(&mut starting);
     starting.snapshot("select_session_starting");
     release.wait();
     results.extend_harness(&mut starting);

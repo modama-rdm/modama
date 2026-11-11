@@ -138,6 +138,13 @@ impl AgentGuiApp {
         self
     }
 
+    /// Start the navigation progress bar over, as if what it shows began in the next frame: for
+    /// snapshots that stop egui's clock (`guide_screenshots::freeze_time`)
+    #[cfg(feature = "guide-screenshots")]
+    pub fn restart_navigation_progress(&mut self) {
+        self.navigation_progress = NavigationProgress::default();
+    }
+
     #[cfg(feature = "autostart")]
     fn handle_autostart_offer(&mut self, action: AutostartOfferAction) {
         match action {
