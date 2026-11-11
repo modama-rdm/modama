@@ -7,3 +7,11 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  # the hooks' `rev` in .pre-commit-config.yaml, which CI runs too
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      pre-commit:
+        patterns: ["*"]
