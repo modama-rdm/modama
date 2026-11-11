@@ -87,14 +87,14 @@ impl From<modama_common::foreground::OtherMount> for ActiveSession {
     }
 }
 
-/// How texts refer to the resource: the agent's resource name, or "this resource" if
+/// How texts refer to the resource: the agent's resource name, or "this instrument" if
 /// unknown (anonymous agent, or not connected yet)
 // TODO: for an anonymous agent, name the resource it inherits from its token, as the connected
 // agents (`ConnectedAgents::resource`) do
 pub fn instrument_name(identity: Option<&AgentIdentity>) -> &str {
     match identity {
         Some(AgentIdentity::AgentId { resource_name, .. }) => resource_name,
-        Some(AgentIdentity::Anonymous { .. }) | None => "this resource",
+        Some(AgentIdentity::Anonymous { .. }) | None => "this instrument",
     }
 }
 
@@ -411,8 +411,8 @@ mod tests {
         let anonymous = AgentIdentity::Anonymous {
             hostname: "pc".to_owned(),
         };
-        assert_eq!(instrument_name(Some(&anonymous)), "this resource");
-        assert_eq!(instrument_name(None), "this resource");
+        assert_eq!(instrument_name(Some(&anonymous)), "this instrument");
+        assert_eq!(instrument_name(None), "this instrument");
     }
 
     fn pending(share_id: &str) -> PendingSession {
