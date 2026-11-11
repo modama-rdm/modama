@@ -1,44 +1,23 @@
-use std::{
-    collections::HashMap,
-    io,
-    net::{IpAddr, Ipv4Addr},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, io, net::Ipv4Addr, sync::Arc, time::Duration};
 
 use axum::{Json, Router, extract::State, routing::put};
 use hyper::StatusCode;
 use log::{debug, error, info, warn};
 use modama_common::tokens::{TokenError, TokenProvider, TokenSignResponse};
-use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use tokio::{net::UdpSocket, spawn, sync::Mutex, task::JoinHandle, time::sleep};
 use url::Url;
 
 use crate::local_net_common::{
     DiscoveryInnerValidated, DiscoveryMessage, NOTIFY_CURRENT_VERSION, NOTIFY_MCAST_ADDR,
-    NOTIFY_PORT, create_mcast_socket_for_sending,
+    NOTIFY_PORT, create_mcast_socket_for_sending, local_networks,
 };
 
 pub fn get_private_addresses() -> Result<Vec<Ipv4Addr>, network_interface::Error> {
-    let mut result: Vec<Ipv4Addr> = Vec::new();
-    let interfaces = NetworkInterface::show()?;
-    for interface in interfaces.iter() {
-        let addrs = interface
-            .addr
-            .iter()
-            .filter_map(|addr| {
-                if let IpAddr::V4(addr) = addr.ip() {
-                    Some(addr)
-                } else {
-                    None
-                }
-            })
-            .filter(|a| a.is_private());
-        for addr in addrs {
-            result.push(addr);
-        }
-    }
-    Ok(result)
+    Ok(local_networks()?
+        .into_iter()
+        .map(|network| network.addr)
+        .filter(Ipv4Addr::is_private)
+        .collect())
 }
 
 #[derive(Clone)]

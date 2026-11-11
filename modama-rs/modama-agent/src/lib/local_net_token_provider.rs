@@ -22,7 +22,13 @@ use tokio::{
 };
 use url::Url;
 
-use crate::local_net_common::DiscoveryMessage;
+use crate::local_net_common::{DiscoveryMessage, LocalNetwork, local_networks};
+
+/// How long connecting to a token proxy may take; they are on a network of this computer, so
+/// one that takes longer is most likely unreachable
+const TOKEN_PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long a whole token request may take; the token proxy asks the server for the token
+const TOKEN_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct RemoteAgent {
@@ -74,6 +80,8 @@ impl RemoteAgents {
 pub struct LocalNetTokenProvider {
     http_client: Client,
     agents: RemoteAgents,
+    /// Where discovery listens; token requests only go to proxies on those networks
+    local: DiscoveryAddr,
     discovery_loop_handle: JoinHandle<()>,
 }
 
@@ -96,6 +104,55 @@ async fn try_recv_discovery_message(
         return Ok(None);
     };
     Ok(DiscoveryMessage::try_parse(recv_str).map(|msg| (msg, addr)))
+}
+
+/// The networks of the interfaces this agent listens on for announcements, as they are now; it
+/// only uses token proxies on those
+fn listened_networks(local: DiscoveryAddr) -> Result<Vec<LocalNetwork>, network_interface::Error> {
+    Ok(local_networks()?
+        .into_iter()
+        .filter(|network| match local {
+            DiscoveryAddr::AnyPrivate => network.addr.is_private(),
+            DiscoveryAddr::V4(addr) => network.addr == addr,
+        })
+        .collect())
+}
+
+/// Whether the token proxy at `url` is on one of `networks`. An announcement reaches every
+/// network of the link it is sent on: an enrolled agent with addresses of two networks on one
+/// interface announces both there, and one of them is out of our reach. Agents announce IPv4
+/// addresses; a host name can't be checked and is out of reach as well.
+fn on_networks(url: &Url, networks: &[LocalNetwork]) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => networks.iter().any(|network| network.contains(ip)),
+        _ => false,
+    }
+}
+
+/// The token proxies to ask for a token, the most recently announced first. With `networks`,
+/// only those on one of them: the networks are checked at each request, so a proxy counts once
+/// this computer joins its network, and no longer once it leaves.
+fn token_proxies_to_ask(
+    agents: HashMap<RemoteAgent, Instant>,
+    networks: Option<&[LocalNetwork]>,
+) -> Vec<RemoteAgent> {
+    let mut agents: Vec<(RemoteAgent, Instant)> = agents.into_iter().collect();
+    agents.sort_by_key(|(_, seen)| std::cmp::Reverse(*seen));
+    agents
+        .into_iter()
+        .map(|(agent, _)| agent)
+        .filter(|agent| match networks {
+            Some(networks) if !on_networks(&agent.url, networks) => {
+                debug!(
+                    "skipping the token proxy at {}: it isn't on a network this agent listens on \
+                     for other agents",
+                    agent.url
+                );
+                false
+            }
+            _ => true,
+        })
+        .collect()
 }
 
 async fn handle_discovery_msg(msg: &DiscoveryMessage, agents: &mut RemoteAgents) {
@@ -390,6 +447,8 @@ impl LocalNetTokenProvider {
         let root_cert = Certificate::from_pem(pem)?;
         let http_client = modama_common::pinned_ca_client_builder(root_cert)
             .user_agent(format!("modama-agent/{}", modama_git_version()))
+            .connect_timeout(TOKEN_PROXY_CONNECT_TIMEOUT)
+            .timeout(TOKEN_REQUEST_TIMEOUT)
             .build()?;
 
         let agents = RemoteAgents::new().await;
@@ -400,6 +459,7 @@ impl LocalNetTokenProvider {
         Ok(Self {
             http_client,
             agents,
+            local: local_addr,
             discovery_loop_handle: handle,
         })
     }
@@ -426,13 +486,14 @@ impl LocalNetTokenProvider {
     }
 
     async fn token_from_local_net(&self) -> Result<TokenSignResponse, TokenError> {
-        // idea: just iterate over known agents sorted by last seen
-        let agents = self.agents.agents().await;
-        let mut agents: Vec<(RemoteAgent, Instant)> = agents.into_iter().collect();
-        agents.sort_by_key(|(_, ts)| *ts);
+        let networks = listened_networks(self.local)
+            .inspect_err(|e| {
+                warn!("could not list this computer's networks, so asking every token proxy: {e}")
+            })
+            .ok();
+        let agents = token_proxies_to_ask(self.agents.agents().await, networks.as_deref());
 
-        // latest first:
-        for agent in agents.iter().rev().map(|t| &t.0) {
+        for agent in &agents {
             let resp = match self.http_client.put(agent.url.clone()).send().await {
                 Ok(r) => r,
                 Err(e) => {
@@ -478,6 +539,7 @@ impl LocalNetTokenProvider {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::{
+        collections::HashMap,
         io::BufReader,
         net::Ipv4Addr,
         path::PathBuf,
@@ -501,9 +563,10 @@ mod tests {
     use url::Url;
 
     use crate::{
-        local_net_common::DiscoveryInnerValidated,
+        local_net_common::{DiscoveryInnerValidated, LocalNetwork},
         local_net_token_provider::{
-            DiscoveryAddr, DiscoveryMessage, LocalNetTokenProvider, RemoteAgent,
+            DiscoveryAddr, DiscoveryMessage, LocalNetTokenProvider, RemoteAgent, on_networks,
+            token_proxies_to_ask,
         },
         local_net_token_proxy::{SharedState, advertisement_loop, local_token_proxy},
     };
@@ -675,6 +738,66 @@ mod tests {
 
         sender_task.abort();
         receiver.abort().await;
+    }
+
+    /// An enrolled agent with addresses of two networks on one interface announces both on that
+    /// link; the token proxy on the network we aren't on is out of reach and isn't asked
+    #[test]
+    fn only_token_proxies_on_our_networks_are_asked_latest_first() {
+        let networks = [LocalNetwork {
+            addr: Ipv4Addr::new(192, 168, 0, 7),
+            netmask: Some(Ipv4Addr::new(255, 255, 255, 0)),
+        }];
+        let agent = |url: &str| RemoteAgent {
+            url: Url::parse(url).unwrap(),
+        };
+        let now = Instant::now();
+        let agents = HashMap::from([
+            (agent("http://192.168.0.20:40729/sign/"), now),
+            (
+                agent("http://10.0.0.1:41767/sign/"),
+                now + Duration::from_secs(1),
+            ),
+            (
+                agent("http://192.168.0.30:40000/sign/"),
+                now + Duration::from_secs(2),
+            ),
+        ]);
+        assert_eq!(
+            token_proxies_to_ask(agents.clone(), Some(&networks)),
+            vec![
+                agent("http://192.168.0.30:40000/sign/"),
+                agent("http://192.168.0.20:40729/sign/"),
+            ]
+        );
+        // without the networks (listing them failed), every one is asked
+        assert_eq!(
+            token_proxies_to_ask(agents, None),
+            vec![
+                agent("http://192.168.0.30:40000/sign/"),
+                agent("http://10.0.0.1:41767/sign/"),
+                agent("http://192.168.0.20:40729/sign/"),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_ipv4_token_proxies_on_our_networks_count() {
+        let networks = [LocalNetwork {
+            addr: Ipv4Addr::new(192, 168, 0, 7),
+            netmask: Some(Ipv4Addr::new(255, 255, 255, 0)),
+        }];
+        let url = |s: &str| Url::parse(s).unwrap();
+        assert!(on_networks(
+            &url("http://192.168.0.20:40729/sign/"),
+            &networks
+        ));
+        assert!(!on_networks(&url("http://10.0.0.1:41767/sign/"), &networks));
+        assert!(!on_networks(
+            &url("http://agent.example:40729/sign/"),
+            &networks
+        ));
+        assert!(!on_networks(&url("http://192.168.0.20:40729/sign/"), &[]));
     }
 
     struct TestTokenProxy {

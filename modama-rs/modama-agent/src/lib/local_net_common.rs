@@ -1,6 +1,7 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use modama_common::agent::{AgentId, FromURIError};
+use network_interface::{Addr, NetworkInterface, NetworkInterfaceConfig};
 use serde::{Deserialize, Serialize};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
@@ -80,6 +81,38 @@ impl DiscoveryMessage {
     }
 }
 
+/// An IPv4 network this computer is directly on: one of its addresses, with that address's
+/// netmask
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalNetwork {
+    pub addr: Ipv4Addr,
+    /// `None` if the system doesn't say; then only `addr` itself is on the network
+    pub netmask: Option<Ipv4Addr>,
+}
+
+impl LocalNetwork {
+    pub fn contains(&self, ip: Ipv4Addr) -> bool {
+        let mask = self.netmask.map_or(u32::MAX, u32::from);
+        u32::from(ip) & mask == u32::from(self.addr) & mask
+    }
+}
+
+/// The IPv4 networks of all of this computer's interfaces; an interface with several addresses
+/// is on several networks
+pub fn local_networks() -> Result<Vec<LocalNetwork>, network_interface::Error> {
+    Ok(NetworkInterface::show()?
+        .into_iter()
+        .flat_map(|interface| interface.addr)
+        .filter_map(|addr| match addr {
+            Addr::V4(v4) => Some(LocalNetwork {
+                addr: v4.ip,
+                netmask: v4.netmask,
+            }),
+            Addr::V6(_) => None,
+        })
+        .collect())
+}
+
 /// A socket that sends discovery announcements on exactly the interface with address `local`.
 /// An announcement carries the URL of this interface's token API, so it must not reach any other
 /// network: the interface is set explicitly (Windows doesn't derive it from the bound address for
@@ -116,5 +149,27 @@ mod tests {
         let socket = socket2::SockRef::from(&socket);
         assert_eq!(socket.multicast_if_v4().unwrap(), local);
         assert_eq!(socket.multicast_ttl_v4().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_network_contains_the_addresses_its_netmask_covers() {
+        let network = LocalNetwork {
+            addr: Ipv4Addr::new(192, 168, 0, 20),
+            netmask: Some(Ipv4Addr::new(255, 255, 255, 0)),
+        };
+        assert!(network.contains(Ipv4Addr::new(192, 168, 0, 1)));
+        assert!(network.contains(Ipv4Addr::new(192, 168, 0, 255)));
+        assert!(!network.contains(Ipv4Addr::new(192, 168, 1, 1)));
+        assert!(!network.contains(Ipv4Addr::new(10, 0, 0, 1)));
+    }
+
+    #[test]
+    fn without_a_netmask_only_the_address_itself_is_on_the_network() {
+        let network = LocalNetwork {
+            addr: Ipv4Addr::new(192, 168, 0, 20),
+            netmask: None,
+        };
+        assert!(network.contains(Ipv4Addr::new(192, 168, 0, 20)));
+        assert!(!network.contains(Ipv4Addr::new(192, 168, 0, 21)));
     }
 }
