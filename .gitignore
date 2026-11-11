@@ -12,7 +12,9 @@ dist/
 .idea
 /design-handoff
 frontend_auth_spike.md
-/.claude
+# Claude Code's local state; the project's skills are committed
+/.claude/*
+!/.claude/skills/
 cargo-git
 /deploy/testconf/secrets/CA/
 /deploy/.env
