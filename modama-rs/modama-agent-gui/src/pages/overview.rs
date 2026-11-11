@@ -69,14 +69,23 @@ pub(crate) fn start_dialog_kind(
             created_by: pending.created_by.clone(),
         },
     };
-    match &previous.created_by {
-        Some(user) if *user != signed_in.username => Some(StartDialog::OthersShare {
+    match others_share_user(previous.created_by.as_deref(), signed_in) {
+        Some(user) => Some(StartDialog::OthersShare {
             project: previous.project.clone(),
             session: previous.session.clone(),
-            user: user.clone(),
+            user: user.to_owned(),
         }),
-        _ => Some(StartDialog::OwnShare { previous }),
+        None => Some(StartDialog::OwnShare { previous }),
     }
+}
+
+/// The user who started an ingest share, if that is not the signed-in user. A share whose
+/// creator isn't known counts as the signed-in user's own.
+pub(crate) fn others_share_user<'a>(
+    created_by: Option<&'a str>,
+    signed_in: &SignedIn,
+) -> Option<&'a str> {
+    created_by.filter(|user| *user != signed_in.username)
 }
 
 /// What starting another ingest does to the running ingest share, shown before the user
@@ -291,8 +300,18 @@ impl PageOverview {
         let signed_in = &app_state.signed_in;
         match &app_state.agent.foreground {
             ForegroundSession::Mounted(session) => {
-                let close_clicked =
-                    self.show_active_session(ui, session, pending_close == Some(&session.share_id));
+                let others_share = signed_in.as_ref().is_some_and(|signed_in| {
+                    others_share_user(session.created_by.as_deref(), signed_in).is_some()
+                });
+                if others_share {
+                    self.drop_foreground_close_confirmation();
+                }
+                let close_clicked = self.show_active_session(
+                    ui,
+                    session,
+                    pending_close == Some(&session.share_id),
+                    others_share,
+                );
                 if close_clicked {
                     if signed_in.is_some() {
                         self.open_close_confirmation();
@@ -544,6 +563,7 @@ impl PageOverview {
         ui: &mut egui::Ui,
         session: &ActiveSession,
         awaiting_close: bool,
+        others_share: bool,
     ) -> bool {
         let is_closing = self.close_task.is_pending() || awaiting_close;
         card_heading(ui, "Foreground ingest");
@@ -577,10 +597,12 @@ impl PageOverview {
         ui.add_space(styles::spacing::form_field_gap::EGUI_POINTS);
 
         card_heading(ui, "Stop ingest");
-        card_description(
-            ui,
-            "Stop the ingest share when you are finished transferring data.",
-        );
+        if !others_share {
+            card_description(
+                ui,
+                "Stop the ingest share when you are finished transferring data.",
+            );
+        }
         ui.add_space(styles::spacing::button_margin_top::EGUI_POINTS);
         let response = if is_closing {
             loading_button(
@@ -590,7 +612,8 @@ impl PageOverview {
                 ButtonVariant::DangerOutline,
             )
         } else {
-            ui.add(danger_outline_button("Stop Ingest", ui))
+            // only the user who started it can stop it
+            ui.add_enabled(!others_share, danger_outline_button("Stop Ingest", ui))
         };
         if self.focus_on_entry && response.enabled() {
             response.request_focus();
