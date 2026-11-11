@@ -757,6 +757,74 @@ fn started_by_is_shown_only_when_known() {
     assert!(unknown.query_by_label("Started by").is_none());
 }
 
+fn stop_is_disabled(harness: &Harness<'static, AgentGuiApp>) -> bool {
+    harness
+        .query_by(|node| node.label().as_deref() == Some("Stop Ingest") && node.is_disabled())
+        .is_some()
+}
+
+fn others_share_harness() -> Harness<'static, AgentGuiApp> {
+    let mut harness = overview_harness(false, true);
+    if let ForegroundSession::Mounted(session) = &mut harness.state_mut().app_state.agent.foreground
+    {
+        session.created_by = Some("other.user".to_owned());
+    }
+    harness.run_steps(2);
+    harness
+}
+
+#[test]
+fn others_share_snapshot() {
+    let mut harness = others_share_harness();
+    assert!(stop_is_disabled(&harness));
+    harness.snapshot("overview_others_share_open");
+}
+
+#[test]
+fn another_users_share_cannot_be_stopped() {
+    let mut harness = others_share_harness();
+    assert!(stop_is_disabled(&harness));
+    harness.get_by_label("Stop Ingest").click();
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Stop ingest?").is_none());
+    assert!(
+        harness
+            .query_by_label("Stop the ingest share when you are finished transferring data.")
+            .is_none()
+    );
+}
+
+#[test]
+fn own_share_can_be_stopped() {
+    let harness = overview_harness(false, true);
+    assert!(!stop_is_disabled(&harness));
+}
+
+#[test]
+fn signing_in_to_stop_another_users_share_opens_no_confirmation() {
+    let mut harness = others_share_harness();
+    harness.state_mut().app_state.signed_in = None;
+    harness.run_steps(1);
+    // signed out, nobody is known yet: Stop leads to the login
+    assert!(!stop_is_disabled(&harness));
+    harness.get_by_label("Stop Ingest").click();
+    harness.run_steps(2);
+    assert!(matches!(harness.state().page, Page::Login(_)));
+
+    if let Page::Login(login) = &mut harness.state_mut().page {
+        login.login_task = AsyncState::Ready {
+            payload: Ok(SignedIn {
+                username: "representative.user".to_owned(),
+            }),
+        };
+    }
+    harness.run_steps(2);
+
+    assert!(matches!(harness.state().page, Page::Overview(_)));
+    assert!(harness.query_by_label("Stop ingest?").is_none());
+    assert!(stop_is_disabled(&harness));
+}
+
 #[test]
 fn start_while_open_snapshots() {
     let mut results = SnapshotResults::new();

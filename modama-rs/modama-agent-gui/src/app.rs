@@ -237,6 +237,11 @@ impl AgentGuiApp {
                             &self.app_state.agent.foreground,
                             crate::state::ForegroundSession::Mounted(session)
                                 if session.share_id == share_id
+                                    && crate::pages::overview::others_share_user(
+                                        session.created_by.as_deref(),
+                                        &signed_in,
+                                    )
+                                    .is_none()
                         ) {
                             page.open_close_confirmation();
                         } else if let Some(mount) = other_mount {
