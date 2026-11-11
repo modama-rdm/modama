@@ -60,6 +60,9 @@ When reviewing differences, look at the snapshots with the largest pixel
 difference first (the test output reports each one's size); don't conclude
 from a sample.
 
+CI's images of a pull request's failing visual tests are on the branch
+`ci-snapshot-review`, under `pr-<number>/`.
+
 ## Shape of UI changes
 
 A small change, such as a text, a label or an icon next to an existing
