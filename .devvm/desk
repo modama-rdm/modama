@@ -1,0 +1,36 @@
+#!/bin/bash
+# The instrument computer's screen, mouse and keyboard: the virtual desktop in the devvm VM.
+#   desk shot FILE.png            screenshot of the whole screen
+#   desk click X Y [BUTTON]       move the pointer to X,Y and click (1 left, 3 right)
+#   desk double X Y               double-click at X,Y
+#   desk move X Y                 move the pointer to X,Y (for tooltips)
+#   desk drag X1 Y1 X2 Y2         drag with the left button held, from X1,Y1 to X2,Y2
+#   desk type TEXT                type TEXT where the keyboard focus is
+#   desk key KEY...               press keys, e.g. Return, Tab, ctrl+c, ctrl+v, ctrl+a, alt+F4
+#   desk xdo ARGS...              any xdotool command, for what the others don't cover
+#   desk ui ARGS...               the screen reader's view: widgets by name (desk ui --help)
+#
+# Only what a user at the screen can do, for a tester in a hallway test. Give the tester a
+# symlink to this file: the link may be anywhere, the commands act on the VM of this checkout.
+set -euo pipefail
+self=$(realpath "$0")
+cmd=${1:-}
+shift || true
+# devvm acts on the repository of the current directory, so a screenshot path relative to the
+# caller's directory is made absolute first
+if [ "$cmd" = shot ] && [ -n "${1:-}" ]; then
+    set -- "$(realpath -m -- "$1")"
+fi
+cd "$(dirname "$self")/.."
+case "$cmd" in
+    shot) exec devvm desktop-shot "$@" ;;
+    click) exec devvm xdo mousemove "$1" "$2" click "${3:-1}" ;;
+    double) exec devvm xdo mousemove "$1" "$2" click --repeat 2 --delay 120 1 ;;
+    move) exec devvm xdo mousemove "$1" "$2" ;;
+    drag) exec devvm desktop-drag "$@" ;;
+    type) exec devvm xdo type --delay 40 "$*" ;;
+    key) exec devvm xdo key "$@" ;;
+    xdo) exec devvm xdo "$@" ;;
+    ui) exec devvm ui "$@" ;;
+    *) sed -n '2,14p' "$self" >&2; exit 2 ;;
+esac

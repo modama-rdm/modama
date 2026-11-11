@@ -102,6 +102,24 @@ devvm ui wait Dismiss --timeout 60          # the mount popup
 devvm ssh 'gio mount -l'                    # the GVfs mount of the ingest share
 ```
 
+## A tester at the desktop
+
+For a hallway test, a fresh agent tries the GUI as a user would, knowing only what a user
+knows, such as the user guide. `.devvm/desk` gives it the instrument computer's screen, mouse
+and keyboard and nothing else: screenshots, clicks, typing, keys and the screen reader's view
+(`desk ui`), but no `devvm ssh`, logs or containers. Put a symlink to it into the tester's
+folder, next to what the tester may read:
+
+```bash
+ln -s "$PWD/.devvm/desk" TESTER/desk     # acts on this checkout's VM from any folder
+```
+
+Prepare the desktop first (`desktop-up`, `desktop-modama`, test data). For a tester who
+starts the GUI on their own, stop the one `desktop-modama` started:
+`devvm ssh 'systemctl --user stop modama-gui'`; the session helper keeps running, with its
+tray icon. The panel's launcher only reacts to a real click
+(`desk click`), not to `ui click` or Enter.
+
 ## Pitfalls
 
 - AccessKit only exposes the GUI's widgets while `org.a11y.Status ScreenReaderEnabled` is
