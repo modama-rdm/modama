@@ -1,12 +1,12 @@
 ---
 name: gui-desktop-vm
-description: Run modama-agent-gui, its session helper, the mount popup and the tray icon on a virtual Linux desktop in a devvm VM, against the test deployment, and drive them from the command line (widgets by name over AT-SPI, the tray icon over D-Bus, xdotool, screenshots).
-when_to_use: Trying a GUI or session helper change in the running program rather than in the visual tests; running a scenario of the platform checklist on Linux (mounting, mount popup, tray icon, hand-off); reproducing a bug that needs a real desktop, GVfs and the backend.
+description: Run modama-agent-gui, its session helper, the mount popup and the tray icon on a virtual Linux desktop in a devvm VM (X11, or GNOME on Wayland), against the test deployment, and drive them from the command line (widgets by name over AT-SPI, the tray icon over D-Bus, xdotool, screenshots).
+when_to_use: Trying a GUI or session helper change in the running program rather than in the visual tests; running a scenario of the platform checklist on Linux (mounting, mount popup, tray icon, hand-off); reproducing a bug that needs a real desktop, GVfs and the backend, or that only shows on Wayland.
 ---
 
 # The agent GUI on a desktop in a VM
 
-`.devvm/commands.sh` adds `devvm desktop-*`, `ui`, `tray` and `xdo` (see `devvm` without
+`.devvm/commands.sh` adds `devvm desktop-*`, `ui`, `tray`, `gnome` and `xdo` (see `devvm` without
 arguments). The tools behind them are in `.devvm/guest/desktop/`; every `desktop-*` command
 copies them into the VM, so changes to them need no commit.
 
@@ -21,7 +21,7 @@ on a shared folder):
 ```bash
 DEVVM_SHARE_WORKSPACE=0 devvm create      # or reuse one: devvm ls -a, then devvm use VM
 devvm push                                # commits only; the VM's checkout is ~/modama
-devvm desktop-setup                       # Xvfb, openbox, xfce4-panel, AT-SPI, GVfs, Rust
+devvm desktop-setup                       # Xvfb, openbox, xfce4-panel, GNOME Shell, AT-SPI, GVfs, Rust
 devvm ssh 'deploy/uptest.sh --build'      # the test deployment; the first build takes long
 ```
 
@@ -33,7 +33,7 @@ Run the long commands in the background with a time limit, and look at the conta
 ```bash
 devvm push                                # after committing the change
 devvm ssh 'cd modama-rs && ~/.cargo/bin/cargo build --release -p modama-agent -p modama-agent-gui'
-devvm desktop-up                          # desktop :1 with xfce4-panel; idempotent
+devvm desktop-up                          # desktop :1, X11 with xfce4-panel; idempotent
 devvm desktop-modama                      # agent, session helper and GUI
 ```
 
@@ -46,6 +46,23 @@ transient: one that was stopped is gone, and `devvm desktop-modama` starts it ag
 The session helper's tray icon shows in xfce4-panel's notification area and can be used there
 as on a real desktop. `devvm desktop-up watcher` replaces the panel by a D-Bus stand-in for
 the notification area, `devvm desktop-up none` leaves it out (a desktop without one).
+
+## GNOME on Wayland
+
+`devvm desktop-up gnome` replaces the X11 desktop by GNOME Shell 48 on Wayland, `devvm
+desktop-up` brings the X11 desktop back. Switching stops the session helper and the GUI;
+`devvm desktop-modama` starts them on the desktop that runs.
+
+- GNOME Shell runs as a window that fills the screen `:1`, at the X11 desktop's size. So
+  `desktop-shot`, `desktop-vnc`, `xdo`, `desktop-drag` and `desk` work as on X11, and a
+  position in a screenshot is a position for `xdo`.
+- There is no Xwayland: the session helper and the GUI get only `WAYLAND_DISPLAY`, and a
+  program that needs X11 doesn't start.
+- With `gnome`, tray icons show in the top bar (Debian's AppIndicator extension), and
+  `devvm tray` works. `devvm desktop-up gnome-plain` is GNOME without extensions, which has
+  no notification area.
+- `devvm gnome windows` lists GNOME's windows from bottom to top with their frame and the
+  focus, which `xdo search` can't see; `devvm gnome raise TITLE` brings one to the front.
 
 ## Test data
 
@@ -71,8 +88,10 @@ devvm ssh 'cd deploy && docker compose exec -T permissions bash -c \
   with the time), `icon DIR`. `--timeout` goes before the command: `devvm tray --timeout 60
   watch`.
 - `devvm xdo …` is xdotool on the desktop: typing, and what needs a real pointer (hover, the
-  panel's menu). Coordinates are those `ui tree` prints; `devvm ui panel-icons` gives the
-  tray icons' positions, which the panel doesn't name.
+  panel's menu). On X11, coordinates are those `ui tree` prints; `devvm ui panel-icons` gives
+  the tray icons' positions, which the panel doesn't name. On Wayland, take them from a
+  screenshot: a program doesn't know where its window is there, so `ui tree` prints
+  positions relative to the window's content.
 - `devvm desktop-shot FILE` saves a screenshot on the host. Look at it before judging how
   something looks; text and positions are better checked with `ui tree`.
 - `devvm desktop-vnc` lets a person watch: VNC on `localhost:5900`. Offer the user this viewer

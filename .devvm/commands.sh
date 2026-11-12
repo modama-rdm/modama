@@ -1,25 +1,28 @@
 # Project commands for devvm (sourced by devvm; see its README, "Project configuration").
 #
 # A virtual desktop in the VM for trying modama-agent-gui, its session helper and mount
-# popup by hand or from scripts: Xvfb with openbox and xfce4-panel, widgets driven by
-# name over AT-SPI (ui.py), the tray icon over D-Bus (tray.py), screenshots to the host.
+# popup by hand or from scripts: Xvfb with openbox and xfce4-panel (X11), or with GNOME Shell
+# (Wayland); widgets driven by name over AT-SPI (ui.py), the tray icon over D-Bus (tray.py),
+# screenshots to the host.
 # The tools live in .devvm/guest/desktop/ and are copied into the VM by every command.
 
 DESKTOP_TOOLS_VM=.local/share/modama-desktop   # in the VM user's home
 
 PROJECT_USAGE+="  desktop-setup     install the virtual desktop's packages and Rust in the VM (once)
-  desktop-up [panel|watcher|none]
-                    start the desktop :1 with a notification area: xfce4-panel (default),
-                    a D-Bus stand-in for tray.py, or none
+  desktop-up [panel|watcher|none|gnome|gnome-plain]
+                    start the desktop :1. On X11 with a notification area: xfce4-panel
+                    (default), a D-Bus stand-in for tray.py, or none. On Wayland: GNOME with
+                    tray icons in its top bar (gnome), or without (gnome-plain)
   desktop-modama    enroll an agent with the test deployment's CA (once) and start
-                    modama-agent and modama-agent-gui on the desktop; needs deploy/uptest.sh
-                    and a release build in the VM's checkout
+                    modama-agent and modama-agent-gui on the desktop that runs; needs
+                    deploy/uptest.sh and a release build in the VM's checkout
   desktop-shot [FILE]
                     save a screenshot of the desktop on the host (default:
                     \${TMPDIR:-/tmp}/devvm-desktop.png)
   desktop-vnc       forward the desktop's VNC server to localhost:5900 on the host
   ui ARGS...        drive widgets by name over AT-SPI (ui.py; devvm ui --help)
   tray ARGS...      read and click the tray icon over D-Bus (tray.py; devvm tray --help)
+  gnome ARGS...     ask GNOME Shell for its windows (gnome.py; devvm gnome --help)
   xdo ARGS...       xdotool on the desktop, e.g. devvm xdo mousemove 100 200 click 1
   desktop-drag X1 Y1 X2 Y2
                     drag with the left button from X1,Y1 to X2,Y2 in steps, as a hand does"
@@ -78,6 +81,10 @@ project_cmd_ui() {
 
 project_cmd_tray() {
     desktop_tool tray.py "$@"
+}
+
+project_cmd_gnome() {
+    desktop_tool gnome.py "$@"
 }
 
 project_cmd_xdo() {
