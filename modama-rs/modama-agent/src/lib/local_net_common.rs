@@ -1,4 +1,7 @@
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::{
+    net::{Ipv4Addr, SocketAddrV4},
+    time::Duration,
+};
 
 use modama_common::agent::{AgentId, FromURIError};
 use network_interface::{Addr, NetworkInterface, NetworkInterfaceConfig};
@@ -11,6 +14,13 @@ pub const NOTIFY_HEADER: &str = "MODAMA-AGENT-NOTIFY";
 pub const NOTIFY_CURRENT_VERSION: u32 = 1u32;
 pub const NOTIFY_PORT: u16 = 5055;
 pub const NOTIFY_MCAST_ADDR: Ipv4Addr = const { Ipv4Addr::new(239, 192, 0, 1) };
+/// How often a token proxy is announced
+pub const ANNOUNCEMENT_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Serializes the tests that announce or listen on loopback, which would hear each other
+#[cfg(test)]
+pub(crate) static DISCOVERY_MUTEX: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiscoveryInner {
