@@ -1,15 +1,21 @@
-use std::{collections::HashMap, io, net::Ipv4Addr, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    io,
+    net::Ipv4Addr,
+    sync::Arc,
+    time::Duration,
+};
 
 use axum::{Json, Router, extract::State, routing::put};
 use hyper::StatusCode;
 use log::{debug, error, info, warn};
 use modama_common::tokens::{TokenError, TokenProvider, TokenSignResponse};
-use tokio::{net::UdpSocket, spawn, sync::Mutex, task::JoinHandle, time::sleep};
+use tokio::{net::UdpSocket, spawn, task::JoinHandle, time::sleep};
 use url::Url;
 
 use crate::local_net_common::{
-    DiscoveryInnerValidated, DiscoveryMessage, NOTIFY_CURRENT_VERSION, NOTIFY_MCAST_ADDR,
-    NOTIFY_PORT, create_mcast_socket_for_sending, local_networks,
+    ANNOUNCEMENT_INTERVAL, DiscoveryInnerValidated, DiscoveryMessage, NOTIFY_CURRENT_VERSION,
+    NOTIFY_MCAST_ADDR, NOTIFY_PORT, create_mcast_socket_for_sending, local_networks,
 };
 
 pub fn get_private_addresses() -> Result<Vec<Ipv4Addr>, network_interface::Error> {
@@ -42,14 +48,13 @@ async fn proxy_sign_request(
     }
 }
 
-/// Local token server for other agents that do not have a client certificate; listens
-/// on the given address on a random port. The URL will be inserted into the `SharedState`.
-/// The token requests will be forwarded to the given `TokenProvider`.
-pub async fn local_token_proxy(
+/// Start the token server for agents without a client certificate on `addr`, on a random
+/// port. Returns its task and the URL to announce; token requests are forwarded to
+/// `token_provider`.
+pub fn local_token_proxy(
     addr: Ipv4Addr,
     token_provider: Arc<dyn TokenProvider + Sync + Send>,
-    state: Arc<Mutex<SharedState>>,
-) -> Result<JoinHandle<()>, io::Error> {
+) -> Result<(JoinHandle<()>, Url), io::Error> {
     let api_state = ProxyState { token_provider };
     let app = Router::<ProxyState>::new()
         .route("/sign/", put(proxy_sign_request))
@@ -60,32 +65,23 @@ pub async fn local_token_proxy(
     listener.set_nonblocking(true)?;
     let server = axum_server::from_tcp(listener)?;
 
-    let server_handle = tokio::spawn(async move {
-        info!("spawning task for token proxy at http://{addr}:{listen_port}");
-        if let Err(e) = server.serve(app.into_make_service()).await {
-            error!("failed to start local token server: {e}");
-            // just let the task expire, it will be restarted in the outside loop
-        }
-    });
-
     let url_str = format!("http://{addr}:{listen_port}/sign/");
     let url = Url::parse(url_str.as_str())
         .map_err(|parse_err| io::Error::other(format!("url parse failed: {parse_err}")))?;
 
-    state.lock().await.api_urls.insert(addr, url);
+    let server_handle = spawn(async move {
+        info!("token proxy listening at http://{addr}:{listen_port}");
+        if let Err(e) = server.serve(app.into_make_service()).await {
+            // the task ends here; `TokenProxies::update` restarts the token proxy
+            error!("the token proxy at http://{addr}:{listen_port} failed: {e}");
+        }
+    });
 
-    Ok(server_handle)
-}
-
-/// State shared to inform the advertisement task about the URLs for the running
-/// services on each interface
-pub struct SharedState {
-    pub api_urls: HashMap<Ipv4Addr, Url>,
+    Ok((server_handle, url))
 }
 
 pub async fn try_send_discovery_message(
     socket: &UdpSocket,
-    _our_addr: Ipv4Addr,
     msg: &DiscoveryMessage,
 ) -> Result<(), io::Error> {
     let msg = msg.serialize();
@@ -97,44 +93,35 @@ pub async fn try_send_discovery_message(
     Ok(())
 }
 
-/// Advertise token API on a single interface (`local`) via multicast UDP
-/// packets
-pub async fn advertisement_loop(local: Ipv4Addr, state: Arc<Mutex<SharedState>>) -> JoinHandle<()> {
+/// Announce the token proxy at `api_url` on the interface with address `local`, via multicast
+/// UDP packets, until aborted
+pub fn advertisement_loop(local: Ipv4Addr, api_url: Url) -> JoinHandle<()> {
     spawn(async move {
-        'outer: loop {
+        let msg = DiscoveryMessage {
+            inner: DiscoveryInnerValidated {
+                version: NOTIFY_CURRENT_VERSION,
+                api: api_url,
+            },
+        };
+        loop {
             let socket = match create_mcast_socket_for_sending(local) {
                 Ok(socket) => socket,
                 Err(err) => {
-                    error!("error creating multicast socket (`{err}`), retrying...");
-                    sleep(Duration::from_millis(5000)).await;
-                    continue 'outer;
+                    error!("error creating multicast socket on {local} (`{err}`), retrying...");
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
                 }
             };
-            'inner: loop {
-                let this_api_url = match state.lock().await.api_urls.get(&local) {
-                    Some(url) => url.clone(),
-                    None => {
-                        warn!("could not get API URL for interface {local}, retrying...");
-                        sleep(Duration::from_millis(1000)).await;
-                        continue 'outer;
-                    }
-                };
-                let msg = &DiscoveryMessage {
-                    inner: DiscoveryInnerValidated {
-                        version: NOTIFY_CURRENT_VERSION,
-                        api: this_api_url,
-                    },
-                };
-                match try_send_discovery_message(&socket, local, msg).await {
-                    Ok(_) => {
-                        debug!("discovery message sent, sleeping...");
-                        sleep(Duration::from_secs(5)).await;
-                        continue 'inner;
-                    }
+            loop {
+                match try_send_discovery_message(&socket, &msg).await {
+                    Ok(()) => sleep(ANNOUNCEMENT_INTERVAL).await,
                     Err(err) => {
-                        error!("error sending multicast message (`{err}`), re-creating socket...");
-                        sleep(Duration::from_millis(1000)).await;
-                        continue 'outer;
+                        error!(
+                            "error sending multicast message on {local} (`{err}`), re-creating \
+                             socket..."
+                        );
+                        sleep(Duration::from_secs(1)).await;
+                        break;
                     }
                 }
             }
@@ -142,54 +129,161 @@ pub async fn advertisement_loop(local: Ipv4Addr, state: Arc<Mutex<SharedState>>)
     })
 }
 
-pub async fn task_exists_and_running(
-    map: &HashMap<Ipv4Addr, JoinHandle<()>>,
-    key: Ipv4Addr,
-) -> bool {
-    match map.get(&key) {
-        Some(handle) => !handle.is_finished(),
-        None => false,
+/// The token proxy on one address: its server, and the task that announces it. Dropping it
+/// stops both.
+struct TokenProxy {
+    server: JoinHandle<()>,
+    advertisement: JoinHandle<()>,
+}
+
+impl TokenProxy {
+    fn start(
+        addr: Ipv4Addr,
+        token_provider: Arc<dyn TokenProvider + Sync + Send>,
+    ) -> Result<Self, io::Error> {
+        let (server, url) = local_token_proxy(addr, token_provider)?;
+        Ok(Self {
+            server,
+            advertisement: advertisement_loop(addr, url),
+        })
+    }
+
+    fn is_running(&self) -> bool {
+        !self.server.is_finished() && !self.advertisement.is_finished()
     }
 }
 
-pub async fn token_publisher_loop(token_fetcher: Arc<dyn TokenProvider + Sync + Send>) {
-    let mut advertisement_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
-    let mut token_server_tasks: HashMap<Ipv4Addr, JoinHandle<()>> = HashMap::new();
+impl Drop for TokenProxy {
+    fn drop(&mut self) {
+        self.server.abort();
+        self.advertisement.abort();
+    }
+}
 
-    let shared_state = Arc::new(Mutex::new(SharedState {
-        api_urls: Default::default(),
-    }));
+/// The token proxies of this agent, one per address
+pub struct TokenProxies {
+    token_provider: Arc<dyn TokenProvider + Sync + Send>,
+    running: HashMap<Ipv4Addr, TokenProxy>,
+    /// Addresses a token proxy couldn't be started on, so each is only logged once; retried on
+    /// every update
+    failed: HashSet<Ipv4Addr>,
+}
 
-    loop {
-        // 1) discover local interfaces, ignore non-private addresses
-        match get_private_addresses() {
-            Ok(addrs) => {
-                // when new interfaces appear, start token servers and
-                // advertisement tasks on them; when interfaces disappear, the
-                // tasks should just kill itself
-                for addr in addrs.iter() {
-                    if !task_exists_and_running(&token_server_tasks, *addr).await
-                        && let Ok(handle) = local_token_proxy(
-                            *addr,
-                            Arc::clone(&token_fetcher),
-                            Arc::clone(&shared_state),
-                        )
-                        .await
-                    {
-                        token_server_tasks.insert(*addr, handle);
-                    }
-                    if !task_exists_and_running(&advertisement_tasks, *addr).await {
-                        let handle = advertisement_loop(*addr, Arc::clone(&shared_state)).await;
-                        advertisement_tasks.insert(*addr, handle);
+impl TokenProxies {
+    pub fn new(token_provider: Arc<dyn TokenProvider + Sync + Send>) -> Self {
+        Self {
+            token_provider,
+            running: HashMap::new(),
+            failed: HashSet::new(),
+        }
+    }
+
+    /// The addresses with a running token proxy
+    pub fn addresses(&self) -> HashSet<Ipv4Addr> {
+        self.running.keys().copied().collect()
+    }
+
+    /// Run a token proxy on each of `addrs` and on no other address: start the missing ones,
+    /// stop those of addresses that are gone, and restart those that stopped by themselves.
+    /// Must be called from within a Tokio runtime.
+    pub fn update(&mut self, addrs: &HashSet<Ipv4Addr>) {
+        self.running.retain(|addr, proxy| {
+            if !addrs.contains(addr) {
+                info!(
+                    "stopping the token proxy on {addr}: this computer no longer has the address"
+                );
+                false
+            } else if !proxy.is_running() {
+                warn!("the token proxy on {addr} stopped, restarting it");
+                false
+            } else {
+                true
+            }
+        });
+        self.failed.retain(|addr| addrs.contains(addr));
+        for addr in addrs {
+            if self.running.contains_key(addr) {
+                continue;
+            }
+            match TokenProxy::start(*addr, Arc::clone(&self.token_provider)) {
+                Ok(proxy) => {
+                    self.running.insert(*addr, proxy);
+                    self.failed.remove(addr);
+                }
+                Err(e) => {
+                    if self.failed.insert(*addr) {
+                        warn!("could not start the token proxy on {addr}: {e}");
                     }
                 }
             }
+        }
+    }
+}
+
+/// Keep a token proxy running on every private address of this computer, following the
+/// addresses as they come and go
+pub async fn token_publisher_loop(token_fetcher: Arc<dyn TokenProvider + Sync + Send>) {
+    let mut proxies = TokenProxies::new(token_fetcher);
+    loop {
+        match get_private_addresses() {
+            Ok(addrs) => proxies.update(&addrs.into_iter().collect()),
             Err(e) => {
+                // keep the token proxies we have
                 error!("error while discovering local interfaces: {e}");
                 sleep(Duration::from_secs(10)).await;
                 continue;
             }
         };
         sleep(Duration::from_secs(1)).await;
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::{collections::HashSet, net::Ipv4Addr, sync::Arc, time::Duration};
+
+    use modama_common::{
+        test_helpers::MockTokenProvider,
+        tokens::{Claims, LocalTokenSigner, TokenProvider},
+    };
+    use tokio::time::sleep;
+
+    use super::TokenProxies;
+    use crate::local_net_common::DISCOVERY_MUTEX;
+
+    #[tokio::test]
+    async fn token_proxies_follow_the_addresses() {
+        // announces on loopback, which the discovery tests listen on
+        let _guard = DISCOVERY_MUTEX.lock().await;
+        let token_provider: Arc<dyn TokenProvider + Sync + Send> = Arc::new(MockTokenProvider {
+            signer: LocalTokenSigner::new(b"secret"),
+            claims: Claims {
+                sub: "x-modama-agent://test_resource#test-agent".to_owned(),
+                exp: 0,
+            },
+        });
+        let loopback = Ipv4Addr::LOCALHOST;
+        let mut proxies = TokenProxies::new(token_provider);
+
+        proxies.update(&HashSet::from([loopback]));
+        assert_eq!(proxies.addresses(), HashSet::from([loopback]));
+        let server = proxies.running[&loopback].server.abort_handle();
+        let advertisement = proxies.running[&loopback].advertisement.abort_handle();
+
+        // unchanged addresses keep their token proxy
+        proxies.update(&HashSet::from([loopback]));
+        assert!(!server.is_finished() && !advertisement.is_finished());
+
+        // the address is gone: both tasks end
+        proxies.update(&HashSet::new());
+        assert!(proxies.addresses().is_empty());
+        for _ in 0..1000 {
+            if server.is_finished() && advertisement.is_finished() {
+                return;
+            }
+            sleep(Duration::from_millis(1)).await;
+        }
+        panic!("the tasks of the removed address are still running");
     }
 }
