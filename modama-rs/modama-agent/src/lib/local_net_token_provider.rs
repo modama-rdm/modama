@@ -33,7 +33,8 @@ const TOKEN_PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const TOKEN_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long after its last announcement a token proxy is forgotten: a few announcements may get
-/// lost, but one that stopped announcing is gone, or has restarted on another port
+/// lost, but one that stopped announcing is gone, or has restarted on another port. One that
+/// answered the last request is kept regardless (see `TokenProxyStatus::expired`).
 const TOKEN_PROXY_EXPIRY: Duration = ANNOUNCEMENT_INTERVAL.saturating_mul(4);
 /// How long a token proxy gets to answer before the next one is asked as well
 const TOKEN_PROXY_HEAD_START: Duration = Duration::from_millis(300);
@@ -60,8 +61,13 @@ struct TokenProxyStatus {
 }
 
 impl TokenProxyStatus {
+    /// Whether to forget the token proxy. One that answered the last request is kept even
+    /// without announcements: on a network that stops delivering them (a switch with IGMP
+    /// snooping and no querier, Wi-Fi), it would otherwise be lost while it still works. It
+    /// expires once a request to it fails, or another token proxy answers before it.
     fn expired(&self, now: Instant) -> bool {
-        now.saturating_duration_since(self.seen) > TOKEN_PROXY_EXPIRY
+        self.last_request != LastRequest::Succeeded
+            && now.saturating_duration_since(self.seen) > TOKEN_PROXY_EXPIRY
     }
 }
 
@@ -113,6 +119,16 @@ impl RemoteAgents {
     /// itself and still be out of reach, for example behind a host firewall.
     pub async fn report_failure(&self, agent: &RemoteAgent) {
         self.set_last_request(agent, LastRequest::Failed).await;
+    }
+
+    /// Remember that another token proxy answered while this one, asked earlier, had not: if
+    /// it answered the request before, it no longer counts as answering
+    async fn outpaced(&self, agent: &RemoteAgent) {
+        if let Some(status) = self.agents.lock().await.get_mut(agent)
+            && status.last_request == LastRequest::Succeeded
+        {
+            status.last_request = LastRequest::Unknown;
+        }
     }
 
     async fn set_last_request(&self, agent: &RemoteAgent, last_request: LastRequest) {
@@ -188,8 +204,10 @@ fn listened_networks(local: DiscoveryAddr) -> Result<Vec<LocalNetwork>, network_
 ///
 /// Known limit: any network of this computer counts, not only the one the announcement arrived
 /// on. If two of its networks use the same address range (a lab network and a VPN, say), a
-/// token proxy announced on one may be asked over the other. That costs one failed request, after
-/// which that token proxy is asked last.
+/// token proxy announced on one may be asked over the other. If that request is refused, the
+/// token proxy is asked last from then on. If it gets no answer at all, it delays a token
+/// request by `TOKEN_PROXY_HEAD_START` whenever it is asked before a working one, which
+/// happens until a token proxy has answered: that one is asked first afterwards.
 fn on_networks(url: &Url, networks: &[LocalNetwork]) -> bool {
     match url.host() {
         Some(url::Host::Ipv4(ip)) => networks.iter().any(|network| network.contains(ip)),
@@ -602,6 +620,8 @@ impl LocalNetTokenProvider {
         let agents = token_proxies_to_ask(self.agents.statuses().await, networks.as_deref());
 
         let mut waiting = agents.iter();
+        // the token proxies asked so far, in order; `asked` holds their running requests
+        let mut asked_agents: Vec<&RemoteAgent> = Vec::new();
         let mut asked = FuturesUnordered::new();
         // Ends: each round returns, takes a token proxy from `waiting`, or finishes a request
         // in `asked`. `waiting` is finite and only shrinks, and every request ends within
@@ -609,7 +629,10 @@ impl LocalNetTokenProvider {
         loop {
             if asked.is_empty() {
                 match waiting.next() {
-                    Some(agent) => asked.push(self.ask(agent)),
+                    Some(agent) => {
+                        asked_agents.push(agent);
+                        asked.push(self.ask(agent));
+                    }
                     None => return Err(TokenError::NoSource),
                 }
             }
@@ -617,12 +640,18 @@ impl LocalNetTokenProvider {
                 Some((agent, result)) = asked.next() => match result {
                     Ok(token) => {
                         self.agents.success(agent).await;
+                        // those asked before it that are still silent (failed ones are
+                        // marked already, and `outpaced` leaves them as they are)
+                        for other in asked_agents.iter().filter(|other| **other != agent) {
+                            self.agents.outpaced(other).await;
+                        }
                         return Ok(token);
                     }
                     Err(e) => {
                         warn!("could not get a token from the token proxy at {}: {e}", agent.url);
                         self.agents.report_failure(agent).await;
                         if let Some(agent) = waiting.next() {
+                            asked_agents.push(agent);
                             asked.push(self.ask(agent));
                         }
                     }
@@ -630,6 +659,7 @@ impl LocalNetTokenProvider {
                 _ = sleep(TOKEN_PROXY_HEAD_START), if waiting.len() > 0 => {
                     if let Some(agent) = waiting.next() {
                         debug!("no token yet, also asking the token proxy at {}", agent.url);
+                        asked_agents.push(agent);
                         asked.push(self.ask(agent));
                     }
                 }
@@ -915,13 +945,40 @@ mod tests {
     #[test]
     fn a_token_proxy_expires_a_few_announcements_after_its_last() {
         let seen = Instant::now();
-        let status = TokenProxyStatus {
+        let later = seen + TOKEN_PROXY_EXPIRY + Duration::from_millis(1);
+        for last_request in [LastRequest::Unknown, LastRequest::Failed] {
+            let status = TokenProxyStatus { seen, last_request };
+            assert!(!status.expired(seen));
+            assert!(!status.expired(seen + TOKEN_PROXY_EXPIRY));
+            assert!(status.expired(later));
+        }
+        // one that answered the last request is kept without announcements
+        let answered = TokenProxyStatus {
             seen,
             last_request: LastRequest::Succeeded,
         };
-        assert!(!status.expired(seen));
-        assert!(!status.expired(seen + TOKEN_PROXY_EXPIRY));
-        assert!(status.expired(seen + TOKEN_PROXY_EXPIRY + Duration::from_millis(1)));
+        assert!(!answered.expired(later + Duration::from_secs(3600)));
+    }
+
+    #[tokio::test]
+    async fn an_outpaced_token_proxy_no_longer_counts_as_answering() {
+        let agent = |url: &str| RemoteAgent {
+            url: Url::parse(url).unwrap(),
+        };
+        let answered = agent("http://10.0.0.1:1/sign/");
+        let failed = agent("http://10.0.0.2:1/sign/");
+        let agents = RemoteAgents::new().await;
+        for agent in [&answered, &failed] {
+            agents.seen(agent).await;
+        }
+        agents.success(&answered).await;
+        agents.report_failure(&failed).await;
+
+        agents.outpaced(&answered).await;
+        agents.outpaced(&failed).await;
+        let statuses = agents.statuses().await;
+        assert_eq!(statuses[&answered].last_request, LastRequest::Unknown);
+        assert_eq!(statuses[&failed].last_request, LastRequest::Failed);
     }
 
     #[tokio::test]
