@@ -65,6 +65,19 @@ impl TokenProxyStatus {
     }
 }
 
+fn forget_expired(agents: &mut HashMap<RemoteAgent, TokenProxyStatus>, now: Instant) {
+    agents.retain(|agent, status| {
+        let expired = status.expired(now);
+        if expired {
+            debug!(
+                "forgetting the token proxy at {}: it is no longer announced",
+                agent.url
+            );
+        }
+        !expired
+    });
+}
+
 #[derive(Clone, Debug)]
 pub struct RemoteAgents {
     agents: Arc<Mutex<HashMap<RemoteAgent, TokenProxyStatus>>>,
@@ -81,7 +94,7 @@ impl RemoteAgents {
     pub async fn seen(&self, agent: &RemoteAgent) {
         let now = Instant::now();
         let mut agents = self.agents.lock().await;
-        agents.retain(|_, status| !status.expired(now));
+        forget_expired(&mut agents, now);
         agents
             .entry(agent.clone())
             .and_modify(|status| status.seen = now)
@@ -120,7 +133,7 @@ impl RemoteAgents {
     async fn statuses(&self) -> HashMap<RemoteAgent, TokenProxyStatus> {
         let now = Instant::now();
         let mut agents = self.agents.lock().await;
-        agents.retain(|_, status| !status.expired(now));
+        forget_expired(&mut agents, now);
         agents.clone()
     }
 }
