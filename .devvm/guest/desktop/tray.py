@@ -13,7 +13,8 @@
                                         with the time, for --timeout seconds
 
 The item is the one whose Id is --id (default modama-session-helper). Waits and watch
-take --timeout (seconds, default 30). Works with any watcher: sni-watcher.py or a panel's.
+take --timeout (seconds, default 30). Works with any watcher: sni-watcher.py, a panel's or
+GNOME's AppIndicator extension.
 """
 
 import argparse
@@ -75,8 +76,10 @@ def items():
 
 
 def split(item):
+    # "name/path", or only the name: a watcher that registered the item by its bus name
+    # (GNOME's AppIndicator extension) expects it at the default path
     name, _, path = item.partition("/")
-    return name, "/" + path
+    return name, "/" + (path or "StatusNotifierItem")
 
 
 def find(item_id):

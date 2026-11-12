@@ -2,7 +2,8 @@
 # Start modama-agent and modama-agent-gui on the virtual desktop :1, against the test
 # deployment (deploy/uptest.sh) of the checkout REPO. Run through `devvm desktop-modama`,
 # after a release build of both in REPO/modama-rs. The agent is enrolled with the test CA
-# once, its config kept in ~/agent.toml. The GUI starts the session helper. Idempotent.
+# once, its config kept in ~/agent.toml. The session helper and the GUI get the window
+# system of the desktop that runs: X11, or Wayland in GNOME. Idempotent.
 set -euo pipefail
 REPO=${REPO:-$HOME/modama}
 cd "$REPO"
@@ -25,12 +26,19 @@ if [ ! -s ~/agent.toml ]; then
     mv ~/agent.toml.new ~/agent.toml
 fi
 
+# Only the one variable: with both, a program could fall back to the other window system
+if systemctl --user is-active --quiet desktop-gnome; then
+    display=WAYLAND_DISPLAY=wayland-desktop   # the name start.sh gives GNOME Shell
+else
+    display=DISPLAY=:1
+fi
+
 start() {  # unit, command...
     local unit=$1
     shift
     if systemctl --user is-active --quiet "$unit"; then return; fi
     systemctl --user reset-failed "$unit" 2> /dev/null || true
-    systemd-run --user --quiet --unit="$unit" --setenv=DISPLAY=:1 \
+    systemd-run --user --quiet --unit="$unit" --setenv="$display" \
         --setenv=MODAMA_LOG_LEVEL="${MODAMA_LOG_LEVEL:-debug}" "$@"
 }
 
@@ -44,5 +52,5 @@ curl -fsS -m 2 -H 'X-API-Version: 1.0.0' http://localhost:3003/api/health/; echo
 # GUI starts writes to /dev/null on Linux, and leaves again since this one runs
 start modama-helper "$BIN/modama-agent-gui" --agent-url http://localhost:3003/ session-helper
 start modama-gui "$BIN/modama-agent-gui" --agent-url http://localhost:3003/
-echo "agent, session helper and GUI started; logs:" \
+echo "agent, session helper and GUI started (${display%%=*}); logs:" \
     "journalctl --user -u modama-agent -u modama-helper -u modama-gui"
