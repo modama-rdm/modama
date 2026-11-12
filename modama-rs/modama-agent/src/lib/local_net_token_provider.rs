@@ -603,6 +603,9 @@ impl LocalNetTokenProvider {
 
         let mut waiting = agents.iter();
         let mut asked = FuturesUnordered::new();
+        // Ends: each round returns, takes a token proxy from `waiting`, or finishes a request
+        // in `asked`. `waiting` is finite and only shrinks, and every request ends within
+        // `TOKEN_REQUEST_TIMEOUT`; once both are empty, the loop returns `NoSource`.
         loop {
             if asked.is_empty() {
                 match waiting.next() {
