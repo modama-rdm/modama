@@ -7,6 +7,10 @@ use crate::styles;
 /// How long the check mark replaces the copy icon after copying
 const COPIED_FEEDBACK_SECONDS: f64 = 2.0;
 
+/// A copy field shows this many lines before it scrolls, so that the "Use in Python" dialog
+/// fits a window of the default height
+const VISIBLE_LINES: f32 = 17.0;
+
 /// Phosphor icons at the size of the text they stand next to; the glyphs are part of the
 /// proportional family only
 pub fn icon_font(text: &egui::FontId) -> egui::FontId {
@@ -58,7 +62,8 @@ pub fn copy_button(ui: &mut egui::Ui, value: &str, what: &str) -> egui::Response
 }
 
 /// `label` above a bordered box with `value` in monospace and a copy button at its right
-/// edge. Lines don't wrap (code stays code): a value wider than the box scrolls sideways.
+/// edge. Lines don't wrap (code stays code): a value wider than the box scrolls sideways,
+/// and one with more lines than [`VISIBLE_LINES`] scrolls vertically.
 pub fn copy_field(ui: &mut egui::Ui, label: &str, value: &str) {
     super::detail_label(ui, label);
     ui.add_space(styles::spacing::detail_label_gap::EGUI_POINTS - ui.spacing().item_spacing.y);
@@ -81,15 +86,20 @@ pub fn copy_field(ui: &mut egui::Ui, label: &str, value: &str) {
                     copy_button(ui, value, &label.to_lowercase());
                 });
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                    egui::ScrollArea::horizontal()
+                    let font = styles::typography::mono_supporting::font_id();
+                    let line_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+                    egui::ScrollArea::both()
                         .id_salt(("copy-field", label))
                         .auto_shrink([false, true])
+                        .max_height(VISIBLE_LINES * line_height)
+                        // a dialog offers less height than that while egui sizes it
+                        .min_scrolled_height(VISIBLE_LINES * line_height)
                         .show(ui, |ui| {
                             ui.add(
                                 egui::Label::new(
                                     // a trailing newline would show as an empty line
                                     RichText::new(value.trim_end_matches('\n'))
-                                        .font(styles::typography::mono_supporting::font_id())
+                                        .font(font)
                                         .color(
                                             styles::color::on_surface::VALUE.resolve(ui.visuals()),
                                         ),

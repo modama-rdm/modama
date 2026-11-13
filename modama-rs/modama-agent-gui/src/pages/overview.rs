@@ -650,7 +650,8 @@ impl PageOverview {
                     ui,
                     "The session folder for new data changes whenever someone starts a new \
                      ingest. This Python code asks the modama agent on this computer for the \
-                     current one, for example in a Jupyter notebook running here.",
+                     current one, for example in a Jupyter notebook running here. Needs \
+                     Python 3.9 or newer.",
                 );
                 ui.add_space(styles::spacing::field_label_gap::EGUI_POINTS);
                 copy_field(ui, "Python code", &snippet);

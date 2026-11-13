@@ -73,7 +73,48 @@ if "mount_path" not in share:
     raise RuntimeError(reason)
 session_folder = share["mount_path"]
 raw_folder = pathlib.Path(session_folder) / "raw"
+
+
+# A subfolder of the raw folder that doesn't exist yet, numbered
+# after the highest one there: scan_0001, scan_0002, ...
+# With full_path=False, only its name. Create it yourself.
+def free_subfolder(prefix="scan_", digits=4, full_path=True):
+    numbers = [0]
+    for path in raw_folder.iterdir():
+        rest = path.name.removeprefix(prefix)
+        if path.name.startswith(prefix) and rest.isdecimal():
+            numbers.append(int(rest))
+    name = f"{prefix}{max(numbers) + 1:0{digits}}"
+    return raw_folder / name if full_path else name
 ```
+
+The code needs Python 3.9 or newer.
 
 The `session_folder` is valid only on the computer where you ran this snippet,
 different computers have their own mount paths.
+
+## Automation: how to get a new folder for each measurement?
+
+Raw data goes into the `raw_folder`, the `raw` folder inside the session folder.
+If each measurement should get its own subfolder there, use `free_subfolder()`
+from the snippet above. It looks into the raw folder and gives you the next
+numbered subfolder:
+
+```python
+target = free_subfolder()  # .../raw/scan_0001
+target.mkdir()
+# save your data into target
+```
+
+`free_subfolder()` only picks the name, so create the folder yourself, as in the
+example. Once it exists, the next call gives `scan_0002`. The number is always
+one higher than the highest one in the raw folder, so a number is not used
+again after you remove an older subfolder.
+
+You can change the name and what you get back:
+
+- `free_subfolder("dark_")` gives `dark_0001`: each prefix has its own numbers.
+- `free_subfolder(digits=6)` gives `scan_000001`.
+- `free_subfolder(full_path=False)` gives only the name, `"scan_0001"`. Use this
+  to pass the name on to a program on another computer, which has its own path
+  to the raw folder.
