@@ -53,7 +53,11 @@ into an acquisition script or notebook, this is easily possible! `modama-agent`
 provides a local HTTP API, which you can query for the current
 session folder. We call this the "foreground ingest". The GUI has ready-made
 Python code for this: on the ingest page, click "Use in Python" below the mount
-path. The code looks like this:
+path:
+
+![The "Use in Python" dialog with the mount path and the Python code](images/agent/use-in-python.png)
+
+The code looks like this:
 
 ```python
 # The session folder for new data (the foreground ingest),
@@ -69,8 +73,9 @@ request = urllib.request.Request(url, headers=headers)
 with urllib.request.urlopen(request, timeout=10) as response:
     share = json.load(response)
 if "mount_path" not in share:
-    reason = share.get("message", "No foreground ingest.")
-    raise RuntimeError(reason)
+    hint = "No foreground ingest: start one in the modama agent"
+    raise RuntimeError(share.get("message", hint))
+project, session = share["project"], share["session"]
 session_folder = share["mount_path"]
 raw_folder = pathlib.Path(session_folder) / "raw"
 
@@ -88,7 +93,11 @@ def free_subfolder(prefix="scan_", digits=4, full_path=True):
     return raw_folder / name if full_path else name
 ```
 
-The code needs Python 3.9 or newer.
+The code needs Python 3.9 or newer. `project` and `session` are the names of the
+project and the session that the data goes to.
+
+Run the code again after a new ingest was started: the session folder is then a
+different one, and the old path no longer works.
 
 The `session_folder` is valid only on the computer where you ran this snippet,
 different computers have their own mount paths.

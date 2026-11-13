@@ -48,10 +48,11 @@ pub enum GuideScene {
     SessionSelection,
     CreateSession,
     ActiveSession,
+    UseInPython,
 }
 
 impl GuideScene {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Connecting,
         Self::OverviewLoggedOut,
         Self::Login,
@@ -59,6 +60,7 @@ impl GuideScene {
         Self::SessionSelection,
         Self::CreateSession,
         Self::ActiveSession,
+        Self::UseInPython,
     ];
 
     pub const fn filename(self) -> &'static str {
@@ -70,6 +72,7 @@ impl GuideScene {
             Self::SessionSelection => "session-selection.png",
             Self::CreateSession => "create-session.png",
             Self::ActiveSession => "active-session.png",
+            Self::UseInPython => "use-in-python.png",
         }
     }
 
@@ -199,7 +202,7 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
                 Date::from_calendar_date(2026, Month::August, 6).unwrap_or(page.session_date);
             app.page = Page::SelectCreateSession(page);
         }
-        GuideScene::ActiveSession => {
+        GuideScene::ActiveSession | GuideScene::UseInPython => {
             seed_logged_in(&mut app);
             app.app_state.agent.foreground = ForegroundSession::Mounted(ActiveSession {
                 share_id: "guide-share".to_owned(),
@@ -257,8 +260,13 @@ pub fn render(scene: GuideScene) -> Result<image::RgbaImage, String> {
     harness.set_size(VIEWPORT).set_pixels_per_point(1.0);
     harness.ctx.set_theme(egui::Theme::Light);
     harness.run_steps(3);
-    if scene == GuideScene::CreateSession {
-        harness.get_by_label("Create a new session").click();
+    let click = match scene {
+        GuideScene::CreateSession => Some("Create a new session"),
+        GuideScene::UseInPython => Some("Use in Python"),
+        _ => None,
+    };
+    if let Some(label) = click {
+        harness.get_by_label(label).click();
         harness.run_steps(2);
         harness.remove_cursor();
         harness.run_steps(1);

@@ -9,7 +9,7 @@ const COPIED_FEEDBACK_SECONDS: f64 = 2.0;
 
 /// A copy field shows this many lines before it scrolls, so that the "Use in Python" dialog
 /// fits a window of the default height
-const VISIBLE_LINES: f32 = 17.0;
+const VISIBLE_LINES: f32 = 18.0;
 
 /// Phosphor icons at the size of the text they stand next to; the glyphs are part of the
 /// proportional family only

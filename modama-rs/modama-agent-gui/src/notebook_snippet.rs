@@ -4,8 +4,8 @@
 const API_VERSION: &str = "1.0.0";
 
 /// Python code (standard library only) that sets `session_folder` to the foreground share's
-/// mount path, as reported by the agent at `agent_url`, and `raw_folder` to its `raw`
-/// subfolder. It asks at run time, so a notebook rerun later writes into the session open
+/// mount path, as reported by the agent at `agent_url`, `raw_folder` to its `raw`
+/// subfolder, and `project` and `session` to their names. It asks at run time, so a notebook rerun later writes into the session open
 /// then, never into a stale one. It also defines `free_subfolder()`, which names the next
 /// numbered subfolder of the raw folder; that function needs Python 3.9.
 pub fn python_snippet(agent_url: &str) -> String {
@@ -24,8 +24,9 @@ request = urllib.request.Request(url, headers=headers)
 with urllib.request.urlopen(request, timeout=10) as response:
     share = json.load(response)
 if "mount_path" not in share:
-    reason = share.get("message", "No foreground ingest.")
-    raise RuntimeError(reason)
+    hint = "No foreground ingest: start one in the modama agent"
+    raise RuntimeError(share.get("message", hint))
+project, session = share["project"], share["session"]
 session_folder = share["mount_path"]
 raw_folder = pathlib.Path(session_folder) / "raw"
 
