@@ -28,8 +28,8 @@ scientific instrument. It is good practice to scope your session
 folders to a single day, such that you can easily find back
 the data that matches entries in your lab notebook notes.
 
-You can create a session folders directly using [`modama-agent`](./agent.md), or
-in the web managament interface.
+You can create a session folder directly using [`modama-agent`](./agent.md), or
+in the web management interface.
 
 ## The data life cycle in modama
 
