@@ -15,7 +15,7 @@ use crate::{
         copy_field::{copy_field, icon_font},
         detail_label,
         dialogs::{
-            ChoiceDialogAction, ConfirmationDialogAction, DialogChoice, choice_dialog,
+            ChoiceDialogAction, ConfirmationDialogAction, DialogChoice, DialogFocus, choice_dialog,
             destructive_confirmation_dialog,
         },
         page_heading,
@@ -432,7 +432,7 @@ impl PageOverview {
             "Start another ingest?",
             &message,
             &choices,
-            self.focus_start_cancel,
+            self.focus_start_cancel.then_some(DialogFocus::Cancel),
         );
         self.focus_start_cancel = false;
 

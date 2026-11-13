@@ -19,7 +19,7 @@ use crate::{
     async_state::AsyncState,
     components::{
         buttons::{ButtonVariant, loading_button, primary_button, secondary_button},
-        dialogs::{ChoiceDialogAction, DialogChoice, choice_dialog},
+        dialogs::{ChoiceDialogAction, DialogChoice, DialogFocus, choice_dialog},
         display_error,
         flow_navigation::{FlowStage, flow_navigation},
         forms::labeled_text_input,
@@ -460,7 +460,7 @@ impl PageSelectCreateSession {
                 variant: ButtonVariant::Primary,
                 value: (),
             }],
-            self.focus_existing_cancel,
+            self.focus_existing_cancel.then_some(DialogFocus::Cancel),
         );
         self.focus_existing_cancel = false;
         match action {

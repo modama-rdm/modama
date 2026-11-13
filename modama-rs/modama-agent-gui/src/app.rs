@@ -9,7 +9,7 @@ use crate::{
     async_state::AsyncState,
     components::{
         buttons::ButtonVariant,
-        dialogs::{ChoiceDialogAction, DialogChoice, choice_dialog},
+        dialogs::{ChoiceDialogAction, DialogChoice, DialogFocus, choice_dialog},
         toast::{ToastAction, ToastState},
     },
     footer::show_footer,
@@ -51,7 +51,8 @@ pub struct AgentGuiApp {
 }
 
 struct LogoutReminder {
-    focus_cancel: bool,
+    /// Set while the dialog opens: the keyboard focus goes to "Stop and log out"
+    focus_stop: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -380,7 +381,7 @@ impl AgentGuiApp {
                 if self.own_ingest_shares().is_empty() {
                     self.handle_action(Action::LogoutSuccess);
                 } else {
-                    self.logout_reminder = Some(LogoutReminder { focus_cancel: true });
+                    self.logout_reminder = Some(LogoutReminder { focus_stop: true });
                 }
             }
             Action::LogoutSuccess => {
@@ -499,7 +500,7 @@ impl AgentGuiApp {
         let Some(reminder) = &mut self.logout_reminder else {
             return;
         };
-        let focus_cancel = std::mem::take(&mut reminder.focus_cancel);
+        let focus_stop = std::mem::take(&mut reminder.focus_stop);
         let message = if self.own_ingest_shares().len() > 1 {
             "Please remember to stop your ingest shares once you are done uploading data."
         } else {
@@ -513,17 +514,17 @@ impl AgentGuiApp {
             message,
             &[
                 DialogChoice {
-                    label: "Log out",
-                    variant: ButtonVariant::Primary,
-                    value: LogoutChoice::LogOut,
-                },
-                DialogChoice {
                     label: "Stop and log out",
-                    variant: ButtonVariant::Secondary,
+                    variant: ButtonVariant::Primary,
                     value: LogoutChoice::StopAndLogOut,
                 },
+                DialogChoice {
+                    label: "Log out",
+                    variant: ButtonVariant::Secondary,
+                    value: LogoutChoice::LogOut,
+                },
             ],
-            focus_cancel,
+            focus_stop.then_some(DialogFocus::FirstChoice),
         );
         match action {
             ChoiceDialogAction::None => {}

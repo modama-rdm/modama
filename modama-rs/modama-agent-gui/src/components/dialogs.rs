@@ -28,8 +28,16 @@ pub enum ChoiceDialogAction<T> {
     Choose(T),
 }
 
+/// The button of a dialog that gets the keyboard focus
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogFocus {
+    Cancel,
+    FirstChoice,
+}
+
 /// Show a modal with a message, the `choices` and Cancel. The first choice is placed at the
-/// right edge, the others to its left, and Cancel last.
+/// right edge, the others to its left, and Cancel last. `focus` moves the keyboard focus;
+/// pass it once, in the frame the dialog opens.
 #[allow(
     clippy::too_many_arguments,
     reason = "a dialog's parts; a builder would only move them around"
@@ -41,7 +49,7 @@ pub fn choice_dialog<T: Copy>(
     title: &str,
     message: &str,
     choices: &[DialogChoice<'_, T>],
-    focus_cancel: bool,
+    focus: Option<DialogFocus>,
 ) -> ChoiceDialogAction<T> {
     let response = egui::Modal::new(egui::Id::new(id))
         .frame(styles::card_frame(visuals))
@@ -65,13 +73,17 @@ pub fn choice_dialog<T: Copy>(
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let chosen = choices
                     .iter()
-                    .map(|choice| {
-                        let clicked = ui.add(button(choice.label, ui, choice.variant)).clicked();
-                        clicked.then_some(choice.value)
+                    .enumerate()
+                    .map(|(index, choice)| {
+                        let response = ui.add(button(choice.label, ui, choice.variant));
+                        if index == 0 && focus == Some(DialogFocus::FirstChoice) {
+                            response.request_focus();
+                        }
+                        response.clicked().then_some(choice.value)
                     })
                     .fold(None, Option::or);
                 let cancel = ui.add(secondary_button("Cancel", ui));
-                if focus_cancel {
+                if focus == Some(DialogFocus::Cancel) {
                     cancel.request_focus();
                 }
                 if cancel.clicked() {
@@ -107,7 +119,8 @@ pub fn destructive_confirmation_dialog(
         variant: ButtonVariant::Danger,
         value: (),
     }];
-    match choice_dialog(ctx, visuals, id, title, message, &choices, focus_cancel) {
+    let focus = focus_cancel.then_some(DialogFocus::Cancel);
+    match choice_dialog(ctx, visuals, id, title, message, &choices, focus) {
         ChoiceDialogAction::None => ConfirmationDialogAction::None,
         ChoiceDialogAction::Cancel => ConfirmationDialogAction::Cancel,
         ChoiceDialogAction::Choose(()) => ConfirmationDialogAction::Confirm,

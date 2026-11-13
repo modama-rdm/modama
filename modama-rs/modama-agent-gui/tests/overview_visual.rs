@@ -811,6 +811,12 @@ fn logout_reminder_logs_out_and_keeps_the_ingest_share() {
 }
 
 #[test]
+fn logout_reminder_focuses_stop_and_log_out() {
+    let harness = open_logout_reminder();
+    assert!(harness.get_by_label("Stop and log out").is_focused());
+}
+
+#[test]
 fn logout_reminder_can_be_cancelled() {
     let mut harness = open_logout_reminder();
     harness.get_by_label("Cancel").click();
