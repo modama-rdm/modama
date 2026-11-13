@@ -58,7 +58,7 @@ or "Open folder" to open your ingest share with a file manager.
 The ingest share is not only available on the computer where you just created it,
 but also on other computers that belong to the same scientific instrument.
 
-The ingest share stays active until it is closed, either explicitly or because another
+The ingest share stays active until it is stopped, either explicitly or because another
 user's session starts. If you disconnect the network drive manually, it will automatically
 be connected again.
 
@@ -113,14 +113,16 @@ Then, press the "Stop Ingest" button on the overview page:
 
 After you click that button, you get a confirmation dialog:
 
-TODO: confirmation dialog screenshot here, add it to the snapshot generator
+![The confirmation dialog for stopping the ingest](images/agent/stop-confirmation.png)
 
-After closing ingest, the data you uploaded to the data management is still
+Click "Stop Ingest" in the dialog to stop the ingest share, or "Cancel" to keep it running.
+
+After stopping ingest, the data you uploaded to the data management is still
 available via the normal data access methods, just no longer
 via the network drive or mount path at the
 scientific instrument where you have just uploaded it from.
 
-By closing the ingest, the session folder is not yet sealed, this is a
+By stopping the ingest, the session folder is not yet sealed, this is a
 separate step done via the management web interface. Sealing a session folder makes your
 `raw/` directory immutable, preventing modifications and deletions by mistake.
 
@@ -131,7 +133,22 @@ You can now log out, and the next user can start their work.
 If everyone follows the steps from the previous sections, the hand-off from one
 user to the next is easy: they just start their own ingest share. Should
 another ingest share from a previous user still be mounted, the new user
-can close the still-connected ingest share by opening one of their own.
+can stop the still-connected ingest share by opening one of their own.
+
+In that case, the ingest page shows their ingest share as the foreground ingest,
+with their name under "Started by":
+
+![The ingest page with the ingest share of the previous user](images/agent/hand-off.png)
+
+When you click "Start Ingest", you are asked to confirm first, and to coordinate
+with the previous user. Their ingest share is then no
+longer available at this instrument, and the data already stored stays in their
+session. You can then start ingest as normal, and the other user's share won't
+block ours. 
+
+If the other user has their ingest share open somewhere else,
+for example on their laptop, they can continue using it as normal - only the
+network drives managed by modama-agent are disconnected.
 
 > [!TIP]
 > To make this easier for everyone involved, transfer or save any

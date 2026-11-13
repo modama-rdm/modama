@@ -37,6 +37,10 @@ const SESSIONS: [&str; 4] = [
     "2026-06-20-holo-stacks",
     SESSION,
 ];
+/// The user before, whose ingest share is still the foreground one
+const PREVIOUS_USERNAME: &str = "mira";
+const PREVIOUS_PROJECT: &str = "Adaptive Optics";
+const PREVIOUS_SESSION: &str = "2026-06-25-wavefront-scan";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GuideScene {
@@ -47,10 +51,12 @@ pub enum GuideScene {
     SessionSelection,
     CreateSession,
     ActiveSession,
+    StopConfirmation,
+    HandOff,
 }
 
 impl GuideScene {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::Connecting,
         Self::OverviewLoggedOut,
         Self::Login,
@@ -58,6 +64,8 @@ impl GuideScene {
         Self::SessionSelection,
         Self::CreateSession,
         Self::ActiveSession,
+        Self::StopConfirmation,
+        Self::HandOff,
     ];
 
     pub const fn filename(self) -> &'static str {
@@ -69,6 +77,8 @@ impl GuideScene {
             Self::SessionSelection => "session-selection.png",
             Self::CreateSession => "create-session.png",
             Self::ActiveSession => "active-session.png",
+            Self::StopConfirmation => "stop-confirmation.png",
+            Self::HandOff => "hand-off.png",
         }
     }
 
@@ -198,7 +208,7 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
                 Date::from_calendar_date(2026, Month::August, 6).unwrap_or(page.session_date);
             app.page = Page::SelectCreateSession(page);
         }
-        GuideScene::ActiveSession => {
+        GuideScene::ActiveSession | GuideScene::StopConfirmation => {
             seed_logged_in(&mut app);
             app.app_state.agent.foreground = ForegroundSession::Mounted(ActiveSession {
                 share_id: "guide-share".to_owned(),
@@ -206,6 +216,17 @@ fn build_app(scene: GuideScene, release: Option<Arc<Barrier>>, ctx: &egui::Conte
                 session: SESSION.to_owned(),
                 mount_path: Some(format!("/mnt/modama/{PROJECT}/{SESSION}")),
                 created_by: Some(USERNAME.to_owned()),
+            });
+            app.page = Page::Overview(PageOverview::new());
+        }
+        GuideScene::HandOff => {
+            seed_logged_in(&mut app);
+            app.app_state.agent.foreground = ForegroundSession::Mounted(ActiveSession {
+                share_id: "guide-previous-share".to_owned(),
+                project: PREVIOUS_PROJECT.to_owned(),
+                session: PREVIOUS_SESSION.to_owned(),
+                mount_path: Some(r"Z:\".to_string()),
+                created_by: Some(PREVIOUS_USERNAME.to_owned()),
             });
             app.page = Page::Overview(PageOverview::new());
         }
@@ -229,6 +250,13 @@ pub fn render(scene: GuideScene) -> Result<image::RgbaImage, String> {
     if scene == GuideScene::CreateSession {
         harness.get_by_label("Create a new session").click();
         harness.run_steps(2);
+        harness.remove_cursor();
+        harness.run_steps(1);
+    }
+    if scene == GuideScene::StopConfirmation {
+        harness.get_by_label("Stop Ingest").click();
+        harness.run_steps(2);
+        harness.get_by_label("Stop ingest?");
         harness.remove_cursor();
         harness.run_steps(1);
     }
