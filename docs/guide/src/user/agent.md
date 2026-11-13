@@ -4,6 +4,11 @@ To ingest data into `modama`, we provide a small software called `modama-agent`.
 Using `modama-agent`, you can create a networked session folder, which we call
 an "ingest share". 
 
+Usually, this software will be installed by an administrator at the computers that belong to
+scientific instruments, and you only need to start the graphical user interface.
+It is also possible to participate with your own laptop in the data management
+session of an experiment, but this is not yet recommended.
+
 ## How to create an ingest share
 
 - Step 1: start the `modama-agent` GUI
@@ -16,44 +21,65 @@ an "ingest share".
 
 ![The modama-agent login screen](images/agent/login.png)
 
-- Step 3: click "Create ingest share" button
+- Step 3: select a project
 
-TODO: describe how to choose a project.
+Select a project from the list - either one you own, or where you are a member. When this page
+opens, you can directly start to type to filter the project list by name. You can double click the
+project in the list, or continue by clicking the "Select Project" button.
 
 ![Selecting a project for the ingest share](images/agent/project-selection.png)
 
 - Step 4: enter session details or select existing session
 
-TODO: describe the choice between a new and an existing session.
+Select a session folder where your data should be stored inside the just selected project.
+Usually, a new session at an instrument also means a new session should be created,
+but you can also ingest data into an existing session, for example if the ingest process
+was interrupted for any reason.
 
 ![Selecting an existing session](images/agent/session-selection.png)
 
+When choosing to create a new session, you can choose a name in the following step.
+The field is pre-filled with today's date, which you can use as a prefix if that fits
+your data organisation scheme.
+
 ![Creating a new session](images/agent/create-session.png)
 
-- Step 5: confirm
-
-TODO: describe the confirmation step.
-
-Now the ingest share should be available, either as a mapped network drive,
-or as a mounted network filesystem under Linux.
+Once you have completed these steps, the system might be busy for a bit, and then,
+the selected session folder should be available as an ingest share, either as a
+mapped network drive on Windows, or as a mounted network filesystem under Linux.
 
 ![The ingest page with a foreground ingest](images/agent/active-session.png)
+
+Where exactly your ingest share is mounted depends on your operating system and its version.
+It should also show up in your normal file manager as a network drive or location.
+As the path can be long, you can use the "Copy" button to copy its path into the clipboard,
+or "Open folder" to open your ingest share with a file manager.
+
+The ingest share is not only available on the computer where you just created it,
+but also on other computers that belong to the same scientific instrument.
+
+The ingest share stays active until it is stopped, either explicitly or because another
+user's session starts. If you disconnect the network drive manually, it will automatically
+be connected again.
+
+You can see the list of other connected computers ("agents") on the overview page.
+There, you also find information on how to upload your data into your ingest share.
 
 ## How to upload data to the ingest share
 
 The ingest share should automatically open on all data-producing systems. On
 Windows, it will be mapped as a network drive (for example `Z:\`). Simply save
-your data on this network drive, or copy/drag is there, and it will be stored
-in the data management.
+your data on this network drive, or copy/drag it there, as normal,
+and it will be stored in the data management.
 
 ## Automation: how to get the current session folder?
 
 If you would like to integrate data management into your automation, for example
 into an acquisition script or notebook, this is easily possible! `modama-agent`
-provides a local HTTP API, which you can query for the current
-session folder. We call this the "foreground ingest". The GUI has ready-made
-Python code for this: on the ingest page, click "Use in Python" below the mount
-path. The code looks like this:
+provides a local HTTP API on port 3003, which you can query for the
+ingest share that was created last. We call this the "foreground share".
+The GUI has ready-made Python code for this: on the ingest page,
+click "Use in Python" below the mount path. The code looks like this:
 
 ```python
 # The session folder for new data (the foreground ingest),
@@ -75,5 +101,58 @@ session_folder = share["mount_path"]
 raw_folder = pathlib.Path(session_folder) / "raw"
 ```
 
-The `session_folder` is valid only on the computer where you ran this snippet,
-different computers have their own mount paths.
+You can use this code for example in a Jupyter notebook.
+
+## Stopping the ingest
+
+At the end of your session, it is your responsibility to stop the ingest share. 
+Before you do, first wait for all of your copies to the ingest share to finish.
+Then, press the "Stop Ingest" button on the overview page:
+
+![The overview with an active ingest session, with the Stop Ingest button](images/agent/active-session.png)
+
+After you click that button, you get a confirmation dialog:
+
+![The confirmation dialog for stopping the ingest](images/agent/stop-confirmation.png)
+
+Click "Stop Ingest" in the dialog to stop the ingest share, or "Cancel" to keep it running.
+
+After stopping ingest, the data you uploaded to the data management is still
+available via the normal data access methods, just no longer
+via the network drive or mount path at the
+scientific instrument where you have just uploaded it from.
+
+By stopping the ingest, the session folder is not yet sealed, this is a
+separate step done via the management web interface. Sealing a session folder makes your
+`raw/` directory immutable, preventing modifications and deletions by mistake.
+
+You can now log out, and the next user can start their work.
+
+## Hand-off from one user to another
+
+If everyone follows the steps from the previous sections, the hand-off from one
+user to the next is easy: they just start their own ingest share. Should
+another ingest share from a previous user still be mounted, the new user
+can stop the still-connected ingest share by opening one of their own.
+
+In that case, the ingest page shows their ingest share as the foreground ingest,
+with their name under "Started by":
+
+![The ingest page with the ingest share of the previous user](images/agent/hand-off.png)
+
+When you click "Start Ingest", you are asked to confirm first, and to coordinate
+with the previous user. Their ingest share is then no
+longer available at this instrument, and the data already stored stays in their
+session. You can then start ingest as normal, and the other user's share won't
+block ours. 
+
+If the other user has their ingest share open somewhere else,
+for example on their laptop, they can continue using it as normal - only the
+network drives managed by modama-agent are disconnected.
+
+> [!TIP]
+> To make this easier for everyone involved, transfer or save any
+> data you record into your ingest share 
+> while your experiment is running - that way, you don't have
+> to stay longer just for data transfer, or interrupt the beginning
+> of the next user's instrument session.
