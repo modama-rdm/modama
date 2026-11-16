@@ -10,17 +10,13 @@ To understand how `modama-agent` works, let's first define some terms and compon
 
 `modama-agent` can run in two configurations:
 
-- privileged: running as a background service, with its own mTLS keypair
+- enrolled: running as a background service, with its own mTLS keypair
 - anonymous: no keypair, must contact privileged agent on different system to participate
 
-There can be multiple `modama-agent` instances running per [resource](#resource), which can cooperatively provide data ingest services on all data generating systems belonging to the resource.
+There can be multiple `modama-agent` instances running per scientific instrument, which can cooperatively provide data ingest services on all data generating systems belonging to the instrument.
 
 To support `modama-agent`, two more applications exist: `modama-agent-gui` and `modama-session-helper`. They
 run in a user's session, under their uid, and ensure the user has access to the current ingest shares.
-
-### `resource`
-
-A `resource` is a data generating instrument, for example an electron microscope, a FIB, etc. There can be different computers involved with a single resource, for example for different detectors, sensors or cameras, which are often provided by different vendors.
 
 ### `smbdrop`
 
@@ -123,9 +119,9 @@ for managing shares:
 ### Service discovery
 
 mTLS is optional for `modama-agent`: systems without a private key should still
-participate in data management. To enable this, privileged `modama-agent`s offer
-a plain-HTTP service that provides JWTs in the name of the privileged `modama-agent`.
-This service is advertised via UDP multicast on local interfaces.
+participate in data management. To enable this, enrolled `modama-agent`s offer
+a plain-HTTP service that provides JWTs in the name of the enrolled `modama-agent`.
+This service is advertised via UDP multicast on local private network interfaces.
 
 ## Administrative tasks
 
@@ -133,7 +129,7 @@ This service is advertised via UDP multicast on local interfaces.
 
 - Create keypair and client certificate
     - `./deploy/ca.sh enroll-agent <AGENT_NAME> <RESOURCE_NAME>`
-- Install the agent binary on the system
+- Install the agent and GUI binaries on the system
     - Linux
     - Windows
 
@@ -181,19 +177,19 @@ private_key = """
 """
 ```
 
-`mgmt_api_url` names the server of the management web interface, not the API itself: the
-agent looks for the API below it, at `/api/` first and then at `/mgmt-api/`, and uses the
-first one that supports its API version. A URL that already points at the API works as well.
-The log says which one was found.
+> [!TIP]
+> Ensure newlines at the beginning and end of the multi-line certificates and keys,
+> otherwise you may get a `KeyMismatch` error!
 
-Tip: ensure newlines at the beginning and end of the multi-line certificates and keys,
-otherwise you may get a `KeyMismatch` error!
+`mgmt_api_url` points at the server of the management web interface, not the API itself: the
+agent looks for the API below it, at `/api/` first and then at `/mgmt-api/`, and uses the
+first one that supports its API version.
+
 
 The configuration is read from the following locations:
 
-- Linux: `~/.config/modama-agent/modama-agent.toml` or `/etc/modama-agent.toml`
-
-TODO: add system-wide locations, and other platforms
+- Linux, two locations by default: `~/.config/modama-agent/modama-agent.toml` or `/etc/modama-agent.toml`
+- Windows, by default `%APPDATA%\modama\modama-agent\config\modama-agent.toml`
 
 #### Linux
 
@@ -202,7 +198,7 @@ TODO: add system-wide locations, and other platforms
 - `gvfs-backends` and `gvfs-fuse` for mounting SMB ingest shares
 - For the GUI and session helper, `glib2.0` needs to be installed (for talking to dbus)
 
-Distributions as old as Ubuntu 18.04, Debian 10 or RHEL 8 should be supported, as should anything newer.
+Distributions as old as Ubuntu 18.04, Debian 10 or RHEL 8 are supported, as should anything newer.
 
 On Linux, the `modama-agent` service can be automatically managed by systemd. An example systemd unit follows:
 
@@ -226,6 +222,7 @@ WantedBy=multi-user.target
 Save this file as `/etc/systemd/system/modama-agent.service`, enable and start the service:
 
 ```bash
+systemctl daemon-reload
 systemctl enable modama-agent
 systemctl start modama-agent
 ```
@@ -237,8 +234,7 @@ you can also do this via systemd, using the following configuration:
 ```
 [Unit]
 Description=Modama session helper (mounts ingest shares)
-# Skip display-manager greeters and other system users: they get a user
-# manager too, but have no shares to mount.
+# Skip display-manager greeters and other system users
 ConditionUser=!@system
 ConditionUser=!gdm-greeter
 
@@ -252,14 +248,19 @@ WantedBy=default.target
 ```
 
 Together with `modama-agent`, this will automatically mount ingest shares for all users.
-Save this file as `/etc/systemd/user/modama-session-helper.service` and run
-`systemctl --global enable modama-session-helper.service` to enable it for all users.
+Save this file as `/etc/systemd/user/modama-session-helper.service` and run the following
+to enable it for all users:
+
+```bash
+systemctl daemon-reload
+systemctl --global enable modama-session-helper.service
+```
 
 The `ConditionUser=` lines keep the helper from starting for the display manager's login
 screen, which runs its own user manager: `@system` covers greeter accounts in the system
 UID range (`Debian-gdm`, `lightdm`, `sddm`), and `gdm-greeter` covers the greeter account
-of newer GDM releases, whose UID lies outside that range. If another account still shows up as a session helper, add a
-`ConditionUser=!<name>` line for it.
+of newer GDM releases, whose UID lies outside that range. If `modama-session-helper` is started
+for another system account, add another `ConditionUser=!<name>` line for it.
 
 #### Windows
 
