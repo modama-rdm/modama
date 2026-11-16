@@ -77,7 +77,7 @@ and it will be stored in the data management.
 If you would like to integrate data management into your automation, for example
 into an acquisition script or notebook, this is easily possible! `modama-agent`
 provides a local HTTP API on port 3003, which you can query for the
-ingest share that was created last. We call this the "foreground share".
+ingest share that was created last. We call this the "foreground ingest".
 The GUI has ready-made Python code for this: on the ingest page,
 click "Use in Python" below the mount path:
 
