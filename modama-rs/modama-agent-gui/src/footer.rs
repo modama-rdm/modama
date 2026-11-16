@@ -21,7 +21,7 @@ pub(crate) fn show_footer(parent: &mut egui::Ui, version: &str) {
     let response = panel.show(parent, |ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(
-                RichText::new(version)
+                RichText::new(format!("{version} alphabeta"))
                     .font(styles::typography::mono_supporting::font_id())
                     .color(styles::color::on_surface_dim::VALUE.resolve(ui.visuals())),
             )
