@@ -29,8 +29,16 @@ fi
 # Only the one variable: with both, a program could fall back to the other window system
 if systemctl --user is-active --quiet desktop-gnome; then
     display=WAYLAND_DISPLAY=wayland-desktop   # the name start.sh gives GNOME Shell
+    # GNOME Shell's monitor here is a virtual one. On such a monitor, mutter 48 holds back
+    # the frame callback for the last frame of a program that presents with Mesa's Vulkan
+    # and vsync (through the Wayland protocols fifo-v1 and commit-timing-v1) until it draws
+    # the screen for another reason, and the GUI draws nothing until then: a click or a
+    # finished request showed only once the pointer moved. A monitor the kernel drives is
+    # not affected. nowlts keeps Mesa from using these protocols.
+    mesa=(--setenv=MESA_VK_WSI_DEBUG=nowlts)
 else
     display=DISPLAY=:1
+    mesa=()
 fi
 
 start() {  # unit, command...
@@ -38,7 +46,7 @@ start() {  # unit, command...
     shift
     if systemctl --user is-active --quiet "$unit"; then return; fi
     systemctl --user reset-failed "$unit" 2> /dev/null || true
-    systemd-run --user --quiet --unit="$unit" --setenv="$display" \
+    systemd-run --user --quiet --unit="$unit" --setenv="$display" "${mesa[@]}" \
         --setenv=MODAMA_LOG_LEVEL="${MODAMA_LOG_LEVEL:-debug}" "$@"
 }
 
