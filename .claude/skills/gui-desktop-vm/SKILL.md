@@ -58,6 +58,11 @@ desktop-up` brings the X11 desktop back. Switching stops the session helper and 
   position in a screenshot is a position for `xdo`.
 - There is no Xwayland: the session helper and the GUI get only `WAYLAND_DISPLAY`, and a
   program that needs X11 doesn't start.
+- GNOME's monitor is a virtual one, on which mutter 48 leaves a program that presents with
+  Mesa's Vulkan and vsync undrawn after a click or a finished request until the pointer
+  moves. `desktop-modama` therefore starts the session helper and the GUI with
+  `MESA_VK_WSI_DEBUG=nowlts`; give a program you start by hand the same variable. A
+  monitor the kernel drives, as on a lab PC, is not affected.
 - With `gnome`, tray icons show in the top bar (Debian's AppIndicator extension), and
   `devvm tray` works. `devvm desktop-up gnome-plain` is GNOME without extensions, which has
   no notification area.
