@@ -3,7 +3,7 @@
 # deployment (deploy/uptest.sh) of the checkout REPO. Run through `devvm desktop-modama`,
 # after a release build of both in REPO/modama-rs. The agent is enrolled with the test CA
 # once, its config kept in ~/agent.toml. The session helper and the GUI get the window
-# system of the desktop that runs: X11, or Wayland in GNOME. Idempotent.
+# system of the desktop that runs: X11, or Wayland in GNOME or KDE. Idempotent.
 set -euo pipefail
 REPO=${REPO:-$HOME/modama}
 cd "$REPO"
@@ -36,6 +36,11 @@ if systemctl --user is-active --quiet desktop-gnome; then
     # finished request showed only once the pointer moved. A monitor the kernel drives is
     # not affected. nowlts keeps Mesa from using these protocols.
     mesa=(--setenv=MESA_VK_WSI_DEBUG=nowlts)
+elif systemctl --user is-active --quiet desktop-kwin; then
+    display=WAYLAND_DISPLAY=wayland-desktop   # the name start.sh gives KWin
+    # KWin draws the GUI after a click without this; leaving it out keeps the GUI as on a
+    # real KDE desktop
+    mesa=()
 else
     display=DISPLAY=:1
     mesa=()

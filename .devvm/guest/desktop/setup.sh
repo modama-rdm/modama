@@ -1,14 +1,15 @@
 #!/bin/bash
 # One-time setup of the virtual desktop in the VM (Debian 13): Xvfb, openbox, xfce4-panel,
-# GNOME Shell for the Wayland desktop, the user's systemd session (GVfs, AT-SPI), software
-# Vulkan, and Rust for building modama-agent and modama-agent-gui. Run through
-# `devvm desktop-setup`.
+# GNOME Shell and KDE Plasma for the Wayland desktops, the user's systemd session (GVfs,
+# AT-SPI), software Vulkan, and Rust for building modama-agent and modama-agent-gui. Run
+# through `devvm desktop-setup`.
 set -euo pipefail
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update
 sudo DEBIAN_FRONTEND=noninteractive apt-get -qq install -y --no-install-recommends \
     xvfb openbox xfce4-panel x11vnc xdotool imagemagick xterm x11-utils \
     gnome-shell gnome-shell-extension-appindicator \
+    kwin-wayland breeze plasma-workspace plasma-desktop \
     dbus-user-session at-spi2-core python3-pyatspi gir1.2-atspi-2.0 \
     mesa-vulkan-drivers libvulkan1 vulkan-tools \
     libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 \

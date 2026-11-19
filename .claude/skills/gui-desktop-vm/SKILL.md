@@ -1,12 +1,12 @@
 ---
 name: gui-desktop-vm
-description: Run modama-agent-gui, its session helper, the mount popup and the tray icon on a virtual Linux desktop in a devvm VM (X11, or GNOME on Wayland), against the test deployment, and drive them from the command line (widgets by name over AT-SPI, the tray icon over D-Bus, xdotool, screenshots).
+description: Run modama-agent-gui, its session helper, the mount popup and the tray icon on a virtual Linux desktop in a devvm VM (X11, or GNOME or KDE Plasma on Wayland), against the test deployment, and drive them from the command line (widgets by name over AT-SPI, the tray icon over D-Bus, xdotool, screenshots).
 when_to_use: Trying a GUI or session helper change in the running program rather than in the visual tests; running a scenario of the platform checklist on Linux (mounting, mount popup, tray icon, hand-off); reproducing a bug that needs a real desktop, GVfs and the backend, or that only shows on Wayland.
 ---
 
 # The agent GUI on a desktop in a VM
 
-`.devvm/commands.sh` adds `devvm desktop-*`, `ui`, `tray`, `gnome` and `xdo` (see `devvm` without
+`.devvm/commands.sh` adds `devvm desktop-*`, `ui`, `tray`, `gnome`, `kwin` and `xdo` (see `devvm` without
 arguments). The tools behind them are in `.devvm/guest/desktop/`; every `desktop-*` command
 copies them into the VM, so changes to them need no commit.
 
@@ -21,7 +21,7 @@ on a shared folder):
 ```bash
 DEVVM_SHARE_WORKSPACE=0 devvm create      # or reuse one: devvm ls -a, then devvm use VM
 devvm push                                # commits only; the VM's checkout is ~/modama
-devvm desktop-setup                       # Xvfb, openbox, xfce4-panel, GNOME Shell, AT-SPI, GVfs, Rust
+devvm desktop-setup                       # Xvfb, openbox, xfce4-panel, GNOME Shell, KDE Plasma, AT-SPI, GVfs, Rust
 devvm ssh 'deploy/uptest.sh --build'      # the test deployment; the first build takes long
 ```
 
@@ -68,6 +68,26 @@ desktop-up` brings the X11 desktop back. Switching stops the session helper and 
   no notification area.
 - `devvm gnome windows` lists GNOME's windows from bottom to top with their frame and the
   focus, which `xdo search` can't see; `devvm gnome raise TITLE` brings one to the front.
+
+## KDE Plasma on Wayland
+
+`devvm desktop-up plasma` replaces the desktop by KDE Plasma on Wayland: Debian 13's KWin and
+Plasma 6.3, with Plasma's panel at the bottom (task manager, notification area, clock).
+`devvm desktop-up kwin` is KWin alone, without a panel or notification area. Switching
+between the two keeps the session helper and the GUI; switching to or from X11 or GNOME stops
+them, and `devvm desktop-modama` starts them again.
+
+- KWin runs as a window that fills the screen `:1`, as GNOME Shell does, so `desktop-shot`,
+  `desktop-vnc`, `xdo`, `desktop-drag` and `desk` work the same. There is no Xwayland.
+- The session helper's tray icon shows in Plasma's notification area, and `devvm tray`
+  works. The task manager shows the GUI's window with KDE's generic Wayland icon, since no
+  desktop entry for its app ID `modama-agent` is installed.
+- Programs started here get `XDG_CURRENT_DESKTOP=KDE`, as on a KDE desktop. `desktop-modama`
+  leaves out `MESA_VK_WSI_DEBUG=nowlts`: under KWin, the GUI shows what a click changed
+  without the pointer moving.
+- `devvm kwin windows` lists KWin's windows from bottom to top with their frame and the
+  focus; `devvm kwin raise TITLE` brings one to the front. `devvm kwin eval JAVASCRIPT` runs
+  a KWin script, which answers with `result(VALUE)`.
 
 ## Test data
 
