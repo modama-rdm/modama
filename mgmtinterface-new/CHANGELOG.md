@@ -15,6 +15,20 @@ planned for the cutover.
 > parentheses. Bump `version` in `package.json` in the same commit: the footer
 > badge reads it, and a test checks that it matches the newest release here.
 
+## [0.19.4] - 2026-11-26 - Session rows open the session folder, and a link to the old portal
+
+### Added
+
+- A link to the old portal, “Use the old portal”: on the login page and, once
+  you are signed in, at the bottom of every page.
+
+### Changed
+
+- On a project’s page, a click anywhere in the row of a session opens the
+  session folder in the data browser, like a row of the projects list opens
+  its project. The buttons in the row and the description’s “show” and “add”
+  work as before.
+
 ## [0.19.3] - 2026-11-06 - Clearer names for ingest and sealing
 
 ### Changed
