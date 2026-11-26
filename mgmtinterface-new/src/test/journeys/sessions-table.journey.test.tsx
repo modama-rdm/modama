@@ -1,4 +1,4 @@
-import {screen, within} from '@testing-library/react'
+import {screen, waitFor, within} from '@testing-library/react'
 import {beforeEach, describe, expect, it} from 'vitest'
 import {installApiMock} from '../api-mock'
 import {renderApp, signIn} from '../render'
@@ -71,6 +71,46 @@ describe('journey: sorting the sessions table', () => {
         const names = sessionNames()
         expect(names[0]).toBe('create by hand')
         expect(names.slice(-3)).toEqual(['2022-06-14-datendemo', 'demo session', 'testsession'])
+    })
+
+    const rowOf = (session: string) => screen.getByRole('link', {name: session}).closest('tr')!
+
+    it('a click anywhere in a session\'s row opens its session folder in Browse, like a row of the projects list', async () => {
+        const {user, router} = await openProject()
+        const folder = `?path=/${FIXTURE_PROJECT.relpath}/demo+session`
+        const opensTheFolder = async (click: () => Promise<void>) => {
+            await click()
+            await waitFor(() => expect(router.state.location.pathname).toBe('/browse'))
+            expect(router.state.location.search).toBe(folder)
+            await router.navigate(-1)
+            await screen.findByRole('heading', {name: FIXTURE_PROJECT.name})
+        }
+
+        // The name is a link of its own, for the keyboard and for a new tab.
+        expect(screen.getByRole('link', {name: 'demo session'})).toHaveAttribute('href', `/browse${folder}`)
+        await opensTheFolder(() => user.click(screen.getByRole('link', {name: 'demo session'})))
+
+        // "Last modified" and "Status": cells without anything to click in them.
+        const cell = (i: number) => within(rowOf('demo session')).getAllByRole('cell')[i]
+        await opensTheFolder(() => user.click(cell(1)))
+        await opensTheFolder(() => user.click(cell(2)))
+
+        await opensTheFolder(() => user.click(within(rowOf('demo session')).getByRole('button', {name: 'Browse'})))
+    })
+
+    it('a button in the row keeps its own action instead of opening the session folder', async () => {
+        const {user, router} = await openProject()
+        const row = within(rowOf('create by hand'))
+
+        // The description opens in its dialog, on the project's page.
+        await user.click(row.getByRole('button', {name: 'Show the description of create by hand'}))
+        const dialog = await screen.findByRole('dialog')
+        expect(router.state.location.pathname).toBe(route)
+        await user.click(within(dialog).getByRole('button', {name: 'Close'}))
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+        await user.click(row.getByRole('button', {name: 'Seal…'}))
+        await waitFor(() => expect(router.state.location.pathname).toMatch(/\/seal$/))
     })
 
     it('remembers the sort on the next visit, apart from the projects list', async () => {

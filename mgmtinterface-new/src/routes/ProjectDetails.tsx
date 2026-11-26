@@ -244,19 +244,29 @@ function SessionsTable({
                 <tbody>
                 {sessions.map((d) => {
                     const shared = sharedNames.has(d.name)
+                    const folder = browsePath(canonicalProjectPath(project.relpath, d.name))
                     return (
                         <tr
                             key={d.name}
-                            className="border-b border-default/60 last:border-0"
+                            // The whole row opens the session folder, like a row
+                            // of the projects list opens its project. A button
+                            // or link in the row keeps its own action: without
+                            // this check its click would also arrive here and
+                            // end in the data browser.
+                            onClick={(e) => {
+                                if ((e.target as Element).closest('a, button')) return
+                                navigate(folder)
+                            }}
+                            className="cursor-pointer border-b border-default/60 last:border-0 hover:bg-surface-muted"
                         >
                             <td className="px-5 py-3.5">
-                                {/* The name first: the journeys read it off the
-                                    cell's first element. Nothing next to it, so
-                                    nothing looks like it renames the session:
-                                    the description's actions sit on its line. */}
-                                <div className="font-mono text-sm font-semibold text-fg wrap-anywhere">
+                                <Link
+                                    to={folder}
+                                    title="Browse the session folder"
+                                    className="block w-fit max-w-full rounded font-mono text-sm font-semibold text-fg wrap-anywhere focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]"
+                                >
                                     {d.name}
-                                </div>
+                                </Link>
                                 {d.description ? (
                                     <DescriptionDigest description={d.description}>
                                         <button
@@ -292,16 +302,7 @@ function SessionsTable({
                                 <div className="flex items-center justify-end gap-2">
                                     <Button
                                         variant="secondary"
-                                        onClick={() =>
-                                            navigate(
-                                                browsePath(
-                                                    canonicalProjectPath(
-                                                        project.relpath,
-                                                        d.name,
-                                                    ),
-                                                ),
-                                            )
-                                        }
+                                        onClick={() => navigate(folder)}
                                         className="px-3 py-1.5 text-xs"
                                     >
                                         Browse
