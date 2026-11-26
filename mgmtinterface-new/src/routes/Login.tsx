@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react'
 import {useNavigate, useSearchParams} from 'react-router-dom'
 import {isAuthenticated, login} from '../api/auth'
+import {OldPortalLink} from '../components/OldPortalLink'
 import {Button} from '../components/ui/Button'
 import {Card} from '../components/ui/Card'
 import {Input} from '../components/ui/Input'
@@ -116,6 +117,9 @@ export function Login() {
                         Contact IT support if you cannot log in.
                     </div>
                 </Card>
+                <div className="mt-5 text-center">
+                    <OldPortalLink/>
+                </div>
             </div>
         </div>
     )

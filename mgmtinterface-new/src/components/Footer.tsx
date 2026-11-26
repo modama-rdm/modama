@@ -1,10 +1,10 @@
 import {Link} from 'react-router-dom'
+import {OldPortalLink} from './OldPortalLink'
 import {HeartIcon} from './ui/icons'
 
 /**
- * App footer: a quiet credit line and the current app version, which links to
- * the changelog. Kept deliberately understated (muted, small type) so it reads
- * as a signature, not a banner. The version comes from `__APP_VERSION__`
+ * App footer: a quiet credit line, the link to the old portal, and the current
+ * app version, which links to the changelog. The version comes from `__APP_VERSION__`
  * (injected from package.json at build time - see vite.config.ts), so it always
  * matches the shipped build.
  */
@@ -20,12 +20,17 @@ export function Footer() {
                     <span className="sr-only">love</span>
                     in ER-C
                 </span>
-                <Link
-                    to="/changelog"
-                    className="rounded font-mono text-fg-subtle transition-colors hover:text-fg-muted focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]"
-                >
-                    v{__APP_VERSION__}
-                </Link>
+                <span className="inline-flex items-center gap-3">
+                    {}
+                    <OldPortalLink/>
+                    <span className="inline-block h-3.5 w-px shrink-0 bg-default"/>
+                    <Link
+                        to="/changelog"
+                        className="rounded font-mono text-fg-subtle transition-colors hover:text-fg-muted focus:outline-none focus:shadow-[0_0_0_3px_var(--ring)]"
+                    >
+                        v{__APP_VERSION__}
+                    </Link>
+                </span>
             </div>
         </footer>
     )
