@@ -35,7 +35,12 @@ env:
   REF_NAME: ${{ github.event.workflow_run.head_branch || github.ref_name }}
 
 jobs:
-  build:
+  # GitHub has no `-latest` label for its arm64 runners, only ones with the Ubuntu release, like
+  # ubuntu-26.04-arm. So that nobody has to raise that by hand, the label follows `ubuntu-latest`:
+  # this job reads the release it runs on. Should `ubuntu-latest` ever move to a release that has
+  # no arm64 runner yet, the builds wait for a runner instead of starting; then set the label of
+  # the build job by hand for the time being.
+  runner:
     # After CI: only for a push that passed. A pull request: not out of a fork, whose token can't
     # write packages.
     if: >-
@@ -44,8 +49,23 @@ jobs:
       || github.event_name == 'workflow_dispatch'
       || (github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository)
-    # Built natively, without emulation. GitHub has no `-latest` label for its arm64 runners.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
+    outputs:
+      arm64: ${{ steps.label.outputs.arm64 }}
+    steps:
+      - id: label
+        run: |
+          . /etc/os-release
+          if [[ ! "$VERSION_ID" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected an Ubuntu release like 26.04, got '$VERSION_ID'."
+            exit 1
+          fi
+          echo "arm64=ubuntu-$VERSION_ID-arm" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    needs: [runner]
+    # built natively, without emulation
+    runs-on: ${{ needs.runner.outputs.arm64 }}
     timeout-minutes: 30
     permissions:
       contents: read
