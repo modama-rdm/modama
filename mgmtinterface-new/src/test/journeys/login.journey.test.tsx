@@ -1,4 +1,4 @@
-import {screen, waitFor} from '@testing-library/react'
+import {screen, waitFor, within} from '@testing-library/react'
 import {beforeEach, describe, expect, it} from 'vitest'
 import {installApiMock, type ApiRecorder} from '../api-mock'
 import {renderApp, signIn} from '../render'
@@ -79,6 +79,25 @@ describe('journey: login', () => {
 
         expect(await screen.findByText('Sign-in failed')).toBeInTheDocument()
         expect(screen.getByLabelText('Username')).toBeInTheDocument()
+    })
+
+    it('links to the old portal at the domain root, outside the app', () => {
+        renderApp({route: '/login'})
+
+        // A plain link and not a route: the old portal is a different application.
+        expect(screen.getByRole('link', {name: 'Use the old portal'})).toHaveAttribute('href', '/')
+    })
+
+    it('keeps that link in the footer once signed in, so nobody has to log out to find it', async () => {
+        signIn('user1')
+        renderApp({route: '/projects'})
+        await screen.findByRole('heading', {name: 'Projects'})
+
+        const footer = within(screen.getByRole('contentinfo'))
+        expect(footer.getByRole('link', {name: 'Use the old portal'})).toHaveAttribute('href', '/')
+        // Not in the header: it is there for those who look for it.
+        expect(within(screen.getByRole('banner')).queryByRole('link', {name: 'Use the old portal'}))
+            .not.toBeInTheDocument()
     })
 
     it('preserves the ?next= redirect target through login', async () => {
