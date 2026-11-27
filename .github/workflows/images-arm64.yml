@@ -1,38 +1,14 @@
 name: Container images (arm64)
 
 # arm64 images for test deployments on arm64 machines, such as a Linux VM on an Apple Silicon
-# Mac. They are kept apart from the amd64 images: this is a workflow of its own, which CI (ci.yml)
-# neither calls nor waits for, and it pushes tags of its own, `<tag>-arm64`, so it never writes a
-# tag that images.yml pushes.
-#
-# It runs when CI has passed for a push to master or for a tag, so like images.yml it builds only
-# what passed the tests. workflow_run runs this file from the default branch with a write token,
-# so it must never build a pull request: the job's `if` only lets pushes through. That's why the
-# zizmor finding dangerous-triggers is ignored below.
-
+# Mac. Called from ci.yml after the tests passed, like images.yml. The images are kept apart from
+# the amd64 ones: this workflow pushes tags of its own, `<tag>-arm64`, so it never writes a tag
+# that images.yml pushes, and it uses no build cache. No other job of CI waits for it.
 on:
-  workflow_run: # zizmor: ignore[dangerous-triggers]
-    workflows: [CI]
-    types: [completed]
-  # Any other branch, by hand ("Run workflow"), without waiting for CI.
-  workflow_dispatch:
-  # A pull request that changes this file tries it out: workflow_run would take the file from
-  # master.
-  pull_request:
-    paths: [.github/workflows/images-arm64.yml]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.workflow_run.head_branch || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  workflow_call:
 
 permissions:
   contents: read
-
-env:
-  # The commit to build and the branch or tag it was pushed as: those of the CI run, or else
-  # this run's own.
-  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-  REF_NAME: ${{ github.event.workflow_run.head_branch || github.ref_name }}
 
 jobs:
   # GitHub has no `-latest` label for its arm64 runners, only ones with the Ubuntu release, like
@@ -41,14 +17,9 @@ jobs:
   # no arm64 runner yet, the builds wait for a runner instead of starting; then set the label of
   # the build job by hand for the time being.
   runner:
-    # After CI: only for a push that passed. A pull request: not out of a fork, whose token can't
-    # write packages.
-    if: >-
-      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push'
-      && github.event.workflow_run.conclusion == 'success')
-      || github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'pull_request'
-      && github.event.pull_request.head.repo.full_name == github.repository)
+    # Not for pull requests out of forks, whose token can't write packages. The build job needs
+    # this one, so it is skipped with it.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       arm64: ${{ steps.label.outputs.arm64 }}
@@ -72,8 +43,10 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
-      # at most four runners at a time, so that the jobs of CI don't have to queue behind these
-      max-parallel: 4
+      # At most six at a time. On the Free plan GitHub runs 20 jobs at once; the 11 amd64 builds
+      # of images.yml start at the same moment, and with six of these that makes 17, so the amd64
+      # builds don't have to queue behind them.
+      max-parallel: 6
       matrix:
         # the same images as in images.yml
         include:
@@ -91,34 +64,34 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.SHA }}
           submodules: recursive
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # The tags of images.yml, each with `-arm64` appended: `sha-<long sha>-arm64` always, the
-      # git tag when the run is for one, and `latest-arm64` for releases (vX.Y.Z) only.
-      - id: tags
+      # `latest-arm64` marks releases (vX.Y.Z) only, like `latest` in images.yml.
+      - id: release
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          REF: ${{ github.ref }}
         run: |
-          image=${IMAGE,,}
-          tags=("$image:sha-$SHA-arm64")
-          # A CI run names a git tag like a branch, so look the name up as a tag of this commit.
-          # The last line is the commit also for an annotated tag.
-          found=$(git ls-remote origin "refs/tags/$REF_NAME" "refs/tags/$REF_NAME^{}")
-          if [[ "$(tail -n 1 <<<"$found" | cut -f 1)" == "$SHA" ]]; then
-            tags+=("$image:${REF_NAME//[^A-Za-z0-9_.-]/-}-arm64")
-            if [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              tags+=("$image:latest-arm64")
-            fi
+          if [[ "$REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
           fi
-          printf '%s\n' "${tags[@]}"
-          { echo "tags<<EOF"; printf '%s\n' "${tags[@]}"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+      # the tags of images.yml, each with `-arm64` appended
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          flavor: latest=false
+          tags: |
+            type=sha,format=long,suffix=-arm64
+            type=ref,event=tag,suffix=-arm64
+            type=raw,value=latest-arm64,enable=${{ steps.release.outputs.is_release }}
       # A tag without `-arm64` is one that serves amd64: pushing an arm64 image to it would break
       # every deployment that pulls it. So this is checked, whatever the step above is changed to.
       - name: Check that every tag ends in -arm64
         env:
-          TAGS: ${{ steps.tags.outputs.tags }}
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           if [[ -z "$TAGS" ]] || grep -v -e '-arm64$' <<<"$TAGS"; then
             echo "::error::Expected only tags that end in -arm64, so nothing is pushed."
@@ -130,14 +103,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       # No build cache, neither read nor written: the Actions caches are at their limit with the
-      # amd64 images alone (see the comment on caches in ci.yml), and nothing waits for this build.
+      # amd64 images alone (see the comment on caches in ci.yml).
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           file: ${{ matrix.dockerfile }}
           context: ${{ matrix.context }}
           platforms: linux/arm64
           push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ env.SHA }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
