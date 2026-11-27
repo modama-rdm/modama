@@ -1,0 +1,114 @@
+name: Container images (arm64)
+
+# arm64 images for test deployments on arm64 machines, such as a Linux VM on an Apple Silicon
+# Mac. Called from ci.yml after the tests passed, like images.yml. The images are kept apart from
+# the amd64 ones: this workflow pushes tags of its own, `<tag>-arm64`, so it never writes a tag
+# that images.yml pushes, and it uses no build cache. No other job of CI waits for it.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # GitHub has no `-latest` label for its arm64 runners, only ones with the Ubuntu release, like
+  # ubuntu-26.04-arm. So that nobody has to raise that by hand, the label follows `ubuntu-latest`:
+  # this job reads the release it runs on. Should `ubuntu-latest` ever move to a release that has
+  # no arm64 runner yet, the builds wait for a runner instead of starting; then set the label of
+  # the build job by hand for the time being.
+  runner:
+    # Not for pull requests out of forks, whose token can't write packages. The build job needs
+    # this one, so it is skipped with it.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      arm64: ${{ steps.label.outputs.arm64 }}
+    steps:
+      - id: label
+        run: |
+          . /etc/os-release
+          if [[ ! "$VERSION_ID" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected an Ubuntu release like 26.04, got '$VERSION_ID'."
+            exit 1
+          fi
+          echo "arm64=ubuntu-$VERSION_ID-arm" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    needs: [runner]
+    # built natively, without emulation
+    runs-on: ${{ needs.runner.outputs.arm64 }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      # At most six at a time. On the Free plan GitHub runs 20 jobs at once; the 11 amd64 builds
+      # of images.yml start at the same moment, and with six of these that makes 17, so the amd64
+      # builds don't have to queue behind them.
+      max-parallel: 6
+      matrix:
+        # the same images as in images.yml
+        include:
+          - { name: gateway, dockerfile: deploy/gateway/Dockerfile, context: deploy/gateway }
+          - { name: nextcloud, dockerfile: deploy/nextcloud/Dockerfile, context: deploy/nextcloud }
+          - { name: permissions, dockerfile: deploy/permissions/Dockerfile, context: . }
+          - { name: sssd, dockerfile: deploy/sssd/Dockerfile, context: . }
+          - { name: watchdog, dockerfile: deploy/watchdog/Dockerfile, context: . }
+          - { name: smbdrop, dockerfile: modama-rs/Dockerfile-smbdrop, context: modama-rs }
+          - { name: ca, dockerfile: modama-rs/Dockerfile-ca-cli, context: modama-rs }
+          - { name: mgmtinterface, dockerfile: deploy/mgmtinterface/Dockerfile, context: . }
+          - { name: mgmtinterface-api, dockerfile: deploy/mgmtinterface-api/Dockerfile, context: . }
+          - { name: wsgidav, dockerfile: deploy/wsgidav/Dockerfile, context: deploy/wsgidav }
+          - { name: mgmtinterface-new, dockerfile: mgmtinterface-new/Dockerfile, context: . }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # `latest-arm64` marks releases (vX.Y.Z) only, like `latest` in images.yml.
+      - id: release
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "$REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+      # the tags of images.yml, each with `-arm64` appended
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          flavor: latest=false
+          tags: |
+            type=sha,format=long,suffix=-arm64
+            type=ref,event=tag,suffix=-arm64
+            type=raw,value=latest-arm64,enable=${{ steps.release.outputs.is_release }}
+      # A tag without `-arm64` is one that serves amd64: pushing an arm64 image to it would break
+      # every deployment that pulls it. So this is checked, whatever the step above is changed to.
+      - name: Check that every tag ends in -arm64
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          if [[ -z "$TAGS" ]] || grep -v -e '-arm64$' <<<"$TAGS"; then
+            echo "::error::Expected only tags that end in -arm64, so nothing is pushed."
+            exit 1
+          fi
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      # No build cache, neither read nor written: the Actions caches are at their limit with the
+      # amd64 images alone (see the comment on caches in ci.yml).
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          file: ${{ matrix.dockerfile }}
+          context: ${{ matrix.context }}
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

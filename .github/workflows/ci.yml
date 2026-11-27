@@ -337,6 +337,21 @@ jobs:
       contents: read
       packages: write
 
+  # arm64 images for test deployments, under tags of their own (see images-arm64.yml). Like
+  # `images`, only after the tests passed. No other job waits for them.
+  images-arm64:
+    needs:
+      - unit-tests
+      - py-lint-and-format
+      - mgmtinterface-new-tests
+      - rust-tests
+      - visual-tests
+      - windows-clippy
+    uses: ./.github/workflows/images-arm64.yml
+    permissions:
+      contents: read
+      packages: write
+
   # Maintainers create the release (tag + description) in the GitHub UI, so this only attaches
   # the binaries to that release and leaves its name and description alone.
   agent-release:
